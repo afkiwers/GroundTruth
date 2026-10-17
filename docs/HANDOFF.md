@@ -7,6 +7,21 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `validation-audit` (2026-10-17, not committed, not merged):** the user's engineering validation of
+  Signal paths, Converters and DC loads. The record, matrix, issue log and evidence are in
+  [VALIDATION_AUDIT.md](VALIDATION_AUDIT.md), and the independent checks in `tests/test_validation_audit.py`
+  (75 cases).
+  - Fixed: a boost's losses / input current at D ≠ ½ (ISSUE-1); every path's line Z0 (closed forms out of range,
+    centre-to-centre heights, centred inner layers: kraft read +21 % outer / +52 % inner; ISSUE-5); impossible net
+    signals and contradictory converter voltages refused instead of crashing (ISSUE-8); a DC-load pin named twice
+    (ISSUE-4); the boost's Middlebrook check (ISSUE-2); `current_a` = the fundamental (ISSUE-6); a boost without
+    V_out (ISSUE-3).
+  - Documented, not fixed: the switch node's averaged DC path reads its copper heat 6-17 % low (ISSUE-7).
+  - The project now lives in `OneDrive\Dokumente\github\GroundTruth`, a fresh GitHub repo whose first commit of
+    the files is fae19c9 (the audit's changes are uncommitted on `validation-audit`). The commits named below are
+    in the old history, `OneDrive\Dokumente\PCB-EMI\.git`. The venv's editable install still points at
+    `PCB-EMI\src` (pytest uses `src` from pyproject). Full suite on the branch: 835 passed, 1 skipped, 3 failed
+    (not from the audit: the launcher's git mode, and two cluster-split tests that pass when run alone).
 - **`main`** (2026-10-16) holds everything (last: `remote-update`, signed remote updates of the servers, merged
   6b6c707 at the user's "yes"; then `modern-help`, a modern help window, at the user's "merge"; then
   `server-address`, a server's chosen address, at the user's "do it"); no unmerged branches, no stashes, no extra

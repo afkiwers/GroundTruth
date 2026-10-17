@@ -1785,10 +1785,11 @@ def _output_runs(model: BoardModel, setup: "ConverterSetup", sw_net: Optional[st
         inj = [x for pads, side, w in src for x in _area_shares(st, pads, side, w)]
         return inj + _area_shares(st, [plus], _side(board.footprint(plus.footprint)), -1.0)
 
-    # the input current per ampere of output current (a buck: D without losses), or the output current per ampere
-    # of input current (a boost: 1 - D without losses); see the docstring
+    # the input current per ampere of output current (a buck: d = D without losses), or the output current per
+    # ampere of input current (a boost: its rectifier's share d = 1 - D = V_in/V_out without losses; d is the high
+    # side's conduction time, ConverterSpec.pulse, in both topologies); see the docstring
     ratio = min(est["i_in_a"] / spec.i_out, 1.0) if est and not boost else d
-    out_per_in = min(spec.i_out / est["i_in_a"], 1.0) if est and boost else 1 - d
+    out_per_in = min(spec.i_out / est["i_in_a"], 1.0) if est and boost else d
 
     def ground_injections(st):
         """The ground return's DC injections: in at the output connector's - pin, out through the input connector's
