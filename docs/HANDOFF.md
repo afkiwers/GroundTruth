@@ -7,6 +7,15 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `audit-2` (2026-10-18, not merged):** the audit's round 2, at the user's "continue with fixing the other
+  issues as well a continue your audit" (VALIDATION_AUDIT.md "Round 2"): the venv rebuilt in place (it had been
+  moved from `PCB-EMI\.venv`; the editable install and every launcher pointed there); ISSUE-7 fixed (the switch
+  node's DC path is RMS: a second DC run per stage, `dc_ripple`); ISSUE-9 (the MIL-461 LISN's 1 kΩ port resistor)
+  and ISSUE-10 (the spread receiver's tuning search, 0.5-0.7 dB optimistic on wide sweeps) found and fixed; the boost
+  loop checked against a cycle-by-cycle switching simulation, MIL-STD-461G's CE101 / CE102 / RE102 / LISN / Table II
+  against the standard itself, the Tier 1 rules on constructed geometry. kraft_flux_mini_2 simulated with the old and
+  new code: SPI margins ~1 dB lower, conv1's switch-node copper +42 %. Full suite: 852 passed, 1 skipped, 3 failed
+  (the launcher's git mode; two GUI timing tests that pass alone).
 - **Branch `validation-audit` (2026-10-17, merged into `main` as f171f99 at the user's "Merge and commit"):** the user's engineering validation of
   Signal paths, Converters and DC loads. The record, matrix, issue log and evidence are in
   [VALIDATION_AUDIT.md](VALIDATION_AUDIT.md), and the independent checks in `tests/test_validation_audit.py`
