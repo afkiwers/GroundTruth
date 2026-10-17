@@ -7,7 +7,7 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `validation-audit` (2026-10-17, not committed, not merged):** the user's engineering validation of
+- **Branch `validation-audit` (2026-10-17, merged into `main` as f171f99 at the user's "Merge and commit"):** the user's engineering validation of
   Signal paths, Converters and DC loads. The record, matrix, issue log and evidence are in
   [VALIDATION_AUDIT.md](VALIDATION_AUDIT.md), and the independent checks in `tests/test_validation_audit.py`
   (75 cases).
@@ -18,7 +18,7 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
     V_out (ISSUE-3).
   - Documented, not fixed: the switch node's averaged DC path reads its copper heat 6-17 % low (ISSUE-7).
   - The project now lives in `OneDrive\Dokumente\github\GroundTruth`, a fresh GitHub repo whose first commit of
-    the files is fae19c9 (the audit's changes are uncommitted on `validation-audit`). The commits named below are
+    the files is fae19c9 (the audit is f171f99). The commits named below are
     in the old history, `OneDrive\Dokumente\PCB-EMI\.git`. The venv's editable install still points at
     `PCB-EMI\src` (pytest uses `src` from pyproject). Full suite on the branch: 835 passed, 1 skipped, 3 failed
     (not from the audit: the launcher's git mode, and two cluster-split tests that pass when run alone).
