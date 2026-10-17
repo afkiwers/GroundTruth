@@ -1348,8 +1348,10 @@ smaller but dense, which a regular grid lets it apply with FFTs.</p>
   Their loop moments combine as m(f) = m<sub>route</sub>(f0) + [m<sub>board</sub>(f) − m<sub>board</sub>(f0)], so the
   coarse grid's bias at f0 cancels.</li>
 <li><b>The current on the trace.</b> The driver is a Thévenin source (resistance, inductance, capacitance) with the
-  trapezoid's harmonics. The route is a chain of lossless transmission lines (microstrip or stripline, Z0 and
-  εeff from the stackup) and series parts, solved at each harmonic and loaded by the receivers. Shunt parts and
+  trapezoid's harmonics. The route is a chain of lossless transmission lines (an outer layer a microstrip, an
+  inner layer a stripline that need not sit in the middle between its planes; Z0 and εeff from the stackup's
+  dielectric heights) and series parts, solved at each harmonic and loaded by the receivers. A net's
+  <code>current_a</code> replaces this: the line's peak current at the fundamental. Shunt parts and
   op-amp stages become current loops of their own, added per harmonic with their own currents.</li>
 <li><b>Frequencies.</b> The solves happen at actual harmonics of the signal. The solver then adds solves in the
   gaps where a resonance could hide or where the estimate is closest to the limit, and always solves the

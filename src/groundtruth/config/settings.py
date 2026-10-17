@@ -165,7 +165,10 @@ class ConverterSpec:
             # losses), and its high-side (synchronous rectifier) conducts for 1 - D = V_in / V_out of the period
             if self.v_in and self.v_out and self.v_out > self.v_in:
                 return self.i_out * self.v_out / self.v_in, self.duty or self.v_in / self.v_out
-            return self.i_out, self.duty or 0.5
+            # without both voltages the duty (given, else ½) is the high side's share: I_out = d·I_L, so the
+            # inductor current is I_out / d (before 2026-10-17 the load current itself: 1/d too little)
+            d = self.duty or 0.5
+            return self.i_out / d, d
         if self.duty is not None:
             return self.i_out, self.duty
         if self.topology == "buck" and self.v_in and self.v_out and 0 < self.v_out < self.v_in:
@@ -989,6 +992,37 @@ def load_text(ld: DcLoad) -> str:
     return f"{ld.pin}{'/' + ld.ret if ld.ret else ''}={format_si(ld.current, 'A')}"
 
 
+def net_problems(spec: NetSpec) -> list[str]:
+    """What makes a net's signal impossible: a frequency or an edge not above 0, an edge longer than the high (rise)
+    or low (fall) time it sits in, a duty outside (0, 1), an amplitude or a given current not above 0, a negative
+    source or load. (Before 2026-10-17 Simulate crashed on f = 0, t_r = 0 or D = 0 and gave nonsense margins on a
+    duty above 1 or a negative swing.)"""
+    out = []
+    if not spec.freq > 0:
+        out.append("freq must be above 0 Hz")
+    if not spec.rise_time > 0 or (spec.fall_time is not None and not spec.fall_time > 0):
+        out.append("rise_time (and fall_time) must be above 0 s")
+    if not 0 < spec.duty < 1:
+        out.append("duty must be between 0 and 1")
+    elif spec.freq > 0 and spec.rise_time > 0:
+        period = 1.0 / spec.freq
+        fall = spec.fall_time if spec.fall_time is not None else spec.rise_time
+        if spec.rise_time > spec.duty * period or (fall > 0 and fall > (1 - spec.duty) * period):
+            out.append(f"rise_time / fall_time must fit the signal's high and low times ({spec.duty * period:.3g} s / "
+                       f"{(1 - spec.duty) * period:.3g} s at {spec.freq:g} Hz, duty {spec.duty:g})")
+    if not spec.amplitude_v > 0:
+        out.append("amplitude_v must be above 0 V")
+    if spec.current_a is not None and not spec.current_a > 0:
+        out.append("current_a must be above 0 A")
+    for key in ("driver_ohms", "load_pf", "driver_nh", "driver_pf"):
+        v = getattr(spec, key)
+        if v is not None and v < 0:
+            out.append(f"{key} must not be negative")
+    if spec.load_ohms is not None and not spec.load_ohms > 0:
+        out.append("load_ohms must be above 0 Ω (leave it out for no termination)")
+    return out
+
+
 def dc_load_problems(spec: DcLoadSpec) -> list[str]:
     """What makes a DC load unusable: no source, no loads, a load without a pin or with a current <= 0, a return on
     some but not all (the ground side must balance: the source's return with every load's, or none)."""
@@ -1189,7 +1223,7 @@ def config_from_data(data: Any) -> Config:
                 continue
             if isinstance(receivers, str):
                 receivers = [receivers]
-            cfg.nets.append(NetSpec(
+            spec = NetSpec(
                 name=str(name), driver=str(driver), receivers=[str(x) for x in receivers],
                 freq=_num(n.get("freq"), f"{where}.freq", "Hz"),
                 rise_time=_num(n.get("rise_time"), f"{where}.rise_time", "s"),
@@ -1209,7 +1243,11 @@ def config_from_data(data: Any) -> Config:
                 source=str(n.get("source", "manual")), reviewed=bool(n.get("reviewed", n.get("source") != "auto")),
                 enabled=bool(n.get("enabled", True)),
                 signal_class=str(n.get("class", "") or ""),
-            ))
+            )
+            problems = net_problems(spec)
+            errors.extend(f"{where} ({spec.name}): {m}" for m in problems)
+            if not problems:
+                cfg.nets.append(spec)
         except ConfigError as e:
             errors.extend(e.messages)
         except KeyError:
@@ -1276,6 +1314,12 @@ def config_from_data(data: Any) -> Config:
             problems.append("f_sw, rise_time and i_out must be positive")
         if spec.duty is not None and not 0 < spec.duty < 1:
             problems.append("duty must be between 0 and 1")
+        # a buck steps down, a boost up: given both voltages the wrong way round the stage would be solved at a made-up
+        # duty of ½ (ConverterSpec.pulse), a buck drawing more input current than it delivers
+        if spec.v_in and spec.v_out and spec.topology in ("buck", "boost") and \
+                (spec.v_out >= spec.v_in) == (spec.topology == "buck"):
+            problems.append(f"a {spec.topology} needs v_out {'below' if spec.topology == 'buck' else 'above'} v_in "
+                            f"(v_in {spec.v_in:g} V, v_out {spec.v_out:g} V): check the voltages or the topology")
         if spec.spread is not None and not 0 <= spec.spread <= 1:
             problems.append("spread is a fraction of f_sw between 0 and 1, e.g. 0.2 for +20 %")
         if spec.spread_mode not in ("random", "triangle"):

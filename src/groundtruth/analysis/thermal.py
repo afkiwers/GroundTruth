@@ -243,25 +243,29 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
         spec = specs.get(res.net)
         if spec is None:
             continue
+        # d is the high side's conduction time (ConverterSpec.pulse, the result's duty): a buck's switch duty
+        # D = V_out/V_in, a boost's rectifier share 1 - D = V_in/V_out (its switch, the low side, conducts 1 - d).
+        # Before 2026-10-17 a boost's d was taken as its switch duty here: right only at d = ½
         d = res.duty if res.duty is not None else 0.5
+        boost = spec.topology == "boost"
         # the stage's connectors carry the output current and the input current (the energy balance's when there
-        # is one, else the lossless D·I_out of a buck, I_out/(1-D) of a boost)
+        # is one, else the lossless D·I_out of a buck, the inductor current I_out/d of a boost)
         i_in = (getattr(res, "input", None) or {}).get("i_in_a")
         if i_in is None:
-            i_in = spec.i_out / (1 - d) if spec.topology == "boost" and d < 1 else spec.i_out * d
+            i_in = spec.i_out / d if boost and d > 0 else spec.i_out * d
         for pin in spec.output_connector:
             fed(pin, spec.i_out)
         for pin in spec.input_connector:
             fed(pin, i_in)
-        boost = spec.topology == "boost"
-        i_l = spec.i_out / (1 - d) if boost and d < 1 else spec.i_out          # inductor current
+        # inductor current: a boost's output is the rectifier's share of it, I_out = d·I_L
+        i_l = spec.i_out / d if boost and d > 0 else spec.i_out
         v = spec.v_out if boost else (spec.v_in or res.v_in)                    # switched voltage
         hs = spec.high_side or spec.switch
         ls = spec.low_side
         main, rect = (ls, hs) if boost else (hs, ls)      # the hard-switched transistor(s), the rectifier
         main = [r for r in main if not _is_diode(r)]
         sync = _synchronous(spec)
-        d_hs, d_ls = (1 - d, d) if boost else (d, 1 - d)                        # conduction share
+        d_hs, d_ls = d, 1 - d                             # conduction share: the high side d in both topologies
         if spec.rds_on is not None:
             r_lo = spec.rds_on_low if spec.rds_on_low is not None else spec.rds_on
             fets_hs, fets_ls = [r for r in hs if not _is_diode(r)], [r for r in ls if not _is_diode(r)]
@@ -275,10 +279,10 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
                 add(ref, d_ls * (i_l / len(fets_ls)) ** 2 * r_lo, f"conduction {d_ls * 100:.0f} % of the time")
         else:
             notes.append(f"{spec.name}: no rds_on, so the switches' conduction loss is left out")
-        for ref in rect:                     # a rectifier diode conducts the off time
+        for ref in rect:                     # a rectifier diode conducts while the main switch is off
             if _is_diode(ref):
                 vf = spec.diode_vf if spec.diode_vf is not None else DIODE_VF
-                add(ref, (1 - d) * i_l * vf, f"{'boost' if boost else 'catch'} diode {vf:g} V")
+                add(ref, (d_hs if boost else d_ls) * i_l * vf, f"{'boost' if boost else 'catch'} diode {vf:g} V")
         if v and spec.f_sw and main:
             # overlap of voltage and current: synchronous, only the main switch's turn-on edge is hard (at its
             # turn-off the inductor current carries the switch node across while the channel is already off);

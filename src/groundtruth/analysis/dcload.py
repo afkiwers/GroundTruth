@@ -152,12 +152,19 @@ def _injections(model: BoardModel, st, spec: DcLoadSpec) -> tuple[list, dict]:
     feeds: dict[str, list] = {}
 
     def at(pin: str, amps: float):
-        """Feed `amps` (per A of the rail) at a pin, spread over its pad's own nodes."""
+        """Feed `amps` (per A of the rail) at a pin, spread over its pad's own nodes. A pin named again (two loads
+        on one pin, a return shared by loads) adds to what it is fed already, as pin_currents counts it (before
+        2026-10-17 the second replaced the first: the injections did not balance and the rail failed)."""
         pad = model.board.find_pin(pin)
         if pad is None:
             raise SolverError(f"pin {pin} is not on the board")
         fp = model.board.footprint(pin.split(".")[0])
-        feeds[pin] = _area_shares(st, [pad], _side(fp) if fp is not None else "F.Cu", amps)
+        new = _area_shares(st, [pad], _side(fp) if fp is not None else "F.Cu", amps)
+        if pin in feeds:
+            # the same pad gives the same nodes with the same weights: add the currents node by node
+            old = dict(feeds[pin])
+            new = [(n, old.get(n, 0.0) + a) for n, a in new]
+        feeds[pin] = new
     at(spec.source, 1.0)
     for ld in spec.loads:
         at(ld.pin, -ld.current / total)
@@ -196,7 +203,9 @@ def _potential(sol, nodes: list) -> float:
     """A pad's potential per A of the rail: its nodes' potentials weighted by the current each is fed with."""
     w = np.array([abs(a) for _, a in nodes])
     v = np.array([sol.V[n].real for n, _ in nodes])
-    return float((v * w).sum() / max(w.sum(), 1e-30))
+    if w.sum() <= 0:            # a pin whose feeds cancel (a load on the source pin itself): its nodes' mean
+        return float(v.mean())
+    return float((v * w).sum() / w.sum())
 
 
 def finish_dc_load(model: BoardModel, setup: DcLoadSetup):

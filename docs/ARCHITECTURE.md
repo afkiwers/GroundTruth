@@ -465,7 +465,12 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   `c_n = 2AD|sinc(nD)||sinc(n f0 tr)|` (a `fall_time` of its own: `c_n = 2|X_n|`, `X_n = A/(j2πn)·[sinc(n f0 tr) −
   e^(−j2πnD) sinc(n f0 tf)]`) from a **Thevenin source**: `driver_ohms` (25 Ω) + jω·`driver_nh`, optional output
   capacitance `driver_pf`. The route is a **signal path**: a lossless line per stretch between series parts (its
-  own Z0 and εeff, microstrip/stripline from the stackup), each series part its component model's impedance
+  own Z0 and εeff from the stackup, `simulate._line_of`: an outer layer a microstrip, Hammerstad & Jensen 1980
+  with their thickness corrections, on the dielectric height to its plane; an inner layer an offset stripline,
+  Wheeler's stripline for each half combined, on the dielectric heights to both neighbours; validated against
+  the 2D field solver, VALIDATION_AUDIT.md ISSUE-5: on refboard within +3-4 % (outer, the solder mask
+  not modelled) and ±8 % (inner) of the as-built cut, where the IPC-2141 / single-correction forms on the foils'
+  centre spacing read +21 % and +52 %), each series part its component model's impedance
   (`ComponentModel.impedance`: R, L, ferrite, C with ESR/ESL; no model: a short), solved as a cascade per
   harmonic. The receivers load it with `load_pf` (5 pF each) and optionally `load_ohms` in parallel (a
   termination). The emission uses the **complex mean current along the path** (lines: Ī = I_in·sin(βl)/βl −
@@ -804,6 +809,13 @@ for a boost; duty = the high-side conduction time). The inductor current is cont
     without copper; `finish_converter` recomputes it with the copper and scales the input path's figures
     (`_rescale_path`, DC is linear; also `dc_branch`). Shown in the DC input view's title, the stage's Heatmap
     line and a loss break-down note. Test: `test_input_current_is_output_power_plus_losses_over_the_input_voltage`.
+    The result's `duty` is the high side's conduction time in both topologies (`ConverterSpec.pulse`): a boost's
+    is its rectifier's V_in/V_out, so `part_losses` gives a boost I_L = I_out/d, its rectifier d and its switch (the
+    low side) 1 − d (until 2026-10-17 it read d as the switch duty: right only at ½; VALIDATION_AUDIT.md ISSUE-1).
+  - **Switch node RMS (not modelled):** the switch-node path feeds the averaged current (D from the high side,
+    1 − D from the low side) where the copper carries each in turn: its copper loss and heat read D·(1−D)·I²·R_hl
+    low (R_hl the resistance between the switches' pads along the node), 6-17 % of the path's loss on the test
+    buck (VALIDATION_AUDIT.md ISSUE-7).
   - **Stages together** (`combine_dc`, called by `simulate()` after the stages finish; `SimulationResult.
     dc_combined`): every path keeps its signed branch currents (`ConverterResult.dc_branch[path] = (build,
     I_branch·I)`), so with two or more stages on the one model their density vectors and branch currents add

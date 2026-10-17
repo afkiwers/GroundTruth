@@ -141,6 +141,17 @@ def filter_ratio(setup, f: np.ndarray, flt: dict) -> np.ndarray:
     return np.abs(filter_transfer(setup, f, flt))
 
 
+def input_side(spec, res) -> tuple[float, float]:
+    """(V_in, I_in) of the stage at its input, where an input filter sits, without losses. A buck: the result's
+    v_in and D·I_out (its pulse times its duty). A boost: its result's v_in is the switched V_out, so its own V_in
+    (else V_out·d, d = V_in/V_out the high side's conduction), and its input current is the inductor's, the pulse.
+    (Before 2026-10-17 a boost's Middlebrook check used V_out²/P_in: (V_out/V_in)² too high a |Z_in|.)"""
+    if spec.topology == "boost":
+        v_in = spec.v_in or (res.v_in or 0.0) * (res.duty or 0.0)
+        return v_in, res.pulse_a
+    return res.v_in or 0.0, res.pulse_a * res.duty
+
+
 def filter_responses(setup, flt: dict) -> list:
     """The proposed input filter as Bode responses (analysis/transfer.py) of the stage: its attenuation of the
     conducted current (filter_transfer, from a tenth of its corner to the top of the conducted band) and, for
@@ -164,9 +175,10 @@ def filter_responses(setup, flt: dict) -> list:
     _, z_th2, z_l, z_c, z_lisn = _filter_parts(setup, f, flt)
     out.append(fitted_response(f"{spec.name}: filter output impedance (Middlebrook)", spec.name, "impedance", f,
                                _par(z_th2, z_l + _par(z_c, z_lisn)), max_order=12))
-    p_in = (res.v_in or 0) * res.pulse_a * res.duty
+    v_in, i_in = input_side(spec, res)
+    p_in = v_in * i_in
     if p_in > 0:
-        z_in = res.v_in ** 2 / p_in
+        z_in = v_in ** 2 / p_in
         r = Response(f"{spec.name}: converter input impedance −V²/P", spec.name, "impedance", f,
                      np.full(len(f), -z_in, complex), exact=True)
         r.notes.append("the filter's output impedance must stay below it (6 dB: half) up to the loop's crossover")
@@ -185,8 +197,9 @@ def middlebrook(setup, flt: dict) -> dict:
     _, z_th2, z_l, z_c, z_lisn = _filter_parts(setup, f, flt)
     z_out = np.abs(_par(z_th2, z_l + _par(z_c, z_lisn)))
     k = int(np.argmax(z_out))
-    p_in = (res.v_in or 0) * res.pulse_a * res.duty
-    z_in = (res.v_in ** 2 / p_in) if p_in > 0 else math.inf
+    v_in, i_in = input_side(spec, res)
+    p_in = v_in * i_in
+    z_in = (v_in ** 2 / p_in) if p_in > 0 else math.inf
     return {"z_out_peak": float(z_out[k]), "f_peak": float(f[k]), "z_in": z_in,
             "ok": bool(z_out[k] * 2 <= z_in), "margin_db": 20 * math.log10(z_in / z_out[k]) if z_out[k] > 0 else None}
 
@@ -252,7 +265,7 @@ def evaluate(setup, change: Optional[Change] = None) -> Outcome:
     if change.snubber:
         loss += change.snubber[0] * v * v * spec.f_sw
     if change.filter:
-        loss += (res.pulse_a * res.duty) ** 2 * change.filter.get("dcr", 0.0)
+        loss += input_side(spec, res)[1] ** 2 * change.filter.get("dcr", 0.0)     # the input current through it
     out.loss_w = loss
     return out
 
@@ -521,7 +534,7 @@ def _filter(setup, t: Targets) -> Optional[FixOption]:
     c_eff = c_nom * X7R_AT_BIAS
     r_d = nearest(math.sqrt(L / c_eff), E24)
     c_d = nearest(4 * c_eff, E6, up=True)
-    i_in = res.pulse_a * res.duty
+    v, i_in = input_side(setup.spec, res)    # the filter sits at the stage's input: its voltage and current
     dcr = 3e-3 * (L / 1e-6) ** 0.5           # a shielded power inductor of that size, for the loss estimate
     trials = []
     for at in ("converter", "connector"):
@@ -531,7 +544,6 @@ def _filter(setup, t: Targets) -> Optional[FixOption]:
     o = evaluate(setup, Change(filter=flt))
     # its curves among the stage's Bode responses (the stage's view; the impedances in a view of their own)
     res.responses += filter_responses(setup, flt)
-    v = res.v_in or 0.0
     where = ("across the stage's own input capacitors" if flt["damp_at"] == "converter"
              else "across the filter capacitor at the connector")
     return FixOption(

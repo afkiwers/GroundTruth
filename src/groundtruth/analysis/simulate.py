@@ -48,7 +48,7 @@ from ..core.issues import Issue, dedupe, resolve_severity, sort_issues
 from ..emi.radiation import emission_arrays, emission_table, limit_range
 from ..emi.path import (PathAmp, PathLine, PathLoad, PathPart, PathShunt, PathSource, amplified_path,
                         path_currents)
-from ..emi.spectrum import analysis_band, microstrip, stripline, trapezoid_harmonics
+from ..emi.spectrum import analysis_band, microstrip, offset_stripline, trapezoid_harmonics
 from ..geometry.copper import CopperMap, reference_layers
 from ..geometry.shapes import arc_points
 from ..rules.checks import CheckResult, run_checks
@@ -809,10 +809,16 @@ def _line_of(board: Board, segments: list, ref_layer: str) -> tuple[float, float
     st = board.stackup
     neigh = st.neighbours(layer)
     t = st.layer(layer).thickness if st.layer(layer) else 0.035
+    # the closed forms want the dielectric heights from the strip's faces to the planes (Stackup.dielectric_between),
+    # not the foils' centre-to-centre distance (35 µm more on a 0.1 mm core: Z0 ~10 % high), and an inner layer is
+    # rarely centred between its neighbours (a thin prepreg on one side, a core on the other): an offset stripline.
+    # Before 2026-10-17: the centred IPC-2141 stripline on the centre-to-centre spacing (+30-40 % for a strip at a
+    # fifth of the spacing, negative Z0 for wide strips) and the microstrip on the centre-to-centre height
     if len(neigh) == 2:
-        return stripline(w, st.distance(neigh[0], neigh[1]), st.epsilon_between(neigh[0], neigh[1]), t)
+        h1, h2 = (st.dielectric_between(layer, n) for n in neigh)
+        return offset_stripline(w, h1, h2, st.epsilon_between(neigh[0], neigh[1]), t)
     ref = neigh[0] if neigh else ref_layer
-    return microstrip(w, st.distance(layer, ref), st.epsilon_between(layer, ref), t)
+    return microstrip(w, st.dielectric_between(layer, ref), st.epsilon_between(layer, ref), t)
 
 
 def find_shunts(model: "BoardModel", route: Route) -> list[dict]:
@@ -1290,7 +1296,11 @@ def prepare_route(model: BoardModel, spec: NetSpec, route: Route) -> tuple[Optio
         if mdl is not None and mdl.kind == "resistor":
             res.series_ohms += mdl.get("R")
     if spec.current_a is not None:
-        setup.currents = amps / spec.amplitude_v * spec.current_a
+        # current_a is the line's peak current at the fundamental (README, settings): the driver's harmonics scaled
+        # so harmonic 1 carries it. (Before 2026-10-17 they were scaled by current_a / amplitude_v, which gave the
+        # fundamental c_1/A·current_a: 2/π of it for a fast 50 % square wave, 3.9 dB low.)
+        k1 = int(np.argmin(np.abs(freqs - f0)))
+        setup.currents = amps / amps[k1] * spec.current_a
     else:
         # the path: a Thevenin source, a line per stretch between series parts, each part's impedance at its
         # place, the receivers' load (emi/path.py). Before, one line with the resistors' R added to the source
