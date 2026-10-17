@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "groundtruth-pcb"
+version = "0.1.0"
+description = "Return-path and EMI analysis for KiCad 10+ boards: KiCad plugin and CI command line"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "shapely>=2.0",
+    "ruamel.yaml>=0.18",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+plugin = ["kicad-python>=0.8.0", "wxPython>=4.2.2"]
+thermal = ["numba>=0.60", "pyamg>=5.0", "psutil>=5.9"]   # the thermal solve (groundtruth.thermal)
+# solver iterations on a GPU (analysis.gpu). PyPI's torch is CPU-only on Windows: install the CUDA build with
+# tools/install_gpu.py (pip install torch --index-url https://download.pytorch.org/whl/cu126)
+gpu = ["torch>=2.2"]
+# the compute server's signed remote updates (remote/release.py): checking a package's signature on the server,
+# signing the packages on the build PC; the KiCad plugin does not need it
+server = ["cryptography>=42"]
+dev = ["pytest>=8", "cryptography>=42"]
+
+[project.scripts]
+groundtruth = "groundtruth.cli:main"
+
+[project.gui-scripts]
+groundtruth-gui = "groundtruth.ui.app:gui_main"   # needs the [plugin] extra (wxPython)
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]

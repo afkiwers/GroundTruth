@@ -1,0 +1,139 @@
+# Example GitLab CI for a KiCad 10 project using GroundTruth (return path / EMI / power stages / thermal).
+# Copy into your project's .gitlab-ci.yml (or `include:` it) and set BOARD.
+#
+# - `emi-check`     fast Tier 1 return-path checks on every merge request: issues in the MR's Code Quality
+#                   widget and Tests tab; fails on errors.
+# - `emi-simulate`  the field solver (nets and power stages) on the default branch, or by hand: HTML report with
+#                   heatmaps, JSON and JUnit as artifacts; fails on errors or an emission within 3 dB of the limit.
+# - `emi-thermal`   by hand: copper/part temperatures and the current capacity of the power stages.
+# - `emi-suggest`   by hand: proposed fixes (stitching vias, capacitors, fills), predicted and verified together.
+# - `emi-simulate-gpu`, `emi-check-refill`: optional variants (a GPU runner; zones refilled with KiCad's CLI).
+#
+# Commit groundtruth/<board>.groundtruth.yaml (the groundtruth folder next to the board). Make it with
+#     groundtruth init BOARD && groundtruth detect BOARD --write
+# then review the nets and power stages (driver/receivers/timing; f_sw, i_out, v_in/v_out, rise_time, connectors,
+# rds_on/dcr for the thermal solve) and set `reviewed: true`; or use the KiCad plugin, which writes the same file.
+# Settings that matter for CI runs (all under `analysis:` / `rules:` / `thermal:` in that file):
+#     analysis.threads: auto       parallel solves (auto = physical cores, at most 4; set a number on big runners)
+#     analysis.gpu: auto           solver iterations on a GPU when the runner has one and PyTorch with CUDA
+#     analysis.conducted: cispr32  conducted standard of the power stages: cispr32 | cispr25 | mil461 | none
+#     rules.emi_margin_db: 6.0     warn when an estimate comes within this many dB of the limit
+#     thermal.max_c / warn_c       temperature limits of --thermal; thermal.capacity_c for --capacity
+# Waive accepted issues in the settings (`waivers:`), or keep a baseline: GROUNDTRUTH_BASELINE below.
+
+variables:
+  BOARD: "hardware/myboard.kicad_pcb"
+  # The PyPI distribution is groundtruth-pcb ("groundtruth" on PyPI is an unrelated package); or the repository:
+  GROUNDTRUTH: "groundtruth-pcb"     # e.g. "git+https://gitlab.example.com/tools/groundtruth.git"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+.groundtruth:
+  image: python:3.12-slim            # Python 3.11 or newer
+  cache:
+    key: groundtruth-pip
+    paths: [.cache/pip]
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git > /dev/null
+    - pip install --quiet "$GROUNDTRUTH"
+  artifacts:
+    when: always
+    expire_in: 4 weeks
+    paths:
+      - emi/
+
+emi-check:
+  extends: .groundtruth
+  stage: test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - groundtruth check "$BOARD" --fail-on error
+        --format text --format gitlab-codequality --format junit --format json
+        --out-dir emi
+        ${GROUNDTRUTH_BASELINE:+--baseline "$GROUNDTRUTH_BASELINE"}
+  artifacts:
+    reports:
+      codequality: emi/gl-code-quality-report.json
+      junit: emi/groundtruth-junit.xml
+
+emi-simulate:
+  extends: .groundtruth
+  stage: test
+  timeout: 2h                        # a 6-layer board with four power stages takes several minutes per stage
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+  script:
+    - groundtruth simulate "$BOARD" --fail-on error --max-dbuv-margin 3 --verbose
+        --format text --format html --format json --format junit --format gitlab-codequality --out-dir emi
+        ${GROUNDTRUTH_BASELINE:+--baseline "$GROUNDTRUTH_BASELINE"}
+  artifacts:
+    reports:
+      codequality: emi/gl-code-quality-report.json
+      junit: emi/groundtruth-junit.xml
+
+# Copper and part temperatures from the power stages' DC paths and losses, and each stage's current capacity
+# (the load that brings the hottest copper or junction to thermal.capacity_c). Needs the [thermal] extra and
+# rds_on / dcr in the converters' settings for realistic losses.
+emi-thermal:
+  extends: .groundtruth
+  stage: test
+  timeout: 2h
+  rules:
+    - when: manual
+      allow_failure: true
+  script:
+    # from a repository instead: pip install "groundtruth-pcb[thermal] @ git+https://…"
+    - pip install --quiet "${GROUNDTRUTH}[thermal]"
+    - groundtruth simulate "$BOARD" --thermal --capacity --verbose
+        --format text --format html --format json --out-dir emi
+
+# Proposed fixes for the issues found: placed only where they are legal, predicted with the solver, and the
+# selected ones verified together on a copy of the board (only what they can change is simulated again;
+# --verify-all simulates everything). The JSON lists each fix as a what-if edit; `groundtruth suggest --write`
+# on your machine adds them to the settings for `groundtruth compare`.
+emi-suggest:
+  extends: .groundtruth
+  stage: test
+  timeout: 2h
+  rules:
+    - when: manual
+      allow_failure: true
+  script:
+    - groundtruth suggest "$BOARD" --verbose --format html --format json --out-dir emi
+
+# The same simulation on a runner with an NVIDIA GPU (register it with the docker executor and `gpus = "all"`,
+# NVIDIA Container Toolkit on the host, tag it `gpu`). PyTorch's CUDA build brings its own CUDA libraries; the
+# host needs only the driver. --gpu on fails the job when no GPU is found, so a misconfigured runner is noticed.
+emi-simulate-gpu:
+  extends: .groundtruth
+  stage: test
+  tags: [gpu]
+  timeout: 2h
+  rules:
+    - when: manual
+      allow_failure: true
+  script:
+    - pip install --quiet torch --index-url https://download.pytorch.org/whl/cu126
+    - groundtruth simulate "$BOARD" --fail-on error --max-dbuv-margin 3 --verbose --gpu on
+        --format text --format html --format json --out-dir emi
+
+# Zones not filled before committing? Refill them on a temporary copy with KiCad's own CLI.
+emi-check-refill:
+  stage: test
+  image: kicad/kicad:10.0
+  rules:
+    - when: manual
+      allow_failure: true
+  before_script:
+    - python3 -m pip install --quiet --break-system-packages "$GROUNDTRUTH"
+  script:
+    - groundtruth check "$BOARD" --refill-zones --format text --format gitlab-codequality --out-dir emi
+  artifacts:
+    when: always
+    paths:
+      - emi/
+    reports:
+      codequality: emi/gl-code-quality-report.json

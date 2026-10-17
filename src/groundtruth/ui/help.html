@@ -1,0 +1,1414 @@
+<html><body bgcolor="@BG@" text="@TEXT@" link="@LINK@">
+<a name="top"></a>
+<h2>GroundTruth help</h2>
+<p>GroundTruth checks a KiCad board for return-path problems on its signals, and analyses its switching power
+stages and motor bridges: hot loops, emission, currents in the copper, losses and temperatures. This page explains
+what each part of the window does and how the analyses fit together. <b>F1</b> (or <b>Help</b> in the top bar)
+opens it at the tab you are on; pressed again, the same help window comes forward at the new tab's section. Links
+within this page jump to their section; others open in your web browser. The sidebar lists every section and marks
+the one you are reading; <b>Search</b> (Ctrl+F) shows the sections that mention a word, the word marked (Enter: the
+next one).</p>
+
+<p><b>Contents</b></p>
+<ul>
+<li><a href="#workflow">The usual workflow</a></li>
+<li><a href="#together">What Simulate does with nets, converters and bridges</a></li>
+<li><a href="#checks">Run checks and Simulate</a></li>
+<li>The tabs: <a href="#nets">Signal paths</a> · <a href="#converters">Converters</a> · <a href="#bridges">Bridges</a> ·
+  <a href="#dcloads">DC loads</a> · <a href="#pdn">Power integrity</a> · <a href="#si">Signal integrity</a> ·
+  <a href="#parts">Parts</a> · <a href="#issues">Issues</a> · <a href="#heatmap">Heatmap</a> · <a href="#fixes">Fixes</a> ·
+  <a href="#history">History</a></li>
+<li><a href="#safety">Voltage-aware safety checks</a></li>
+<li><a href="#fields">Part parameters from the schematic (InvenTree fields)</a></li>
+<li><a href="#thermal">Thermal and Current capacity</a></li>
+<li><a href="#prefs">Preferences</a></li>
+<li><a href="#export">Export report</a></li>
+<li><a href="#drawing">Drawing on the board</a></li>
+<li><a href="#labels">Detection labels (GT field)</a> · <a href="#siglabels">Labelling a signal path</a> ·
+  <a href="#pins">Through-hole pins</a></li>
+<li><a href="#settings">The settings file</a></li>
+<li><a href="#speed">Speed, memory and the GPU</a></li>
+<li><a href="#server">Compute server: set up and run</a></li>
+<li><a href="#methods">How the simulation works (the algorithms)</a></li>
+<li><a href="#limits">What the numbers mean, and their limits</a></li>
+</ul>
+
+<hr><a name="workflow"></a><h3>The usual workflow</h3>
+<ol>
+<li><b>Open the board.</b> The first time, GroundTruth looks for the nets worth analysing, the DC-DC converters
+  and the motor bridges by itself. What it found shows in <font color="@WARN@">orange</font> on the Signal paths,
+  Converters and Bridges tabs until you review it.</li>
+<li><b>Review.</b> Check each row: the driver and receivers of a net, a converter's switches, inductor and
+  operating point, a bridge's legs. Fill in what the board cannot tell: frequencies, edge times, currents,
+  voltages, a motor's data. Press <b>Mark reviewed</b>.</li>
+<li><b>Run checks</b> (seconds): rule checks on the nets' routes against the planes.</li>
+<li><b>Simulate</b> (minutes): the field solver on everything listed. Results go to the Issues and Heatmap
+  tabs.</li>
+<li><b>Look and fix:</b> click an issue to see it in KiCad, look at the current maps, let <b>Suggest fixes</b>
+  (Fixes tab) propose vias and capacitors, try them as what-if edits, place the vias.</li>
+<li><b>Thermal</b> and <b>Current capacity</b> for power stages and bridges, after Simulate.</li>
+</ol>
+<p>Every edit on the tabs is saved to the settings file at once (<b>Save settings</b> writes it
+immediately). The board itself is never changed, except when you place suggested vias or draw on the board.</p>
+<p><b>The top bar</b>, left to right: <b>Reload board</b> reads the board again (after you changed it in KiCad);
+<b>Refill zones</b> has KiCad refill every zone and then reloads; <b>Run checks</b>, <b>Simulate</b>,
+<b>Thermal</b> and <b>Export report…</b> (below); <b>with what-if edits</b>; <b>Cancel</b> stops the running job;
+<b>Save settings</b>; <b>Clear EMI layers</b> removes what GroundTruth drew. On the right, <b>Preferences…</b> and
+<b>Help</b>. Refill zones and Clear EMI layers are there only when GroundTruth was started from KiCad's toolbar
+(<b>Analyse return paths</b>); opened on a board file, it can analyse but not show or draw anything in KiCad.
+Hover over <b>Thermal</b>, <b>Export report…</b>, <b>with what-if edits</b>, <b>Preferences…</b> or <b>Help</b> for
+what it does.</p>
+
+<p><b>Starting GroundTruth.</b> In KiCad's PCB editor the plugin has three actions:</p>
+<ul>
+<li><b>Analyse return paths</b> (toolbar button) opens the window on the board open in the PCB editor. A small
+  start window shows at once ("Connecting to KiCad…", "Loading the analysis modules…") and closes when the main
+  window opens. If KiCad cannot be reached or no board is open, a message says so.</li>
+<li><b>Add selected net to GroundTruth</b> (toolbar button) adds the net of the track, via or pad selected in the
+  PCB editor to the Signal paths tab (see <a href="#nets">Signal paths</a>). An open GroundTruth window of the same board takes it
+  and comes to the front (while it runs a Simulate or another job, once that has finished); with none open, a window opens and adds it once it has read the board. With nothing
+  selected that has a net, a message says what KiCad reports as selected.</li>
+<li><b>Clear EMI layers</b> (no toolbar button) removes what GroundTruth drew on the board, without opening the
+  window, and says how many items it removed (one undo step).</li>
+</ul>
+<p>Without KiCad, <code>groundtruth-gui BOARD.kicad_pcb</code> opens the same window on a board file: everything
+analyses the same, but the KiCad parts are left out (Refill zones, Clear EMI layers, Add KiCad selection, the zoom
+and highlight options, the drawing buttons, showing rows and issues in KiCad, the Parts tab following KiCad's
+selection). Started from KiCad, the window closes by itself when KiCad exits.</p>
+<p><b>When the board is read</b>, the board must have been saved once (its settings go into the <code>groundtruth</code> folder next to it). A
+settings file with errors is reported and nothing is loaded. When some zones are not filled, GroundTruth asks
+whether to refill them first. When the settings file is new or lists no nets, converters or bridges, detection runs
+by itself (a settings file from before the Bridges tab is searched for bridges once). Closing the window saves the
+settings and clears the net highlight it set in KiCad, giving back your active layer.</p>
+<p><b>The status bar</b> shows what happened last; a long message wraps onto up to three lines (hover over it for
+all of it). While a job runs it shows what the job is doing, how far it is, the time spent and about how long is
+left, with a progress bar on the right; a job of 10 s or more says afterwards how long it took. Only one job runs at
+a time: a button pressed meanwhile is refused with "still working". <b>Cancel</b> stops Run checks, Simulate,
+Thermal, Current capacity, Suggest fixes, Compare what-if and Export report at their next progress step; reading the
+board, detection, drawing and Sharper map cannot be cancelled. A settings file that cannot be written is reported
+there too ("could not save the settings").</p>
+
+<hr><a name="together"></a><h3>What Simulate does with nets, converters and bridges</h3>
+<p><b>Everything listed is simulated, every time.</b> Simulate runs every net on the Signal paths tab, every converter
+on the Converters tab and every motor bridge on the Bridges tab, in one job. To leave something out, remove its
+row (the detection can find it again later) or keep a second settings file. The command line
+(<code>groundtruth simulate --nets NAME</code>) can run some of them.</p>
+
+<p><b>They share the board, not the physics.</b> All of them use one model of the board's copper, read once,
+and their solves run in parallel. Each one is still solved as if it were alone:</p>
+<table border="0" cellpadding="4">
+<tr><td valign="top" width="130"><b>A net</b></td><td>A signal from its driver to its receivers at its frequency and edge
+  time. The solver finds where its <i>return current</i> flows in the planes (under the trace, around a slot,
+  through a stitching via or a capacitor, between planes through their capacitance), the loop it makes, and the
+  emission that loop radiates at each harmonic.</td></tr>
+<tr><td valign="top"><b>A converter</b></td><td>Its <i>hot loop</i>: the fast current that moves between the
+  switches and the input capacitors at every edge, at its switching frequency. Also its DC power paths (current
+  density and resistance), its ringing, the conducted emission at its input connector and the radiated estimate
+  of the loop.</td></tr>
+<tr><td valign="top"><b>A motor bridge</b></td><td>First its six-step drive with the motor, at the operating
+  point: the phase, switch and bus currents. Then each leg's hot loop at the leg's largest switched current, all
+  legs on one model. Together: the conducted emission of all legs at the battery input, the bus capacitors'
+  ripple, the RMS current density from the battery to the motor, the parts' losses, and the sweep over other
+  currents and speeds.</td></tr>
+</table>
+<p><b>No switching current is fed into the nets' solves.</b> A net on the Signal paths tab shows its own return path,
+not the noise a converter or a bridge puts on it. That interaction has its own analysis:</p>
+<ul>
+<li><b>Victims of a bridge or a converter.</b> When a bridge or a power stage is simulated, GroundTruth finds the
+  microcontroller, reset, crystal, Hall, debug and PWM / gate-input nets on the board by itself (or takes the ones
+  listed under <code>victims:</code> in the settings), puts them into the stage's model and computes the noise each
+  one's receiver sees at the switching edges. This does not depend on the Signal paths tab. The results are in the
+  bridge's drive view, in each stage's part of the report, and as <code>victim_coupling</code> issues.</li>
+</ul>
+<p><b>Where the results come together:</b></p>
+<ul>
+<li><b>Issues</b> lists every problem of every net, converter and bridge, sorted by severity.</li>
+<li><b>Heatmap</b> has a view per net route, converter, DC path, bridge, bridge leg, RMS map and sweep.</li>
+<li><b>Thermal</b> and <b>Current capacity</b> add the heat of every converter and every bridge on the board:
+  they share the copper.</li>
+<li><b>Suggest fixes</b> works through all the issues and proposes fixes per net, converter or bridge leg; a fix
+  is checked on every net it could disturb.</li>
+</ul>
+
+<hr><a name="checks"></a><h3>Run checks and Simulate</h3>
+<p><b>Run checks</b> follows each listed net from its driver to its receivers (through series resistors and
+ferrites) and checks every segment against the planes next to it: crossing a gap or a split, running off a plane
+or along its edge, changing layer without a stitching via (same reference net) or a capacitor (different nets),
+referencing a non-ground plane. It also runs the board-wide <a href="#safety">voltage-aware safety checks</a>
+(spacing for the voltage, capacitor ratings, ESD parts at connectors). It takes seconds.</p>
+<p><b>Simulate</b> runs the checks and then the field solver on everything listed (see
+<a href="#together">above</a>). The status line shows what it is doing, how far it is and the time left;
+<b>Cancel</b> stops it. With <b>with what-if edits</b> ticked, both run on a copy of the board with the enabled
+what-if edits (virtual vias, capacitors, fills) added; with none enabled, it says where to add them.</p>
+<p>Run checks without nets runs the board-wide checks only; Simulate needs a net, a converter, a bridge, a DC load
+or a PDN rail. Afterwards the status line
+counts the errors, warnings and infos (waived ones left out) and the window turns to the Issues tab (Run checks) or
+the Heatmap tab (Simulate).</p>
+<p>The settings are checked first. A value that looks like a missing unit is refused with what to write instead
+(a C_oss of <code>482</code> is 482 F: write <code>482p</code>); a bridge without its operating point or motor
+data is listed with what is missing.</p>
+
+<hr><a name="nets"></a><h3>Signal paths tab</h3>
+<p>The signal paths to analyse, one row each: a path runs from its driver pin to its receiver pins, across nets
+through series parts (0R, termination resistors, ferrites), the parts named in <b>Pass through</b> and op-amp
+stages, and is solved as one. Each row has its frequency, edge time and amplitude (optional: source and load,
+current). A path on one net is simply a path without parts.</p>
+<p>The table's columns: <b>Path</b> (named after its start net), <b>Status</b>, <b>Chain</b> (the path as the route
+follows it: <code>U302.3 → U301 ×1 → R303 4k7 → U1102.9</code>, op-amps with their gain; worked out in the
+background, "no route: …" when the copper or a part doesn't connect), <b>Freq</b>, <b>Rise</b>, <b>Ampl.</b> and
+<b>Class</b> (the kind of signal detection took it for). Under the table, the selected path in full: its chain
+and the parts across it to ground or a rail (a load resistor, a filter capacitor), which take their share of the
+current in Simulate. Status is <i>manual</i> (entered by
+you), <i>auto, REVIEW</i> (found by detection, not checked yet: the row is <font color="@WARN@">orange</font>) or
+<i>auto, reviewed</i>.</p>
+<p>Where Detect misses a path, takes it for a supply, guesses its driver wrong or stops at an op-amp, label the path
+in the schematic: see <a href="#siglabels">Labelling a signal path</a>.</p>
+<ul>
+<li><b>The form</b>: <b>Start net</b> (pick it from the list of the board's nets or type it); then <b>Driver pin</b> and
+  <b>Receiver pins</b> list the pins of that net (also across series parts) to choose from; <b>Frequency</b>,
+  <b>Rise time</b>, <b>Amplitude (V)</b> and <b>Duty cycle</b> (0.5 for a clock). Values take units and SI
+  prefixes (20MHz, 2ns, 3.3).</li>
+<li><b>A signal path across nets</b>: the driver and receiver pins may be on different nets joined by series
+  parts (a damping resistor, a ferrite, an inductor): the path runs through them and each part's impedance (from
+  the <a href="#parts">Parts tab</a>) counts, at its place along the path. A part that doesn't pass a signal by
+  default (an AC-coupling capacitor, a resistor above 1 kΩ) is passed when named in <b>Pass through</b> (e.g.
+  C12); when no path is found, the issue names the parts in the way. The source: <b>Source R</b> (Ω),
+  <b>Source L</b> (nH, package and bond wire) and <b>Source C</b> (pF, its output capacitance), <b>Fall
+  time</b> when it differs from the rise time. The load: <b>Load C</b> (pF per receiver) and <b>Load R</b> (Ω,
+  a termination at the receivers). Empty fields use the defaults (25 Ω, 5 pF, no L, C or termination). The
+  report shows the path per net: its stretches and parts with their |Z| at the worst harmonic. Parts from the
+  path to ground or a rail (a termination, an RC or pi filter's capacitor, a pull-down) are found on their own:
+  each takes its share of the current at its place, and one that carries at least 1 % of it is a current loop of
+  its own (the return flows back through the plane from its ground pin), solved with the net. The report lists
+  them with their current; the notes name the loops. An <b>op-amp</b> on the path (part model
+  <code>amplifier</code>, see <a href="#parts">Parts tab</a>) splits it into stages: the driver drives the op-amp's
+  input, the op-amp drives the rest with its gain (rolled off at its bandwidth or GBW / gain, capped by its slew
+  rate) through its output impedance, and each side's current returns at the op-amp's ground pin: two current
+  loops. The maps then show the output side's.</li>
+<li><b>Detect…</b> suggests nets from their names and the schematic's pin types (SPI, RMII, USB, SDIO, debug
+  clocks, crystals …), with the driver from the pin types and the series parts followed, and default timing to
+  review. A dialog lists what it found that is not listed yet (with its class, driver, receivers, timing, its
+  <b>Confidence</b> and <b>Why</b>); the likely ones are ticked. <b>OK</b> adds the ticked nets as unreviewed.
+  A net already listed, still unreviewed and detected, whose path detection now sees differently (after GT labels
+  were added, say) is offered again, ticked and marked <b>REPLACES</b>: it replaces the entry (its tick kept), and
+  unreviewed entries for pieces of its path are removed. Reviewed and hand-made nets are never changed.</li>
+<li><b>A whole path from KiCad</b>: select one bit of copper on each net of the path in the PCB editor (a track,
+  via or pad per net, Ctrl+click to add, any order), then <b>Add KiCad selection</b> or the toolbar button. The
+  nets are put in order by the parts that join them; an op-amp's input and output pins give the direction (else the
+  pin types at the ends; a selected pad fixes that end's pin). One row is added: driver → series parts and op-amps
+  → receivers, the resistors that pass no signal by default in <b>Pass through</b>, the op-amps modelled as
+  amplifiers with their two pins (Parts tab). The GT labels this means for the schematic symbols
+  (<code>sig_drv</code>, <code>amp_in</code> / <code>amp_out</code>, <code>sig_rx</code>, see
+  <a href="#labels">labels</a>) are written into the open schematic where KiCad allows it. That needs
+  KiCad 11 (<a href="#kicad11">see the note</a>): on KiCad 10 they are shown in a message to add by hand (Symbol
+  Fields Table, a GT column; Ctrl+C copies the message). The path works in Simulate right away either way. Selected nets no part joins are added one by one.</li>
+<li><b>Add KiCad selection</b> (or KiCad's toolbar button <b>Add selected net to GroundTruth</b>) adds the net
+  of the track, via or pad selected in the PCB editor (click or right-click it there first), as an unreviewed
+  suggestion with its driver and receivers from the pin types; the status line says what was added, and asks for
+  the frequency and rise time where the net's kind of signal is unknown. Ground nets and power-stage switch
+  nodes are refused with the reason. A net that looks like a supply (a power pin on it, a supply name such as
+  +3V3, VIN, RAIL) or carries a power stage's current is refused too, but you are asked whether to add it as a
+  signal anyway: an ADC input or a sense line measuring a rail is one. A name with a measuring word (ADC, SENSE,
+  SNS, MEAS, MON, FB) is taken as a signal without asking (/CPU/ADC_I_RAIL_1). A net already listed is
+  selected.</li>
+<li><b>The tick box at the start of a row</b> switches the net on or off. Switched off, it keeps everything you
+  entered (in the settings file as <code>enabled: false</code>) and shows greyed, but Run checks, Simulate and the
+  fix search leave it out, and it is not checked against the board. The <b>Converters</b> and <b>Bridges</b> tabs
+  have the same tick box. With every row off, Simulate says so. The command line runs a switched-off row only when
+  <code>--nets</code> names it.</li>
+<li>The form on the right edits the selected row: <b>Add</b> (a new net from the form), <b>Update selected</b>
+  (one row only; editing a detected net counts as reviewing it), <b>Remove selected</b>, <b>Mark reviewed</b>
+  (the orange stops). Hover over a field or a button for what it means. With no nets yet, a line above the table
+  says how to start.</li>
+<li>Clicking a row fills the form and highlights the net's whole path in KiCad, from its driver through its series
+  parts, Pass through parts and op-amps to its receivers (<b>Zoom KiCad to the selected nets</b> also
+  zooms to it; <b>~</b> in KiCad clears the highlight). Several rows can be selected (Ctrl / Shift-click, Ctrl+A),
+  removed (Delete) or marked reviewed at once.</li>
+<li><b>How nets are found</b> at the bottom, <b>Show</b> / <b>Hide</b>: the net and pin names detection looks
+  for (the text can be selected and copied).</li>
+</ul>
+
+<hr><a name="converters"></a><h3>Converters tab</h3>
+<p>The switching power stages (DC-DC converters): name, topology, rail, switch node, ground, the switches (high
+side, low side, or an IC with its switches inside), switching frequency, input and output voltage, load current,
+edge time, and optionally C_oss / Q_oss, R_DS(on), the inductor's DCR, a diode's V_f, the stray capacitance to a
+chassis, the input and output connectors and the conducted standard. Hover over a field for what it means. C_oss,
+Q_oss, R_DS(on), DCR and V_f come from the parts' schematic fields where they have them: ◆ beside a field, or
+<font color="@WARN@">!</font> where a value set here differs; <b>Use schematic values</b> takes them back
+(<a href="#fields">Part parameters from the schematic</a>). The controller's
+<b>spread spectrum</b> is on the form: <b>Spread spectrum (%)</b> (f_sw dithered up to that much above it; empty:
+off), <b>Spread mode</b> (random hops, or a triangle sweep) and <b>Spread rate</b> (the triangle's modulation
+frequency, or random hops per second; empty: every cycle). The buttons are those of the Signal paths
+tab, and the rows show in KiCad the same way: clicking a row selects the stage's switches and hot-loop capacitors
+and highlights its switch node (<b>Zoom KiCad to the selected power stages</b> also zooms). KiCad shows the row
+you stop on: clicking or arrowing quickly through the rows does not make it select and zoom to each one.</p>
+<p>The table's columns: <b>Name</b>, <b>Status</b> (as on the Signal paths tab), <b>Topology</b>, <b>Switches</b> (high
+side / low side, or "integrated" and the IC), <b>Rail</b>, <b>f_sw</b>, <b>I out</b> (the load current: the output's; the input current is worked out, see below), <b>V in→out</b>
+(? where not set), <b>Edge</b>, <b>Input</b> and <b>Output</b> (the connector pins). The form scrolls when the window
+is short. In the form, <b>Topology</b> is buck, boost or custom; <b>Integrated stage</b> takes an IC with both
+switches inside (leave High side, Low side and Switch node empty then); <b>Conducted standard</b>
+<i>(analysis default)</i> uses the settings' <code>analysis.conducted</code>; parts are references separated by
+commas (Q1, Q2), connectors plus then minus (J1.1, J1.2). <b>R_DS(on)</b>, <b>R_DS(on) low side</b>, <b>Inductor
+DCR</b> and <b>Diode V_f (V)</b> are the losses of the thermal solve.</p>
+<ul>
+<li><b>Detect…</b> finds stages from their inductors and switches; a surge stopper or reverse-polarity FET in the
+  input path is recognised and taken as closed (give it a resistor model of its R_DS(on) on the Parts
+  tab). A dialog lists the stages found (switches, rail, ground, connectors, confidence, why); the likely ones are
+  ticked, <b>OK</b> adds them as unreviewed: set the switching frequency, load current, voltages and edge
+  time.</li>
+<li>What Simulate gives per stage: the hot-loop inductance and L·di/dt overshoot, the ringing with C_oss, which
+  capacitors carry the loop current, the radiated and the conducted estimate (through a LISN at the input
+  connector), a common-mode budget, input-filter guidance, and the DC power paths with their current density and
+  via loads.</li>
+<li><b>DC paths on the whole board, and all stages together.</b> Every stage's DC power paths (switch node,
+  input, output, ground return) are solved on one copper model of the whole board, so nothing is cut off at the
+  edge of a box around the stage and the current spreads as far as the copper takes it. With two or more stages
+  the Heatmap tab's Route list starts with <b>all power stages DC currents together</b>: every stage at its own
+  load at once, their currents added (they share the input connector, a surge stopper, the rail and the
+  ground). Its title gives the loads, the total input current and the copper's loss of the total current.
+  The current-density and via-load checks run on this total, as issues of <i>all power stages</i>; the
+  stages' own DC views still show what each stage alone puts where.</li>
+<li><b>The input current</b> is not entered: it follows from the energy balance V_in·I_in = V_out·I_out + losses
+  (a buck at 100 % efficiency would draw I_out·D). The losses are the ones Thermal uses: the switches' conduction
+  (R_DS(on)), the hard edge (½·V·I·t_r·f_sw) and output charge (Q_oss·V·f_sw), a diode's V_f, the inductor's DCR,
+  series parts and the copper of the DC paths; gate drive and the controller's own supply are not counted, and a
+  value not given (no R_DS(on), no DCR) counts as no loss: the stage's notes say which. The stage's line on the
+  Heatmap tab shows the input current and efficiency, its notes the loss break-down, and the DC input path's map
+  (connector to the high side) carries this current: its title reads "expected input current … A (efficiency
+  … %)" beside the path's resistance and voltage drop. The ground return splits by it too: the input connector's
+  minus pin takes the input current back, the low side the rest.</li>
+<li>The radiated estimate counts the charge each edge moves into the switch node (C_oss, or Q_oss where given) on
+  top of the load current: near the ringing it can be several times the load pulse (a light load on a high input
+  voltage). Without C_oss there is neither ringing nor that current: for a diode buck give the diode's junction
+  capacitance as C_oss. The estimate is the hot loop's own radiation; cables usually radiate more, so read it as a
+  lower bound.</li>
+<li>Ceramic input capacitors lose much of their capacitance at a high DC voltage (an X7R keeps roughly 30-60 %
+  at half its rating). A stage's notes name those still at their nominal value: give their <b>C at bias</b> on the
+  Parts tab.</li>
+<li>The line at the bottom (<b>Labels (GT field)</b>) says which detection labels the board carries;
+  <b>Show</b> explains them (see <a href="#labels">Detection labels</a>). The Bridges tab has the same line.</li>
+</ul>
+
+<hr><a name="bridges"></a><h3>Bridges tab</h3>
+<p>Motor bridges: half-bridge legs on one bus, the motor's winding as the inductor (BLDC drives, ESCs,
+starter-generators). The legs, their phase nodes, drivers, snubbers and the motor connector are detected; the
+operating point and the motor are yours to enter:</p>
+<table border="0" cellpadding="3">
+<tr><td valign="top" width="130"><b>Operating point</b></td><td>bus voltage, PWM frequency, phase current (the mean current
+  of the conducting phases), mode (motoring or generating), speed (0 = locked rotor, cranking).</td></tr>
+<tr><td valign="top"><b>PWM scheme</b></td><td><code>hpwm_lon</code>: the sourcing phase's high side chops, the
+  sinking phase's low side stays on; <code>hon_lpwm</code>: the mirror; <code>bipolar</code>: both conducting legs
+  chop. <b>Synchronous</b>: the chopping leg's other switch conducts in the off time (complementary PWM with dead
+  time). A scope on a leg's two gates shows which.</td></tr>
+<tr><td valign="top"><b>Switches</b></td><td>dead time (between one gate turning off and the other turning on),
+  edge time, R_DS(on) of one FET, reverse-conduction voltage, C_oss and Q_oss of one side's parallel FETs
+  together. The FETs' schematic fields fill these where they have them, marked as on the Converters tab
+  (<a href="#fields">Part parameters from the schematic</a>).</td></tr>
+<tr><td valign="top"><b>Motor</b></td><td>star or delta; resistance and inductance between two motor leads;
+  back-EMF constant as the line-to-line peak per 1000 rpm (from a datasheet's V AC RMS per 1000 rpm: × 1.414;
+  from Kv in rpm/V: about 1000 / Kv); pole pairs (poles / 2); trapezoidal or sinusoidal EMF.</td></tr>
+<tr><td valign="top"><b>Sweep</b></td><td>phase currents and speeds that Simulate also evaluates, every current
+  at every speed, from the same solves (a few seconds each).</td></tr>
+</table>
+<p>The form also has the bridge's <b>Name</b>, <b>Bus net</b>, <b>Ground net</b>, <b>Input connector</b> (+ and
+- pins, where the LISN goes), <b>Conducted standard</b> and <b>C stray (chassis)</b>, and under Motor <b>Advance
+(°)</b>: the commutation advance in electrical degrees (negative: retarded). Hover over a field for what it means
+and an example value.</p>
+<p>The table's columns: <b>Name</b>, <b>Status</b>, <b>Legs</b> (how many), <b>Bus</b>, <b>V</b>, <b>f_pwm</b>,
+<b>I phase</b>, <b>rpm</b>, <b>Motor</b> and <b>Input</b>. A bridge stays <font color="@WARN@">orange</font> while
+it is unreviewed or while Simulate still lacks its operating point or motor data: its Status then reads
+<i>auto, SET UP</i> or <i>set operating point</i>.</p>
+<p>The legs of the bridge in the form are listed under the bridges (<b>Legs of the bridge in the form</b>: phase,
+switch node, high side, low side, output pin, driver and the nets it is driven from). Clicking a leg fills the
+<b>Selected leg</b> fields (<b>Phase</b>, <b>Switch node</b>, <b>High side</b>, <b>Low side</b>, <b>Output
+pin</b>); <b>Set leg</b> replaces the selected leg with them, <b>Add leg</b> adds one, <b>Remove leg</b> removes
+the selected one. A leg needs its switch node, high side and low side. Leg edits belong to the form: <b>Update
+selected</b> (or <b>Add</b>) stores them with the bridge. Clicking a bridge shows it in KiCad like a converter
+(<b>Zoom KiCad to the selected bridges</b>). The other buttons are those of the Signal paths tab;
+<b>Detect…</b> shows the bridges found (legs, bus, input, confidence, why) with the complete, likely ones
+ticked.</p>
+<p>Simulate then, per bridge:</p>
+<ul>
+<li><b>drives the motor in six-step</b> at the operating point and finds the duty for the phase current (an
+  issue says when the bus cannot drive it at that speed);</li>
+<li><b>solves each leg's hot loop</b>: inductance, L·di/dt, ringing (with the leg's snubber), radiated
+  estimate. A leg that does not switch at the operating point (a locked rotor drives one commutation step) gets
+  no hot-loop checks;</li>
+<li><b>adds the legs at the input</b>: the conducted emission at the battery, read by a simulated EMI receiver
+  against the limit;</li>
+<li><b>shares the ripple</b> among the bus capacitors;</li>
+<li><b>maps the RMS currents</b> from the battery to the motor (phase currents, bus current, switching currents)
+  with the busiest vias against their IPC-2221 rating;</li>
+<li><b>counts the parts' losses</b>: each FET's conduction, reverse conduction in the dead times, hard turn-on
+  and output charge; the snubber resistors; the capacitors' ESR; the series parts on the battery path (a part
+  modelled as a <code>short</code> gets no loss: give it a resistor model);</li>
+<li><b>checks the victims</b> (see <a href="#together">above</a>) and runs the <b>sweep</b>.</li>
+</ul>
+<p>On the Heatmap tab a bridge has four kinds of view: its drive (phase and bus currents, capacitor ripple,
+conducted spectrum, losses), each leg's hot loop, its <b>RMS currents</b> map, and its <b>sweep</b> (losses, RMS
+density, conducted and radiated margin against the phase current, one line per speed; a hollow marker where the
+current is not reached).</p>
+
+<hr><a name="dcloads"></a><h3>DC loads tab</h3>
+<p>A <b>DC load</b> is a supply rail with the currents its loads draw: a power connector feeding several boards'
+connectors, a pour or track to a regulator, a fused output. Simulate solves each rail on the copper of the whole
+board (pours, tracks and vias, as for a power stage's DC paths) and shows:</p>
+<ul>
+<li>the <b>voltage drop each load sees</b>: on the supply side (from the source pin to the load's pin) and, when the
+  return pins are given, on the ground side (back to the source's return pin), and the total;</li>
+<li>the <b>current density</b> with its flow (a view of its own on the Heatmap tab), the hottest narrow spot and the
+  busiest vias against IPC-2221, and the copper's loss; these are checked like a power stage's DC paths
+  (current_density, via_overload), and a load above the rail's <b>Max drop</b> is an issue (dc_drop);</li>
+<li><b>Thermal</b> heats the board with it, and <b>Current capacity</b> finds the current at which the hottest copper
+  or part reaches the limit, all the rail's loads scaled together.</li>
+</ul>
+<p><b>Fill from net…</b> is the quick way: pick the rail's net (e.g. VDD) and its ground (GND); GroundTruth lists every part with a pin on the rail, with that part's own ground pin, and you pick the part feeding it (the connector with the fewest pins is preselected) and the parts drawing from it (the connectors are preselected), then a current per load. The form is filled in; check it, change a line's current if a load draws more, and press <b>Add</b>.</p>
+<p><b>Typing pins</b>: the Source pin, Source return and Loads fields list the board's pins while you type, each with
+its net and part (<b>Ctrl+Space</b>, or Down in a one-line field, lists them on an empty field); Up/Down choose, Enter or
+Tab takes one, Escape closes the list. Typing matches a pin's start (<i>j3</i>: J3's pins) or, from two letters, its net
+(<i>vdd</i>). The order follows the field: the source offers supply connectors first, the return the source part's own
+ground pin first; in Loads, a line's pin comes from the source pin's net (pins already listed are left out), followed by
+a "/" and its own part's pin on the return's net, then "=" for the current.</p>
+<p>The form: <b>Name</b>; <b>Source pin</b>, the pin the rail is fed from (REF.PAD, e.g. <code>J1.2</code>);
+<b>Source return</b>, optional (e.g. <code>J1.1</code>, GND); <b>Loads</b>, one per line as
+<code>PIN/RETURN=CURRENT</code>, e.g. <code>J2.2/J2.1=0.5A</code> (without returns: <code>J2.2=0.5A</code>; give the
+returns for every load and the source, or for none); <b>Max drop</b>, optional, in volts. Every load draws its
+current at once (the solve is linear: one load alone is not needed to know its share). The tick box at the start of
+a row switches it off without losing it. With power stages on the same copper, the <b>DC currents together</b> view
+adds the rails too. The model's cells start at the board's dielectric height: a pour reads a few % low at 1x
+resolution (0.24 mm cells widen its edges); 4x is converged.</p>
+<p>In the settings file:</p>
+<pre>dc_loads:
+  - {name: VDD rail, source: J1.2, source_return: J1.1, max_drop: 200mV, loads: [{pin: J2.2, return: J2.1, current: 500mA}, {pin: J3.2, return: J3.1, current: 500mA}]}</pre>
+
+<hr><a name="pdn"></a><h3>Power integrity tab (PDN impedance)</h3>
+<p>For a supply rail, the <b>impedance its ICs see</b> between their supply and ground pins, from 10 kHz to 1 GHz:
+the decaps (their C, ESR and ESL from the Parts tab, plus their pads and vias), the planes' capacitance, the copper
+and the regulator together, solved on one model of the whole board. Each IC with supply pins (schematic pin type
+<i>power_in</i>) on the rail and a pad on its ground is a port: a current step at its pins and the voltage it makes
+there. The rail holds its voltage within the allowed <b>ripple</b> when the impedance stays below the <b>target</b>
+V &middot; ripple / I_step, whatever the frequency of the IC's current step.</p>
+<ul>
+<li>per IC the <b>curve</b> |Z(f)| with its phase below it (−90°: capacitive, +90°: inductive, crossing 0° at a
+  resonance; the HTML report's Power integrity part and the rail's view), its <b>peaks</b> (anti-resonances: two
+  decaps, or the decaps and the planes, ringing together), the <b>part holding the rail</b> at each frequency (the
+  regulator, a decap, the planes) and the <b>inductance above its decaps</b>;</li>
+<li>issues: <b>pdn_impedance</b> where an IC's curve is over the target below <i>check_to</i> (default 100 MHz: above
+  it the package and the die's own capacitance take over), naming the part holding the rail there;
+  <b>decap_missing</b> for supply pins with no decap pad within <i>decap_mm</i> (3 mm);</li>
+<li>the <b>source</b> (the regulator's output, found by its <i>power_out</i> pin, or a connector) is modelled as
+  <i>vrm_r</i> + jω<i>vrm_l</i> (5 mΩ, 20 nH unless set): below the decaps' range the rail is the regulator's.</li>
+</ul>
+<p>The model is the whole board at the board-wide resolution (Preferences), and each IC's pins with their nearby decaps
+on a fine model of their own: the inductance at small pads and vias, which the board-wide grid cannot resolve, is
+added to the IC's curve. An IC whose small pads the board-wide grid cannot join to the rail's copper is left out
+with a note (raise the resolution).</p>
+<p>The <b>Power integrity</b> tab lists the rails: <b>Find rails</b> adds every rail ICs draw supply from (its source
+found by itself); set each one's <b>Load step</b> for a target (and its voltage when the name has none). After
+Simulate, each rail is a view on the <b>Heatmap</b> tab: the curves with the target, and under them what holds the
+rail at each IC across frequency. In the settings file:</p>
+<pre>pdn:
+  - {rail: +3V3, i_step: 300mA}
+  - {rail: VDD_CORE, voltage: 1.2V, ripple: 3%, i_step: 2A, source: U7, vrm_r: 2mΩ, vrm_l: 10nH}</pre>
+
+<hr><a name="si"></a><h3>Signal integrity tab</h3>
+<p>The characteristic impedance of the listed nets along their tracks, differential pairs, crosstalk and via stubs,
+from <b>cross-sections</b> of the board: a cut across every copper layer perpendicular to the track, every 2 mm, with
+all the copper in it (other nets, pours and planes as the reference at 0 V), the stackup's dielectrics and the
+solder mask, solved as a two-dimensional field problem (within 0.2 % of exact results). Run checks does it: a few
+seconds per net; the figures show on this tab and in the report, the issues on the Issues tab.</p>
+<ul>
+<li><b>impedance</b>: Z0 along a net's tracks outside its target. Targets on this tab (Impedance target: nets by
+  name or pattern such as <code>/CPU/SPI_*</code>, or a KiCad net class, with Z0 and tolerance). A listed net
+  without a target gets its Z0 shown. A void in the plane under a track shows as a higher Z0 there.</li>
+<li><b>diff_impedance</b>, <b>diff_skew</b>: a pair's differential impedance where its two nets run side by side
+  (elsewhere it is uncoupled, about twice Z0), and the delay mismatch of their routed lengths against Max skew (by
+  default a tenth of the pair's edge). <b>Find pairs</b> lists the pairs found by name (_P/_N, +/-, CAN_H/CAN_L,
+  DP/DM, X and X*), with the interface's impedance where the name tells it (USB 90 Ω, Ethernet, LVDS, HDMI
+  100 Ω); CAN and RS-485 get none (their slow edges need none on the board).</li>
+<li><b>crosstalk</b>: a listed net (its edge and swing from the Signal paths tab) running beside another track on one
+  layer: near-end and far-end crosstalk as a share of its swing, from the coupled length, the spacing and the edge;
+  above the limit (5 %) an issue on the victim.</li>
+<li><b>KiCad tuning profiles</b> (Board Setup &gt; Tuning Profiles, assigned to a net class): the profile's target
+  impedance is its nets' target (a Differential profile's, its pairs'), and <b>tuning_delay</b> compares its unit
+  delay per layer with the cross-sections' when it tunes in time: KiCad turns lengths into delays with the figure
+  typed there (FR-4 microstrip is about 60 ps/cm). A profile on the Default class applies to the listed nets.</li>
+<li><b>via_stub</b>: a via of a listed net or pair whose barrel runs on past the layers it uses: the stub resonates
+  at a quarter wave; below 3 × the signal's knee (0.35 / rise time) an issue (back-drill, a blind via, or change
+  layers near the via's end).</li>
+</ul>
+<pre>si:
+  impedance:
+    - {nets: [/CPU/SPI_*], z0: 50Ω, tol: 10%}
+    - {class: HighSpeed, z0: 45Ω}
+  pairs:
+    - {p: /USB/D_P, n: /USB/D_N, zdiff: 90Ω, rise_time: 500ps, max_skew: 10ps}
+  crosstalk_max: 5%
+  stub_factor: 3
+  step_mm: 2</pre>
+
+<hr><a name="safety"></a><h3>Voltage-aware safety checks</h3>
+<p>What each net's voltage asks of the copper and the parts around it. A net's voltage comes from its name (+12V,
+VDD_3V3), the grounds and reference nets (0 V), a converter's input rail and switch node (its input voltage; a
+boost's output) and its output after the inductor, a motor bridge's bus and phases, a PDN rail, and through parts in
+series with (nearly) no drop: 0R, shunts and resistors up to 10 Ω, inductors, ferrites, and a pass FET given a short
+or resistor model on the Parts tab (its drain and source, not its gate). A voltage of your own wins (settings
+<code>safety: voltages</code>).</p>
+<ul>
+<li><b>clearance_voltage</b> (Run checks): copper of two nets on one layer closer than IPC-2221B Table 6-1 asks for
+  their voltage difference, at the closest point: B1 on inner layers, B2 on outer layers, B4 when the board is
+  <b>coated</b> (<code>safety: coated: true</code>); only above 30 V (below it the fab's basic spacing applies). An
+  error; a <b>warning</b> when the other net's voltage is not known and is taken as 0 V (give it under
+  <code>safety: voltages</code>). Voltages are ranges: a switch node swings from 0 V to its rail; a FET's gate
+  rides on its source and a bootstrap net on its switch node, up to the gate drive (<code>gate_drive_v</code>,
+  10 V) above it, so a bootstrap net and its switch node are only that far apart. A part's own pads against each
+  other are not checked (its maker rates them); a track near them is.</li>
+<li><b>cap_voltage</b> (Run checks): a capacitor's voltage against its rating (its <b>Rated Voltage</b> or <b>Voltage</b> field, else
+  "50V" in its value), derated by kind (ceramic and tantalum 50 %, aluminium 80 %): over the rating an error, over
+  the derated value a warning; capacitors at 10 V or more without a rating are listed in one info issue.</li>
+<li><b>esd_protection</b> (Run checks): a connector's pins with no ESD / TVS part on their net within 10 mm
+  (<code>esd_mm</code>): info, or a warning for the connectors listed in <code>esd_connectors</code> (the board's
+  outside world).</li>
+<li><b>resistor_power</b> (Simulate): a resistor's loss I²R in the DC paths or a motor bridge's RMS current against
+  its <b>Rated Power</b> or <b>Power</b> field (1/16W as written; else by its package: 0402 1/16 W … 2512 1 W),
+  above 50 % of it a warning; resistors dissipating 50 mW or more without a rating are listed in one info
+  issue.</li>
+<li><b>vds_rating</b> (Simulate): a power stage's switch-node peak (its rail plus the ringing's overshoot) against
+  the switches' <b>Vds</b> field, above 80 % of it a warning.</li>
+</ul>
+<pre>safety:
+  voltages: {V_BATT: 58V}
+  coated: false
+  cap_derating: {ceramic: 50%}
+  resistor_derating: 50%
+  vds_derating: 80%
+  esd_connectors: [J1, J4]</pre>
+
+<hr><a name="parts"></a><h3>Parts tab</h3>
+<p>Every part on the board with the electrical model the solver uses for it: <code>short</code>, <code>open</code>,
+<code>resistor</code> (R), <code>cap</code> (C, ESR, ESL, and optionally C at bias), <code>inductor</code> (L, R),
+<code>ferrite</code> (R, L), <code>amplifier</code> (an op-amp stage: gain, and optionally GBW, bandwidth, output
+impedance, input C and R, slew rate, CMRR). Models are suggested from the value and footprint, and from the
+symbol's fields where it has them (<a href="#fields">Part parameters from the schematic</a>); correct them where it
+matters:</p>
+<ul>
+<li>an op-amp in a signal path: give it the <code>amplifier</code> model (a <b>Gain</b> field on its symbol does it
+  by itself) and, for a dual or quad op-amp, its stage's input and output pins (<code>pins</code>, or the GT labels
+  <code>amp_in:3, amp_out:1</code>). The path runs through it: see <a href="#nets">Signal paths tab</a>.</li>
+<li>a signal route runs through a part whose model passes it (0R, a termination resistor up to 1 kΩ, a
+  ferrite);</li>
+<li>capacitors, 0R and ferrites between plane nets are branches between the planes (decoupling, bridges across
+  splits): their C and ESL matter for the return paths and the hot loops;</li>
+<li>a current sensor, an ideal-diode or surge-stopper FET in a power path is detected as a <code>short</code>:
+  give it a <code>resistor</code> model with its real resistance for the DC paths and the losses;</li>
+<li>a ceramic capacitor on a high voltage: <b>C at bias</b> is its capacitance at its DC voltage, read from the
+  maker's DC-bias curve (a 10 µF X7R rated 100 V keeps roughly 3-6 µF at 50 V). Where it is given, the solver uses
+  it instead of C; empty, the nominal C.</li>
+</ul>
+<p>The table's columns: <b>Ref</b>, <b>Value</b>, <b>Footprint</b> (read only), <b>Model</b> (a drop-down),
+<b>R (Ω)</b>, <b>C (F)</b>, <b>C at bias (F)</b>, <b>L (H)</b>, <b>ESR (Ω)</b>, <b>ESL (H)</b>, <b>Pins</b>
+(a through-hole part's own pin values, see below), <b>Schematic</b> and <b>Note</b>. Only the parameters of the part's model can be edited; the others are shaded. A Model cell is coloured
+when its model still lacks a parameter it needs. An emptied parameter cell removes that value; text that is not a
+number is refused and the old value comes back. Every edit is saved to the settings at once.</p>
+<p><b>Filter</b> narrows the list by reference, value or footprint (or a reference prefix such as C); <b>Set
+filtered parts to</b> a model and <b>Apply</b> changes all the listed parts at once (after asking), <b>Reset
+filtered to suggested</b> takes them back to the suggested models. Values accept SI notation (33R, 4k7, 100n). An
+<code>open</code> part is only ports; a <code>short</code> is a dead short. Clicking a part in KiCad selects its row
+while this tab shows (a filter that hides it is cleared) and puts the cursor on its Model cell, ready to edit.</p>
+<p><a name="pins"></a><b>Through-hole pins</b> (a connector, a big inductor's leads): how a part's pins
+conduct through the board and join it. Built in, a soldered pin is copper filling the whole drilled hole, joined to
+every layer around its ring, with nothing in series: a perfect joint. Where that is too kind, give the part its
+values, comma separated, e.g. <code>contact:0.5m, fill:75, pin:brass</code>:</p>
+<ul>
+<li><code>contact</code>: the mating contact's resistance per pin (the connector's datasheet, e.g. 0.5m = 0.5 mΩ);</li>
+<li><code>joint</code>: the solder joint's resistance per pin;</li>
+<li><code>fill</code>: how far up the hole the solder goes, in % of the board's thickness from the soldering side
+  (the side opposite the part). 100 built in; IPC-A-610 accepts 75. Above the solder only the hole's thin plating
+  joins the layers to the pin, and the part's current enters the board where the solder ends;</li>
+<li><code>pin</code>: the pin's conductor: <code>hole</code> (built in: copper filling the hole), <code>copper</code>,
+  <code>brass</code>, <code>bronze</code> (phosphor bronze), <code>becu</code> or <code>tellurium</code>. With a
+  material the pin is a rod of <code>pin_d</code> (mm; default the hole less 0.25 mm), the gap is solder and the
+  plating conducts alongside; <code>pin_r</code> gives the pin's own resistance through the board instead.</li>
+</ul>
+<p>Each value comes from the first place that has it: the part's <b>GT field</b> in the schematic (beside its labels:
+<code>GT = conv_in, contact:0.5m</code>), else its <b>Pins</b> cell on this tab, else <b>Pin defaults…</b> (the
+board's values, for every part without its own), else built in. The Schematic column shows a GT field's values
+(◆ GT …). <code>contact</code> and <code>joint</code> sit in series where a part's current enters the board (a DC
+load's source and load pins, a converter's input and output connectors): they add I·R to a DC load's drop (the
+Loads table's "of which at pins") and I²·R of heat at the part in Thermal; the current in the copper does not change.
+No contact value is guessed: a connector pin carrying 3 A or more without one gets a note. <code>fill</code> and
+<code>pin</code> change the hole's conduction between layers in every analysis.</p>
+
+<hr><a name="fields"></a><h3>Part parameters from the schematic (InvenTree fields)</h3>
+<p>R_DS(on), C_oss, an inductor's DCR, a capacitor's ESR and the like can come from the parts' symbol fields
+instead of being typed in here: give the parts these fields in the schematic, or the parameter templates in
+InvenTree (KiCad's HTTP library hands them to the symbols as fields). Each parameter has one field name, matched
+without regard to case. A value with a unit is read as InvenTree sends it (<code>3.8milliohm</code>,
+<code>616 picofarad</code>, <code>38 nanocoulomb</code>, <code>6.9 mΩ</code>) or in datasheet notation
+(<code>3.8m</code>, <code>616p</code>, <code>4m7</code>); a bare number is in the unit the table names. A value of the
+wrong kind (<code>100V</code> for Rds(on)) is not used, and the stage's or part's note
+says why. A value outside the usual range (the table's column) is your value: it is used as written, and a power
+stage's is listed on the Issues tab (<code>unusual_value</code>, info) in case a unit is missing.</p>
+<table border="1" cellpadding="3" cellspacing="0">
+<tr><th>Field</th><th>On</th><th>Fills</th><th>Bare number in</th><th>Usual range</th><th>Example</th><th>Used for</th></tr>
+@PART_FIELDS@
+</table>
+<ul>
+<li><b>Stages:</b> R_DS(on) comes from the high side (or the integrated switch IC) and the low side, per FET. C_oss
+  and Q_oss come from the switch-node device and count a side's parallel FETs together (a bridge with two FETs per
+  switch: 2 × the FET's Coss). A diode buck's c_oss is its catch diode's Cj. DCR comes from the inductor on the switch
+  node. Parallel parts whose fields disagree give no value (the note names them).</li>
+<li><b>Parts:</b> a capacitor's C, ESR, ESL and C at bias, an inductor's L and R (from DCR), a resistor's R.</li>
+<li><b>In sync:</b> a value from the schematic is marked <b>◆</b> and follows the field: it is read again every time
+  the board opens and before every run, so a change in InvenTree (after <i>Update symbols from library</i> and
+  <i>Update PCB from schematic</i> in KiCad) arrives by itself.</li>
+<li><b>Set here:</b> typing another value makes it yours: it is kept as it is and, where the schematic says
+  something else, marked <b><font color="@WARN@">!</font></b> (hover over it for both values). The issue
+  <code>schematic_differs</code> (info) lists it too, so a CI run sees it. <b>Use schematic values</b> (Converters and
+  Bridges tabs) or <b>Reset filtered to suggested</b> (Parts tab) takes the schematic's values back; typing the
+  schematic's value does too.</li>
+<li>The Converters and Bridges forms show the mark beside each parameter; the Parts table has a <b>Schematic</b> column
+  (◆ the parameters from the fields, ! the ones set here that differ, with the schematic's value) and colours a
+  differing cell.</li>
+</ul>
+
+<hr><a name="issues"></a><h3>Issues tab</h3>
+<p>Every problem found, by severity (error, warning, info). Clicking one shows it in KiCad: the copper concerned
+is selected, its net highlighted and the view zoomed to it (nothing in the design changes); <b>Zoom to it</b> and
+<b>Highlight its net</b> switch those off, <b>Show in KiCad</b> shows the selected issue again after you moved
+KiCad's view. <b>Draw markers on board</b> puts numbered markers on a drawing layer. (These need GroundTruth started
+from KiCad.) A finding you accept can be waived with <b>Waive selected…</b>
+(with a reason, kept in the settings file). Issue kinds include gap crossings, missing stitching vias or capacitors at layer changes, return
+detours, plane resonances, emission margins, hot-loop overshoot, conducted emission, current density, via
+overload, victim coupling and temperatures. <b>band_unsolved</b> says that a solve did not converge: above the
+last solved frequency the emission is only held at its value there, so a resonance in that band would be missed;
+Simulate again at another resolution (<a href="#prefs">Preferences</a>). A connector's or other part's soldered
+pin is not checked as a via: the pin carries the current between the layers.</p>
+<ul>
+<li>The columns: <b>#</b>, <b>Severity</b>, <b>Check</b> (the kind of issue), <b>Net</b>, <b>Location</b> (x, y in
+  mm), <b>Layer</b> and <b>Message</b>. Rows are coloured by severity; a waived issue is greyed, reads "(waived)"
+  and is not counted in the status line's totals.</li>
+<li>The line under the list gives the selected issue's title and its fingerprint (what a waiver is tied to).</li>
+<li>Double-click or Enter on a row shows it in KiCad again, like <b>Show in KiCad</b>. <b>~</b> in KiCad clears the
+  net highlight. The status line says what was shown, or that its copper is no longer on the board (then Reload
+  board and run the checks again).</li>
+<li><b>Waive selected…</b> asks for the reason; an empty reason waives nothing.</li>
+<li>Opened on a board file, clicking an issue tells in the status line what it is about and where.</li>
+</ul>
+
+<hr><a name="heatmap"></a><h3>Heatmap tab</h3>
+<p>One view per analysed item: pick it in the <b>Route</b> list at the top, and the copper layer in <b>Layer</b>.
+<b>Current arrows</b>, <b>Log scale</b> and <b>Cross-section</b> switch those parts of the view on and off and keep
+their state for next time. How vias and parts are marked is set in <a href="#prefs">Preferences</a>.</p>
+<ul>
+<li><b>Route</b> lists a signal route as its net and driver → receiver, a converter's DC path as "DC" and the
+  path's name, a bridge's RMS map as "RMS currents", and the bridge, sweep and thermal views by name.
+  <b>Layer</b>: <i>main layers</i>, or one copper layer with its share of the current in %, busiest first (the
+  drawing buttons use the busiest layer for <i>main layers</i>).</li>
+<li><b>A buck or boost stage's control loop</b> is one of its responses (the loop gain T): its crossover, phase
+  margin and gain margin are in the stage's tiles and the report, an issue below 45° (30°: an error) or above f_sw/5
+  (a boost: above a fifth of its right-half-plane zero, D'²·R_load/L, marked RHP). The parts
+  come from the board (the controller by its pin on the switch node; the R-C on its ITH / COMP pin, the divider on its
+  FB pin, the sense resistor between its SENSE pins), the controller's figures from its symbol's fields: Control Mode
+  (peak current, voltage, COT, internal), Vref, EA gm (or EA Gain / EA GBW), Vsense Max and ITH Range (or Current
+  Sense Gain), Slope Compensation, Ramp (voltage mode): see <a href="#fields">Part parameters from the
+  schematic</a>. Once a controller has a loop field, a field still missing is named in the stage's notes.</li>
+<li><b>Bode / poles and zeros</b> views (one per signal path, power stage and PDN rail, after the maps): the
+  frequency response's magnitude and phase on top (× poles and ○ zeros marked at their frequencies), the poles and
+  zeros in the s-plane below (in Hz, on symmetric log axes; the dominant ones labelled with their frequency and Q).
+  A signal path: the voltage at the receivers per volt of the driver, through its lines, parts, filters and op-amp
+  stages (each op-amp stage's own gain too). A power stage: the hot loop's ringing (node current per A of the load
+  pulse: exact poles from L, C_oss, the damping and a snubber), the input transfer (the current reaching the
+  LISN per A of loop current: the input filter's effect), and when the fixes propose an input filter, its
+  attenuation; its output impedance and the converter's input impedance −V²/P (Middlebrook: the first must stay
+  well below the second) are in a second view, "<i>stage</i> impedances" (impedances in Ω, not dB). A PDN rail:
+  each IC's supply impedance (poles at the
+  anti-resonances, zeros at the decaps' series resonances). A response known only from its solves is fitted by a
+  rational function (vector fitting); its largest error is in the tiles and the report, and a coarse fit says so.
+  RHP marks a zero in the right half plane (a line's delay, approximated).</li>
+<li>Under the tiles, a line sums the view up (also the tiles' tooltip); next to the toolbar the readout shows the
+  value under the mouse. The toolbar is matplotlib's: zoom, pan, save the picture; its <b>Home</b> also undoes a
+  wheel zoom.</li>
+<li><b>Log scale</b> is greyed for a temperature view (always linear). <b>Cross-section</b> on a bridge's drive
+  view shows its capacitors' ripple instead.</li>
+<li><b>Reading a map</b>: the <b>colour</b> is the current density (by default over three decades, log
+  scale); the <b>arrows</b> are all the same size and point the way the current flows: how <i>many</i> there are
+  shows how much flows (they crowd where it concentrates, idle copper has none). For an AC current (a return, a
+  hot loop) they show the direction when the current is strongest.</li>
+<li><b>Maps</b>: the current on each copper layer (a net's return current, a hot loop, a DC path's or a bridge's
+  RMS current density), or the temperature. Arrows show which way the current flows, and their density how much.
+  Green markers show the vias and parts that carry the current between layers, with their share.
+  <b>Log scale</b> shows weak current spread over a plane; untick it to see where most of it flows.</li>
+<li><b>Vias on the maps</b>: a green ▲ marks a via that carries the view's current to another layer or net,
+  a ■ a part that does. Every via with at least 1 % of the current is marked (on a DC path or a bridge's RMS map:
+  of the path's current; on a signal route: of its return), drawn at its true size (pad and drill) for the wheel
+  zoom; from 5 % up its share is written next to it. Vias carrying less are left out so a stitched pour does not
+  disappear under markers. In <a href="#prefs">Preferences</a>, <b>Via markers</b> unticked hides them all (parts and
+  issues stay) and <b>Vias shown</b> limits them to the 5, 10, 20 or 50 busiest; it is your
+  preference for every board, and the exported report follows it. Only the drawing changes: the
+  checks (current density, via overload) always look at every via, and the tile <b>busiest via</b> names the
+  one carrying most.</li>
+<li><b>Hover</b> over a map for the value under the mouse; over a red / orange issue circle for the issue
+  (severity, check and message, in full as a tooltip); over a via's ▲ or a part's ■ for its name and share of the
+  current. The green ring around a ▲ is the via's own pad, not an issue. Each view marks its own issues: a power
+  stage's DC path view (input, switch node, output, ground) only that path's current-density and via issues, the
+  hot-loop view the stage's other issues.</li>
+<li><b>Click</b> an issue circle, a ▲ or a ■ to show it in KiCad, as a click on the Issues tab does: the via,
+  pad or track right at the marker is selected, its net highlighted (never a ground net) and the view zoomed to
+  it, on the map's layer (the zoom and highlight options of the Issues tab apply). An overloaded via's circle
+  shows that via; a ■ shows the part; an issue with no particular copper at its circle (a hot loop, a route's
+  margin) shows the issue's copper as the Issues tab would. The status line says what was shown. Needs
+  GroundTruth started from KiCad.</li>
+<li><b>Part outlines</b> (Preferences) draws every part's outline over the maps (its courtyard, else its
+  fabrication outline, else a box around its pads; top-side parts solid, bottom-side dashed), to see which current
+  flows under which part; <b>Part names</b> writes each part's reference at its middle, with or without the
+  outlines (off where the names crowd a busy map). Remembered for every board; the exported report follows them.</li>
+<li><b>Tiles</b>: the view's key numbers, coloured by your rules. Hover over a tile for what it means.</li>
+<li><b>Cross-section</b> (signal nets): the return current layer by layer along the route, driver on the
+  left.</li>
+<li><b>Spectrum</b>: the emission against the limit, harmonic by harmonic (or a simulated receiver's reading for
+  a bridge).</li>
+<li><b>Ctrl + mouse wheel</b> over a map zooms it; double-click shows the whole map; the wheel alone scrolls the
+  page down to the cross-section and the spectrum. <b>Open in window</b> shows the maps in a large window that
+  you can enlarge or maximise; it follows the route, layer and arrows chosen on the tab, and its toolbar zooms and
+  pans all layers together. <b>Open 3D view</b> shows the layers stacked in your browser (the current maps, the
+  signal, the vias and parts carrying the current between layers, and the displacement current between the planes
+  where the model has plane capacitance; drag to turn it: the edge you grab follows the mouse). Its page is written to
+  <code>%LOCALAPPDATA%\GroundTruth\views</code>, overwritten for the same view, and holds the board's maps and net
+  names. <b>Sharper map</b> solves the view again on a grid with 4× the nodes of the one simulated, about half the
+  cell size, in the background (about 20 s for a route, up to a minute for a power stage; the picture, not the
+  numbers, gets sharper; not for a bridge's drive view or a temperature map: for a finer temperature map choose
+  Thermal <b>Quality</b> fine in Preferences and run Thermal again).</li>
+<li><b>Draw contours on board</b> and <b>Draw arrows on board</b> put the current's contours and arrows of the
+  shown layer onto a drawing layer in KiCad (the current-drawing User layer). On a temperature map the contours are
+  isotherms, and there are no arrows; on a bridge's drive view, pick one of its legs first. The arrows drawn on the
+  board get thicker where the current density is higher, on the heatmap's log scale: the thickest line at the
+  result's peak, the thinnest three decades below it and lower (<b>Thinnest / Thickest arrow line</b> in
+  Preferences, 0.01 and 0.3 mm by default); a thick arrow also gets a longer head.</li>
+<li><b>The contours read like a map's height lines.</b> KiCad draws a User layer in one colour, so each line has
+  its value written along it, with a gap in the line where the value sits.
+  <ul>
+  <li>Current density: lines at round values in 1-2-5 steps (2k, 1k, 500, 200, 100 …), over the same three decades
+    below the peak as the heatmap's log colour scale. Every power of ten (1, 10, 100, 1k) is drawn thicker. The
+    values are in the colour bar's unit (A/m per A of signal, or A/mm² for a DC map).</li>
+  <li>Temperature: isotherms in round °C steps from the ambient up (every 5 °C, say), every fifth one thicker.</li>
+  <li>Every layer of a result gets the same levels, so a layer carrying little current gets few lines, as on the
+    heatmap.</li>
+  <li>A line above the copper says what the values are, the step and the peak.</li>
+  <li>Lines stop at the copper's edge and are smoothed within a quarter of a grid cell. Their detail is the
+    simulation grid's: for finer lines press <b>Sharper map</b>, then draw them again (for isotherms, Thermal
+    <b>Quality</b> fine in Preferences).</li>
+  </ul></li>
+<li><b>Current capacity</b>: see <a href="#thermal">Thermal and Current capacity</a>.</li>
+</ul>
+
+<hr><a name="fixes"></a><h3>Fixes tab</h3>
+<p><b>Suggest fixes</b> proposes changes for the issues found, each placed where it would be legal on the board,
+predicted on the solver's model and verified together by simulating again:</p>
+<ul>
+<li>signal nets: a stitching via at a layer change, a capacitor between two nets at a layer change or across a
+  split, a fill that closes a slot; advice where no part helps;</li>
+<li>converters and bridge legs: stitching vias at the hot loop's pads, a small capacitor right at the switches;
+  a bridge's own issues (conducted emission, RMS current density) are taken to its legs' candidates.</li>
+</ul>
+<p>A fix that would raise the emission somewhere else by more than 1 dB is not selected. Ticked suggestions can be
+drawn on the board (<b>Draw ticked on board</b>), added to the settings' what-if edits (<b>Add ticked to
+what-if</b>; then <b>with what-if edits</b> runs with them), or, for vias, placed in KiCad as real vias in one undo
+step (<b>Place ticked vias in KiCad</b>). Capacitors and fills are never placed for you. <b>Compare what-if</b>
+simulates the board with and without the enabled what-if edits and lists what changed.</p>
+<ul>
+<li>The list's columns: <b>#</b>, <b>Kind</b> (via green, cap blue, fill purple), <b>Net</b>, <b>Location</b>,
+  <b>Predicted</b>, <b>Fix</b>, <b>For issue</b> (the check it answers) and <b>Note</b>. Ticked = selected by the
+  search (the best per issue, verified together); tick or untick rows before the buttons. <b>Predicted</b> is the
+  change of the loop moment at the worst harmonic (plane capacitance included) and of the loop inductance at the
+  fundamental.</li>
+<li>The box under the list shows the verification of the selected fixes (a full analysis on a copy of the board
+  with them), or the text of <b>Compare what-if</b>.</li>
+<li><b>Suggest fixes</b> starts from the last Simulate when neither the board, the settings nor the resolution
+  changed since, and its models were kept: they are kept while they take less than a quarter of the memory this
+  computer has free (a large board with every net and stage: ~2 GB). Otherwise it simulates first. That
+  simulation also updates the Issues and Heatmap tabs.</li>
+<li><b>Draw ticked on board</b> draws crosses and labels on the suggestion layer. <b>Add ticked to what-if</b>
+  stores the ticked vias, capacitors and fills in the settings and ticks <b>with what-if edits</b>.</li>
+<li><b>Place ticked vias in KiCad</b> lists the vias (pad and drill) and asks first; afterwards refill the zones
+  and run DRC. Their what-if edits are switched off ("placed in KiCad"), so a what-if run does not count them twice,
+  and the board is read again.</li>
+<li><b>Compare what-if</b> needs enabled what-if edits in the settings (from <b>Add ticked to what-if</b>, or under
+  <code>modifications:</code>).</li>
+</ul>
+<p><b>Design changes (power stages)</b>, the second list, fills after every <b>Simulate</b> for each power stage with
+ringing, radiated or conducted issues. Layout alone rarely clears those; these are the changes that do, each with its
+parts, the predicted radiated and conducted margin, the overshoot, the extra loss and the issues it clears, best
+first. The first row is the stage as it is. They are worked out on the stage's own solves (the loop, its moment and
+its input path stay), in moments:</p>
+<ul>
+<li><b>RC snubber</b> across the switch node (C a few times C_oss, R about √(L/C_oss)): it damps the ringing; its
+  resistor burns C·V²·f_sw, so the list gives the best-damping one and the lowest-loss one that meets the overshoot
+  target.</li>
+<li><b>Slower edge</b> (a turn-on gate resistor): less spectrum above 1/(π·t_r) and less overshoot, for
+  ½·V·I·Δt·f_sw more switching loss.</li>
+<li><b>Shorter hot loop</b>: the largest loop inductance that meets the targets, if a layout can reach it (about 0.4×
+  today's at best, not below 0.4 nH); <b>Suggest fixes</b> searches the capacitor and via positions.</li>
+<li><b>Together</b>: when no single change clears both the ringing and the radiated issue, the cheapest mix of a
+  snubber, a slower edge and a shorter loop that does.</li>
+<li><b>Input π-filter</b> at the connector: L and C from standard values (the capacitor's DC-bias loss assumed), its
+  damping on whichever side keeps it stable against the converter's input impedance (Middlebrook), its attenuation
+  from the stage's input capacitors and the LISN.</li>
+<li><b>Spread spectrum</b>: the best of a few modulations through the simulated EMI receiver, where the controller
+  has it.</li>
+<li><b>Common mode</b>: the switch node's stray-capacitance budget, and the choke and Y capacitors needed for 1, 10
+  and 50 pF to a chassis.</li>
+</ul>
+<p>The targets: margins of at least <code>rules.emi_margin_db</code>, and an overshoot within
+<code>rules.overshoot_warning</code> of V_in, or within 80 % of the switches' rating where they carry a
+<code>Vds</code> field (<a href="#fields">Part parameters from the schematic</a>). Select a row for its parts and notes;
+<b>Check in Simulate</b> simulates that stage again with a snubber, edge time or spread spectrum applied (in memory: the
+settings stay as they are) and shows the prediction next to the result. The exported report has the same list under
+each stage (<i>How to fix it</i>).</p>
+
+<hr><a name="history"></a><h3>History tab</h3>
+<p>Every <b>Simulate</b> is kept, so earlier results can be looked up and compared after the board or the settings
+changed. The runs go into the board's <code>groundtruth</code> folder:
+<code>groundtruth\history\</code> (two boards in one folder share it; the tab lists only the open
+board's runs). Each run keeps:</p>
+<ul>
+<li><b>the board as it was simulated</b>: in KiCad, the open board with any edits not saved yet (if KiCad cannot
+  hand it over, the saved file; the run says which). Each distinct board is stored once, zipped
+  (about a fifth of the board file), in <code>boards\</code> under the name of the run that first kept it
+  (<code>2026-10-10_08-11-40.kicad_pcb.gz</code> for the run <code>runs\2026-10-10_08-11-40</code>); the runs after
+  it on the unchanged board use that copy, so a new file there means the board changed;</li>
+<li><b>the settings file</b> as Simulate used it, and the resolution, the what-if edits (with what-if edits ticked)
+  and how long it took;</li>
+<li><b>the results</b> (<code>results.json</code>, as <code>groundtruth simulate --format json</code> writes them);</li>
+<li><b>the report page</b> (<code>report.html</code>, as <a href="#export">Export report</a> writes it), made in the
+  background after the results show, while you leave the mouse and keyboard alone for a few seconds (drawing
+  its plots would make the window stutter while you use it; it pauses as soon as you click or type again): the
+  History tab says <i>writing…</i> until it is there. Closing the window finishes it (out of sight) for up to a
+  minute.</li>
+</ul>
+<p>The table lists the runs, newest first: their time, your note, what <b>changed</b> since the run below it
+(board, settings, resolution, what-if), the errors and warnings, the worst radiated and conducted margins (and
+which net or stage), how long it took, and whether the report is there. Select a run to write a <b>note</b> for it
+(Enter or <b>Save note</b>). <b>Compare</b> takes two selected runs (Ctrl-click), or one against the run before it:
+per net route, power stage and bridge the margins and loop inductance in both and the change (green: better, red:
+something worse), then the issues fixed and new and the lines of the settings file that changed. Each run's worst
+harmonic is its own: a few tenths of a dB come from where each run's frequency refinement landed.
+<b>Open report</b> (or a double-click) shows a run's page in the browser; <b>Open board copy</b> unpacks its board
+to a temporary file and opens it with the program Windows uses for <code>.kicad_pcb</code> files (it is checked
+against its fingerprint first); <b>Open folder</b> shows the folder; <b>Delete…</b> removes runs and the board
+copies no other run needs.</p>
+<p>Keeping runs is on by default; <a href="#prefs">Preferences</a> turns it, or just the report page, off. A run
+takes, on a 6-layer, 200-part board, about 0.2 MB of results and 2.9 MB of report, plus 1 MB for the board copy
+when the board changed. The folder holds copies of the board, the
+settings and the results: share or check it in as you would the board, or leave it out of version control. The
+command line keeps a run with <code>groundtruth simulate --history</code> and lists and compares runs with
+<code>groundtruth history BOARD [--compare RUN [RUN]]</code>. You may delete anything in the folder by hand (a run's
+folder, a report, a board copy, or the whole folder): the tab says what is gone when you use it, a run without its
+<code>run.json</code> drops out of the list, and the next Simulate starts the folder again. Run checks, Thermal, Sharper map, Check in Simulate and
+the fix search are not kept.</p>
+
+<hr><a name="thermal"></a><h3>Thermal and Current capacity</h3>
+<p><b>Thermal</b> (top bar, after Simulate) solves the copper and part temperatures with the heat of every
+converter, every motor bridge and every <a href="#dcloads">DC load</a> from the last Simulate (a DC load's current
+capacity scales all its loads together):</p>
+<ul>
+<li>copper: a converter's DC paths, a bridge's RMS currents (Joule heat, resistivity following the
+  temperature);</li>
+<li>parts: their losses at the operating point (switch conduction, switching edges, output charge, an inductor's
+  DCR, series parts; for a bridge, the losses from its drive waveform).</li>
+</ul>
+<p><b>Current capacity</b> (Heatmap tab) finds, per converter, the load current, and per bridge, the phase
+current, at which the hottest copper or part junction reaches the limit (<code>thermal.capacity_c</code>, by default
+<code>max_c</code>), the others at their operating points. The thermal settings: ambient temperature,
+orientation, natural or forced convection (air speed), the warning and maximum temperatures, and the parts'
+junction-to-board resistances (<code>theta_jb</code>). The thermal mesh is the settings' <code>thermal.quality</code>
+(draft, normal, fine) unless <a href="#prefs">Preferences</a> sets one for this computer. Both run in the
+background; <b>Cancel</b> stops them. The solve is steady state: a load that lasts a few seconds (a cranking pulse)
+heats less than shown.</p>
+<p>Thermal adds a temperature view to the Heatmap tab's <b>Route</b> list (replacing an earlier one), its issues
+join the Issues tab, and the status line gives the hottest copper and its layer and the power in copper and parts.
+Current capacity adds one view per stage or bridge at its capacity (replacing earlier capacity views), and the
+status line lists each one's capacity and what limits it.</p>
+
+<hr><a name="prefs"></a><h3>Preferences</h3>
+<p><b>Preferences…</b> (top bar, next to Help) holds your settings on this computer, for every board (a board's
+own settings, such as its nets, converters and rules, are in its settings file). <b>OK</b> keeps them and redraws
+the maps at once (the status line repeats the resolution, threads and GPU chosen), <b>Cancel</b> drops the changes;
+they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a setting for what it does.</p>
+<table border="0" cellpadding="3">
+<tr><td valign="top" width="130"><b>Resolution</b></td><td>Simulate's grid: every model gets 1, 2, 4, 8, 16, 20 or 25
+  times the nodes, its cells 1/√ of that in size. Each level shows its cell size in brackets, e.g.
+  <i>4× (0.11 × 0.11 mm)</i>: the coarsest model's, from the last Simulate of this board (also one kept in its
+  history, so the sizes are there when the board is opened again); smaller model regions get finer cells. A board
+  never simulated shows the levels without sizes until its first Simulate. Memory and time grow about as much as the nodes: 2× to 4× on a
+  laptop, 8× and up on a machine with lots of memory. A solve that runs out of memory is retried on its own, then
+  reported. The standard grid is converged for the numbers (margins, inductances) up to about 1 GHz; a finer one
+  mainly sharpens the maps and resolves narrow copper. Above 1 GHz the board-wide model's plane resonances can
+  change by several dB with the grid: when a net's worst emission comes from one, its notes say so and name the
+  resolution to check it at. <b>Sharper map</b> solves one view with 4× the nodes of what was simulated.
+  Applies from the next Simulate. The command line has <code>--resolution N</code>.</td></tr>
+<tr><td valign="top"><b>Solver threads</b>, <b>GPU</b></td><td>how many models are solved at once (auto: the
+  physical cores, at most 4, and no more than fit in the free memory: fewer at high resolutions) and whether a graphics card does the iterations (auto: one if this computer has one;
+  on: refuses to run without one; off: never), on this computer (a laptop with other programs open wants fewer
+  threads, a server more). <i>From the settings file</i> keeps the
+  board's own <code>analysis.threads</code> and <code>analysis.gpu</code>.</td></tr>
+<tr><td valign="top"><b>All cores</b> (opt-in)</td><td>"Use every core": Solver threads <i>auto</i> uses every
+  physical core (not at most 4), and after the first frequencies the refinement solves up to 4 frequencies per net or
+  power stage at once while cores would otherwise wait, with its solve budget raised as much. It helps big machines
+  with few nets or stages at high resolution. Its price (the <b>(i)</b> button next to it): figures are no longer
+  identical across computers (normally within a fraction of a dB; near a sharp resonance a margin can move more), so
+  compare History runs only with the same setting; more solves in total (CPU, heat, fans), more memory at once, and
+  slower when the cores are busy with other work. A compute server's own <i>threads</i> setting still applies; the
+  result notes that it ran this way. Off (the default): the same figures on every computer. CLI:
+  <code>--all-cores</code>.</td></tr>
+<tr><td valign="top"><b>Thermal: Quality</b></td><td>draft, normal or fine: the thermal mesh, speed against
+  detail and memory (the solve stops with a message above 60 % of this computer's memory). <i>From the settings
+  file</i> keeps <code>thermal.quality</code>.</td></tr>
+<tr><td valign="top"><b>Via markers</b>, <b>Vias shown</b></td><td>whether the maps mark the vias carrying the
+  current, and how many at most (All, 5, 10, 20, 50, the busiest first; greyed while Via markers is unticked; see
+  <a href="#heatmap">Heatmap</a>).</td></tr>
+<tr><td valign="top"><b>Part outlines</b></td><td>every part's outline over the maps.</td></tr>
+<tr><td valign="top"><b>Part names</b></td><td>every part's reference over the maps (with or without the outlines).</td></tr>
+<tr><td valign="top"><b>Contour line</b>, <b>Index contour line</b></td><td>the line widths of <b>Draw contours on
+  board</b>: the ordinary contour lines (0.04 mm by default) and the thicker index lines, every decade or every
+  fifth isotherm (0.1 mm by default).</td></tr>
+<tr><td valign="top"><b>Thinnest / Thickest arrow line</b></td><td>the line widths of <b>Draw arrows on board</b>: each arrow is as thick as the current density at it, from the thinnest (three decades below the peak and lower) to the thickest (at the peak); 0.01 and 0.3 mm by default.</td></tr>
+<tr><td valign="top"><b>Author</b>, <b>Company</b></td><td>the exported report's cover lines where the board's
+  <code>report:</code> section names none.</td></tr>
+<tr><td valign="top"><b>History</b></td><td><b>Keep runs</b>: every Simulate kept in the board's
+  <code>groundtruth\history</code> folder (see <a href="#history">History tab</a>; from the next board load when
+  turned on); <b>Report</b>: with its report page.</td></tr>
+<tr><td valign="top"><b>Theme</b></td><td>System (follows Windows' light or dark apps), Light or Dark; applies the
+  next time GroundTruth opens.</td></tr>
+</table>
+<p>The exported report follows the heatmap settings and names the resolution it was simulated at. The working
+toggles keep their last state for next time too: the Heatmap tab's <b>Current arrows</b>, <b>Log scale</b> and
+<b>Cross-section</b>, the Issues tab's <b>Zoom to it</b> and <b>Highlight its net</b>.</p>
+
+<hr><a name="export"></a><h3>Export report</h3>
+<p><b>Export report…</b> (top bar) writes the results shown as one HTML page to share, archive or print: a cover
+(board, date, analysis, settings, solver), a summary with the key figures and the main findings, the <b>board</b>
+(an interactive view like InteractiveHtmlBom: front or back, a copper layer's pours and tracks, the parts with their
+pads, outlines and references, the analysed routes and power stages, and every issue as a numbered marker; drag to
+pan, wheel to zoom, double-click for the whole board; the parts list beside it finds a part on the board when the
+mouse is over its row, a click on a part or a marker shows what it is), the issues
+(filter and sort them in the browser), every net, power stage and motor bridge with its figures and tables, the
+temperatures and current capacities, the suggested fixes, and the method and its limits. Everything is inside the
+file (images included), so it opens anywhere without the plugin; your browser's <b>Print</b> makes an A4 PDF of
+it. <b>The images are at the highest resolution there is:</b> every map gets at least one and a half pixels per
+model cell (up to 400 dpi, so a 16x or 25x Simulate keeps its detail), the plots 200 dpi, and a view you sharpened
+with <b>Sharper map</b> is shown sharpened. A click on a figure shows it at full size (scroll inside it), another
+click fits it again. Fine Simulates make bigger files: a few MB for a small board, tens of MB for a big board at
+high resolution (the History tab keeps one per run when its report is on). It needs results: run <b>Run checks</b> or <b>Simulate</b> first. It asks where to save the page
+(<code>&lt;board&gt;_report.html</code> in the board's <code>groundtruth</code> folder by default), writes it in the background
+(<b>Cancel</b> stops it) and opens it in your browser. The cover's title, company, author and
+document number come from the settings file (company and author otherwise from <a href="#prefs">Preferences</a>):</p>
+<pre>report: {title: Motor drive review, company: Example Ltd, author: A. Iwers, document: TR-0123 rev A}</pre>
+<p>The page holds the board's net names, maps and its copper and parts: share it as you would the board.</p>
+
+<hr><a name="drawing"></a><h3>Drawing on the board</h3>
+<p>Markers, suggestions, contours and arrows go onto user layers of the board (by default User.9, User.8 and
+User.7: issues, suggestions, currents; settings: <code>drawing</code>), each in one undo step and in a group of
+its own. Drawing needs GroundTruth started from KiCad's toolbar. When a drawing layer was not enabled on the board,
+GroundTruth enables it and the status line names it (Board Setup › Board Editor Layers). <b>Clear EMI layers</b>
+(top bar, or the plugin's <b>Clear EMI layers</b> action in KiCad) removes exactly what GroundTruth drew. Vias placed from the Fixes tab are real
+design changes and stay.</p>
+
+<hr><a name="labels"></a><h3>Detection labels (GT field)</h3>
+<p>Where detection misses a converter or a bridge, or takes the wrong parts, add a field named <b>GT</b> to the
+symbols in the schematic (Symbol Properties, or Tools &gt; Edit Symbol Fields for many) and update the PCB from the
+schematic. Labels change no net names. The signal labels (<code>sig…</code>, <code>amp_…</code>) are explained with
+an example in <a href="#siglabels">Labelling a signal path</a>.</p>
+<table border="0" cellpadding="3">
+<tr><td><code>conv_hs</code> / <code>conv_ls</code></td><td>a converter's high-side / low-side switch (a catch
+  diode is <code>conv_ls</code>)</td></tr>
+<tr><td><code>conv_sw</code></td><td>a converter IC with its switches inside</td></tr>
+<tr><td><code>conv_L</code></td><td>the converter's power inductor</td></tr>
+<tr><td><code>conv_in</code> / <code>conv_out</code></td><td>its input / output connector</td></tr>
+<tr><td><code>hb_hs</code> / <code>hb_ls</code></td><td>a bridge leg's high-side / low-side switch</td></tr>
+<tr><td><code>hb_out</code> / <code>hb_in</code></td><td>the motor connector / the bus input connector</td></tr>
+<tr><td><code>ignore</code></td><td>a part detection should never use</td></tr>
+<tr><td><code>sig</code></td><td>the Signal paths tab: every net of this 2-pin part is a signal (a filter resistor)</td></tr>
+<tr><td><code>sig:9</code></td><td>the net on pin 9 (pad number or pin name: <code>sig:PA3</code>) is a signal, even
+  with a supply-like name (ADC_I_RAIL_1)</td></tr>
+<tr><td><code>sig_drv:5</code> / <code>sig_rx:9</code></td><td>... and this pin drives / receives it (Detect's guess
+  is replaced)</td></tr>
+<tr><td><code>amp_in:3, amp_out:1</code></td><td>an op-amp stage's input and output pin (pad number or pin name):
+  the part becomes an <code>amplifier</code> the signal path runs through</td></tr>
+<tr><td colspan="2"><b>Through-hole pin values</b> (a connector, a big inductor's leads; per pin of the part; see
+  <a href="#pins">Through-hole pins</a>):</td></tr>
+<tr><td><code>contact:0.5m</code></td><td>the mating contact's resistance per pin, Ω (0.5m = 0.5 mΩ, from the
+  connector's datasheet): adds I·R to a DC load's drop and I²·R of heat at the part</td></tr>
+<tr><td><code>joint:50u</code></td><td>the solder joint's resistance per pin, Ω (50u = 50 µΩ): the same, at the
+  joint</td></tr>
+<tr><td><code>fill:75</code></td><td>how far up the hole the solder goes, % of the board's thickness from the side
+  opposite the part (100 when not given; IPC-A-610 accepts 75): above it only the hole's plating joins the layers</td></tr>
+<tr><td><code>pin:brass</code></td><td>the pin's conductor: <code>hole</code> (copper filling the hole, when not
+  given), <code>copper</code>, <code>brass</code>, <code>bronze</code>, <code>becu</code>, <code>tellurium</code></td></tr>
+<tr><td><code>pin_d:1.0</code></td><td>the pin's diameter, mm (with a material; default the hole less 0.25 mm)</td></tr>
+<tr><td><code>pin_r:0.1m</code></td><td>the pin's own resistance through the board, Ω (instead of a material's)</td></tr>
+</table>
+<p>An id ties a stage's parts together: <code>conv1_hs</code>, <code>conv1_ls</code>, <code>conv1_L</code>; a
+bridge leg's id is its phase: <code>hbA_hs</code>, <code>hbB_ls</code>. A sheet used once per phase carries the same
+label in every copy: each copy becomes its own leg. Several labels on one part are separated by commas, pin values
+too: <code>GT = conv_in, contact:0.5m, fill:75</code>. A pin value left out comes from the part's Pins cell on the
+Parts tab, else the board's Pin defaults…, else the built-in value.</p>
+
+<hr><a name="siglabels"></a><h3>Labelling a signal path</h3>
+<p>Detect finds most clock and data paths on its own, from net names and pin types. Label a path when it:</p>
+<ul>
+<li>looks like a supply (a name with RAIL, VIN or +3V3 in it, or a power pin on the net), for example an ADC
+  input that measures a rail;</li>
+<li>gets the wrong driver (both ends are bidirectional pins, or the schematic has no pin types);</li>
+<li>runs through an op-amp. Detect only crosses an op-amp that is labelled, or set to <code>amplifier</code> on the
+  Parts tab;</li>
+<li>runs through a resistor above 1 kΩ or a capacitor, which a path doesn't cross unless it is labelled or named
+  in <b>Pass through</b>.</li>
+</ul>
+<p><b>What to label.</b> Label only the parts at the ends of the path and its op-amps:</p>
+<table border="0" cellpadding="3">
+<tr><td><b>Part</b></td><td><b>GT field</b></td><td><b>Meaning</b></td></tr>
+<tr><td>the part that drives the path</td><td><code>sig_drv:3</code></td><td>pin 3 drives the signal</td></tr>
+<tr><td>each op-amp on the way</td><td><code>amp_in:1, amp_out:4</code></td><td>the stage's input pin
+  (non-inverting input for a follower) and its output pin; the part becomes an <code>amplifier</code> in the Parts
+  tab</td></tr>
+<tr><td>the part that receives it</td><td><code>sig_rx:9</code></td><td>pin 9 receives it</td></tr>
+</table>
+<p>Leave the resistors, ferrites and filter capacitors in between unlabelled: the path finds them itself.
+<code>sig:9</code> (no direction) only says the net on pin 9 is a signal; Detect then guesses its driver.
+<code>sig</code> on its own, on a 2-pin part, marks both its nets as signals.</p>
+<p><b>Pins</b> are pad numbers (<code>sig_rx:9</code>) or pin names (<code>sig_rx:PA2</code>), as in the
+schematic symbol. For a dual or quad op-amp, name the pins of the stage on the path
+(<code>amp_in:5, amp_out:7</code> for the second unit). Several labels on one part go in the same field, separated
+by commas: a microcontroller with two ADC inputs on two paths gets <code>sig_rx:9, sig_rx:10</code>.</p>
+<p><b>How Detect turns the labels into a path.</b> It starts at a labelled net and follows 2-pin parts and
+labelled op-amps (input net to output net) to the next labelled net. It never crosses into a ground, a reference
+net or an unlabelled supply. Branches that end at an unlabelled net (a load resistor to ground, a filter capacitor)
+are dropped from the path. They still count in Simulate, as parts across the path. Parts on the path that don't pass
+a signal by default (a resistor over 1 kΩ) go into its <b>Pass through</b> list. The path is named after one of its nets
+with a real name (not <code>Net-(…)</code>). One row then covers every net of the path. Op-amps get their gain from
+a <b>Gain</b> field on the symbol or from the <a href="#parts">Parts tab</a> (1 when neither is given). Don't put a
+<code>sig</code> label on an op-amp in the path: it would end the path there. Use <code>amp_in</code> /
+<code>amp_out</code> instead.</p>
+<p><b>Example</b> (a current-sense output read by an ADC through a buffer and a resistor):</p>
+<table border="0" cellpadding="3">
+<tr><td>U302 (current-sense amplifier)</td><td><code>sig_drv:3</code></td></tr>
+<tr><td>U301 (op-amp follower)</td><td><code>amp_in:1, amp_out:4</code></td></tr>
+<tr><td>R303 4.7 kΩ, C304 100 nF to ground</td><td>no label</td></tr>
+<tr><td>U1102 (microcontroller)</td><td><code>sig_rx:9</code></td></tr>
+</table>
+<p>Detect gives one path, <code>U302.3 → U301 ×1 → R303 4k7 → U1102.9</code>, named after the ADC net, with R303 in
+Pass through and C304 as a part across the path.</p>
+<p><b>Steps:</b></p>
+<ol>
+<li>In the schematic editor, add a field named <b>GT</b> to each symbol, either in Symbol Properties or, for
+  several at once, in the Symbol Fields Table (add a GT column).</li>
+<li>Update PCB from Schematic (F8) and save the board. The labels reach the board as footprint fields and change
+  no net names.</li>
+<li>In GroundTruth, press <b>Reload board</b>, then <b>Detect…</b>. The new path is ticked. An unreviewed row that
+  covered part of it before is offered as <b>REPLACES</b>: keep it ticked and press OK. Reviewed and hand-made rows
+  are never changed; edit or remove them yourself.</li>
+<li>Set the path's frequency and rise time on the <a href="#nets">Signal paths tab</a>, then mark it reviewed.</li>
+</ol>
+<p><b>Shortcut:</b> select one bit of copper on each net of the path in the PCB editor and press <b>Add KiCad
+selection</b> (see <a href="#nets">A whole path from KiCad</a>). GroundTruth works out the same labels and adds the
+path at once.</p>
+<a name="kicad11"></a>
+<table border="1" cellpadding="6" cellspacing="0" width="100%"><tr><td>
+<b>Note: writing the GT labels into the schematic automatically needs KiCad 11.</b> KiCad 10's API can't change a
+schematic, so on KiCad 10 GroundTruth shows the labels in a message for you to add by hand (step 1; Ctrl+C copies
+the message). The path is in the settings either way, and Simulate uses it right away; the labels only keep it in
+the design, so that Detect finds it again later.
+</td></tr></table>
+<p>The line at the bottom of the Converters tab (<b>Labels (GT field)</b>) names the parts that carry signal and
+op-amp labels, and lists as problems a GT word that is not a label (a typing error), a label naming a pin its part
+doesn't have, and an op-amp with <code>amp_in</code> but no <code>amp_out</code> (or the other way round). If a
+labelled path still doesn't appear in Detect…, check that every net of the path is joined to the next by a 2-pin
+part or a labelled op-amp.</p>
+
+<hr><a name="settings"></a><h3>The settings file</h3>
+<p>GroundTruth keeps everything for a board in one folder next to it, <code>groundtruth</code>, so the KiCad
+project folder stays tidy: the settings file, the simulation history and (offered first) the exported reports.
+Everything you enter is kept in <code>groundtruth\&lt;board&gt;.groundtruth.yaml</code>: the nets,
+converters, bridges, part models, rules (thresholds, severities), analysis settings, waivers and what-if edits.
+Commit it with the board. It can be edited by hand; the plugin reads it when the window opens. The same file
+drives the <code>groundtruth</code> command line for CI, with the same results.</p>
+<p>Useful analysis settings: <code>max_nodes</code> (the grid budget of each model: lower it for speed or
+memory), <code>threads</code> (solves in parallel), <code>conducted</code> (cispr32, cispr25, mil461 or none) and
+<code>conducted_class</code>, <code>limit_class</code> (CISPR 32 class A or B for radiated), <code>radiated_limit</code>
+(another radiated limit: MIL-STD-461G RE102 by name, e.g. <code>re102_ground_army</code> or
+<code>re102_aircraft_external</code>, at 1 m with the standard's bandwidths; or a curve of your own: a name, the
+distance and its points), <code>ce101</code> (MIL-STD-461G CE101,
+the input leads' current from 30 Hz to 10 kHz: <code>aircraft</code> or <code>ships</code>; a motor bridge's
+commutation lines, strongest at six times the electrical frequency, read through the bus capacitors and the test
+leads, which can resonate in this band; shown as <i>CE101 margin</i> and in the emission plots), <code>gpu</code> (auto,
+on, off). In the plugin, <a href="#prefs">Preferences</a> sets the resolution and can replace <code>threads</code>,
+<code>gpu</code> and <code>thermal.quality</code> on this computer; those choices are not written to the file.</p>
+
+<hr><a name="speed"></a><h3>Speed, memory and the GPU</h3>
+<ul>
+<li>A board with a few nets simulates in a minute or two; a power stage takes 30–70 s; a motor bridge with its
+  victims and a sweep several minutes.</li>
+<li>Large models need memory: each bridge model on an 8-layer board can take a few GB while it is factorised.
+  When the models of all nets and stages would not fit in the free memory at once, Simulate solves them in groups,
+  one after the other (the board-wide model last); the results are the same, it may take a little longer.
+  When memory runs out anyway, those solves are repeated one at a time after the others. If it still does not fit, close
+  other programs, choose fewer <b>Solver threads</b> or a lower <b>Resolution</b> (above 1×) in Preferences, or lower
+  <code>analysis.max_nodes</code>.</li>
+<li>With PyTorch installed in the plugin's environment on a machine with an NVIDIA GPU (CUDA) or an AMD Radeon
+  (ROCm, e.g. a Radeon 860M), the solver's iterations run on the GPU (<b>GPU</b> in Preferences, or
+  <code>analysis.gpu</code>: auto). The status line ends with "solved on GPU &lt;name&gt;". The installer is
+  <code>tools/install_gpu.py</code> in the plugin folder (<code>--amd</code> for a Radeon), run once with KiCad's
+  Python while KiCad is closed; <code>tools/check_gpu.py</code> checks it and says whether the GPU is faster than
+  the CPU. An integrated GPU shares the computer's memory and computes in double precision far slower than in
+  single precision, so it may not be: then choose GPU <b>off</b>.</li>
+<li>The window never waits for a job: everything slow runs in the background, and <b>Cancel</b> stops it.</li>
+</ul>
+
+<hr><a name="server"></a><h3>Compute server: set up and run (Server jobs tab)</h3>
+<p>Simulate, Suggest fixes, Check in Simulate, Compare what-if, Thermal and Current capacity can run on a powerful PC
+on your local network: you keep working in KiCad on your own computer, the solving happens on the server, and the
+results show here as usual. Several people can share one server; their jobs wait in a queue. KiCad does
+<b>not</b> need to be running on the server.</p>
+
+<p><b>Update the servers from here</b>: <b>Preferences, Compute server, Servers</b> lists the server and the
+others of its cluster (and any other server with this key the network answers from), each with its version against
+this plugin's (the out-of-date ones in orange: an earlier build, also one that still takes this plugin's jobs
+because only the server's own program changed; a server is asked at whichever of its addresses answers from this
+computer). <b>Update</b>
+(the selected server) or <b>Update all</b> installs this plugin's own version on them (after a confirmation
+listing each server's version now and after); each row shows how far its
+update is. A server takes it only when it was installed with remote updates on (asked on its first install, or
+<code>install_server.cmd install --remote-update on</code>), the package is signed with the release key of the
+build PC its last manual install came from (every manual install resets that key), and the package is newer than
+what it runs. A busy server finishes its running jobs first; queued jobs wait. It restarts by itself, and goes back
+to its old version if the new one does not stay up. A development copy of the plugin carries no server package:
+its buttons stay off.</p>
+
+<p><b>A server PC with two networks</b> (two network cards): <code>install_server.cmd install --address</code>
+lists its addresses to pick the one the other servers and the users reach it at; it then announces that one alone.
+<code>install_server.cmd status</code> shows the server's addresses.</p>
+
+<p><b>On a Mac</b> (Apple Silicon such as an M2, or Intel): install Python 3.13 from python.org first (KiCad for
+macOS brings Python 3.9, too old for GroundTruth), then unzip the server package and double-click
+<b>install_server.command</b> (right-click, Open, the first time: macOS asks about downloaded scripts), then enter
+your password. It installs into <code>/Library/Application Support/GroundTruth</code> as a launchd daemon that starts at
+boot; everything else (status, key, cluster) is as below with <code>./install_server.command</code>. A Mac solves on its
+CPU (no GPU support there: Apple GPUs have no double precision).</p>
+
+<p><b>Install the server as a background service</b> (recommended: it starts with Windows, runs with nobody
+logged in, restarts itself; on the powerful PC, Windows 10/11 or Windows Server, with KiCad 10 installed):</p>
+<ol>
+<li>Unzip the <b>server package</b> (<code>groundtruth-server-&lt;version&gt;.zip</code>, built with the KiCad
+  package of the same version) on the server and double-click <b>install_server.cmd</b>; allow it to run as
+  administrator. It installs into <code>C:\ProgramData\GroundTruth</code> (its own copy of GroundTruth and its
+  libraries, from the internet), opens TCP 8765 in the firewall for the private and domain networks, starts the
+  service and shows the <b>address and access key</b> to give to the users.</li>
+<li>Updates: unzip the new server package and double-click its install_server.cmd (the key, settings, queued jobs
+  and waiting results stay). <code>install_server.cmd status | key | stop | start | uninstall</code>; with an NVIDIA
+  GPU <code>install_server.cmd install --cuda cu126</code>. Its README.md has the details.</li>
+<li>The settings are in <code>C:\ProgramData\GroundTruth\server.json</code> (as below); the logs
+  <code>server.log</code> and <code>service.log</code> are next to it. Give the server a page file of at least its
+  RAM's size: the solver reserves far more memory than it uses.</li>
+</ol>
+
+<p><b>Several servers: a cluster.</b> Servers with the <b>same access key</b> find each other on the local network
+(they announce themselves on UDP port 8766, signed with the key; the installer opens it for the private and domain
+networks) and the first one to find another becomes the cluster's <b>lead</b>. Install the first server as above;
+install every further one with <code>install_server.cmd install --key</code>: it asks for the first one's key
+(<code>install_server.cmd key</code> there shows it) instead of making its own. To choose the lead yourself, install
+it with <code>--lead</code> (<code>--no-lead</code> undoes it); if the lead goes off, the others elect a new one within
+half a minute. A server on another subnet (behind a router) isn't found by itself: list it in
+<code>--peers NAME,NAME</code> (server.json <code>"peers"</code>) on both sides. <code>install_server.cmd status</code>
+and <b>Test connection</b> show the cluster: how many servers and for how long, the lead (since when, and whether
+set with --lead), every server with its name and IP address, cores, memory, GPUs, jobs and how long it has been in
+the cluster, a server that has the key but another GroundTruth version (update it), and the history: who joined,
+was lost (not heard for 20 s), came back or restarted, and lead changes (all of it also in each server's
+server.log).</p>
+<p><b>A Simulate on a cluster is split over its servers.</b> Send it to any server of the cluster: a member passes
+it on to the lead (your plugin then follows the job there; if the lead does not answer, the member runs it). The
+lead splits it by item: every signal net, power stage and motor bridge is simulated on one of the servers, and the
+parts are joined into one result. <b>Each server gets what it can do:</b> an item only goes to a server with the
+memory free for it (a 16× power stage needs about 9 GB: a laptop with 2 GB free gets the small nets, or nothing),
+and more items go to the faster servers. The lead learns from every run: each item's real peak memory and each
+server's real speed are kept and used for the next split of that board. A part that runs out of memory moves to a
+server it fits (the progress line says so), and is not sent there again. When a Simulate is not split (one item
+only, no other server answering), the Server jobs tab's details say why (Cluster:). It is the same result as
+from one server: the same issues, figures and maps, and the power stages' DC currents still added up together; a
+note under the results names the servers and how long each part took. A server that drops out during the run has
+its part done by the lead after two minutes; Cancel stops every part. Thermal, Current capacity, Suggest fixes
+and a Simulate of a single item run on one server as before. The speed-up comes from boards with several nets or
+power stages: one big item can't be split further.</p>
+
+<p><b>Or run it in a window</b> (to try it out, without installing anything): set up the server PC as follows.</p>
+<p><b>Set up the server</b> (once, on the powerful PC, Windows 10/11):</p>
+<ol>
+<li><b>Install GroundTruth in KiCad there</b>, the same package as on the users' computers (Plugin and Content
+  Manager, <i>Install from File…</i>). The server refuses jobs from a plugin of another version, so update both
+  together.</li>
+<li><b>Open KiCad's PCB editor once</b> on the server and wait until the GroundTruth button appears: KiCad then builds
+  the plugin's Python environment, which the server uses. Close KiCad again.</li>
+<li><b>Optional, for the GPUs:</b> install PyTorch with GPU support into that environment, as described under
+  <a href="#speed">Speed, memory and the GPU</a> (<code>install_gpu.py</code>; <code>--amd</code> for an AMD
+  Radeon). Without it the server solves on its CPU cores.</li>
+<li><b>Open the firewall:</b> allow inbound TCP port <b>8765</b> on the <i>private</i> network (Windows Security,
+  Firewall, Advanced settings, Inbound rules, New rule: Port, TCP 8765, Private). Never on a public network.</li>
+<li><b>Note the server's address:</b> its computer name, or its IP address (<code>ipconfig</code> in a command prompt,
+  the IPv4 address).</li>
+</ol>
+
+<p><b>Run the server:</b></p>
+<ol>
+<li>In the plugin's folder on the server (Plugin and Content Manager installs it under
+  <code>Documents\KiCad\10.0\3rdparty\plugins\io_github_iwers_groundtruth</code>), double-click
+  <b>groundtruth_server.cmd</b>. A console window opens and shows, within a few seconds, the <b>access key</b>, the
+  <b>server address</b> to enter (the PC's name and IP addresses) and <i>READY: listening on port 8765</i>. Give the
+  key and the address to each user. The first start makes the key; it is kept in
+  <code>%LOCALAPPDATA%\GroundTruth\server.key</code> on the server and shown at every start.</li>
+<li><b>Don't click into the window</b>: Windows pauses a console program while text is selected in it (its title
+  then starts with "Select"); press Esc to let it go on.</li>
+<li><b>Leave the window open</b> while people use the server. Closing it, Ctrl+C or logging off stops the server,
+  but nothing is lost: every job is kept on disk (<code>%LOCALAPPDATA%\GroundTruth\server_jobs</code>), so at the
+  next start the queued jobs run, a job that was running starts over, and finished results still wait for their
+  owners. The jobs are logged in the window and in <code>%LOCALAPPDATA%\GroundTruth\server.log</code>.</li>
+<li><b>The server's settings</b> are in <code>%LOCALAPPDATA%\GroundTruth\server.json</code> (made with the
+  defaults on the first start; the window shows its path and the settings in use). Edit it with Notepad, then
+  restart the server:
+  <ul>
+  <li><code>"workers": 1</code>: jobs at once. 1 (default): each job gets all cores and the GPU, the others wait,
+    first come first served. With 2 on a server with two GPUs, each job gets its own GPU; give each job fewer
+    threads then.</li>
+  <li><code>"threads": "-"</code>: solver threads per job (<code>"-"</code>: each user's Preferences; or a number,
+    e.g. 8 = the physical cores for one job at a time).</li>
+  <li><code>"gpu": "auto"</code>: use the server's GPUs if PyTorch finds them (<code>"on"</code>, <code>"off"</code>,
+    or <code>"-"</code>: each user's Preferences).</li>
+  <li><code>"keep_hours": 24</code>: how long a finished job's result waits for its owner (removed at once when
+    fetched).</li>
+  <li><code>"port": 8765</code>: another port (then open that one in the firewall, and add <code>:port</code> to the
+    address in the users' Preferences).</li>
+  </ul>
+  The same options can be given once on the command line, overriding the file for that run, e.g.
+  <code>groundtruth_server.cmd --workers 2 --threads 4</code> (also <code>--gpu</code>, <code>--keep-hours</code>,
+  <code>--port</code>); <code>--new-key</code> makes a new access key (every user then needs it; the old one stops
+  working).</li>
+</ol>
+
+<p><b>Use it from your computer:</b></p>
+<ol>
+<li><b>Preferences…</b> (top bar), group <b>Compute server</b>: <i>Run analyses on</i> = <i>A GroundTruth compute
+  server</i>; <i>Server address</i> = its name or IP address (optionally <code>:port</code>); <i>Access key</i> = the
+  key from the server.</li>
+<li><b>Test connection</b>: shows the server laid out: its version and code (the same as this plugin's, or not),
+  addresses, cores, memory, GPU, its jobs (at a time, running, queued), remote updates, and its cluster as a table
+  (every server's role, address, cores, memory, GPU and time in the cluster); <b>Copy details</b> copies it. Or why
+  it can't be used (not reachable: server not running or the firewall; wrong access key; another GroundTruth
+  version).</li>
+<li><b>Find servers</b> (after entering the access key): lists the compute servers on your network that use this key,
+  a cluster's lead first, each with its cores, memory and GPUs; pick one and its name goes into <i>Server
+  address</i>. A server on another subnet isn't found: type its address.</li>
+<li>Press <b>Simulate</b> or <b>Suggest fixes</b> as usual. The board is read here and <b>handed to the server</b>
+  with its settings, and the window is free again at once: keep working, simulate something else, close KiCad, or
+  take the laptop home. The job is listed on the <b>Server jobs</b> tab under <b>Current jobs</b>: the server
+  computer it runs on, the <b>resolution</b> it runs at (yours from Preferences when you handed it over; "–" for
+  Thermal and Current capacity, whose setting is the thermal quality, and for a job handed over before this was
+  recorded), queued with the jobs ahead or running with how far it is, the elapsed time counting up, and its <b>memory</b>: what the job uses on the server and what the server still has free (the details box adds what it has reserved from Windows, the commit, and the server's free commit: a job fails when that runs out, even with RAM free; a bigger page file on the server helps).
+  Ended jobs move to <b>Past jobs</b> (shown, failed, cancelled, no longer on the server) and stay there until you
+  remove them; select one for its details below (drag the line above the details to make them taller): where and how long it ran and, for a failure, the error in full
+  (the server's own message and traceback, kept with the job). <b>Copy details</b> puts them on the clipboard.
+  The list is checked against the servers every 30 seconds: a job of this computer that a server still has but the
+  list lost is listed again (<i>listed again from the server</i>; its result can be fetched but not shown, since the
+  board and settings it ran with are not here). Several GroundTruth windows can be open at once: they share the list.</li>
+<li><b>When it is done</b>, its result comes back by itself whenever the server can be reached (the laptop awake on
+  the office network) and is shown at once, as if it had run here (kept in the History tab too), when it was
+  handed over from this window for the board open here and nothing else was shown since. Otherwise the status line
+  says it is here: <b>Server jobs</b> tab, select it, <b>Show results</b> (its board must be the one open). The
+  status line ends with <i>on the compute server …</i>.</li>
+<li><b>Nothing is lost to a dropped connection</b>: a sleeping laptop, a VPN drop or a night at home only delay the
+  result. The server keeps a finished result for 24 hours (its settings) and removes it once fetched. Only you stop
+  a job: <b>Cancel job</b> on the Server jobs tab. <b>Remove from list</b> on a job still queued or running stops it
+  on the server and takes it off the list. When its server can't be reached (switched off, renamed, a new address),
+  you are asked whether to remove it anyway: should that server come back with the job, it finishes it there and
+  nobody fetches the result.</li>
+<li>Check in Simulate, Compare what-if, Thermal and Current capacity also run on the server, but the window waits for
+  them (the progress bar shows the server's progress or your place in its queue, Cancel cancels the job there); a
+  lost connection is waited out, not given up. They are listed on the <b>Server jobs</b> tab too while they run
+  (<i>What</i>: Thermal, Current capacity, Check …, What-if …), with the server, the elapsed time and the memory,
+  then under Past jobs; their results go straight to the window, so there is nothing to <i>Show</i>.</li>
+<li>If the server can't be reached when you start a job, or refuses it, you are asked whether to run it on this
+  computer instead. To work without the server, set <i>Run analyses on</i> back to <i>This computer</i>.</li>
+</ol>
+
+<p><b>Good to know:</b></p>
+<ul>
+<li>Resolution in your Preferences applies on the server too: the server's memory makes 8× and finer practical.</li>
+<li>Rule checks, drawing on the board and Sharper map run on your computer. Suggest fixes on the server simulates its
+  own baseline (the last Simulate's models stay on the server).</li>
+<li><b>Security:</b> every job and result is signed with the access key (no key, no access; an intercepted request
+  can't be replayed), and the server accepts only GroundTruth's own data. The traffic is <b>not encrypted</b>: use
+  the server only on your local network, and keep the key like a password (it is stored in your Preferences file,
+  <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>). Board data goes only between your computer and the server.</li>
+<li>Updating: install the new GroundTruth package on the server and on every user's computer, restart the server
+  window. Until both match, the server refuses the jobs and says so.</li>
+</ul>
+<hr><a name="methods"></a><h3>How the simulation works (the algorithms)</h3>
+<p>Simulate uses one field solver for everything electrical. Nets, converters, DC paths, bridges and the fix search
+differ only in the current they drive into it. Thermal has a solver of its own.</p>
+
+<p><b>This is not FEM.</b> The field solver uses PEEC (partial element equivalent circuit), an integral-equation
+method from the method-of-moments family. Only the copper is meshed: each layer's copper is cut into small strips, and
+vias, pins and parts become branches between layers. Each strip gets its resistance, its partial inductance to every
+other strip (from the free-space field), and the capacitance between facing planes. The board becomes one large
+circuit, solved at each frequency. The thermal and DC solves come from the PCB Thermal solver: a finite-volume grid,
+not FEM either.</p>
+
+<p><b>PEEC and FEM compared.</b> FEM (the finite element method) meshes the whole volume: copper, dielectric
+<i>and</i> the air around the board, out to an artificial boundary. Its system is sparse but very large. PEEC meshes
+only the conductors and puts the coupling through space into its kernels, so there is no air mesh. Its system is
+smaller but dense, which a regular grid lets it apply with FFTs.</p>
+<ul>
+<li><b>Why PEEC here.</b> A PCB is thin copper (35 µm) spread over a large area. FEM would need millions of flat
+  elements and a robust mesher for any KiCad geometry. PEEC gives the copper's currents directly, and those are the
+  questions GroundTruth answers: return paths, loop inductance, hot loops, plane resonances and DC paths. It is also
+  fast enough to solve dozens of frequencies per net and to try every candidate fix. Full-wave FEM is slow at the low
+  frequencies where power stages live (DC to a few MHz). Commercial power- and signal-integrity tools use PEEC,
+  method-of-moments or 2.5D solvers for the same reasons.</li>
+<li><b>Where FEM (or another full 3D method such as FDTD) would shine.</b> Radiation with the enclosure and the
+  cables in the model: GroundTruth estimates radiated emission from the board's current loops alone. Local 3D detail:
+  current crowding inside a big connector pin or a dense via field, or skin and proximity effects in thick copper.
+  Independent reference solutions, to check where PEEC's quasi-static, planar assumptions stop holding at high
+  frequency (see <a href="#limits">What the numbers mean, and their limits</a>).</li>
+</ul>
+
+<p><b>The field solver: quasi-static PEEC</b> (partial element equivalent circuit, in the frequency domain)</p>
+<ul>
+<li><b>The grid.</b> Every plane layer is cut into the same square grid. Copper is sampled on a finer sub-grid
+  (≤ 0.15 mm), so thin webs between via antipads stay connected and a slot still cuts. Tracks narrower than a cell
+  are followed along their centre line and kept joined; where another net's pour takes a cell, the track crosses it
+  as a lumped branch with the track's own resistance and inductance. Nets are never joined, even when their
+  clearance is smaller than a cell.</li>
+<li><b>The unknowns:</b>
+  <ul>
+  <li>the currents in the x and y strips between cells on every layer;</li>
+  <li>the currents through the plane-pair capacitances, the vias, the plated pads and the parts;</li>
+  <li>the voltage of every node.</li>
+  </ul>
+  The equations are Kirchhoff's voltage law over each strip and branch, Z·I − A·V = −jω·ψ (ψ: the field of the
+  known signal or switch current), and Kirchhoff's current law at each node.</li>
+<li><b>The partial elements:</b>
+  <ul>
+  <li>a strip has R(f), including skin effect and the copper thickness from the stackup, plus jωL;</li>
+  <li>every strip couples magnetically to every other strip on every layer (mutual partial inductance);</li>
+  <li>two layers with copper and none in between form a parallel-plate capacitance ε₀·εᵣ·area/t, scaled by the
+    cell's copper fraction and with dielectric loss (tan δ);</li>
+  <li>a via is its barrel resistance plus partial self-inductance; a through-hole pin (a connector's) is a solid conductor joined to every layer all around its barrel, so its current enters the copper around the whole ring, not at one point;</li>
+  <li>a part is its model's Z(f) plus 0.3 nH mounting inductance, spread over its pads.</li>
+  </ul>
+  The integrals use Gauss–Legendre quadrature near by, filaments far away, and numerical integration for the self
+  term.</li>
+<li><b>Fast products.</b> The mutual inductance between two strips depends only on their offset, so each layer
+  pair is a convolution. It is applied with FFTs (double precision; single precision stalled the solver near
+  resonances) and a compiled multiply-add.</li>
+<li><b>The linear solve: GMRES</b> (right-preconditioned, restarted):
+  <ul>
+  <li>Gram–Schmidt orthogonalisation, repeated only where cancellation happens;</li>
+  <li>Givens rotations keep the small least-squares problem triangular;</li>
+  <li>the restart length follows a memory budget;</li>
+  <li>a solve that stops converging is marked unsolved, and its band is named in the results, never silently
+    filled in.</li>
+  </ul></li>
+<li><b>The preconditioner</b> is an exact sparse factorisation (SuperLU) of the system's Schur complement Aᵀ·D⁻¹·A.
+  D has two forms:
+  <ul>
+  <li>each strip's own impedance, for the route models, which are inductive;</li>
+  <li>per grid position, a block that couples all layers, for the board-wide model. It keeps the planes' cavity
+    modes; without it the solver needs thousands of iterations above about 600 MHz.</li>
+  </ul></li>
+<li><b>Reuse.</b>
+  <ul>
+  <li>One factorisation serves every net at its frequency. Nearby frequencies (within ±25 %) borrow it within an
+    iteration budget; past that budget the solver factorises again.</li>
+  <li>The plan of which frequency borrows what is fixed before solving, so the same board gives bit-identical
+    results whatever the thread count.</li>
+  <li>Candidate vias and capacitors (Suggest fixes) and a converter's LISN are added as low-rank (Woodbury)
+    updates of the existing factorisation, and their solves start from the baseline solution.</li>
+  <li>With a GPU, the FFTs, products and orthogonalisation run there; the factorisations stay on the CPU (see <a
+    href="#speed">Speed, memory and the GPU</a>).</li>
+  </ul></li>
+</ul>
+
+<p><b>Signal nets</b></p>
+<ul>
+<li><b>Two models per net</b>, because one grid can't be both fine enough for the loop next to the trace and large
+  enough for the whole board:
+  <ul>
+  <li>a fine model around the route, with R + jωL;</li>
+  <li>a coarser model of the whole board that adds the plane capacitance, for displacement currents and plane
+    resonances.</li>
+  </ul>
+  Their loop moments combine as m(f) = m<sub>route</sub>(f0) + [m<sub>board</sub>(f) − m<sub>board</sub>(f0)], so the
+  coarse grid's bias at f0 cancels.</li>
+<li><b>The current on the trace.</b> The driver is a Thévenin source (resistance, inductance, capacitance) with the
+  trapezoid's harmonics. The route is a chain of lossless transmission lines (microstrip or stripline, Z0 and
+  εeff from the stackup) and series parts, solved at each harmonic and loaded by the receivers. Shunt parts and
+  op-amp stages become current loops of their own, added per harmonic with their own currents.</li>
+<li><b>Frequencies.</b> The solves happen at actual harmonics of the signal. The solver then adds solves in the
+  gaps where a resonance could hide or where the estimate is closest to the limit, and always solves the
+  worst-margin harmonic itself. Between solves, |m| is interpolated on log-log axes.</li>
+<li><b>Emission.</b> A small loop radiates |E| = 1.316·10⁻¹⁴·f²·|m|·I/r, doubled for the ground reflection. The
+  receiver's bandwidth adds harmonics that fall in it in phase. The result is compared with CISPR 32.</li>
+</ul>
+
+<p><b>Power stages and bridges</b></p>
+<ul>
+<li><b>The hot loop.</b> The switches are current filaments carrying the commutated current as a trapezoid pulse
+  train; their pours are solved copper.
+  <ul>
+  <li>The loop inductance comes from a series-LC fit at 30 and 100 MHz.</li>
+  <li>The ringing is a second-order resonance with C_oss, and an edge-charge factor adds the C_oss·dv/dt current.
+    It was checked against a time-domain simulation of the switching cell.</li>
+  </ul></li>
+<li><b>Conducted emission.</b> The LISN is added to the loop as a low-rank update. Its current, per ampere of loop
+  current, is interpolated over frequency and summed over the receiver bandwidth. For spread spectrum, the
+  receiver itself is simulated: each harmonic's sweep passes a Gaussian filter swept across the band, then the
+  standard's peak or average detector. Common mode is C·dV/dt of the switch node through the two LISNs.</li>
+<li><b>DC paths</b> are the same solver at 10 Hz, where the copper is purely resistive. All stages share one model
+  of the whole board, so their currents add (superposition) in the "currents together" view. Via currents are
+  checked against IPC-2221.</li>
+<li><b>Fix search.</b> Candidates are ranked one by one. They are then picked greedily: in each round the
+  remaining candidates are re-evaluated with the chosen ones in place, and the best is added.</li>
+</ul>
+
+<p><b>Thermal</b> (the PCB Thermal solver)</p>
+<ul>
+<li>Steady-state 3-D heat conduction on a block-structured mesh, refined where the heat is. Convection and
+  radiation leave through the board's faces (correlations for h).</li>
+<li>The heat comes from two sources:
+  <ul>
+  <li>the copper's Joule heat ρ·|J|²·t from the DC current maps;</li>
+  <li>the parts' losses: conduction, the switching edges, Q_oss·V·f, a diode's V_f, the inductor's DCR.</li>
+  </ul></li>
+<li>The system is solved with conjugate gradients, preconditioned by algebraic multigrid (pyamg; a direct solve
+  for small models). The copper's resistivity follows each node's temperature, by iteration.</li>
+</ul>
+<p>Each model is checked against an analytic result in the test suite. Examples: a microstrip's return-current
+spread and loop inductance against Wheeler, a pour over its plane against Hammerstad, parallel-plate capacitance
+and the cavity's first resonance, current conservation across every cut between planes, and a strip's I²R
+heating.</p>
+
+<hr><a name="limits"></a><h3>What the numbers mean, and their limits</h3>
+<ul>
+<li><b>Emission figures are for ranking and comparing layouts</b>, not a compliance prediction. The model is
+  quasi-static (no radiation from plane edges), it estimates the differential-mode loop of each net or hot loop,
+  and common-mode currents on cables, which often dominate real emissions, are not modelled (a converter's
+  common-mode budget is the exception).</li>
+<li>Plane resonance peaks are upper estimates (the model has no radiation loss); margins set by a resonance are
+  good to a few dB.</li>
+<li>The edge time sets the high-frequency content and L·di/dt: use the fastest edge at the operating current
+  (a GaN bridge at 100 A switches in about a nanosecond, at 1 A on a bench in 100 ns).</li>
+<li>Thermal: steady state; heat leaves through the board's faces only (no heatsinks, enclosure or part bodies
+  yet), so large parts come out on the hot side.</li>
+<li>Results depend on what you enter: frequencies, edge times, currents, part models. Orange rows are still
+  guesses.</li>
+</ul>
+<p><a href="#top">Back to the top</a></p>
+</body></html>

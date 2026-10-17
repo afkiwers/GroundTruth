@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+/emi/
+/out/
+# KiCad's working files when the demo project is opened from the repo
+~*.lck
+*.kicad_prl
+*-backups/
+fp-info-cache
+.history/

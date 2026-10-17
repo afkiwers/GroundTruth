@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<!-- The help window's page when a browser engine shows it (ui/help.py: wx.html2.WebView, Edge WebView2 on Windows,
+     WebKit on macOS). help.py fills in help.html's text as sections, the sidebar built from its headings and the
+     plugin theme's colours (its placeholders are named only where they go). The user: "can we make this help look
+     more modern and better formatted?" -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GroundTruth help</title>
+<style>
+:root {
+@VARS@
+  --radius: 10px;
+  --side: 270px;
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; }
+body {
+  margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* the sidebar: search and the sections, the one in view marked */
+#side {
+  position: fixed; inset: 0 auto 0 0; width: var(--side); display: flex; flex-direction: column;
+  background: var(--panel); border-right: 1px solid var(--border);
+}
+#brand { padding: 18px 18px 10px; font-weight: 650; font-size: 17px; letter-spacing: .2px; }
+#brand small { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
+#search {
+  margin: 0 14px 10px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--card); color: var(--text); font: 14px var(--font); outline: none;
+}
+#search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+#hits { margin: -4px 18px 8px; font-size: 12px; color: var(--muted); min-height: 16px; }
+#nav { overflow-y: auto; padding: 0 8px 24px; flex: 1; }
+#nav .group { margin: 14px 10px 4px; font-size: 11px; font-weight: 650; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted); }
+#nav a {
+  display: block; padding: 5px 10px; border-radius: 6px; color: var(--text); font-size: 13.5px; line-height: 1.35;
+}
+#nav a:hover { background: var(--hover); text-decoration: none; }
+#nav a.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+#nav a.dim { opacity: .35; }
+
+/* the text: one card per section */
+#main { margin-left: var(--side); padding: 28px 40px 80px; }
+#content { max-width: 920px; margin: 0 auto; }
+header.intro { margin: 0 0 22px; }
+header.intro h1 { margin: 0 0 6px; font-size: 28px; font-weight: 700; letter-spacing: -.3px; }
+header.intro p { margin: 0; color: var(--muted); }
+section {
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 6px 28px 18px; margin: 0 0 18px; box-shadow: 0 1px 2px var(--shadow);
+}
+section.flash { animation: flash 1.4s ease-out; }
+@keyframes flash { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: 0 1px 2px var(--shadow); } }
+section.hidden { display: none; }
+section > h3 {
+  margin: 18px 0 10px; font-size: 21px; font-weight: 650; letter-spacing: -.2px; color: var(--text);
+  padding-bottom: 8px; border-bottom: 2px solid var(--accent-soft);
+}
+h4 { margin: 18px 0 6px; font-size: 16px; }
+p { margin: 10px 0; }
+ul, ol { padding-left: 22px; margin: 8px 0; }
+li { margin: 5px 0; }
+li::marker { color: var(--accent); }
+b, strong { font-weight: 620; }
+code {
+  font: 13px var(--mono); background: var(--code); border: 1px solid var(--border); border-radius: 5px;
+  padding: 1px 5px; white-space: nowrap;
+}
+pre { font: 13px/1.5 var(--mono); background: var(--code); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; overflow-x: auto; }
+pre code { border: 0; padding: 0; background: none; white-space: pre; }
+.warn { color: var(--warn); font-weight: 600; }
+table { border-collapse: collapse; margin: 12px 0; width: 100%; font-size: 14px; line-height: 1.45; }
+th, td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { background: var(--panel); font-weight: 620; }
+tr:nth-child(even) td { background: var(--zebra); }
+mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1px; }
+mark.current { outline: 2px solid var(--warn); }
+#totop { position: fixed; right: 22px; bottom: 20px; width: 38px; height: 38px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--card); color: var(--muted); font-size: 18px; cursor: pointer;
+  box-shadow: 0 2px 6px var(--shadow); display: none; }
+#totop.show { display: block; }
+@media (max-width: 760px) {
+  #side { position: static; width: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  #nav { max-height: 180px; }
+  #main { margin-left: 0; padding: 18px; }
+}
+</style>
+</head>
+<body>
+<aside id="side">
+  <div id="brand">GroundTruth help<small>@VERSION@</small></div>
+  <input id="search" type="search" placeholder="Search the help (Ctrl+F)" autocomplete="off" spellcheck="false">
+  <div id="hits"></div>
+  <nav id="nav">
+@NAV@
+  </nav>
+</aside>
+<main id="main"><div id="content">
+@CONTENT@
+</div></main>
+<button id="totop" title="Back to the top">&#8593;</button>
+<script>
+"use strict";
+// Jump to a section (F1 at a tab: help.py calls gtShow), mark it in the sidebar and flash it
+function gtShow(id) {
+  var el = document.getElementById(id);
+  if (!el) { return; }
+  var sec = el.closest ? el.closest("section") : null;
+  el.scrollIntoView({block: "start"});
+  if (sec) { sec.classList.remove("flash"); void sec.offsetWidth; sec.classList.add("flash"); }
+}
+// links within the page: scroll, never navigate (a navigation would reload the page)
+document.addEventListener("click", function (e) {
+  var a = e.target.closest ? e.target.closest("a") : null;
+  if (!a) { return; }
+  var href = a.getAttribute("href") || "";
+  if (href.charAt(0) === "#") { e.preventDefault(); clearSearch(); gtShow(href.slice(1)); }
+});
+// the section in view, marked in the sidebar
+var links = {};
+Array.prototype.forEach.call(document.querySelectorAll("#nav a"), function (a) {
+  links[a.getAttribute("href").slice(1)] = a;
+});
+var sections = Array.prototype.slice.call(document.querySelectorAll("section"));
+function spy() {
+  var y = window.scrollY + 90, current = sections.length ? sections[0].id : null;
+  sections.forEach(function (s) { if (!s.classList.contains("hidden") && s.offsetTop <= y) { current = s.id; } });
+  Object.keys(links).forEach(function (k) { links[k].classList.toggle("active", k === current); });
+  if (current && links[current]) {
+    // the marked link kept in view by scrolling the sidebar alone (scrollIntoView would move the page too)
+    var nav = document.getElementById("nav"), r = links[current].getBoundingClientRect(), n = nav.getBoundingClientRect();
+    if (r.top < n.top) { nav.scrollTop -= n.top - r.top + 8; }
+    else if (r.bottom > n.bottom) { nav.scrollTop += r.bottom - n.bottom + 8; }
+  }
+  document.getElementById("totop").classList.toggle("show", window.scrollY > 600);
+}
+window.addEventListener("scroll", spy, {passive: true});
+document.getElementById("totop").addEventListener("click", function () { window.scrollTo(0, 0); });
+// search: the sections that mention the words, the words marked; Enter goes to the next one
+var search = document.getElementById("search"), hits = document.getElementById("hits"), marks = [], at = -1;
+var original = {};
+sections.forEach(function (s) { original[s.id] = s.innerHTML; });
+function clearSearch() {
+  if (!search.value && !marks.length) { return; }
+  search.value = "";
+  runSearch();
+}
+function escapeRe(t) { return t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function runSearch() {
+  var q = search.value.trim();
+  marks = []; at = -1;
+  sections.forEach(function (s) { s.innerHTML = original[s.id]; s.classList.remove("hidden"); });
+  Object.keys(links).forEach(function (k) { links[k].classList.remove("dim"); });
+  if (q.length < 2) { hits.textContent = ""; spy(); return; }
+  var re = new RegExp(escapeRe(q), "gi"), found = 0, inSections = 0;
+  sections.forEach(function (s) {
+    var walker = document.createTreeWalker(s, NodeFilter.SHOW_TEXT, null), nodes = [], n;
+    while ((n = walker.nextNode())) { if (re.test(n.nodeValue)) { nodes.push(n); } re.lastIndex = 0; }
+    nodes.forEach(function (node) {
+      var frag = document.createDocumentFragment(), text = node.nodeValue, last = 0, m;
+      re.lastIndex = 0;
+      while ((m = re.exec(text))) {
+        frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+        var mk = document.createElement("mark");
+        mk.textContent = m[0];
+        frag.appendChild(mk);
+        marks.push(mk);
+        last = m.index + m[0].length;
+      }
+      frag.appendChild(document.createTextNode(text.slice(last)));
+      node.parentNode.replaceChild(frag, node);
+    });
+    if (nodes.length) { found += nodes.length; inSections++; }
+    else { s.classList.add("hidden"); if (links[s.id]) { links[s.id].classList.add("dim"); } }
+  });
+  hits.textContent = marks.length ? marks.length + " found in " + inSections + " section(s); Enter: next"
+                                  : "nothing found";
+  if (marks.length) { next(); }
+}
+function next() {
+  if (!marks.length) { return; }
+  if (at >= 0) { marks[at].classList.remove("current"); }
+  at = (at + 1) % marks.length;
+  marks[at].classList.add("current");
+  marks[at].scrollIntoView({block: "center"});
+}
+var timer = null;
+search.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(runSearch, 180); });
+search.addEventListener("keydown", function (e) {
+  if (e.key === "Enter") { e.preventDefault(); next(); }
+  if (e.key === "Escape") { clearSearch(); }
+});
+document.addEventListener("keydown", function (e) {
+  if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")) { e.preventDefault(); search.focus(); search.select(); }
+});
+spy();
+</script>
+</body>
+</html>
