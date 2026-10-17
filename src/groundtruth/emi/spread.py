@@ -22,7 +22,7 @@ from typing import Optional
 import numpy as np
 
 MODES = ("triangle", "random", "sine")
-DWELL_S = 0.015                 # MIL-STD-461G Table III measurement (dwell) time per frequency
+DWELL_S = 0.015                 # MIL-STD-461G Table II minimum dwell time per frequency (above 1 kHz)
 LN2 = math.log(2.0)
 
 
@@ -150,17 +150,18 @@ def _gain(n: int, f0: float, spread: Spread, rbw: float, detector: str, dwell: f
     # tunings RBW/4 apart, at most 400 per end
     span = max(3.0 * rbw, 0.05 * width)
     ends = np.arange(-rbw, span, max(rbw / 4, (span + rbw) / 400))
-    fcs = np.unique(np.concatenate([np.linspace(-rbw, width + rbw, 25), ends, width - ends]))
-    if spread.mode == "random":
-        # random hopping is noise-like: its highest reading can be anywhere in the band, as a receiver stepping
-        # through it at ~RBW/2 finds: scan the band that way (at most 2000 tunings)
-        fcs = np.arange(-rbw, width + rbw, max(rbw / 2, (width + 2 * rbw) / 2000))
+    # and the whole band at ~RBW/2, as a receiver stepping through it finds the worst tuning (at most 2000): with the
+    # modulation rate near the RBW the swept harmonic is a comb of lines one rate apart whose strongest can lie
+    # anywhere (a 500 kHz triangle sweep at 10 kHz, RBW 9 kHz: worst at 110 kHz in, which 25 coarse tunings missed
+    # by 0.5 dB before 2026-10-18; random hopping, noise-like, was scanned so already)
+    band = np.arange(-rbw, width + rbw, max(rbw / 2, (width + 2 * rbw) / 2000))
+    fcs = band if spread.mode == "random" else np.unique(np.concatenate([band, ends, width - ends]))
     coarse = _read_many(S, f, keep, fcs, rbw, detector)
     best = float(coarse.max())
-    # refine around the three best tunings (one alone can climb a lesser local peak) until the tuning step is
+    # refine around the five best tunings (one alone can climb a lesser local peak) until the tuning step is
     # below RBW/8 (≤ 0.2 dB off a line)
-    for seed in fcs[np.argsort(coarse)[-3:]]:
-        step, best_fc = (width + 2 * rbw) / 24, seed     # the coarse grid's spacing
+    for seed in fcs[np.argsort(coarse)[-5:]]:
+        step, best_fc = max(rbw / 2, (width + 2 * rbw) / 2000), seed     # the band scan's spacing
         while step > rbw / 8:
             grid = np.linspace(best_fc - step, best_fc + step, 9)
             vals = _read_many(S, f, keep, grid, rbw, detector)

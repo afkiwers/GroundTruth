@@ -138,6 +138,14 @@ def _layer_currents(board: Board, converters, bridges=()) -> dict:
                 g = grids.get(layer)
                 if g is not None:
                     per_layer.setdefault(layer, []).append((getattr(c, "net", ""), g, jx, jy))
+        # a switch node's time variance D(1-D)·|J_hs - J_ls|² (power.dc_summary): heat on top of its mean current's,
+        # added as J² as a bridge's RMS density is (and, keyed by the stage, scaled ∝ s² in the capacity search)
+        for name, layers in (getattr(c, "dc_ripple_sq", None) or {}).items():
+            grids = c.dc_grids.get(name, {})
+            for layer, sq in layers.items():
+                g = grids.get(layer)
+                if g is not None:
+                    per_layer.setdefault(layer, []).append((getattr(c, "net", ""), g, np.sqrt(sq), None))
     for b in bridges:
         for layer, m in b.rms["maps"].items():
             per_layer.setdefault(layer, []).append((b.net, b.rms["grids"][layer], m, None))

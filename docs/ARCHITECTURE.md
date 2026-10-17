@@ -812,10 +812,16 @@ for a boost; duty = the high-side conduction time). The inductor current is cont
     The result's `duty` is the high side's conduction time in both topologies (`ConverterSpec.pulse`): a boost's
     is its rectifier's V_in/V_out, so `part_losses` gives a boost I_L = I_out/d, its rectifier d and its switch (the
     low side) 1 − d (until 2026-10-17 it read d as the switch duty: right only at ½; VALIDATION_AUDIT.md ISSUE-1).
-  - **Switch node RMS (not modelled):** the switch-node path feeds the averaged current (D from the high side,
-    1 − D from the low side) where the copper carries each in turn: its copper loss and heat read D·(1−D)·I²·R_hl
-    low (R_hl the resistance between the switches' pads along the node), 6-17 % of the path's loss on the test
-    buck (VALIDATION_AUDIT.md ISSUE-7).
+  - **Switch node RMS** (2026-10-18, VALIDATION_AUDIT.md ISSUE-7): the node carries I from the high side's pads for
+    D and from the low side's for 1 − D. The path's run is that time average (its vectors: the arrows, the mean that
+    superposes in `combine_dc`); one more run (`ConverterSetup.dc_ripple`), 1 A in at the high side's pads and out
+    at the low side's, gives J_hs − J_ls, and the two-state variance D(1−D)·|J_hs − J_ls|² adds exactly:
+    `dc_summary(ripple=)` makes the densities, via and part currents RMS and adds D(1−D)·I²·R_d to R and the loss;
+    `res.dc_ripple_sq` (A²/mm⁴ per layer) is added to the thermal heat as a bridge's RMS density is (and scales ∝ s²
+    in the capacity search), `res.dc_ripple_branch` to `combine_dc`'s vias in quadrature (the stages' switching
+    taken as independent; made portable by `compact_dc_branch`, released with `dc_branch`); Sharper map solves it
+    too. Before: the mean alone, its copper loss 6-17 % low on the test buck. Test: test_validation_audit CV-28
+    (the two states solved apart: loss D·P_hs + (1−D)·P_ls, densities their RMS).
   - **Stages together** (`combine_dc`, called by `simulate()` after the stages finish; `SimulationResult.
     dc_combined`): every path keeps its signed branch currents (`ConverterResult.dc_branch[path] = (build,
     I_branch·I)`), so with two or more stages on the one model their density vectors and branch currents add
