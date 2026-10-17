@@ -1,0 +1,42 @@
+{
+  "$schema": "https://go.kicad.org/api/schemas/v1",
+  "identifier": "io.github.iwers.groundtruth",
+  "name": "GroundTruth – return path / EMI analysis",
+  "description": "Finds return-path problems (plane gaps, missing stitching vias, detours) on high-speed nets, solves the return current in the reference plane and estimates the radiated emission.",
+  "runtime": {
+    "type": "python",
+    "min_version": "3.11"
+  },
+  "actions": [
+    {
+      "identifier": "analyse",
+      "name": "Analyse return paths",
+      "description": "Open the GroundTruth window: part models, nets, rule checks, field solver and heatmaps",
+      "show-button": true,
+      "scopes": ["pcb"],
+      "entrypoint": "groundtruth_action.py",
+      "icons-light": ["icons/groundtruth-24.png", "icons/groundtruth-48.png"],
+      "icons-dark": ["icons/groundtruth-dark-24.png", "icons/groundtruth-dark-48.png"]
+    },
+    {
+      "identifier": "add-net",
+      "name": "Add selected net to GroundTruth",
+      "description": "Add the net of the selected track, via or pad to the GroundTruth Nets table (select it first by clicking or right-clicking it); opens the window if needed",
+      "show-button": true,
+      "scopes": ["pcb"],
+      "entrypoint": "groundtruth_add_net.py",
+      "icons-light": ["icons/groundtruth-add-24.png", "icons/groundtruth-add-48.png"],
+      "icons-dark": ["icons/groundtruth-add-dark-24.png", "icons/groundtruth-add-dark-48.png"]
+    },
+    {
+      "identifier": "clear",
+      "name": "Clear EMI layers",
+      "description": "Remove all markers, contours and arrows GroundTruth drew on the board (one undo step)",
+      "show-button": false,
+      "scopes": ["pcb"],
+      "entrypoint": "groundtruth_clear.py",
+      "icons-light": ["icons/groundtruth-clear-24.png"],
+      "icons-dark": ["icons/groundtruth-clear-dark-24.png"]
+    }
+  ]
+}
