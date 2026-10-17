@@ -37,18 +37,21 @@ class Lisn:
     C_s: float            # F, supply-side capacitor to the reference (0: an ideal RF short)
     C_c: float            # F, coupling capacitor to the receiver port (0: none, the nominal network)
     R_m: float = 50.0     # receiver input
+    R_p: float = math.inf  # ohm, a resistor across the port inside the network (MIL-STD-461: 1 kΩ), with R_m
 
     def impedance(self, f) -> tuple[np.ndarray, np.ndarray]:
         """(impedance at the EUT terminal, receiver voltage / terminal voltage) per frequency."""
         w = 2 * np.pi * np.asarray(f, float)
         # the EUT terminal sees the supply branch (R + jwL, plus the supply-side capacitor) in parallel with the
-        # measuring branch (coupling capacitor + 50 ohm); the receiver reads the 50 ohm share of the terminal
-        # voltage (a voltage divider with the coupling capacitor)
+        # measuring branch (coupling capacitor + the port: the receiver's 50 ohm, in parallel with the network's own
+        # resistor across it where it has one); the receiver reads the port's share of the terminal voltage (a
+        # voltage divider with the coupling capacitor)
         z_supply = self.R_s + 1j * w * self.L
         if self.C_s > 0:
             z_supply = z_supply + 1.0 / (1j * w * self.C_s)
-        z_meas = self.R_m + (1.0 / (1j * w * self.C_c) if self.C_c > 0 else 0.0)
-        return z_supply * z_meas / (z_supply + z_meas), self.R_m / z_meas
+        r_port = self.R_m if math.isinf(self.R_p) else self.R_m * self.R_p / (self.R_m + self.R_p)
+        z_meas = r_port + (1.0 / (1j * w * self.C_c) if self.C_c > 0 else 0.0)
+        return z_supply * z_meas / (z_supply + z_meas), r_port / z_meas
 
 
 LISNS = {
@@ -56,8 +59,10 @@ LISNS = {
     "cispr32": Lisn("50 Ω ∥ (50 µH + 5 Ω) (CISPR 16-1-2)", 50e-6, 5.0, 0.0, 0.0),
     # CISPR 25 artificial network: nominal 50 ohm || 5 uH
     "cispr25": Lisn("50 Ω ∥ 5 µH (CISPR 25)", 5e-6, 0.0, 0.0, 0.0),
-    # MIL-STD-461 LISN as drawn: 50 uH, 8 uF + 5 ohm to the reference on the supply side, 0.25 uF to the 50 ohm port
-    "mil461": Lisn("50 µH (MIL-STD-461)", 50e-6, 5.0, 8e-6, 0.25e-6),
+    # MIL-STD-461G Figure 6, as drawn: 50 uH, 8 uF + 5 ohm to the reference on the supply side, 0.25 uF to the signal
+    # port with 1 kohm across it (the receiver's 50 ohm in parallel: 47.6 ohm; before 2026-10-18 the 1 kohm was left
+    # out, 0.4 dB high). Its impedance is specified with the power input unterminated (4.3.6 c), as modelled here
+    "mil461": Lisn("50 µH (MIL-STD-461)", 50e-6, 5.0, 8e-6, 0.25e-6, R_p=1e3),
 }
 
 # Receiver resolution bandwidth tables [(upper frequency, bandwidth)]
@@ -214,7 +219,7 @@ CE101_BANDS = [(1e3, 10.0), (10e3, 100.0), (np.inf, 1e3)]   # Table II: 10 Hz to
 # mΩ together). Without it the leads' 100 µH and the board's bus capacitors resonate in band with a Q of hundreds
 # (45 µF of ceramics: ~2.4 kHz), set only by the capacitors' ESR; with it the Q of such a resonance is ~10-15.
 CE101_LEAD_R = 0.05                     # Ω per line
-CE101_LEAD = Lisn("50 µH + 50 mΩ to a stiff source (CE101)", 50e-6, CE101_LEAD_R, 0.0, 0.25e-6)
+CE101_LEAD = Lisn("50 µH + 50 mΩ to a stiff source (CE101)", 50e-6, CE101_LEAD_R, 0.0, 0.25e-6, R_p=1e3)
 CE101_CURVES = {   # (f Hz, dBµA) breakpoints, straight on a log-frequency axis between them
     # Figure CE101-4: Army aircraft (including flight line) and Navy ASW aircraft, AC and DC, by nominal EUT
     # source voltage: curve #1 above 28 V, curve #2 at 28 V or below

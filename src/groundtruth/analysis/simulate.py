@@ -2514,6 +2514,8 @@ def finish_issues(result: SimulationResult, issues: list, route_issues: list, st
     # result from being pickled (the compute server sends results back pickled)
     for r in converters:
         r.dc_branch = {}
+        if hasattr(r, "dc_ripple_branch"):
+            r.dc_ripple_branch = {}
     issues = dedupe(issues + route_issues + stage_issues)
     for w in config.waivers:
         for i in issues:

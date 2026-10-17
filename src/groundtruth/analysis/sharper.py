@@ -124,7 +124,12 @@ def _converter(model, view):
         current, r = run
         sol = r.exc.solve(DC_F)
         st = r.build
-        summary, maps = dc_summary(st, sol, current, name)
+        # a switch node's two conduction states: its variance solved too, so the finer map is RMS like the first
+        ripple = None
+        if name in setup.dc_ripple:
+            k_r, rrun = setup.dc_ripple[name]
+            ripple = (k_r, rrun.exc.solve(DC_F))
+        summary, maps = dc_summary(st, sol, current, name, ripple=ripple)
         out = copy.copy(view)
         out.layer_grids = dict(zip(st.names, st.grids))
         out.grid = st.grids[0]

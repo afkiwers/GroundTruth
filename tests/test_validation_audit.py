@@ -380,8 +380,9 @@ def test_CV5_the_boost_ripple_harmonics_are_the_asymmetric_triangle_s():
 
 def test_CV6_the_lisn_networks_and_the_receiver_s_share():
     """CV-6: each LISN's impedance at the EUT terminal and the 50 Ω port's share, from the networks drawn in the
-    standards: CISPR 16-1-2 50 Ω ∥ (50 µH + 5 Ω); CISPR 25 50 Ω ∥ 5 µH; MIL-STD-461G Figure 7 (50 µH, 8 µF + 5 Ω on the
-    source side, 0.25 µF to the 50 Ω port, the input unterminated)."""
+    standards: CISPR 16-1-2 50 Ω ∥ (50 µH + 5 Ω); CISPR 25 50 Ω ∥ 5 µH; MIL-STD-461G Figure 6 (50 µH, 8 µF + 5 Ω on the
+    source side, 0.25 µF to the signal port with 1 kΩ across it, the receiver's 50 Ω in parallel; the impedance with
+    the power input unterminated, 4.3.6 c). ISSUE-9: the 1 kΩ was left out (0.4 dB high)."""
     from groundtruth.emi.conducted import LISNS
     f = np.geomspace(10e3, 100e6, 20)
     w = 2 * np.pi * f
@@ -393,8 +394,35 @@ def test_CV6_the_lisn_networks_and_the_receiver_s_share():
     z, k = LISNS["cispr25"].impedance(f)
     assert np.allclose(z, par(50.0, 1j * w * 5e-6))
     z, k = LISNS["mil461"].impedance(f)
-    zm = 50.0 + 1 / (1j * w * 0.25e-6)
-    assert np.allclose(z, par(zm, 1j * w * 50e-6 + 5.0 + 1 / (1j * w * 8e-6))) and np.allclose(k, 50.0 / zm)
+    port = par(50.0, 1e3)
+    zm = port + 1 / (1j * w * 0.25e-6)
+    assert np.allclose(z, par(zm, 1j * w * 50e-6 + 5.0 + 1 / (1j * w * 8e-6))) and np.allclose(k, port / zm)
+
+
+def test_CV26_the_mil_std_461g_ce101_and_re102_limits_are_its_figures():
+    """CV-26 / SP-25: MIL-STD-461G (11 Dec 2015) read from the figures. CE101-4 (aircraft): #1 above 28 V 110 dBµA
+    30 Hz-1 kHz falling to 90 at 10 kHz, #2 100 → 80; CE101-1 (ships, DC): 95 to 2.6 kHz → 76 at 10 kHz, relaxed by
+    20·log(I/3) from 3 to 185 A, 35 dB above. RE102-1..-4 at their breakpoints (dBµV/m, 1 m)."""
+    from groundtruth.emi.conducted import Ce101, ce101_limit
+    from groundtruth.emi.radiation import RE102_LIMITS, limits
+    f = np.array([30.0, 500.0, 1e3, 2.6e3, 10e3])
+    assert np.allclose(ce101_limit(f, Ce101("aircraft", 270.0)), [110, 110, 110, 110 - 20 * math.log10(2.6), 90])
+    assert np.allclose(ce101_limit(f, Ce101("aircraft", 28.0)), [100, 100, 100, 100 - 20 * math.log10(2.6), 80])
+    assert np.allclose(ce101_limit(f, Ce101("ships", 28.0, 2.0)), [95, 95, 95, 95, 76])
+    assert np.allclose(ce101_limit(f, Ce101("ships", 28.0, 30.0)), np.array([95, 95, 95, 95, 76]) + 20)
+    assert np.allclose(ce101_limit(f, Ce101("ships", 28.0, 300.0)), np.array([95, 95, 95, 95, 76]) + 35)
+    fig = {"re102_ship_above_deck": [(10e3, 70), (100e6, 36), (18e9, 82)],
+           "re102_ship_below_deck": [(10e3, 90), (100e6, 56), (18e9, 102)],
+           "re102_submarine_external": [(10e3, 60), (2e6, 24), (100e6, 24), (18e9, 69)],
+           "re102_submarine_internal": [(10e3, 88), (100e6, 50), (18e9, 95)],
+           "re102_aircraft_external": [(10e3, 60), (2e6, 24), (100e6, 24), (18e9, 69)],
+           "re102_aircraft_internal": [(2e6, 34), (100e6, 34), (18e9, 79)],
+           "re102_aircraft_internal_25m": [(2e6, 44), (100e6, 44), (18e9, 89)],
+           "re102_ground_army": [(2e6, 24), (100e6, 24), (18e9, 69)],
+           "re102_ground_navy_fixed": [(2e6, 44), (100e6, 44), (18e9, 89)]}
+    for name, pts in fig.items():
+        lim, dist = limits(np.array([p[0] for p in pts]), RE102_LIMITS[name])
+        assert np.allclose(lim, [p[1] for p in pts]) and np.all(dist == 1.0), name
 
 
 def test_CV7_the_conducted_limits_are_the_standards():
@@ -990,3 +1018,266 @@ def test_DC6_a_load_off_the_rail_s_copper_is_an_error_not_a_crash(tmp_path):
     board, cfg = board_with(tmp_path, 20.0, [("U2.2", 1.0)], "off")       # U2.2 is a GND pad
     res = simulate(board, cfg).dc_loads[0]
     assert res.error and "rail" in res.error
+
+
+def _tier1(tmp_path, name, zones, holes=()):
+    """A 4-layer board (0.2 mm to In1: h = 0.235 mm between the foils' centres): SIG on F.Cu from U1 (x 5) to U2 (x
+    35) at y 10, 0.2 mm wide; `zones` [(net, outline)] on In1, the first with `holes`; the Tier 1 issues."""
+    from boardgen import BoardGen
+    from conftest import make
+    from groundtruth.rules.checks import run_checks
+    g = BoardGen(layers=4, size=(40.0, 20.0))
+    g.ic("U1", (5.0, 10.0), "SIG", gnd_offset=(0.0, 1.0))
+    g.ic("U2", (35.0, 10.0), "SIG", gnd_offset=(0.0, 1.0))
+    g.track((5.0, 10.0), (35.0, 10.0), "SIG")
+    for k, (net, outline) in enumerate(zones):
+        g.zone(net, "In1.Cu", outline, holes if k == 0 else ())
+    board, sc, _ = make(tmp_path, g, name)
+    return [i for i in run_checks(board, sc.config).issues if i.net == "SIG"]
+
+
+FULL = [(0.3, 0.3), (39.7, 0.3), (39.7, 19.7), (0.3, 19.7)]
+
+
+@pytest.mark.parametrize("width, flagged", [(1.0, True), (0.3, True), (0.05, False)])
+def test_SP21_a_slot_across_the_trace_is_a_gap_of_its_width(tmp_path, width, flagged):
+    """SP-21: a slot in the GND plane straight across the trace: one gap_crossing as long as the slot is wide; a
+    slot narrower than min_gap_mm (0.1) is not a gap."""
+    x0 = 20.0 - width / 2
+    hole = [(x0, 4.0), (x0 + width, 4.0), (x0 + width, 16.0), (x0, 16.0)]
+    gaps = [i for i in _tier1(tmp_path, f"slot{width}", [("GND", FULL)], [hole]) if i.check == "gap_crossing"]
+    assert len(gaps) == (1 if flagged else 0)
+    if flagged:
+        assert gaps[0].length_mm == pytest.approx(width, abs=0.01) and gaps[0].location[0] == pytest.approx(20.0)
+
+
+def test_SP22_a_split_between_two_nets_is_named_and_the_other_net_flagged(tmp_path):
+    """SP-22: In1 is GND left of x 19.7 and VX right of 20.3: the 0.6 mm split is named with both nets, and the
+    15 mm over VX (not a reference net) is a reference_net issue."""
+    left = [(0.3, 0.3), (19.7, 0.3), (19.7, 19.7), (0.3, 19.7)]
+    right = [(20.3, 0.3), (39.7, 0.3), (39.7, 19.7), (20.3, 19.7)]
+    issues = _tier1(tmp_path, "split", [("GND", left), ("VX", right)])
+    gap = [i for i in issues if i.check == "gap_crossing"]
+    ref = [i for i in issues if i.check == "reference_net"]
+    assert len(gap) == 1 and "split between GND and VX" in gap[0].message
+    assert gap[0].length_mm == pytest.approx(0.6, abs=0.01)
+    assert len(ref) == 1 and ref[0].length_mm == pytest.approx(35.0 - 20.3, abs=0.05)
+
+
+@pytest.mark.parametrize("edge_y, flagged", [(10.5, True), (11.0, False)])
+def test_SP23_a_trace_near_the_plane_edge_is_flagged_within_three_heights(tmp_path, edge_y, flagged):
+    """SP-23: a 10 mm long hole in the plane beside the trace (x 15-25, from y = edge_y): edge_proximity when the edge
+    is within edge_factor·h = 3 × 0.235 mm of the centreline, with that distance reported; 1 mm away it is not."""
+    hole = [(15.0, edge_y), (25.0, edge_y), (25.0, 16.0), (15.0, 16.0)]
+    near = [i for i in _tier1(tmp_path, f"edge{edge_y}", [("GND", FULL)], [hole]) if i.check == "edge_proximity"]
+    assert bool(near) == flagged
+    if flagged:
+        assert near[0].details["distance_mm"] == pytest.approx(edge_y - 10.0, abs=0.01)
+        assert near[0].details["limit_mm"] == pytest.approx(3 * 0.235, abs=1e-6)
+        assert sum(i.length_mm for i in near) > 8.0                  # most of the 10 mm (corners excluded)
+
+
+def test_SP24_a_trace_running_off_its_plane_is_off_plane_for_the_uncovered_length(tmp_path):
+    """SP-24: the GND plane ends at x 25: the last 10 mm of the trace (to U2 at x 35) have no reference: one
+    off_plane issue of that length (at a run's end, beyond the 1 mm / 2h pad allowance)."""
+    part = [(0.3, 0.3), (25.0, 0.3), (25.0, 19.7), (0.3, 19.7)]
+    off = [i for i in _tier1(tmp_path, "off", [("GND", part)]) if i.check == "off_plane"]
+    assert len(off) == 1 and off[0].length_mm == pytest.approx(10.0, abs=0.05)
+
+
+def test_CV29_the_fix_advisor_reproduces_a_boost_and_sizes_its_filter_at_the_input(tmp_path):
+    """CV-29: a boost 12 V → 36 V at 1 A with an input connector (its conducted estimate from the inductor ripple):
+    evaluate(setup) with no change gives the stage's own figures (the advisor's every option is a difference on
+    them), and Middlebrook's |Z_in| is V_in²/P_in at the input, 12²/(12·3) = 4 Ω (ISSUE-2: was 36²/(12·3))."""
+    from boardgen import boost_board
+    from conftest import make
+    from groundtruth.analysis.detect import detect_converters
+    from groundtruth.analysis.fix_advisor import evaluate, middlebrook
+    from groundtruth.analysis.simulate import simulate
+    from groundtruth.config.settings import SettingsFile
+    board, sc, _ = make(tmp_path, boost_board(), "fab", nets=())
+    spec = detect_converters(board, sc.config)[0].spec
+    spec.f_sw, spec.i_out, spec.v_in, spec.v_out, spec.rise_time = 300e3, 1.0, 12.0, 36.0, 5e-9
+    spec.input_connector = ["J1.1", "J1.2"]
+    sc.set_converters([spec])
+    sc.save()
+    res = simulate(board, SettingsFile.load(sc.path).config)
+    r, setup = res.converters[0], res.converter_setups[0]
+    assert not r.error, r.error
+    o = evaluate(setup)
+    assert o.overshoot_v == pytest.approx(max(r.overshoot_v or 0.0, (r.ringing or {}).get("overshoot_v", 0.0)))
+    if r.worst is not None:
+        assert o.radiated_db == pytest.approx(r.worst["margin_db"], abs=1e-9)
+    assert r.conducted_worst is not None and o.conducted_db == pytest.approx(r.conducted_worst["margin_db"], abs=1e-9)
+    mb = middlebrook(setup, {"L": 2.2e-6, "C": 4.7e-6, "R_damp": 0.7, "C_damp": 22e-6, "damp_at": "connector"})
+    assert mb["z_in"] == pytest.approx(12.0 ** 2 / (12.0 * r.pulse_a), rel=1e-9) and r.pulse_a == pytest.approx(3.0)
+
+
+def _pcm_switching(topology, v_in, v_out, i_out, L, C, ri, se, f_sw, fms, amp=0.003, sub=32):
+    """A peak-current-mode buck or boost switched cycle by cycle (ideal synchronous switches, R load, C, L; exact
+    linear steps by matrix exponential; turn-off where R_i·i_L + S_e·t = v_c(t), by root search) with its control
+    voltage modulated at each f_m: the control-to-output response v̄_out / v_c of the cycle means (what the
+    averaged models describe; sampling v_out at the switching instants instead mixes in the boost's pulsed output
+    ripple, a few degrees at f_sw/20). se in control-voltage units (V/s). Returns {f_m: complex}."""
+    from scipy.linalg import expm
+    from scipy.optimize import brentq
+    R, T = v_out / i_out, 1 / f_sw
+    if topology == "buck":
+        D, i_l, up = v_out / v_in, i_out, (v_in - v_out) / L
+        modes = ((np.array([[0, -1 / L], [1 / C, -1 / (R * C)]]), [v_in / L, 0.0]),
+                 (np.array([[0, -1 / L], [1 / C, -1 / (R * C)]]), [0.0, 0.0]))
+    else:
+        D = 1 - v_in / v_out
+        i_l, up = i_out / (1 - D), v_in / L
+        modes = ((np.array([[0, 0], [0, -1 / (R * C)]]), [v_in / L, 0.0]),
+                 (np.array([[0, -1 / L], [1 / C, -1 / (R * C)]]), [v_in / L, 0.0]))
+    aug = []
+    for A, b in modes:
+        M = np.zeros((3, 3))
+        M[:2, :2], M[:2, 2] = A, b
+        aug.append(M)
+
+    def go(x, M, t):
+        """The state after t in one mode."""
+        return (expm(M * t) @ np.array([x[0], x[1], 1.0]))[:2]
+
+    def run(vc, cycles, x):
+        """`cycles` periods from state x: (cycle-middle times, cycle-mean output voltages, end state)."""
+        ts, means = [], []
+        for n in range(cycles):
+            t0 = n * T
+            g = lambda tau: ri * go(x, aug[0], tau)[0] + se * tau - vc(t0 + tau)
+            d = 0.0 if g(0.0) >= 0 else 1.0 if g(T) < 0 else brentq(g, 0.0, T, xtol=1e-14) / T
+            acc = 0.0
+            for M, tau in ((aug[0], d * T), (aug[1], (1 - d) * T)):
+                if tau <= 0:
+                    continue
+                E = expm(M * (tau / sub))
+                vs = [x[1]]
+                for _ in range(sub):
+                    x = (E @ np.array([x[0], x[1], 1.0]))[:2]
+                    vs.append(x[1])
+                vs = np.array(vs)
+                acc += tau / sub / 3 * (vs[0] + vs[-1] + 4 * vs[1:-1:2].sum() + 2 * vs[2:-1:2].sum())
+            ts.append(t0 + T / 2)
+            means.append(acc / T)
+        return np.array(ts), np.array(means), x
+    vc0 = ri * (i_l + up * D * T / 2) + se * D * T
+    _, _, x_ss = run(lambda t: vc0, int(8 * R * C / T) + 400, np.array([i_l, v_out]))
+    out = {}
+    for fm in fms:
+        n_per = round(f_sw / fm)
+        w = 2 * math.pi * f_sw / n_per
+        dv = amp * vc0
+        n_skip = n_per * 4 + int(6 * R * C / T)
+        t, v, _ = run(lambda tt: vc0 + dv * math.sin(w * tt), n_skip + 6 * n_per, x_ss)
+        t, v = t[n_skip:], v[n_skip:]
+        vc = vc0 + dv * np.sin(w * t) * math.sin(w * T / 2) / (w * T / 2)     # the control's own cycle means
+        e = np.exp(-1j * w * t)
+        out[fm] = (v * e).sum() / (vc * e).sum()
+    return out
+
+
+@pytest.mark.parametrize("topology", ["buck", "boost"])
+def test_CV24_the_current_mode_plant_matches_a_cycle_by_cycle_switching_simulation(tmp_path, topology):
+    """CV-24: analyse_loop's peak-current-mode plant (its T over the board's own compensator gm·Z(ITH)·H) against
+    the converter switched cycle by cycle (_pcm_switching): the buck (Ridley's model) and the boost (the module's
+    own derivation, which no published source checked before) agree to 0.3 dB and 1.5° up to f_sw/10 (measured: the
+    boost 0.06 dB / 0.3°, the buck 0.21 dB / 0.9° with heavy slope compensation, Ridley's own small error)."""
+    from test_loop import B_I, B_IN, B_OUT, C, F_SW, GM, I_OUT, K, L, R_SENSE, V_IN, V_OUT, _boost, _setup
+    from groundtruth.analysis.loop import analyse_loop
+    if topology == "buck":
+        b, cfg, spec = _setup(tmp_path, "sim", **{"Slope Compensation": "20mV/us"})
+        v_in, v_out, i_out, rc, cc, chf, h, se = V_IN, V_OUT, I_OUT, 2.2e3, 22e-9, 22e-12, 0.2, 20e3
+    else:
+        b, cfg, spec = _boost(tmp_path, "sim", **{"Slope Compensation": "10mV/us"})
+        v_in, v_out, i_out, rc, cc, chf, h, se = B_IN, B_OUT, B_I, 10e3, 10e-9, 100e-12, 10e3 / 300e3, 10e3
+    res = analyse_loop(b, cfg, spec)
+    assert not res.error, res.error
+    fms = (F_SW / 50, F_SW / 10)
+    sim = _pcm_switching(topology, v_in, v_out, i_out, L, C, R_SENSE / K, se / K, F_SW, fms)
+    for fm, g in sim.items():
+        s = 2j * math.pi * fm
+        gc = GM * h / (1 / (rc + 1 / (s * cc)) + s * chf)
+        t = np.interp(math.log(fm), np.log(res.response.f), res.response.h.real) + \
+            1j * np.interp(math.log(fm), np.log(res.response.f), res.response.h.imag)
+        plant = t / gc
+        assert 20 * math.log10(abs(g / plant)) == pytest.approx(0.0, abs=0.3), (topology, fm)
+        assert math.degrees(np.angle(g / plant)) == pytest.approx(0.0, abs=1.5), (topology, fm)
+
+
+def _receiver_triangle(n, f0, frac, rate, rbw):
+    """An independent EMI receiver on a triangle-swept harmonic: its complex baseband (offset 0 … n·f0·frac), a
+    Gaussian filter of 6 dB bandwidth rbw (H(f) = exp(−4 ln2 (f/rbw)²), 0.5 at ±rbw/2) applied by direct convolution
+    with its impulse response √(π/a)·exp(−π²t²/a), tunings every rbw/32 across the sweep, the peak envelope."""
+    width = n * f0 * frac
+    fs = 16.0 * (width + 4 * rbw)
+    periods = max(4, math.ceil(8.0 / rbw * rate) + 2)
+    t = np.arange(int(periods / rate * fs)) / fs
+    dev = width * (1.0 - np.abs(2.0 * ((t * rate) % 1.0) - 1.0))
+    s = np.exp(2j * np.pi * np.cumsum(dev) / fs)
+    a = 4 * math.log(2) / rbw ** 2
+    half = int(4 * math.sqrt(a) / math.pi * fs)
+    tau = np.arange(-half, half + 1) / fs
+    h = math.sqrt(math.pi / a) * np.exp(-(math.pi ** 2) * tau ** 2 / a) / fs
+    return max(float(np.abs(np.convolve(s * np.exp(-2j * np.pi * fc * t), h, mode="valid")[len(tau):]).max())
+               for fc in np.arange(-rbw, width + rbw, rbw / 32))
+
+
+@pytest.mark.parametrize("n, f0, frac, rate", [(1, 500e3, 0.1, 10e3), (1, 500e3, 0.1, 300.0), (5, 500e3, 0.2, 10e3),
+                                               (1, 2e6, 0.2, 30e3)])
+def test_CV30_the_spread_receiver_reads_what_an_independent_receiver_reads(n, f0, frac, rate):
+    """CV-30 (ISSUE-10): emi/spread.receiver_gain, peak detector, triangle modulation, RBW 9 kHz, against the
+    independent receiver above within 0.1 dB. The wide sweeps (100 and 500 kHz) have their worst tuning mid-band
+    (a comb of lines one modulation rate apart): 25 coarse tunings read them 0.5-0.7 dB low before."""
+    from groundtruth.emi.spread import Spread, receiver_gain
+    got = receiver_gain(n, f0, Spread(frac, "triangle", rate), 9e3, "peak")
+    ref = _receiver_triangle(n, f0, frac, rate, 9e3)
+    assert 20 * math.log10(got / ref) == pytest.approx(0.0, abs=0.1)
+
+
+@pytest.mark.parametrize("v_out", [1.2, 6.0])          # D = 0.1 and 0.5 at 12 V in
+def test_CV28_the_switch_node_s_loss_and_densities_are_its_two_states_rms(tmp_path, v_out):
+    """CV-28 (ISSUE-7): the switch node carries I from the high side's pads for D and from the low side's for 1 - D.
+    Its copper loss is D·P_hs + (1 - D)·P_ls of the two states solved apart (the mean pattern alone read 6-17 % low
+    on this buck), its density map the RMS √(D·J_hs² + (1-D)·J_ls²) of those two solves, and the thermal heat
+    counts the difference on top of the mean current's."""
+    from boardgen import discrete_buck_board
+    from conftest import make
+    from test_power import run
+    from groundtruth.analysis.detect import detect_converters
+    from groundtruth.analysis.power import (DC_F, _area_shares, _side, dc_board_build, dc_summary, elements_of,
+                                            switch_inductor)
+    from groundtruth.analysis.simulate import BoardModel
+    from groundtruth.analysis.thermal import copper_heat
+    from groundtruth.solver.peec import RouteExcitation
+    board, sc, _ = make(tmp_path, discrete_buck_board(), "swrms", nets=())
+    spec = detect_converters(board, sc.config)[0].spec
+    spec.f_sw, spec.i_out, spec.v_in, spec.v_out = 300e3, 3.0, 12.0, v_out
+    r, _, settings = run(tmp_path, discrete_buck_board(), "swrms2", spec=spec)
+    D = v_out / 12.0
+    sw = next(p for p in r.dc if p["name"].startswith("switch node"))
+    # the two conduction states solved apart, on the same whole-board DC model (rebuilt: the result released it)
+    st = dc_board_build(BoardModel(board, settings.config))
+    els = elements_of(board, spec)
+    sw_net, ind = switch_inductor(board, settings.config, spec)
+    sink = _area_shares(st, [p for p in ind.pads if p.net == sw_net], _side(ind), -1.0)
+
+    def state(side, pads):
+        """The node fed from one side alone: (R in Ω, density maps per A)."""
+        inj = [x for el in els if el.ref in side for x in _area_shares(st, pads(el), _side(el.fp), el.weight)]
+        sol = RouteExcitation(st.plane, [], injections=inj + sink).solve(DC_F)
+        s, m = dc_summary(st, sol, 1.0, "x")
+        return s["r_mohm"] * 1e-3, m
+    (r_h, m_h), (r_l, m_l) = state(spec.high_side, lambda e: e.b), state(spec.low_side, lambda e: e.a)
+    i = spec.i_out
+    assert sw["rms"] and sw["loss_w"] == pytest.approx((D * r_h + (1 - D) * r_l) * i * i, rel=2e-3)
+    rms = r.dc_maps[sw["name"]]
+    for layer in m_h:
+        ref = np.sqrt(D * m_h[layer] ** 2 + (1 - D) * m_l[layer] ** 2) * i
+        assert np.allclose(rms[layer], ref, rtol=2e-3, atol=1e-3 * float(ref.max() or 1.0)), layer
+    # the heat over the node's copper: the mean flow's ρ·J² plus the variance = Σ ρ·J_rms², i.e. the path's loss
+    # (the stage's other paths add theirs on top)
+    assert r.dc_ripple_sq[sw["name"]]
+    total = sum(float(h[3].sum()) for h in copper_heat(board, [r]).values())
+    assert total > sw["loss_w"] * 0.99

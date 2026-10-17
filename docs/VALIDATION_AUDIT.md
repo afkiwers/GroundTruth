@@ -1,17 +1,20 @@
 # Validation audit: Signal paths, Converters, DC loads
 
-Branch `validation-audit` (from `main`), 2026-10-17. This file is the audit's record: the system overview, the
-validation matrix with every row's outcome, the issue log with evidence, and the final assessment. The independent
-checks are `tests/test_validation_audit.py` (43 test functions, 75 cases); each matrix row names its test or the
-existing test it rests on. Status words: **Verified** (an independent method agrees within the stated tolerance),
+Round 1 on branch `validation-audit` (merged f171f99, 2026-10-17); round 2 on `audit-2` (2026-10-18). This file is
+the audit's record: the system overview, the validation matrix with every row's outcome, the issue log with
+evidence, and the final assessment. The independent checks are `tests/test_validation_audit.py` (52 test functions,
+92 cases); each matrix row names its test or the existing test it rests on. Status words: **Verified** (an independent method agrees within the stated tolerance),
 **Verified (conditions)** (only under the conditions named), **Covered** (an existing analytic test, reviewed, not
 re-derived here), **Limitation** (known model error, quantified, not fixed), **Unverified** (no independent
 evidence available), **Fixed** (a defect, corrected, with a regression test that fails on the old code).
 
 ## Executive summary
 
-- 8 defects found; 7 fixed with regression tests that fail on the baseline code and pass now; 1 (ISSUE-7) is a
-  modelling limitation, quantified and documented.
+- 10 defects found, all fixed, each with a regression test that fails on the code before its fix and passes now.
+  Round 1: ISSUE-1 to -8 (ISSUE-7 then documented); round 2: ISSUE-7 fixed, ISSUE-9 and -10 found and fixed, the
+  items left unverified in round 1 checked (the boost loop against a switching simulation, the MIL-STD-461G limits
+  against the standard, the Tier 1 rules on constructed geometry, the spread receiver against an independent one),
+  and refboard simulated with the old and the new code ("Round 2" below).
 - The most consequential:
   - **ISSUE-1**: a boost's losses (switches, inductor, diode), and through them its input current, its thermal
     heat and its current capacity, were wrong at any duty but ½. Example: 5 V → 20 V at 1 A put 0.2 W into the
@@ -26,8 +29,9 @@ evidence available), **Fixed** (a defect, corrected, with a regression test that
   random operating points.
 - Confidence, after the fixes: **Signal paths** good for the circuit, spectra and emission arithmetic; moderate for
   absolute emission levels (the quasi-static loop model's documented limits). **Converters** good for the hot
-  loop, ringing, conducted chain, losses and DC paths, buck and boost alike; the switch node's copper heat is low
-  by 6-17 % (ISSUE-7). **DC loads** high: every result checked against circuit identities that must hold exactly.
+  loop, ringing, conducted chain, spread receiver, loop gain (both topologies against a switching simulation),
+  losses and DC paths (the switch node now RMS), buck and boost alike. **DC loads** high: every result checked
+  against circuit identities that must hold exactly.
 
 ## Phase 1: the system and the baseline
 
@@ -119,6 +123,11 @@ pins); `radiation` (signal paths and converters); the component models (all thre
 | SP-18 | Signal-path Bode: RC pole, op-amp pole | 1/(2π(R_drv+R)C), GBW/gain | 1 % | Covered (test_transfer) |
 | SP-19 | Board-wide resonance heights above 1 GHz | grid convergence | – | Limitation (documented in ARCHITECTURE: several dB between grids; a note says so) |
 | SP-20 | Route finding through series parts, `route_missing` | – | – | Covered (test_path, test_checks) |
+| SP-21 | Tier 1 gap_crossing: a slot's length, below min_gap_mm none | constructed geometry | 0.01 mm | Verified (round 2, 3 cases) |
+| SP-22 | Tier 1 split between two nets named; reference_net over the other net | constructed geometry | 0.05 mm | Verified (round 2) |
+| SP-23 | Tier 1 edge_proximity within edge_factor·h, its distance | constructed geometry | 0.01 mm | Verified (round 2; h is the foils' centre spacing: the limit ~17 % wider than with the dielectric, conservative) |
+| SP-24 | Tier 1 off_plane for the uncovered length | constructed geometry | 0.05 mm | Verified (round 2) |
+| SP-25 | RE102 limit curves (MIL-STD-461G Figs. RE102-1 to -4) | the standard's figures | exact | Verified (round 2, test_CV26) |
 
 ### Converters
 
@@ -148,10 +157,12 @@ pins); `radiation` (signal paths and converters); the component models (all thre
 | CV-21 | Boost ground split with the energy balance | Kirchhoff | 1 % | Covered (test_power) |
 | CV-22 | Stages' DC currents combined | superposition, 2× | exact | Covered (test_power) |
 | CV-23 | Loop gain: buck Ridley (no ESR), voltage-mode LC pair, boost RHP zero and LC pair at D' | written-out models | 1e-9 | Covered (test_loop) |
-| CV-24 | Boost peak-current-mode loop (the code's derivation) | none independent | – | Unverified (internally consistent: its RHP zero and DC gain match Erickson's forms) |
+| CV-24 | Peak-current-mode loop plant, buck and boost (the boost: the code's own derivation) | cycle-by-cycle switching simulation, cycle means | 0.3 dB / 1.5° to f_sw/10 | Verified (round 2: boost 0.06 dB / 0.3°, buck 0.21 dB / 0.9°) |
 | CV-25 | Spread spectrum receiver (sinusoidal FM, slow / fast sweeps, random hops) | Bessel, chirp gain, Rayleigh | – | Covered (test_spread) |
-| CV-26 | CE101 limit curves (MIL-STD-461G Figs. CE101-1, -4) | the standard (not at hand) | – | Unverified |
-| CV-27 | Switch-node copper loss and heat | D·P_hs + (1−D)·P_ls | – | **Limitation** (ISSUE-7) |
+| CV-26 | CE101 limit curves (Figs. CE101-1, -4), Table II bandwidths, CE102, the LISN (Fig. 6, 4.3.6) | MIL-STD-461G itself (everyspec) | exact | Verified (round 2); the LISN's 1 kΩ: **Fixed** (ISSUE-9) |
+| CV-27/28 | Switch-node copper loss, densities, heat | the two conduction states solved apart | 0.2 % | **Fixed** (ISSUE-7, round 2), Verified |
+| CV-29 | Fix advisor on a boost: no-change outcome = the stage's figures; Middlebrook at the input | full Simulate | 1e-9 | Verified (round 2) |
+| CV-30 | Spread receiver, triangle sweeps narrow and wide | an independent receiver (direct convolution, dense tuning) | 0.1 dB | **Fixed** (ISSUE-10), Verified (round 2, 4 cases) |
 
 ### DC loads
 
@@ -188,7 +199,9 @@ pins); `radiation` (signal paths and converters); the component models (all thre
 | ISSUE-4 | DC loads: a pin named twice fails the rail with a misleading message | Medium | Fixed, verified |
 | ISSUE-2 | Converter (boost): fix advisor's Middlebrook \|Z_in\|, filter current and voltage | Medium | Fixed, verified |
 | ISSUE-6 | Signal paths: `current_a` read 2/π of the documented fundamental (−3.9 dB) | Medium | Fixed, verified |
-| ISSUE-7 | Converter: switch-node DC path averaged, not RMS | Medium-Low | Limitation, documented |
+| ISSUE-7 | Converter: switch-node DC path averaged, not RMS | Medium-Low | Fixed (round 2), verified |
+| ISSUE-9 | Converter (MIL-461): the LISN's 1 kΩ across its port left out (0.4 dB high) | Low | Fixed (round 2), verified |
+| ISSUE-10 | Converter: the spread receiver's tuning search missed mid-band peaks (0.5-0.7 dB optimistic) | Medium | Fixed (round 2), verified |
 | ISSUE-3 | Converter (boost) without V_out: pulse amplitude I_out, ground split 1 − d | Low | Fixed, verified |
 
 ### ISSUE-1: a boost's losses took the high side's conduction time for the switch duty
@@ -282,22 +295,53 @@ pins); `radiation` (signal paths and converters); the component models (all thre
 - **Fix:** I_L = I_out/d; the load's share of the input current is d.
 - **Evidence:** CV-15.
 
-### ISSUE-7: switch-node DC path (limitation, not fixed)
-- **What happens:** the path feeds the averaged current: D from the high side's pads, 1 − D from the low side's.
+### ISSUE-7: switch-node DC path (fixed in round 2)
+- **What happened:** the path fed the averaged current: D from the high side's pads, 1 − D from the low side's.
   The copper actually carries the full current from each side in turn.
 - **Consequence:** the copper loss and heat read D·(1−D)·I²·R_hl low, R_hl being the resistance between the
   switches' pads along the node. On the test buck that is 5.9 % (D = 0.1), 12.5 % (0.25) and 17 % (0.5) of the
-  path's loss; near the high side's pads the heat reads lower still.
-- **Why not fixed here:** a proper fix solves the two conduction states separately and adds their heat
-  (D·q_hs + (1−D)·q_ls), as `bridge_rms` does for motor bridges. `combine_dc` relies on linear superposition of
-  densities, which RMS paths do not allow, so it would need rework too.
-- **Recommendation:** do this in a branch of its own.
+  path's loss; near the high side's pads the heat read lower still. The densities and via currents for the checks
+  were means, not RMS.
+- **Fix (exact, and linear where it must be):** the time-averaged square of a two-state current is
+  |J_mean|² + D(1−D)·|J_hs − J_ls|².
+  - One more DC solve per stage (`ConverterSetup.dc_ripple`): 1 A in at the high side's pads, out at the low
+    side's, which is J_hs − J_ls.
+  - `dc_summary(ripple=)`: RMS densities, via and part currents; R and the loss gain D(1−D)·R_d.
+  - The mean (`dc_vectors`) still superposes linearly in `combine_dc`; the variance is kept as `dc_ripple_sq`
+    (heat, as a bridge's RMS density) and `dc_ripple_branch` (vias, in quadrature); the stages' switching is taken
+    as independent.
+  - Thermal adds the variance heat, scaled ∝ s² in the capacity search; Sharper map solves it too; split
+    Simulates carry it (`compact_dc_branch`).
+- **Evidence:** CV-28 (D = 0.1, 0.5): the loss equals D·P_hs + (1−D)·P_ls of the two states solved apart (0.2 %),
+  and the density maps equal their RMS. `test_the_stages_dc_currents_add_up_on_one_board_model` (test_power)
+  updated: the combined map is √(|2·J_mean|² + 2·variance), not 2·|J_mean|.
+
+### ISSUE-9: the MIL-STD-461 LISN's port (fixed in round 2)
+- MIL-STD-461G Figure 6 has 1 kΩ from the signal port to the case, in parallel with the receiver's 50 Ω (47.6 Ω).
+  The code had the 50 Ω alone, so CE102 readings came out 20·log(50/47.6) = 0.42 dB high (conservative); the CE101
+  lead model had the same port.
+- **Fix:** `Lisn.R_p` (the port's own resistor), 1 kΩ on `mil461` and `CE101_LEAD`. **Evidence:** CV-6.
+- Confirmed from the standard while there: the LISN impedance is specified with the power input unterminated
+  (4.3.6 c), as modelled; Table II's bandwidths; CE102 Figure CE102-1 and its relaxations; CE101 Figures CE101-1 and
+  -4; RE102 Figures -1 to -4. The 15 ms dwell is Table II's (the code cited Table III; comment corrected).
+
+### ISSUE-10: the spread receiver's tuning search (fixed in round 2)
+- **Reproduce:** a 500 kHz-wide triangle sweep at 10 kHz (harmonic 5 of 500 kHz, 20 %), RBW 9 kHz.
+  `receiver_gain` read −14.01 dB; an independent receiver (direct convolution, tunings every RBW/32) reads
+  −13.48 dB. A 400 kHz sweep at 30 kHz: −8.98 dB against −8.25 dB.
+- **Root cause:** with the modulation rate near the RBW, the swept harmonic is a comb of lines one rate apart whose
+  strongest lies anywhere in the band (here 110 kHz in). The search placed 25 coarse tunings across the band,
+  dense ones only at the ends, then refined the 3 best; it missed the peak by 0.5-0.7 dB, optimistically.
+- **Fix:** the whole band is scanned at RBW/2 (at most 2000 tunings, as random hopping already was), plus the
+  dense ends; the 5 best are refined.
+- **Evidence:** CV-30, 4 cases within 0.03 dB.
 
 ### Smaller observations (no change)
 - The via plating density uses π·d·t, the IPC capacity π·(d+t)·t: ~8 % apart for 0.3 mm vias.
 - All receivers' input capacitance sits at the route's end (`load_pf × receivers`).
 - The inner-layer εr is the thickness-weighted mean of the dielectrics between the neighbours.
-- The MIL-461 LISN is modelled with its input unterminated (as its impedance calibration is specified).
+- The Tier 1 edge rule's h is the foils' centre-to-centre height: a limit ~17 % wider than with the dielectric
+  (on a 0.2 mm core), so it flags slightly more (conservative).
 
 ## Phase 6-8: corrections and verification
 
@@ -313,6 +357,9 @@ Changed code (a diff against the baseline copy shows only these):
 | `analysis/simulate.py` | `current_a` (ISSUE-6); `_line_of`: dielectric heights, offset stripline (ISSUE-5) |
 | `emi/spectrum.py` | H&J 1980 microstrip, Wheeler stripline, `offset_stripline` (ISSUE-5) |
 | `docs/ARCHITECTURE.md`, `ui/help.html` | the line model, the duty convention, ISSUE-7 |
+| round 2: `analysis/power.py`, `analysis/thermal.py`, `analysis/sharper.py`, `analysis/simulate.py` | ISSUE-7: the switch node's variance run, `dc_summary(ripple=)`, heat, `combine_dc`, portability |
+| round 2: `emi/conducted.py`, `emi/spread.py` | ISSUE-9 (`Lisn.R_p`), ISSUE-10 (the tuning search), the Table II citation |
+| round 2: `tests/test_power.py` | the combined-view expectation (mean superposed, variance in quadrature) |
 
 Regression evidence:
 - Against the baseline code: the 8 regression cases of ISSUE-1/2/3/4/6 failed (the 3 buck and D = ½ cases
@@ -323,19 +370,67 @@ Regression evidence:
 
 Full suite on the final code: see "Final run" below.
 
+## Round 2 (2026-10-18, branch `audit-2`)
+
+The user: "continue with fixing the other issues as well a continue your audit", and fix the venv.
+
+- **Venv:** the whole venv had been moved from `...\Dokumente\PCB-EMI\.venv`. Its editable install pointed at
+  `PCB-EMI\src`, and every launcher (`pytest.exe`, `groundtruth.exe`, `pip.exe`) had the old interpreter built in,
+  so re-linking the package alone would not have fixed it. It was rebuilt in place as `.venv` with the old one's
+  exact versions as constraints (`out/audit_validation/venv_constraints.txt`): the editable install now points at
+  this folder. Left out: the ad-hoc dev tools the old venv held (py-spy, pyflakes, vulture, pyopencl, pypdf);
+  install them again if needed. `src/pcbemi.egg-info` (the project's old name, gitignored) is a harmless leftover
+  that pip lists.
+- **Fixed:** ISSUE-7 (switch node RMS), ISSUE-9 (MIL-461 LISN port), ISSUE-10 (spread tuning search).
+- **Verified, round 1's open items:**
+  - CV-24: the loop plant against a switching simulation. A first comparison sampled v_out at the switching
+    instants and showed 4-15° of phase difference on the boost; that came from the measurement, not the code
+    (the boost's pulsed output ripple), and vanished with cycle means.
+  - CV-26 / SP-25: CE101, RE102, CE102, Table II and the LISN against MIL-STD-461G itself.
+  - SP-21 to -24: the Tier 1 rules on constructed geometry.
+  - CV-29: the fix advisor on a boost.
+  - CV-30: the spread receiver.
+- **Covered, reviewed:** plane-pair capacitance and cavity resonance (test_capacitance), shunt and op-amp loops on
+  boards (test_path), Bode responses (test_transfer), victims' plate coupling and termination divider
+  (test_stack, test_stage_victims), the fix advisor's other options (test_fix_advisor: every change against a full
+  Simulate with it).
+- **refboard, old code (fae19c9) against new (audit-2), every net and converter** (they are switched off
+  in the user's file), same settings, the board only read:
+
+  | | Old | New |
+  |---|---|---|
+  | Line Z0, outer / inner | 52.7 / 54.5 Ω | 44.8 / 38.6 Ω |
+  | Worst margin SPI_SCK / SPI_MISO / SPI_MOSI | +15.3 / +18.8 / +18.8 dB | +13.9 / +18.1 / +17.8 dB |
+  | Other nets' worst margins | – | within −0.7 to +0.6 dB of old |
+  | conv1 switch-node copper loss, sustained density | 19.5 mW, 28.5 A/mm² | 27.7 mW, 35.9 A/mm² |
+  | conv2 switch-node copper loss | 17.6 mW | 20.3 mW |
+  | Hot-loop L, radiated and conducted margins, other DC paths | – | unchanged |
+
+  The four stages are bucks with CISPR 32 and no spread, so ISSUE-1, -9 and -10 do not show there. The emission
+  margins move little because these short lines are capacitive loads at most harmonics; long or terminated lines
+  depend on Z0 more.
+
 ## Remaining risks and unverified items
-- CV-24 (boost peak-current loop) and CV-26 (CE101 limits): no independent reference here.
 - SP-19: board-wide resonance heights above 1 GHz depend on the grid by several dB (documented; a note says so).
-- ISSUE-7: the switch-node copper heat reads 6-17 % low.
-- ISSUE-5's remainder: very asymmetric inner layers up to ~10 % high, and no solder mask in the closed forms.
+- ISSUE-5's remainder: very asymmetric inner layers up to ~10 % high, and no solder mask in the closed forms (the
+  SI module's field-solved cut would remove both).
+- ISSUE-7's assumption: two stages' switch-node variances add as independent (unlocked phases). Two phases of one
+  controller (interleaved) are locked: their cross term is not modelled.
 - The emission estimate's model limits are unchanged: quasi-static, differential mode only, no cables; it ranks
   layouts, it is not a compliance prediction.
-- The real boards were used read-only for Z0 and settings checks only, not re-simulated: their published numbers
-  in HANDOFF / README predate ISSUE-1 and ISSUE-5 and will move (inner-layer nets' line currents up, boost losses
-  up).
+- Published refboard numbers in HANDOFF and README predate the fixes: the SPI margins about 1 dB lower now,
+  conv1's switch-node copper about 42 % more.
 
 ## Final run
-- **Full suite** on the final code (`out/audit_validation/full_final.log`, 36 min): **835 passed, 1 skipped,
+- **Round 2, full suite** on the final code with the rebuilt venv (`out/audit_validation/full_round2.log`, 37 min):
+  **852 passed, 1 skipped, 3 failed**, none from the audit:
+  - `test_server_setup::test_the_mac_launcher_is_lf_and_executable`: the launcher's git mode (below);
+  - `test_gui::test_a_new_board_gets_its_power_stages_detected` and
+    `…::test_the_bridges_tab_detects_a_motor_bridge_simulates_it_and_shows_its_drive`: the window's busy-gap timing
+    (0.70 s and 0.61 s against 0.5 s) on the loaded machine. Re-run alone: both pass.
+- Round 2's regression tests on round 1's code (b479e10): CV-6, CV-28 (both duties) and the two wide CV-30 sweeps
+  fail, as they should; the verification-only checks (CV-24, CV-26, CV-29, SP-21 to -24) pass on both.
+- **Round 1, full suite** on its final code (`out/audit_validation/full_final.log`, 36 min): **835 passed, 1 skipped,
   3 failed**. None of the three failures is caused by the audit's changes:
   - `test_server_setup::test_the_mac_launcher_is_lf_and_executable`: `tools/install_server.command` is in the
     repository's new first commit (fae19c9, made during the audit) with mode 100644. The test wants 100755 once

@@ -750,7 +750,10 @@ def test_the_stages_dc_currents_add_up_on_one_board_model(tmp_path):
     for layer, m in combo.dc_maps[COMBINED_VIEW].items():
         jx = sum(one.dc_vectors[n][layer][0] for n in one.dc_vectors)
         jy = sum(one.dc_vectors[n][layer][1] for n in one.dc_vectors)
-        assert np.allclose(m, 2 * np.hypot(jx, jy), rtol=1e-4, atol=1e-6)
+        # the mean currents superpose (twice one stage's); each stage's switch-node variance adds in quadrature
+        # (two stages switching independently: twice one stage's variance; VALIDATION_AUDIT.md ISSUE-7)
+        var = sum(one.dc_ripple_sq[n][layer] for n in one.dc_ripple_sq)
+        assert np.allclose(m, np.sqrt((2 * np.hypot(jx, jy)) ** 2 + 2 * var), rtol=1e-4, atol=1e-6)
     single = {v["name"]: v["current_a"] for p in one.dc for v in p["vias"]}
     busiest = path["vias"][0]
     assert busiest["current_a"] <= 2 * sum(single.values())                 # bounded by the paths' sum

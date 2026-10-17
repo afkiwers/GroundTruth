@@ -131,6 +131,11 @@ class ConverterResult(RouteResult):
     dc_maps: dict = field(default_factory=dict)         # path name -> {layer: A/mm² map} (not in the summary)
     dc_grids: dict = field(default_factory=dict)        # path name -> {layer: Grid} of the model it was solved on
     dc_vectors: dict = field(default_factory=dict)      # path name -> {layer: (Jx, Jy) A/mm²} (not in the summary)
+    # the switch node's time variance (dc_runs): it carries the current from the high side for D and from the low
+    # side for 1 - D, so besides the mean (dc_vectors) its heat has D(1-D)·|J_hs - J_ls|² (A²/mm⁴ per layer), and
+    # the per-branch amplitude √(D(1-D))·I·I_hs-ls (A, with its build: combine_dc adds it in quadrature)
+    dc_ripple_sq: dict = field(default_factory=dict)    # path name -> {layer: map} (not in the summary)
+    dc_ripple_branch: dict = field(default_factory=dict)  # path name -> (build, amplitude per branch, A)
     switch_pins: list = field(default_factory=list)     # the switches' D/S (A/K, VIN/SW/GND) pads, for the heatmaps
     location: tuple = (0.0, 0.0)
     layer: str = ""
@@ -148,6 +153,8 @@ class ConverterResult(RouteResult):
         d.pop("dc_grids", None)
         d.pop("dc_vectors", None)
         d.pop("dc_branch", None)
+        d.pop("dc_ripple_sq", None)
+        d.pop("dc_ripple_branch", None)
         d.pop("switch_pins", None)
         d["kind"] = "converter"
         return d
@@ -185,6 +192,8 @@ class ConverterSetup:
     model_label: str = "power-stage"
     config: Optional[Config] = None
     dc_runs: list = field(default_factory=list)      # [(name, current A, ModelRun planned at DC_F)]
+    dc_ripple: dict = field(default_factory=dict)    # path name -> (√(D(1-D)), ModelRun at DC_F of 1 A in at the
+                                                     # high side's pads and out at the low side's: J_hs - J_ls)
     cond_freqs: Optional[np.ndarray] = None           # harmonics driving the conducted estimate, when they are not
     cond_currents: Optional[np.ndarray] = None        # the hot loop's (a boost: the inductor's ripple current)
     victim_run: Optional[ModelRun] = None             # the hot loop on a model that reaches the victims (victims.py)
@@ -213,7 +222,8 @@ class ConverterSetup:
     def extra_runs(self) -> list[ModelRun]:
         """The stage's further runs for the scheduler (solve_setups): the conducted band, the DC paths and the
         victim model (a stage's own, or a bridge leg's)."""
-        return [self.cond] + [r for _, _, r in self.dc_runs] + ([self.victim_run] if self.victim_run else [])
+        return [self.cond] + [r for _, _, r in self.dc_runs] + [r for _, r in self.dc_ripple.values()] + \
+            ([self.victim_run] if self.victim_run else [])
 
     def refine(self, run: ModelRun, config: Config) -> list[float]:
         """The next frequency to solve for one of the extra runs: only the conducted band is refined."""
@@ -1409,18 +1419,32 @@ def dc_path(st: StackBuild, injections: list[tuple], current: float, name: str) 
     return dc_summary(st, sol, current, name)
 
 
-def dc_summary(st: StackBuild, sol: Solution, current: float, name: str, plating_um: float = 25.0
-               ) -> tuple[dict, dict]:
+def dc_summary(st: StackBuild, sol: Solution, current: float, name: str, plating_um: float = 25.0,
+               ripple: Optional[tuple] = None) -> tuple[dict, dict]:
     """Resistance, drop, loss, peak and sustained current density and via currents of a DC solution; each via
     with its IPC-2221 capacity for a 10 K rise (analysis.ipc) and its load in % of it. A part's plated hole is
     not a via here: its soldered pin carries the current between the layers (a connector pin's 6 A read as
-    187 % of the plating's capacity on refboard)."""
+    187 % of the plating's capacity on refboard).
+
+    ripple = (k, sol_d): the path's current switches between two patterns (the switch node: from the high side for
+    D, from the low side for 1 - D) whose difference per A is sol_d, k = √(D(1-D)). `sol` is their time average;
+    the two-state variance adds in quadrature, exactly: the densities, via and part currents are RMS
+    (√(mean² + k²·diff²)), R and the loss gain k²·R_d (Tellegen on sol_d), so loss = r·I² is the time-averaged
+    Joule loss. (Before 2026-10-17 the switch node's mean alone: 6-17 % less copper loss on the test buck,
+    VALIDATION_AUDIT.md ISSUE-7.)"""
     from .ipc import via_capacity
+    k_r, sol_d = ripple if ripple is not None else (0.0, None)
     r = float(sol.Z_loop.real)                       # V per A between the + and - nodes
+    r_rip = k_r * k_r * float(sol_d.Z_loop.real) if sol_d is not None else 0.0
+    r += r_rip
+    i_d = np.asarray(sol_d.I_branch) if sol_d is not None else np.zeros(len(sol.I_branch))
     maps, best, best_s = {}, (0.0, "", (0.0, 0.0)), (0.0, "", (0.0, 0.0))
     for k, layer in enumerate(st.names):
         g = st.grids[k]
         dens = sol.sheet_current(k, st.d) * current / st.t[k] * 1e-6          # A/mm²
+        if sol_d is not None:
+            dd = sol_d.sheet_current(k, st.d) * (k_r * current) / st.t[k] * 1e-6
+            dens = np.sqrt(dens * dens + dd * dd)                               # RMS over the two states
         maps[layer] = dens
         if not dens.size or dens.max() <= 0:
             continue
@@ -1432,10 +1456,10 @@ def dc_summary(st: StackBuild, sol: Solution, current: float, name: str, plating
         if sus[i, j] > best_s[0]:
             best_s = (float(sus[i, j]), layer, tuple(float(v) for v in g.xy(i, j)))
     vias: dict[str, dict] = {}
-    for b, cur in zip(st.plane.branches, sol.I_branch):
+    for b, cur, cd in zip(st.plane.branches, sol.I_branch, i_d):
         if b.kind != "via" or b.name.startswith("pad "):    # a part's hole carries its pin, not only plating
             continue
-        a_ = float(abs(cur)) * current
+        a_ = float(math.hypot(abs(cur), k_r * abs(cd))) * current       # RMS (the mean alone without ripple)
         if a_ < 0.01 * current:                          # vias of other nets, or idle ones
             continue
         dens = a_ / (math.pi * 2 * b.radius * plating_um * 1e-6) * 1e-6
@@ -1450,21 +1474,27 @@ def dc_summary(st: StackBuild, sol: Solution, current: float, name: str, plating
     # |I_b|²·Re(Z_b) per A² (Tellegen: the path's R is the sum over all branches), the rest is copper and vias
     parts: dict[str, dict] = {}
     flow: dict[str, complex] = {}           # a part's parallel branches (simulate.part_pairs): their currents add
-    for b, cur in zip(st.plane.branches, sol.I_branch):
+    flow_d: dict[str, complex] = {}
+    for b, cur, cd in zip(st.plane.branches, sol.I_branch, i_d):
         if b.kind != "part":
             continue
         flow[b.name] = flow.get(b.name, 0j) + complex(cur)
+        flow_d[b.name] = flow_d.get(b.name, 0j) + complex(cd)
         p = parts.setdefault(b.name, {"name": b.name, "current_a": 0.0, "r_mohm": 0.0})
-        p["current_a"] = float(abs(flow[b.name])) * current
-        p["r_mohm"] += float(abs(cur)) ** 2 * complex(b.z(DC_F)).real * 1e3
-    parts = {n: p for n, p in parts.items() if abs(flow[n]) >= 0.01}
+        p["current_a"] = float(math.hypot(abs(flow[b.name]), k_r * abs(flow_d[b.name]))) * current
+        p["r_mohm"] += (float(abs(cur)) ** 2 + (k_r * float(abs(cd))) ** 2) * complex(b.z(DC_F)).real * 1e3
+    parts = {n: p for n, p in parts.items() if math.hypot(abs(flow[n]), k_r * abs(flow_d[n])) >= 0.01}
     r_parts = sum(p["r_mohm"] for p in parts.values()) * 1e-3
-    return {"name": name, "current_a": current, "r_mohm": r * 1e3, "drop_mv": r * current * 1e3,
-            "loss_w": r * current * current, "r_copper_mohm": (r - r_parts) * 1e3,
-            "parts": sorted(parts.values(), key=lambda p: -p["r_mohm"]),
-            "peak_a_mm2": best[0], "peak_layer": best[1], "peak_at": best[2],
-            "sustained_a_mm2": best_s[0], "sustained_layer": best_s[1], "sustained_at": best_s[2],
-            "vias": top}, maps
+    out = {"name": name, "current_a": current, "r_mohm": r * 1e3, "drop_mv": r * current * 1e3,
+           "loss_w": r * current * current, "r_copper_mohm": (r - r_parts) * 1e3,
+           "parts": sorted(parts.values(), key=lambda p: -p["r_mohm"]),
+           "peak_a_mm2": best[0], "peak_layer": best[1], "peak_at": best[2],
+           "sustained_a_mm2": best_s[0], "sustained_layer": best_s[1], "sustained_at": best_s[2],
+           "vias": top}
+    if sol_d is not None:       # RMS figures: the switching share of the loss, for the reports
+        out["rms"] = True
+        out["ripple_loss_w"] = r_rip * current * current
+    return out, maps
 
 
 DC_BUDGET = 3.0               # the whole-board DC model's node budget, times analysis.max_nodes (and the resolution)
@@ -1527,6 +1557,9 @@ def compact_dc_branch(res) -> None:
     res.dc_branch = {name: (dc_board_of(st) if isinstance(st, StackBuild) else st,
                             dc_board_of(st).via_currents(cur) if isinstance(st, StackBuild) else cur)
                      for name, (st, cur) in (res.dc_branch or {}).items()}
+    res.dc_ripple_branch = {name: (dc_board_of(st) if isinstance(st, StackBuild) else st,
+                                   dc_board_of(st).via_currents(cur) if isinstance(st, StackBuild) else cur)
+                            for name, (st, cur) in (getattr(res, "dc_ripple_branch", None) or {}).items()}
 
 
 def dc_nets(board: Board, config: Config, spec: ConverterSpec) -> set[str]:
@@ -1658,6 +1691,11 @@ def _rescale_path(res, path: dict, k: float):
     if name in getattr(res, "dc_branch", {}):
         st, cur = res.dc_branch[name]
         res.dc_branch[name] = (st, cur * k)
+    if name in getattr(res, "dc_ripple_sq", {}):
+        res.dc_ripple_sq[name] = {l: m * (k * k) for l, m in res.dc_ripple_sq[name].items()}
+    if name in getattr(res, "dc_ripple_branch", {}):
+        st, cur = res.dc_ripple_branch[name]
+        res.dc_ripple_branch[name] = (st, cur * k)
 
 
 def input_note(est: dict, v_in: float) -> str:
@@ -1703,7 +1741,16 @@ def dc_runs(model: BoardModel, setup: "ConverterSetup") -> tuple[list, list[str]
             run = ModelRun(st, RouteExcitation(st.plane, [], injections=inj), planned=[DC_F])
             # the inductor current: the load current for a buck, the input current for a boost
             i_sw = res.pulse_a if spec.topology == "boost" else i_out
-            out.append((f"switch node → {inductor.reference}", i_sw, run))
+            name = f"switch node → {inductor.reference}"
+            out.append((name, i_sw, run))
+            if not spec.switch and hs and ls and 0.0 < duty < 1.0:
+                # the injection above is the time average; the node carries the whole current from the high side
+                # for D and from the low side for 1 - D. Its variance is D(1-D)·(J_hs - J_ls)²: one more solve,
+                # 1 A in at the high side's pads and out at the low side's (dc_summary takes it in quadrature)
+                rip = [x for el in hs for x in _area_shares(st, el.b, _side(el.fp), el.weight)] + \
+                    [x for el in ls for x in _area_shares(st, el.a, _side(el.fp), -el.weight)]
+                setup.dc_ripple[name] = (math.sqrt(duty * (1.0 - duty)),
+                                         ModelRun(st, RouteExcitation(st.plane, [], injections=rip), planned=[DC_F]))
         except SolverError as e:
             notes.append(f"DC switch-node path not modelled: {e}")
     if (dst is not None or setup.standard != "none") and spec.input_connector:
@@ -1901,10 +1948,24 @@ def combine_dc(results, rules, plating_um: float = 25.0):
         cur += i_v
         for layer, (jx, jy) in r.dc_vectors.get(name, {}).items():
             vec[layer] = (vec[layer][0] + jx, vec[layer][1] + jy)
-    maps = {layer: np.hypot(jx, jy) for layer, (jx, jy) in vec.items()}
+    # each stage's switch-node variance (dc_ripple_sq / dc_ripple_branch, see dc_summary) adds in quadrature: the
+    # mean currents superpose, the stages' switching is taken as independent (their phases not locked), so the
+    # densities and via currents are RMS and the loss below the time-averaged one
+    rip_sq = {layer: np.zeros(st.grids[k].node.shape) for k, layer in enumerate(st.names)}
+    rip_v = np.zeros(len(st.vias))
+    for r in stages:
+        for name, layers in (getattr(r, "dc_ripple_sq", None) or {}).items():
+            for layer, m in layers.items():
+                if layer in rip_sq and m.shape == rip_sq[layer].shape:
+                    rip_sq[layer] += m
+        for name, (rst, i_b) in (getattr(r, "dc_ripple_branch", None) or {}).items():
+            i_v = np.asarray(i_b) if isinstance(rst, DcBoard) else dc_board_of(rst).via_currents(i_b)
+            if i_v.shape == rip_v.shape:
+                rip_v += i_v ** 2
+    maps = {layer: np.sqrt(jx * jx + jy * jy + rip_sq[layer]) for layer, (jx, jy) in vec.items()}
     best, best_s = _density_peaks(st, maps)
     vias: dict[str, dict] = {}
-    for (_, vname, radius, x, y), a_ in zip(st.vias, np.abs(cur)):
+    for (_, vname, radius, x, y), a_ in zip(st.vias, np.sqrt(cur ** 2 + rip_v)):
         if a_ < 0.01:
             continue
         old = vias.get(vname)
@@ -1936,6 +1997,7 @@ def combine_dc(results, rules, plating_um: float = 25.0):
     view.dc_vectors = {COMBINED_VIEW: {l: (jx.astype(np.float32), jy.astype(np.float32)) for l, (jx, jy) in vec.items()}}
     view.dc_grids = {COMBINED_VIEW: dict(zip(st.names, st.grids))}
     view.dc_branch = {}
+    view.dc_ripple_sq, view.dc_ripple_branch = {}, {}     # the view is never a heat source (thermal._stages)
     view.switch_pins = [p for r in stages for p in (r.switch_pins or [])]
     view.fixes, view.input = [], None
     # the checks on the total current (as _converter_issues does per path)
@@ -1994,12 +2056,30 @@ def dc_analysis(model: BoardModel, setup: "ConverterSetup") -> tuple[list[dict],
         if sol is None:
             notes.append(f"DC {name} not solved")
             continue
-        summary, m = dc_summary(run.build, sol, current, name, model.config.analysis.via_plating_um)
+        ripple = None
+        if name in setup.dc_ripple:
+            k_r, rrun = setup.dc_ripple[name]
+            sol_d = rrun.ok().get(DC_F)
+            if sol_d is None:
+                notes.append(f"DC {name}: its switching share not solved (the mean current only)")
+            else:
+                ripple = (k_r, sol_d)
+        summary, m = dc_summary(run.build, sol, current, name, model.config.analysis.via_plating_um, ripple)
         paths.append(summary)
         maps[name] = m
         grids[name] = dict(zip(run.build.names, run.build.grids))
-        setup.res.dc_vectors[name] = dc_vector_maps(run.build, sol, current)
+        setup.res.dc_vectors[name] = dc_vector_maps(run.build, sol, current)          # the mean flow (arrows)
         setup.res.dc_branch[name] = (run.build, np.asarray(sol.I_branch).real * current)
+        if ripple is not None:
+            k_r, sol_d = ripple
+            st = run.build
+            setup.res.dc_ripple_sq[name] = {
+                layer: ((sol_d.sheet_current(k, st.d) * (k_r * current) / st.t[k] * 1e-6) ** 2).astype(np.float32)
+                for k, layer in enumerate(st.names)}
+            setup.res.dc_ripple_branch[name] = (st, np.asarray(sol_d.I_branch).real * (k_r * current))
+            notes.append(f"DC {name}: the high side carries it for D = {setup.res.duty:.2f}, the low side "
+                         f"for the rest: densities, via currents and the {summary['ripple_loss_w'] * 1e3:.1f} mW of "
+                         "switching share in its loss are RMS")
     return paths, maps, grids, notes
 
 
