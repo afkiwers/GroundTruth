@@ -7,7 +7,7 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `audit-2` (2026-10-18, not merged):** the audit's round 2, at the user's "continue with fixing the other
+- **Branch `audit-2` (2026-10-18, merged into `main` as c5c313e at the user's "Merge"):** the audit's round 2, at the user's "continue with fixing the other
   issues as well a continue your audit" (VALIDATION_AUDIT.md "Round 2"): the venv rebuilt in place (it had been
   moved from `PCB-EMI\.venv`; the editable install and every launcher pointed there); ISSUE-7 fixed (the switch
   node's DC path is RMS: a second DC run per stage, `dc_ripple`); ISSUE-9 (the MIL-461 LISN's 1 kΩ port resistor)
