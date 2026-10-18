@@ -9,6 +9,20 @@ User-facing docs: [README.md](README.md).
 
 ## Environment (Windows 11, PowerShell + Git Bash)
 
+Since 2026-10-18 the work is on a bigger machine (user `andre`, 16 threads, 32 GB, NVIDIA RTX 3050 Laptop 4 GB,
+driver 527 / CUDA 12.0). The notes below were written on the old laptop (user `iwers`); where this machine differs:
+- the repo is `C:\Users\andre\Documents\github\GroundTruth`; Documents is not redirected: KiCad's plugins are in
+  `C:\Users\andre\Documents\KiCad\10.0\plugins`; KiCad 10.0 at `C:\Program Files\KiCad\10.0` as before;
+- kraft_flux_mini_2 is the user's copy `C:\Users\andre\Downloads\flux-2\flux-2.kicad_pcb` (2026-10-17, the current
+  board; `Downloads\flux\flux\flux.kicad_pcb` is an older 10-14 copy without U303's fields). Read only, never
+  write next to it; the scratch settings are in `out/`
+  (copied from the laptop: `out/audit/`, `out/kraft_refresh/`, `out/converge/`, the audit sources);
+- the venv is python.org 3.13 with `out/audit_validation/venv_constraints.txt` and PyTorch **cu118** (the CUDA
+  build, not the CPU one: `pip install torch --index-url https://download.pytorch.org/whl/cu118`), so `gpu: auto`
+  uses the RTX 3050 (its 4 GB run full on kraft's models: a full kraft Simulate took > 2 h on it, 18 min with
+  `--gpu off`). Run the test suite with `CUDA_VISIBLE_DEVICES=""` here: with the GPU visible, test_split's
+  lead-split test never finishes (NEXT_STEPS item 7); run `tests/test_gpu.py` on its own with the GPU.
+
 - **Do not use the default `python`**: it's MSYS/MinGW 3.12 and cannot install PyPI wheels.
   The project venv uses python.org 3.13: `.venv\Scripts\python`. Recreate with
   `py -3.13 -m venv .venv` and `.venv\Scripts\python -m pip install -e ".[plugin,dev,thermal]"` (thermal:

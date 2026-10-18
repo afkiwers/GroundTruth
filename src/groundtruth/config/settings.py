@@ -126,6 +126,11 @@ class ConverterSpec:
     spread_mode: str = "random"           # random (a new frequency every cycle, or spread_rate per s) | triangle
     spread_rate: Optional[float] = None   # triangle: modulation frequency; random: hops per second (default: per cycle)
     conducted: Optional[str] = None       # conducted standard for this stage (default analysis.conducted)
+    # interleaving (analysis/interleave.py): stages with the same group name are phases of one controller, switching
+    # at one frequency, this one delayed by phase_deg of the switching period (None: the group's stages spread
+    # evenly, 360°/n apart in the settings' order); their conducted and radiated emissions are added as phasors
+    interleave: str = ""
+    phase_deg: Optional[float] = None
     source: str = "manual"                # manual | auto (suggested by `groundtruth detect`)
     reviewed: bool = True
     enabled: bool = True                  # off: kept with its values, left out of checks and Simulate (Config.active)
@@ -1288,6 +1293,8 @@ def config_from_data(data: Any) -> Config:
                 spread_rate=_opt(c.get("spread_rate"), f"{where}.spread_rate", "Hz"),
                 conducted=(str(c["conducted"]).lower().replace(" ", "").replace("-", "") if c.get("conducted")
                            else None),
+                interleave=str(c.get("interleave") or "").strip(),
+                phase_deg=_opt(c.get("phase_deg"), f"{where}.phase_deg"),
                 source=str(c.get("source", "manual")), reviewed=bool(c.get("reviewed", c.get("source") != "auto")),
                 enabled=bool(c.get("enabled", True)),
                 note=str(c.get("note", "") or ""),
@@ -1333,6 +1340,8 @@ def config_from_data(data: Any) -> Config:
             problems.append("spread_mode must be random or triangle")
         if spec.spread and spec.spread_mode == "triangle" and not spec.spread_rate:
             problems.append("spread_mode triangle needs spread_rate (the modulation frequency)")
+        if spec.phase_deg is not None and not spec.interleave:
+            problems.append("phase_deg needs interleave (the name of the group of interleaved stages)")
         errors.extend(f"{where} ({spec.name}): {m}" for m in problems)
         if not problems:
             cfg.converters.append(spec)
@@ -1770,6 +1779,10 @@ class SettingsFile:
                 d["loop"] = _flow(dict(c.loop))
             if c.conducted:
                 d["conducted"] = c.conducted
+            if c.interleave:
+                d["interleave"] = c.interleave
+                if c.phase_deg is not None:
+                    d["phase_deg"] = c.phase_deg
             if c.source != "manual":
                 d["source"] = c.source
                 d["reviewed"] = c.reviewed

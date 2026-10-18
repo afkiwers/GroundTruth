@@ -5,6 +5,30 @@ pick each item up on another computer. Written 2026-10-18, after round 3, the re
 For a Claude session: read [../CLAUDE.md](../CLAUDE.md) and the top of [HANDOFF.md](HANDOFF.md) first; this file
 says what to do next, those say how to work in this repo.
 
+**Status, 2026-10-18 evening (round 4, branch `next-steps`, on the bigger machine; VALIDATION_AUDIT "Round 4"):**
+1 done (8x run: 4x converged below 1 GHz, ~3 dB left above; the grid note points at 4x / 8x; a GMRES restart floor
+so 8x converges at all), 2 decided (a finer sampling does not help: `RASTER_MM` stays), 3 done (`_line_of` tries
+more places: no kraft path falls back), 4 see its section, 5 built at the user's "Yes, build it"
+(`analysis/interleave.py`). Item 4 done on the current board (`Downloads\flux-2`, 2026-10-17; VALIDATION_AUDIT's
+table under Round 2, the README's loop figure). A new item 6 came out of it:
+
+**6. Loss in the signal path's lines.** `emi/path.py` cascades lossless lines. /CPU/ADC_I_RAIL_1 (88 mm into the ADC's
+5 pF, C304 at the start) is a quarter wave at 310 MHz; C304's ESL resonates with the line's input there, and the
+7 % Z0 change of the field-solved cut moved its margin by 13 dB (C304's current 0.02 → 4.5 × the input). A real line's
+copper resistance and tan δ damp such a peak. Add them (α = R/2Z0 + G·Z0/2, with R from the skin depth as
+`_trace_resistance` and G from the stackup's tan δ) to `path_currents`' ABCD step, with a test against the lossy
+line's closed form, then compare kraft's ADC paths.
+
+**7. The GPU path on a small GPU, and several processes on one GPU.** On the RTX 3050 (4 GB) a full kraft Simulate
+took > 2 h on the GPU against 18 min on the CPU, and a split Simulate whose two worker processes both pick the GPU
+did not finish in 4 h (`test_split.py`, the lead-split test; on `main` too). Find out whether it is memory
+(WDDM paging when 4 GB are full), the two processes contending, or a GMRES that stops converging on the GPU
+(`tools/dev/gpu_check.py` compares results and speed); then let `gpu: auto` decline a GPU too small for the model
+and give a split's parts the GPU one at a time. Until then run the suite with `CUDA_VISIBLE_DEVICES=""` on this
+machine, and the GPU backend's tests (`tests/test_gpu.py`) separately.
+
+The sections below are kept as they were written, for the commands.
+
 | # | Item | Needs | Rough effort |
 |---|---|---|---|
 | 1 | Resonance heights above ~600 MHz still move with the grid | an 8× run (memory, time) | 2–6 h of computing, 1 h to evaluate |

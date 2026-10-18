@@ -702,8 +702,52 @@ def detect_converters(board: Board, config: Config) -> list[DetectedConverter]:
                 out.append(d)
                 seen.add(sw)
     _unique_names(out)
+    _interleave_proposals(board, out, by_net)
     out.sort(key=lambda d: d.spec.name)
     return out
+
+
+def _stage_controller(board: Board, spec: ConverterSpec, by_net: dict) -> Optional[str]:
+    """The IC that switches a stage: an integrated stage's own switch IC; else an IC (U / IC) with a pad on the
+    switch node (a synchronous controller's SW pin) or on the high-side switch's gate net, directly or through a
+    gate resistor (one R between the gate and the IC's pin). None when no IC (or more than one) qualifies."""
+    if spec.switch:
+        return spec.switch[0]
+    nets = {spec.switch_node} if spec.switch_node else set()
+    for ref in spec.high_side:
+        fp = board.footprint(ref)
+        t = fet_terms(fp) if fp is not None else None
+        if t is None:
+            continue
+        nets.add(t[0])
+        for r in by_net.get(t[0], []):           # a gate resistor: its other net
+            if ref_prefix(r.reference) == "R" and len(r.nets()) == 2:
+                nets |= r.nets() - {t[0]}
+    ics = {fp.reference for n in nets if n for fp in by_net.get(n, [])
+           if ref_prefix(fp.reference) in ("U", "IC") and not fp.dnp}
+    return next(iter(ics)) if len(ics) == 1 else None
+
+
+def _interleave_proposals(board: Board, found: list[DetectedConverter], by_net: dict):
+    """Stages switched by one IC (the channels of a dual or multiphase controller, like kraft_flux_mini_2's LTC7890
+    U303 for SW1 and SW2) become an interleave group named after it, 360°/n apart in name order: what most such
+    controllers do, but some run their channels in phase or set the phase by a pin, so a reason asks to check the
+    datasheet (analysis/interleave.py)."""
+    by_ic: dict[str, list[DetectedConverter]] = {}
+    for d in found:
+        ic = _stage_controller(board, d.spec, by_net)
+        if ic is not None:
+            by_ic.setdefault(ic, []).append(d)
+    for ic, ds in by_ic.items():
+        if len(ds) < 2 or len({d.spec.f_sw for d in ds}) > 1:
+            continue
+        ds.sort(key=lambda d: d.spec.name)
+        others = ", ".join(d.spec.name for d in ds)
+        for k, d in enumerate(ds):
+            d.spec.interleave = f"{ic} phases"
+            d.spec.phase_deg = 360.0 * k / len(ds)
+            d.reasons.append(f"interleaved with the other stages {ic} switches ({others}), {d.spec.phase_deg:g}° of "
+                             f"{len(ds)}: check the controller's datasheet for its phases")
 
 
 def _tagged_converter(board: Board, config: Config, st, tags, by_net: dict, zone_nets: set[str],

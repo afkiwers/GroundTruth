@@ -634,6 +634,17 @@ def _stage(board, c, issues, warn, figs, view3d) -> str:
         w = c.worst
         cards.append(_kpi("Radiated", f"{w['margin_db']:+.1f} dB", f"{w['e_dbuv']:.1f} dBµV/m @ {w['f'] / 1e6:.4g} MHz",
                           _margin_cls(w["margin_db"], warn)))
+    g = getattr(c, "interleave", None)
+    if g:                                    # its interleave group: the stages together (analysis/interleave.py)
+        who = ", ".join(f"{n} {p:g}°" for n, p in g["phases_deg"].items())
+        for label, key, inp in (("Conducted, group", "conducted_worst", "conducted_in_phase_worst"),
+                                ("Radiated, group", "worst", "radiated_in_phase_worst")):
+            w, wi = g.get(key), g.get(inp)
+            if w:
+                cards.append(_kpi(label, f"{w['margin_db']:+.1f} dB",
+                                  f"{who} @ {w['f'] / 1e6:.4g} MHz" + (f"; in phase {wi['margin_db']:+.1f} dB"
+                                                                      if wi else ""),
+                                  _margin_cls(w["margin_db"], warn)))
     flt = getattr(c, "input_filter", None)
     if flt:
         cards.append(_kpi("Input filter (guidance)", f"f_c ≤ {flt['f_c'] / 1e3:.3g} kHz",

@@ -262,6 +262,9 @@ def converter_text(c) -> list[str]:
                    f"(margin {w['margin_db']:+.1f} dB)")
     elif not c.conducted_standard:
         out.append("    conducted: not estimated (set input_connector)")
+    if getattr(c, "interleave", None):       # its interleave group, the stages together (analysis/interleave.py)
+        from ..analysis.interleave import interleave_text
+        out += [f"    {t}" for t in interleave_text(c.interleave)]
     out += ce101_lines(c)
     flt = getattr(c, "input_filter", None)
     if flt:

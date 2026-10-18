@@ -122,14 +122,14 @@ pins); `radiation` (signal paths and converters); the component models (all thre
 | SP-16 | Plane-pair capacitance, cavity resonance f10 | ε0εrA/t; c/(2a√εr) | exact / 3 % | Covered (test_capacitance) |
 | SP-17 | Shunt loops on a board (50 Ω shunt vs load_ohms), op-amp board path | equivalent circuits | 0.1-0.4 dB | Covered (test_path) |
 | SP-18 | Signal-path Bode: RC pole, op-amp pole | 1/(2π(R_drv+R)C), GBW/gain | 1 % | Covered (test_transfer) |
-| SP-19 | Board-wide resonance heights above 1 GHz | grid convergence | – | Improved (round 3: strips as wide as their copper, SP-27; kraft above 1 GHz rms 7.0 → 4.0 dB 1x vs 2x, 5.3 → 4.4 dB 2x vs 4x; the largest mode now agrees at 2x and 4x, 1x places it 8 % low); the grid note now from 600 MHz. Limitation (several dB remain) |
+| SP-19 | Board-wide resonance heights above 1 GHz | grid convergence (1x / 2x / 4x / 8x) | – | Improved (round 3: strips as wide as their copper, SP-27); round 4: 8x run, 4x vs 8x 0.8 dB rms at 0.5-1 GHz (converged), 2.9 dB rms at 1-1.5 GHz; the grid note points at 4x below 1 GHz and 8x above. Limitation (~3 dB above 1 GHz) |
 | SP-20 | Route finding through series parts, `route_missing` | – | – | Covered (test_path, test_checks) |
 | SP-21 | Tier 1 gap_crossing: a slot's length, below min_gap_mm none | constructed geometry | 0.01 mm | Verified (round 2, 3 cases) |
 | SP-22 | Tier 1 split between two nets named; reference_net over the other net | constructed geometry | 0.05 mm | Verified (round 2) |
 | SP-23 | Tier 1 edge_proximity within edge_factor·h, its distance | constructed geometry | 0.01 mm | Verified (round 2; h is the foils' centre spacing: the limit ~17 % wider than with the dielectric, conservative) |
 | SP-24 | Tier 1 off_plane for the uncovered length | constructed geometry | 0.05 mm | Verified (round 2) |
 | SP-25 | RE102 limit curves (MIL-STD-461G Figs. RE102-1 to -4) | the standard's figures | exact | Verified (round 2, test_CV26); round 3: fixed wing from 2 MHz, helicopter / space curves apart (461H) |
-| SP-26 | The path's line: the field-solved cut of the board at the stretch (solder mask, as-built planes) | the 2D field solver on a hand-built section | 1 % | **Fixed** (ISSUE-5's remainder, round 3), Verified (In1.Cu, B.Cu with mask) |
+| SP-26 | The path's line: the field-solved cut of the board at the stretch (solder mask, as-built planes) | the 2D field solver on a hand-built section | 1 % | **Fixed** (ISSUE-5's remainder, rounds 3 and 4), Verified (In1.Cu, B.Cu with mask; a stretch whose middle has no cut takes one a quarter along: kraft's 14 paths all field-solved) |
 | SP-27 | Strips narrower than the pitch: width, centre, inductance, a neck's resonance on and off the cell rows | the copper's own width; a single strip's integral; the aligned neck | one sub-pitch / 1 % / 2 % | **Fixed** (round 3), Verified (6 cases) |
 
 ### Converters
@@ -400,14 +400,18 @@ The user: "continue with fixing the other issues as well a continue your audit",
 - **kraft_flux_mini_2, old code (fae19c9) against new (audit-2), every net and converter** (they are switched off
   in the user's file), same settings, the board only read:
 
-  | | Old | New |
-  |---|---|---|
-  | Line Z0, outer / inner | 52.7 / 54.5 Ω | 44.8 / 38.6 Ω |
-  | Worst margin SPI_SCK / SPI_MISO / SPI_MOSI | +15.3 / +18.8 / +18.8 dB | +13.9 / +18.1 / +17.8 dB |
-  | Other nets' worst margins | – | within −0.7 to +0.6 dB of old |
-  | conv1 switch-node copper loss, sustained density | 19.5 mW, 28.5 A/mm² | 27.7 mW, 35.9 A/mm² |
-  | conv2 switch-node copper loss | 17.6 mW | 20.3 mW |
-  | Hot-loop L, radiated and conducted margins, other DC paths | – | unchanged |
+  | | Old | New | After rounds 3 and 4 (2026-10-18 evening) |
+  |---|---|---|---|
+  | Line Z0, outer / inner | 52.7 / 54.5 Ω | 44.8 / 38.6 Ω | field-solved cut: 43.1-43.8 / 35.6-41.7 Ω |
+  | Worst margin SPI_SCK / SPI_MISO / SPI_MOSI | +15.3 / +18.8 / +18.8 dB | +13.9 / +18.1 / +17.8 dB | +11.4 / +14.8 / +15.4 dB |
+  | Other nets' worst margins | – | within −0.7 to +0.6 dB of old | SW_CLK +32.8 → +40.5 dB; Net-(U301--) +45.7 → +22.1 and ADC_I_RAIL_1 +34.2 → +21.4 dB (a lossless line at a resonance, round 4); the rest within −1.5 to +2.1 dB |
+  | conv1 switch-node copper loss, sustained density | 19.5 mW, 28.5 A/mm² | 27.7 mW, 35.9 A/mm² | 29.7 mW, 37.4 A/mm² |
+  | conv2 switch-node copper loss | 17.6 mW | 20.3 mW | 21.5 mW |
+  | Hot-loop L, radiated and conducted margins, other DC paths | – | unchanged | hot loops +6 % (conv1 1.48 → 1.57 nH), margins within 0.2 dB, control loops unchanged |
+
+  The last column: the current board (`Downloadslux-2lux-2.kicad_pcb`, 2026-10-17, the same results as round
+  2's board where the code did not change: conv1's loop 11.2 kHz / 76.8° / 20.2 dB, 37 errors, 50 warnings),
+  `out/kraft_refresh/now2/`, 18 min on 16 CPU threads.
 
   The four stages are bucks with CISPR 32 and no spread, so ISSUE-1, -9 and -10 do not show there. The emission
   margins move little because these short lines are capacitive loads at most harmonics; long or terminated lines
@@ -433,7 +437,7 @@ The user: "Fix this" (inner-layer Z0 and solder mask), "Is that a bad thing?" (i
 - **Interleaved phases (ISSUE-7's assumption): no error for DC and thermal.** The switching variance
   D(1−D)·|J_hs − J_ls|² is confined to each switch node's own copper, and two stages' switch nodes are different
   nets, so their cross term is exactly zero, locked or not. The combined *emission* of interleaved stages is
-  not modelled (README, not done).
+  not modelled (README, not done; it followed in round 4, `analysis/interleave.py`).
 - **Resonances above 1 GHz (SP-19): the cause and a fix.**
   - The loss physics converges: a plate pair's cavity Q 35.6 against 36.0 by 1/Q = tanδ + δs/h, its peaks within
     0.3 dB from d = 1 to 0.25 mm. The demo board converges within ~1 dB.
@@ -471,19 +475,70 @@ The user: "Fix this" (inner-layer Z0 and solder mask), "Is that a bad thing?" (i
   `analysis.mil461`, on branch `mil461h`.) (The sub-grid for cells of
   0.15 mm and less followed on branch `small-fixes`.)
 
+## Round 4 (2026-10-18, branch `next-steps`, on the bigger machine)
+The items left in "Remaining risks" (docs/NEXT_STEPS.md), on the 16-thread, 32 GB machine with an RTX 3050. The
+kraft board is the user's copy `flux.kicad_pcb` (read only); its 1x convergence run reproduces round 3's numbers to
+the last digit or two.
+- **SP-19, the 8x run.** SPI_SCK's board-wide model at 8x (0.305 mm, 256 152 nodes, the same 25 harmonics,
+  `out/converge/spi_sck_widths_8x.json`, 44 min on 4 threads). It first failed to converge at almost every
+  frequency: GMRES's Krylov basis was limited to 400 MB (`GMRES_MEMORY`), a restart of ~26 at ~1 M unknowns, and a
+  short restart stalls near a resonance (`spi_sck_widths_8x_restart26.log`). With ~150 every solve converged in
+  116-163 iterations. A plugin Simulate at 8x builds the same model (the node budget scales with the resolution),
+  so the restart now has a floor, `GMRES_RESTART_MIN` = 100 (`peec.gmres_restart`; the memory planner,
+  `simulate.solve_bytes`, counts the longer basis): 1020 / 1300 MHz at 8x then converge in 284 / 260 iterations
+  (`probe_8x_restart_floor.log`). Smaller models are unchanged (they restart at 200 already).
+  The rms (max) |m| difference between grids:
+
+  | | 1x vs 2x | 2x vs 4x | 4x vs 8x |
+  |---|---|---|---|
+  | 0.5-1 GHz | 6.3 (17.2) dB | 1.5 (2.7) dB | **0.8 (1.6) dB** |
+  | 1-1.5 GHz | 4.0 (8.0) dB | 4.4 (7.0) dB | **2.9 (5.1) dB** |
+
+  Below 1 GHz 4x is converged. Above it the differences keep shrinking but ~3 dB remain. 4x's peak at 1260-1300 MHz
+  (45-52 mm²) is not at 8x (25-35 mm²): at 1280 MHz both grids excite the same mode, the +3V3 pour on F.Cu against
+  the +3V3 plane on In1 around (120-123, 123) mm through the same vias and C1104, with 11.6 vs 8.5 A/A of
+  displacement current (`hot_1280_4x.log`, `hot_1280_8x.log`): one mode a few per cent apart in frequency, no
+  connection that exists on one grid only. The F.Cu/In1 mode by C1105/C1110 stays at 1020 MHz at 2x, 4x and 8x
+  (69 / 78 / 62 mm²). `grid_sensitive_note` now names 4x for a peak below 1 GHz (none from 4x on) and 8x above it
+  (from 8x on it says the height is good to a few dB). 16x would need ~4x the nodes again, more than this
+  machine's memory alongside the solve.
+- **ISSUE-5's remainder (line cuts).** `tools/dev/line_cut_check.py` on all 14 nets: one path fell back on the
+  closed forms, Net-(U301--) (1.8 mm of track: the middle of its longest track is in a pad's copper). `_line_of` now
+  tries the longest track at its middle, then a quarter from either end, then the next two longest tracks
+  (`LINE_CUT_TRACKS`); U301- reads 43.8 Ω (closed form 44.8), and no path falls back. Test: a track that widens
+  into a pour of its own net at its middle reads the line of the same track without the pour within 1 %
+  (`test_SP26_a_stretch_without_a_cut_at_its_middle_takes_one_further_along`; it fails on the old code).
+  Net-(U1001-VIB) reads 60.6 Ω against the closed form's 38.6 (In1.Cu): a cut that sees its real neighbourhood,
+  not a fallback.
+- **Copper narrower than the 0.15 mm sampling.** `tools/dev/neck_converge.py`, the 0.35 mm neck on seven grids
+  (1.0 to 0.1 mm, `out/neck/`): at Simulate's sampling (0.15 mm, at most 6 × 6 per cell) 763 / 758 / 736 / 762 /
+  716 / 768 / 743 MHz, ±3.5 %; at 0.075 mm and up to 12 × 12, 763 / 783 / 775 / 763 / 807 / 768 / 743 MHz, ±4.1 %.
+  A finer sampling does not narrow the spread (NEXT_STEPS asked for ±2 % before trying it on kraft), so `RASTER_MM`
+  stays: the remaining scatter is how the grid falls on the geometry, ±4 % on a resonance set by a neck narrower
+  than the pitch.
+- **Interleaved stages (the user: "Yes, build it").** `analysis/interleave.py` (ARCHITECTURE "Interleaved stages",
+  REFERENCES A35). Verified: the phasors against the DFT of sampled trapezoids and triangles (0.002 rad, 0.2 %),
+  the ringing rational against `ringing_response`; 180° and 120° sums exactly; two identical stages end to end
+  (180°: the fundamental falls by > 60 dB, 2·f_sw +6.02 dB; in phase +6.02 dB conducted and radiated). On kraft,
+  conv1 + conv2 (detection proposes "U303 phases", 0° / 180°): conducted worst −38.6 dB together, −39.6 in phase,
+  −38.8 / −27.9 alone (conv1's D = 0.51 fundamental dominates; conv2's D = 0.095 adds little); radiated −21.6 dB
+  together at 161 MHz, −25.4 in phase, −19.8 / −21.0 alone (`out/interleave/`).
+
 ## Remaining risks and unverified items
-- SP-19: board-wide resonance heights above ~600 MHz still depend on the grid by several dB on kraft (2x vs 4x rms
-  4.4 dB at 1-1.5 GHz; 1x places the largest mode 8 % low); a note says so. 2x is the grid to check them at.
-- ISSUE-5: where no cut can be made (a stretch's centre off its net's copper), the closed forms remain: very
-  asymmetric inner layers up to ~10 % high, no solder mask.
-- Copper narrower than the 0.15 mm sub-grid pitch is still sampled at that pitch (a 0.35 mm neck reads 0.29 or 0.43
-  mm wide, by where it falls).
+- SP-19: board-wide resonance heights above 1 GHz still move by ~3 dB rms between the 4x and 8x grids on kraft
+  (converged within 0.8 dB below 1 GHz); the grid note says so and names the grid to check at (round 4).
+- ISSUE-5: where no cut can be made at any of the places tried (three tracks, three places each), the closed forms
+  remain: very asymmetric inner layers up to ~10 % high, no solder mask. None of kraft's 14 paths does (round 4).
+- A resonance set by copper narrower than the grid pitch scatters by about ±4 % from grid to grid (the 0.35 mm neck
+  case); a finer copper sampling does not reduce it (round 4).
 - MIL-STD-461H: selectable since branch `mil461h` (`analysis.mil461`, default G); between 10 and 20 kHz its ships
   CE101 reads the CE102 band's solves (the LISN as specified, REFERENCES A34).
 - The emission estimate's model limits are unchanged: quasi-static, differential mode only, no cables; it ranks
   layouts, it is not a compliance prediction.
-- Published kraft_flux_mini_2 numbers in HANDOFF and README predate the fixes: the SPI margins about 1 dB lower now,
-  conv1's switch-node copper about 42 % more.
+- The signal path's lines are lossless (`emi/path.py`): at a line resonance a shunt's current, and the margin, are
+  very sensitive to Z0 (kraft's ADC_I_RAIL_1: 13 dB for a 7 % Z0 change). NEXT_STEPS item 6.
+- Published kraft numbers: refreshed in round 4 (the table under Round 2; the README's loop and Sharper-map figures). README figures from
+  other settings or tools (the safety counts, the PDN grids) were not re-taken.
 
 ## Final run
 - **Round 3, full suite** (`out/audit_validation/full_round3.log`, 76 min, the machine also running neck sweeps):

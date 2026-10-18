@@ -147,11 +147,16 @@ class ConverterResult(RouteResult):
     loop: Optional[dict] = None                         # the control loop (analysis/loop.py): fc, pm, gm_db, notes
     victims: list = field(default_factory=list)         # what the switching does to victim nets and parts (a stage of
                                                         # its own; a bridge's are on the bridge): victims.stage_rows
+    # an interleaved stage (analysis/interleave.py): its phasor record until the group is combined (not in the
+    # summary), then its group's figures with the stages together (the same dict on every member)
+    phasors: Optional[dict] = None
+    interleave: Optional[dict] = None
 
     def summary(self) -> dict:
         """The result as plain data for the JSON report: without the DC maps, grids and arrow fields (large
-        arrays) and the switch pins (only the maps use them)."""
+        arrays), the switch pins (only the maps use them) and an interleaved stage's phasors."""
         d = super().summary()
+        d.pop("phasors", None)
         d.pop("dc_maps", None)
         d.pop("dc_grids", None)
         d.pop("dc_vectors", None)
@@ -1348,6 +1353,9 @@ def finish_converter(model: BoardModel, setup: ConverterSetup) -> ConverterResul
     if not spec.bridge:
         from .fix_advisor import stage_options
         res.fixes = stage_options(setup, model.board)
+        if spec.interleave:                  # its group adds the stages' phasors at the end of the Simulate
+            from .interleave import stage_phasors
+            res.phasors = stage_phasors(setup, config)
     res.seconds = time.time() - setup.t_start
     return res
 

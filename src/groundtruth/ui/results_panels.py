@@ -958,6 +958,9 @@ class HeatmapPanel(wx.Panel):
             parts.append(f"CE101 margin {c.ce101_worst['margin_db']:+.1f} dB @ {c.ce101_worst['f']:.4g} Hz")
         if c.worst:
             parts.append(f"radiated margin {c.worst['margin_db']:+.1f} dB @ {c.worst['f'] / 1e6:.4g} MHz")
+        if getattr(c, "interleave", None):   # its interleave group, the stages together (analysis/interleave.py)
+            from ..analysis.interleave import interleave_text
+            parts += interleave_text(c.interleave)
         if c.cm:
             parts.append(f"common-mode budget ≤ {c.cm['budget_pf']:.2g} pF switch node to chassis")
         return "   ·   ".join(parts) + ("\n" + "; ".join(c.notes) if c.notes else "")
