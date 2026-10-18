@@ -51,7 +51,7 @@ def test_simulate_on_the_device_matches_the_cpu(tmp_path, torch_cpu):
     cfg.analysis.gpu = "on"
     dev = simulate(board, cfg)
     assert cpu.solver["device"] == "CPU" and dev.solver == {"device": "cpu (PyTorch)", "gpu_fallbacks": 0,
-                                                            "gpu_error": ""}
+                                                            "gpu_error": "", "gpu_note": ""}
     a, b = cpu.routes[0], dev.routes[0]
     assert [s["f"] for s in a.cavity_solves] == [s["f"] for s in b.cavity_solves]
     assert b.worst["margin_db"] == pytest.approx(a.worst["margin_db"], abs=1e-3)
@@ -105,3 +105,42 @@ def test_modes_without_a_gpu(monkeypatch, tmp_path, capsys):
         SettingsFile.load(tmp_path / "bad.groundtruth.yaml").config
     assert main(["simulate", str(path), "--gpu", "on", "-q"]) == EXIT_CONFIG
     assert "analysis.gpu is on, but" in capsys.readouterr().err
+
+
+def test_auto_declines_a_device_slower_than_the_cpu_and_says_why(monkeypatch):
+    """auto times the solver's convolution on the device against the CPU (_speedup) and keeps to the CPU below
+    GPU_MIN_SPEEDUP, with the measured ratio in the reason (an RTX 3050 Laptop GPU: 0.8x); at or above it the
+    device is used; `on` (untimed) uses it either way."""
+    monkeypatch.setattr(gpu, "_speedup", lambda torch, dev: 0.5)
+    found, why = gpu._find("cpu", timed=True)
+    assert found is None and "0.5x the CPU's speed" in why and "analysis.gpu: on" in why
+    assert gpu._find("cpu", timed=False)[0] is not None
+    monkeypatch.setattr(gpu, "_speedup", lambda torch, dev: gpu.GPU_MIN_SPEEDUP)
+    assert gpu._find("cpu", timed=True)[0] is not None
+
+
+def test_one_process_at_a_time_on_a_gpu(monkeypatch):
+    """A GPU held by another run (its lock file taken: here a second handle, as another process would hold it):
+    auto runs on the CPU and says why, without running anything on the GPU (not even the speed check: two processes
+    timing it at once stalled each other), and gets the GPU again once it is released; the lock is released when the
+    run ends."""
+    import torch
+    fake = gpu.Device(torch, torch.device("cuda"), "Test GPU")
+    monkeypatch.setattr(gpu, "_candidate", lambda: fake)
+    probed = []
+    monkeypatch.setattr(gpu, "probe", lambda mode: probed.append(mode) or fake)
+    other = gpu._DeviceLock(fake)
+    assert other.acquire(wait=False)
+    try:
+        with gpu.use("auto") as run:
+            assert run.device is None and "Test GPU is in use by another process" in run.note
+            assert "in use by another process" in gpu.describe(run.summary())
+        assert probed == []                      # nothing ran on the busy GPU, not even the speed check
+    finally:
+        other.release()
+    with gpu.use("auto") as run:
+        assert run.device is fake and run.lock is not None
+        held = gpu._DeviceLock(fake)
+        assert not held.acquire(wait=False)              # this run holds it
+    assert held.acquire(wait=False)                      # released at the end of the run
+    held.release()

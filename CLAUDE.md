@@ -19,9 +19,8 @@ driver 527 / CUDA 12.0). The notes below were written on the old laptop (user `i
   (copied from the laptop: `out/audit/`, `out/kraft_refresh/`, `out/converge/`, the audit sources);
 - the venv is python.org 3.13 with `out/audit_validation/venv_constraints.txt` and PyTorch **cu118** (the CUDA
   build, not the CPU one: `pip install torch --index-url https://download.pytorch.org/whl/cu118`), so `gpu: auto`
-  uses the RTX 3050 (its 4 GB run full on kraft's models: a full kraft Simulate took > 2 h on it, 18 min with
-  `--gpu off`). Run the test suite with `CUDA_VISIBLE_DEVICES=""` here: with the GPU visible, test_split's
-  lead-split test never finishes (NEXT_STEPS item 7); run `tests/test_gpu.py` on its own with the GPU.
+  sees the RTX 3050; since 2026-10-19 auto times it against the CPU and keeps to the CPU here (0.3-0.8x; a full
+  kraft Simulate took > 2 h on it, 18 min on the CPU). `gpu: on` / `--gpu on` still forces it.
 
 - **Do not use the default `python`**: it's MSYS/MinGW 3.12 and cannot install PyPI wheels.
   The project venv uses python.org 3.13: `.venv\Scripts\python`. Recreate with

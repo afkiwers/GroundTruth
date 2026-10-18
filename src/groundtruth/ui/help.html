@@ -1083,7 +1083,12 @@ on, off). In the plugin, <a href="#prefs">Preferences</a> sets the resolution an
   <code>tools/install_gpu.py</code> in the plugin folder (<code>--amd</code> for a Radeon), run once with KiCad's
   Python while KiCad is closed; <code>tools/check_gpu.py</code> checks it and says whether the GPU is faster than
   the CPU. An integrated GPU shares the computer's memory and computes in double precision far slower than in
-  single precision, so it may not be: then choose GPU <b>off</b>.</li>
+  single precision, and so does a GeForce card (1/64 of its single-precision speed), so it may not be. GPU
+  <b>auto</b> therefore times the solver's own work on the GPU against the CPU once per session and uses the GPU
+  only when it is at least 1.5 times as fast; otherwise the status line says "solved on CPU (the &lt;GPU&gt; computes
+  … at 0.3x the CPU's speed here …)". <b>On</b> uses the GPU anyway. Only one program at a time computes on a GPU:
+  under auto, a second one (another Simulate, a compute server's other job) runs on the CPU and says the GPU is in
+  use; under on it waits for it.</li>
 <li>The window never waits for a job: everything slow runs in the background, and <b>Cancel</b> stops it.</li>
 </ul>
 

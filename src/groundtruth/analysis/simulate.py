@@ -858,6 +858,28 @@ def _line_of(board: Board, segments: list, ref_layer: str, cache=None) -> tuple[
     return microstrip(w, st.dielectric_between(layer, ref), st.epsilon_between(layer, ref), t)
 
 
+def _line_loss(board: Board, segments: list, ref_layer: str) -> dict:
+    """A stretch's loss parameters for emi/path.PathLine: its longest layer's median track width and foil
+    thickness, and the dielectric between that layer and its neighbouring copper (thickness-weighted εr and tan δ,
+    Stackup.epsilon_between / loss_tangent_between), as _line_of picks the layer."""
+    lengths: dict[str, float] = {}
+    for s in segments:
+        lengths[s.layer] = lengths.get(s.layer, 0.0) + s.length
+    layer = max(lengths, key=lengths.get) if lengths else ref_layer
+    st = board.stackup
+    cu = st.layer(layer) if layer else None
+    widths = [s.width for s in segments if s.layer == layer and s.kind == "track"]
+    if cu is None or not widths:
+        return {}
+    neigh = st.neighbours(layer) or ([ref_layer] if ref_layer and ref_layer != layer else [])
+    if not neigh:
+        return {}
+    er = sum(st.epsilon_between(layer, n) for n in neigh) / len(neigh)
+    tan_d = sum(st.loss_tangent_between(layer, n) for n in neigh) / len(neigh)
+    return {"width_m": float(np.median(widths)) * 1e-3, "thickness_m": cu.thickness * 1e-3, "er": er,
+            "tan_d": tan_d}
+
+
 def find_shunts(model: "BoardModel", route: Route) -> list[dict]:
     """Parts from the signal path to a return: a 2-net passive part (resistor, capacitor, inductor, ferrite, 0R)
     with one pin on a net of the path and the other on a reference net or a poured net (a rail), not one of the
@@ -918,9 +940,12 @@ def path_elements(board: Board, config: Config, route: Route, ref_layer: str,
         if stretch:
             z0, eeff = _line_of(board, stretch, ref_layer, cache)
             length = sum(s.length for s in stretch)
-            elements.append(PathLine(z0, eeff, length * 1e-3))
+            loss = _line_loss(board, stretch, ref_layer)
+            elements.append(PathLine(z0, eeff, length * 1e-3, **loss))
             rows.append({"kind": "line", "length_mm": length, "z0": z0, "eeff": eeff,
-                         "nets": sorted({s.net for s in stretch if s.net})})
+                         "nets": sorted({s.net for s in stretch if s.net}),
+                         **({"width_mm": loss["width_m"] * 1e3, "thickness_mm": loss["thickness_m"] * 1e3,
+                             "er": loss["er"], "tan_d": loss["tan_d"]} if loss else {})})
             stretch.clear()
     for i, seg in enumerate(route.segments):
         if seg.kind != "part":
