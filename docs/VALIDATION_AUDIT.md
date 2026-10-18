@@ -467,7 +467,8 @@ The user: "Fix this" (inner-layer Z0 and solder mask), "Is that a bad thing?" (i
     has not. `grid_sensitive_note` now applies from 600 MHz (it was 1 GHz), so the mode is flagged at 1x too. The
     20 MHz loop is the same before and after (14.97 / 15.04 mm²). Which frequency is right for the mode (1020 or
     1060 MHz) would take 8x.
-- **Not changed:** CE101 to 20 kHz (461H), the combined emission of interleaved stages. (The sub-grid for cells of
+- **Not changed:** the combined emission of interleaved stages. (CE101 to 20 kHz under 461H followed as a setting,
+  `analysis.mil461`, on branch `mil461h`.) (The sub-grid for cells of
   0.15 mm and less followed on branch `small-fixes`.)
 
 ## Remaining risks and unverified items
@@ -477,7 +478,8 @@ The user: "Fix this" (inner-layer Z0 and solder mask), "Is that a bad thing?" (i
   asymmetric inner layers up to ~10 % high, no solder mask.
 - Copper narrower than the 0.15 mm sub-grid pitch is still sampled at that pitch (a 0.35 mm neck reads 0.29 or 0.43
   mm wide, by where it falls).
-- MIL-STD-461H: CE101-1 to 20 kHz not implemented (the code follows 461G there).
+- MIL-STD-461H: selectable since branch `mil461h` (`analysis.mil461`, default G); between 10 and 20 kHz its ships
+  CE101 reads the CE102 band's solves (the LISN as specified, REFERENCES A34).
 - The emission estimate's model limits are unchanged: quasi-static, differential mode only, no cables; it ranks
   layouts, it is not a compliance prediction.
 - Published kraft_flux_mini_2 numbers in HANDOFF and README predate the fixes: the SPI margins about 1 dB lower now,

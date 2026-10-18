@@ -23,7 +23,7 @@ GITLAB_SEVERITY = {"info": "info", "warning": "minor", "error": "major"}
 
 def ce101_lines(r, who: str = "") -> list:
     """A stage's or bridge's MIL-STD-461 CE101 result in the text report: the worst reading (input lead current,
-    30 Hz-10 kHz) against its limit, or nothing when CE101 is off."""
+    30 Hz-10 kHz; 461H ships to 20 kHz) against its limit, or nothing when CE101 is off."""
     from ..components.values import format_si
     w = getattr(r, "ce101_worst", None)
     if not w:
