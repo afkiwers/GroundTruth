@@ -1,6 +1,6 @@
-"""Six-step (Hall-commutated) drive of a three-phase BLDC motor by a bridge of three half-bridge legs: the phase,
-switch and bus currents in steady state at the user's operating point (bus voltage, PWM frequency, phase current,
-speed, motoring or generating).
+"""Six-step (Hall-commutated) drive [Krishnan 2010] of a three-phase BLDC motor by a bridge of three half-bridge legs:
+the phase, switch and bus currents in steady state at the user's operating point (bus voltage, PWM frequency, phase
+current, speed, motoring or generating). Source keys in square brackets: docs/REFERENCES.md.
 
 The motor is given by its terminal data (line-to-line R, L, back-EMF constant). Every phase then has the same
 star-equivalent R = R_LL/2 (plus the switches' on-resistance) and L = L_LL/2 = L - M, for a star and for a delta
@@ -22,7 +22,7 @@ timer's preload), so an electrical period is N = 6·n_s PWM periods and the spee
 Schemes: hpwm_lon (p's high side chops, q's low side held on; with `synchronous` p's low side conducts in the off
 time), hon_lpwm (the mirror), bipolar (p and q both chop, each leg complementary). A dead time precedes every
 turn-on. The steady state is the fixed point over 120 degrees, where the pattern repeats with the phases shifted
-(a -> b -> c): found by Newton's method on the two independent currents; the duty is found so that the mean
+(a -> b -> c): found by Newton's method [Press 2007] on the two independent currents; the duty is found so that the mean
 current of the sourcing phase equals the target (negative when generating).
 """
 from __future__ import annotations

@@ -10,12 +10,12 @@ input, an AC ground) below; its current-sense pins (SENSE± through their filter
 (in parallel), or the inductor itself (DCR sensing). The output capacitors are the capacitors from the output nets to
 ground (C at bias where given, ESR), the load V_out / I_out.
 
-The model (Ridley; Erickson & Maksimovic): with Y_o(s) = Σ sC/(1 + sC·ESR) + 1/R_load,
+The model [Ridley 1991] [Erickson 2001]: with Y_o(s) = Σ sC/(1 + sC·ESR) + 1/R_load,
 - peak current mode: G_vc(s) = Z'(s)·F_h(s) / R_i with Z' = 1/(Y_o + T_s·(m_c·D' − ½)/L), R_i = R_sense / k (k the
   current-sense gain dV_sense/dV_COMP, from Current Sense Gain or Vsense Max / ITH Range), m_c = 1 + S_e/S_n (S_n the
   sensed up-slope R_sense·(V_in − V_out)/L, S_e the slope compensation, else half the down-slope), and the sampling
-  double pole F_h = 1/(1 + s/(ω_n·Q_p) + s²/ω_n²) at ω_n = π·f_sw, Q_p = 1/(π·(m_c·D' − ½));
-- voltage mode: G_vd(s) = (V_in / V_ramp) / (1 + (sL + R_L)·Y_o);
+  double pole F_h = 1/(1 + s/(ω_n·Q_p) + s²/ω_n²) at ω_n = π·f_sw, Q_p = 1/(π·(m_c·D' − ½)) [Ridley 1991];
+- voltage mode: G_vd(s) = (V_in / V_ramp) / (1 + (sL + R_L)·Y_o) [Erickson 2001];
 - the compensator: a gm amplifier gm·Z_comp (Z_comp = 1/(1/(Rc + 1/sCc) + sChf + 1/Ro)) times the divider
   H = Y_top/(Y_top + Y_bottom); an op-amp error amplifier (EA Gain, no EA gm): Z_f / Z_in with Z_f the network from
   COMP to FB and Z_in the divider's top (ideal amplifier).
@@ -25,11 +25,11 @@ here: a note.
 A boost (its output is its rail, behind the rectifier; D' = V_in / V_out, I_L = I_out / D', a = I_L / V_out,
 Z_L = sL + R_L):
 - peak current mode: G_vc = (D' − a·Z_L) / (Y_o + a·D' + G·(D' − a·Z_L)) / R_i · F_h with G = T_s·D'²·(m_c − ½)/L
-  (the averaged peak-current law, Erickson & Maksimovic ch. 12, with the duty cycle taken quasi-statically from the
+  (the averaged peak-current law [Erickson 2001, ch. 12], with the duty cycle taken quasi-statically from the
   inductor: the same steps give Ridley's buck model above exactly); S_n = R_sense·V_in/L;
 - voltage mode: G_vd = V_out·(D' − a·Z_L) / (Z_L·Y_o + D'²) / V_ramp;
-both with the right-half-plane zero at D'²·R_load/L (figures["f_rhp"]), which bounds the crossover.
-Both topologies assume continuous conduction (a note when the load is below the ripple's half).
+both with the right-half-plane zero at D'²·R_load/L (figures["f_rhp"]) [Erickson 2001], which bounds the crossover.
+Both topologies assume continuous conduction [A13] (a note when the load is below the ripple's half).
 Validated in tests/test_loop.py against the closed forms (the LC pair and ESR zero, Ridley's pole and sampling pair,
 the compensator's zero and pole, the asymptotic crossover gm·Rc·H / (2π·R_i·C); a boost's right-half-plane zero,
 its dominant pole and its voltage-mode pair at D'/(2π·sqrt(LC)) with Q = D'·R·sqrt(C/L)).

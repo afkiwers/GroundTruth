@@ -4,7 +4,8 @@ emission.
 The switches commutate the load current within the edge time tr. The current that changes that fast flows around
 the hot loop, rail capacitors -> high-side switch -> switch node -> low-side switch -> ground -> rail capacitors,
 as a trapezoidal pulse train (amplitude I, duty D, edges tr). The inductor current is continuous and stays out of
-it. A buck's hot loop sits on its input, a boost's on its output.
+it. A buck's hot loop sits on its input, a boost's on its output [Erickson 2001]; its spectrum is the trapezoid's
+[Paul 2006]. Source keys in square brackets: docs/REFERENCES.md.
 
 Model (one per converter, over the converter's region of the board):
 * every net the loop touches is solved copper, pours and tracks alike: the rail, the switch node, ground and the
@@ -23,10 +24,11 @@ Solved at:
   where the share of the loop current reaching the input changes quickly;
 * the harmonics above 30 MHz for the radiated estimate, on the board-wide model with plane capacitance, as for nets.
 
-With the switches' output capacitance c_oss, the loop rings at 1/(2π·sqrt(L·C_oss)): the pulse spectrum is shaped by
-that series resonance (damping r_damp plus the loop's own resistance) and the switch-node overshoot is estimated.
-The edges also charge the node (C_oss·dv/dt, Q_oss per edge where known): that current adds to the load pulse
-(edge_charge_factor) and dominates near the ringing when V/I is large (a light load on a high input voltage).
+With the switches' output capacitance c_oss, the loop rings at 1/(2π·sqrt(L·C_oss)) (a series RLC [Desoer 1969]):
+the pulse spectrum is shaped by that series resonance (damping r_damp plus the loop's own resistance) and the
+switch-node overshoot is estimated. The edges also charge the node (C_oss·dv/dt, Q_oss per edge where known): that
+current adds to the load pulse (edge_charge_factor) and dominates near the ringing when V/I is large (a light load on a
+high input voltage).
 """
 from __future__ import annotations
 
@@ -1122,7 +1124,7 @@ def apply_ringing(setup: ConverterSetup):
     L, _ = loop_inductance(fine.get(LOOP_F_LO), s_hi)
     res.loop_nh = L * 1e9
     res.loop_mohm = s_hi.Z_loop.real * 1e3
-    res.overshoot_v = L * res.pulse_a / spec.rise_time
+    res.overshoot_v = L * res.pulse_a / spec.rise_time        # v = L di/dt over the edge [A14]
     snub = _snubber_rc(setup.config, spec)
     setup.currents, res.ringing = stage_spectrum(spec, setup.harmonics, setup.pulse, res.v_in, res.pulse_a, L,
                                                  s_hi.Z_loop.real, spec.rise_time, snub)
@@ -1195,8 +1197,9 @@ def stage_spectrum(spec: ConverterSpec, freqs: np.ndarray, pulse: np.ndarray, v:
         ring["charge_c"] = c_node
     if v and q > 0.5:
         zeta = 1 / (2 * q)
-        # overshoot of a lightly damped series LC after a ramp of length tr (the edge): the step response's
-        # overshoot exp(-πζ/sqrt(1-ζ²)), reduced by |sinc(f_ring·tr)|
+        # overshoot of a lightly damped series LC after a ramp of length tr (the edge): the second-order step
+        # response's overshoot exp(-πζ/sqrt(1-ζ²)) [Ogata 2010], reduced by |sinc(f_ring·tr)| (a ramp is a step
+        # averaged over tr: its ringing amplitude scales with the ramp's spectrum at f_ring)
         ring["overshoot_v"] = v * math.exp(-math.pi * zeta / math.sqrt(1 - zeta * zeta)) * \
             abs(float(np.sinc(f_ring * rise_time)))
     return currents, ring
@@ -1429,8 +1432,8 @@ def dc_summary(st: StackBuild, sol: Solution, current: float, name: str, plating
     ripple = (k, sol_d): the path's current switches between two patterns (the switch node: from the high side for
     D, from the low side for 1 - D) whose difference per A is sol_d, k = √(D(1-D)). `sol` is their time average;
     the two-state variance adds in quadrature, exactly: the densities, via and part currents are RMS
-    (√(mean² + k²·diff²)), R and the loss gain k²·R_d (Tellegen on sol_d), so loss = r·I² is the time-averaged
-    Joule loss. (Before 2026-10-17 the switch node's mean alone: 6-17 % less copper loss on the test buck,
+    (√(mean² + k²·diff²)), R and the loss gain k²·R_d (Tellegen on sol_d [Tellegen 1952]), so loss = r·I² is the
+    time-averaged Joule loss. (Before 2026-10-17 the switch node's mean alone: 6-17 % less copper loss on the test buck,
     VALIDATION_AUDIT.md ISSUE-7.)"""
     from .ipc import via_capacity
     k_r, sol_d = ripple if ripple is not None else (0.0, None)
@@ -1471,7 +1474,8 @@ def dc_summary(st: StackBuild, sol: Solution, current: float, name: str, plating
                             "capacity_a": cap, "load_pct": 100.0 * a_ / cap if cap > 0 else None}
     top = sorted(vias.values(), key=lambda v: -v["current_a"])      # every via with ≥ 1 % of the current
     # Series parts on the path (a current-sense shunt, a fuse, a surge stopper's model) are in R: their share is
-    # |I_b|²·Re(Z_b) per A² (Tellegen: the path's R is the sum over all branches), the rest is copper and vias
+    # |I_b|²·Re(Z_b) per A² (Tellegen [Tellegen 1952]: the path's R is the sum over all branches), the rest is copper
+    # and vias
     parts: dict[str, dict] = {}
     flow: dict[str, complex] = {}           # a part's parallel branches (simulate.part_pairs): their currents add
     flow_d: dict[str, complex] = {}
@@ -2090,7 +2094,7 @@ def input_filter_advice(rows: list[dict], margin_db: float) -> Optional[dict]:
     f_c = 1/(2π·sqrt(L·C)). f_c is chosen so every harmonic gains what it lacks to `margin_db`: f_c ≤ f·10^(-A/40).
     C is the smallest standard value that keeps L ≤ FILTER_L_MAX. The damping network is the usual R = sqrt(L/C)
     in series with 4·C across C (the filter's output impedance must stay below the converter's input impedance,
-    Middlebrook). None when the estimate already meets the margin."""
+    [Middlebrook 1976] [Erickson 2001]). None when the estimate already meets the margin."""
     need = [(r["f"], margin_db - r["margin_db"]) for r in rows
             if r.get("margin_db") is not None and r["margin_db"] < margin_db]
     if not need:

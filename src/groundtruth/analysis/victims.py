@@ -13,7 +13,8 @@ connector pins), at two frequencies of the edge's spectrum. From that solution, 
   peak at an edge is M·I/t_r. A ground that crosses to another board on a few pins, or a reset line that crosses
   near the bridge, shows here.
 - injected current: a victim track facing a phase node's copper with no copper layer between them (a logic board's
-  bottom layer over the bridge's pours) has the capacitance C = ε0·εr·A/h to it and takes C·V_bus/t_r at every edge.
+  bottom layer over the bridge's pours) has the capacitance C = ε0·εr·A/h to it [Pozar 2012] and takes C·V_bus/t_r
+  at every edge.
 - ground shift (for information): a victim part's ground potential against the reference pin (the bridge's input
   minus unless set), L_g = Im(Δφ)/(ωI). A part's ground alone does not upset it; what crosses between grounds does
   (the receiver noise above).

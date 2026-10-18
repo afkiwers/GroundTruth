@@ -18,9 +18,9 @@ Six values per part, each one falling back on its own (`params_for`), from the m
     pin_d    the pin's diameter, mm (default: the hole less PIN_CLEARANCE_MM, the usual lead-to-hole clearance)
     pin_r    the pin's own resistance through the board, Ω (instead of a material's)
     fill     how far up the hole the solder goes, % of the board's thickness from the soldering side (the side
-             opposite the part: wave or selective soldering). Built in 100. IPC-A-610 accepts 75. Above the solder
-             only the hole's plating joins the layers to the pin; the current from the part enters the board at the
-             top of the solder (the layer nearest to it inside the filled height).
+             opposite the part: wave or selective soldering). Built in 100. IPC-A-610 accepts 75 [IPC-A-610]. Above the
+             solder only the hole's plating joins the layers to the pin; the current from the part enters the board at
+             the top of the solder (the layer nearest to it inside the filled height).
     joint    the solder joint's resistance per pin, Ω, where the pin's current enters the board copper
     contact  the mating contact's resistance per pin, Ω (a connector's datasheet value)
 
@@ -46,13 +46,13 @@ from ..solver.kernel import filament_mutual
 from ..solver.peec import SIGMA_CU, VIA_PLATING
 
 KEYS = ("pin", "pin_d", "pin_r", "fill", "joint", "contact")
-# resistivity at 20 °C, Ω·m: copper 100 % IACS; brass C26000 ~28 %; phosphor bronze C51000 ~15 %; beryllium copper
-# C17200 ~22 %; tellurium copper C14500 ~93 %
+# resistivity at 20 °C, Ω·m: copper 100 % IACS [IEC 60028]; brass C26000 ~28 %; phosphor bronze C51000 ~15 %;
+# beryllium copper C17200 ~22 %; tellurium copper C14500 ~93 % (the alloys' conductivities [CDA])
 MATERIALS = {"copper": 1.72e-8, "brass": 6.2e-8, "bronze": 1.15e-7, "becu": 7.8e-8, "tellurium": 1.85e-8}
 ALIASES = {"cu": "copper", "phosphor-bronze": "bronze", "phosphorbronze": "bronze", "pb": "bronze",
            "beryllium": "becu", "cube": "becu", "tecu": "tellurium"}
-SOLDER_RHO = 1.3e-7             # SAC305 (~13 % IACS), Ω·m: the solder between the pin and the hole's wall
-PIN_CLEARANCE_MM = 0.25         # a lead's diameter is the hole's less this (IPC-2222's usual lead-to-hole clearance)
+SOLDER_RHO = 1.3e-7             # SAC305 (~13 % IACS), Ω·m: the solder between the pin and the hole's wall [A18]
+PIN_CLEARANCE_MM = 0.25         # a lead's diameter is the hole's less this (a usual lead-to-hole clearance [A18])
 NOTE_A = 3.0                    # a connector pin carrying this much without a contact value gets a note
 SOURCES = ("GT field", "part setting", "board default", "built in")
 WORD = re.compile(r"^(pin_d|pin_r|pin|fill|joint|contact)\s*[:=]\s*(.+)$", re.I)

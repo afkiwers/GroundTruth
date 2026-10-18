@@ -48,6 +48,19 @@ Rules this list follows:
 | Papoulis 2002 | A. Papoulis, S. U. Pillai, *Probability, Random Variables and Stochastic Processes*, 4th ed. New York: McGraw-Hill, 2002. | The envelope of a complex Gaussian signal is Rayleigh distributed; the largest of N such samples grows as σ·√(2 ln N). |
 | Middlebrook 1976 | R. D. Middlebrook, "Input filter considerations in design and application of switching regulators," *Proc. IEEE Industry Applications Society Annual Meeting*, 1976, pp. 366–382. | Input-filter stability: the filter's output impedance against the converter's negative input impedance. |
 
+### Power electronics
+
+| Key | Source | Used for |
+|---|---|---|
+| Erickson 2001 | R. W. Erickson, D. Maksimović, *Fundamentals of Power Electronics*, 2nd ed. Norwell, MA: Kluwer, 2001. | Buck and boost in steady state (volt-second and charge balance, duty, ripple, CCM), their small-signal models and the right-half-plane zero, current-programmed control [ch. 12], input-filter design with Middlebrook's criterion, loss models. |
+| Ridley 1991 | R. B. Ridley, "A new, continuous-time model for current-mode control," *IEEE Trans. Power Electron.*, vol. 6, no. 2, pp. 271–280, 1991. | The peak-current-mode plant with the sampling double pole at f_sw/2, Q_p = 1/(π(m_c D′ − ½)). |
+| McMurray 1972 | W. McMurray, "Optimum snubbers for power semiconductors," *IEEE Trans. Ind. Appl.*, vol. IA-8, no. 5, pp. 593–600, 1972. | RC snubber design around the ringing loop's characteristic impedance √(L/C). |
+| Ogata 2010 | K. Ogata, *Modern Control Engineering*, 5th ed. Upper Saddle River, NJ: Prentice Hall, 2010. | The second-order step response: overshoot exp(−πζ/√(1 − ζ²)); Bode, crossover, phase and gain margins. |
+| Smith 1999 | L. D. Smith, R. E. Anderson, D. W. Forehand, T. J. Pelc, T. Roy, "Power distribution system design methodology and capacitor selection for modern CMOS technology," *IEEE Trans. Adv. Packag.*, vol. 22, no. 3, pp. 284–291, 1999. | The target impedance Z_t = V·ripple / I_step of a supply rail. |
+| Gustavsen 1999 | B. Gustavsen, A. Semlyen, "Rational approximation of frequency domain responses by vector fitting," *IEEE Trans. Power Del.*, vol. 14, no. 3, pp. 1052–1061, 1999. | Vector fitting a rail's or a port's impedance as a rational function. |
+| Gustavsen 2006 | B. Gustavsen, "Improving the pole relocating properties of vector fitting," *IEEE Trans. Power Del.*, vol. 21, no. 3, pp. 1587–1592, 2006. | The relaxed vector fitting (a free constant in σ(s)). |
+| Krishnan 2010 | R. Krishnan, *Permanent Magnet Synchronous and Brushless DC Motor Drives*. Boca Raton, FL: CRC Press, 2010. | The six-step (Hall-commutated) drive of a three-phase BLDC motor, its phase equations and the star equivalent of a delta winding. |
+
 ### Standards
 
 | Key | Standard | Used for |
@@ -58,7 +71,9 @@ Rules this list follows:
 | CISPR 25 | CISPR 25, *Vehicles, boats and internal combustion engines – Radio disturbance characteristics – Limits and methods of measurement for the protection of on-board receivers*. | The 5 µH artificial network; the voltage-method limits by class. The edition the limit table follows is not verified [A10]. |
 | MIL-STD-461G | MIL-STD-461G, *Requirements for the Control of Electromagnetic Interference Characteristics of Subsystems and Equipment*, Department of Defense, 11 December 2015. | CE101 (Figures CE101-1, -4), CE102, RE102 (Figures RE102-1 to -4), the LISN (Figure 6), Table II (bandwidths, dwell times). |
 | MIL-STD-461H | MIL-STD-461H, Department of Defense, 17 April 2026 (supersedes 461G). | RE102-3's helicopter and space curves from 10 kHz. Where the code follows 461G instead (CE101 to 10 kHz, where 461H's CE101-1 goes to 20 kHz), the place says so. |
-| IPC-2221B | IPC-2221B, *Generic Standard on Printed Board Design*, IPC, 2012. | Conductor current capacity, I = k·ΔT^0.44·A^0.725 (k = 0.048 external, 0.024 internal; A in mil²) for vias and tracks. |
+| IPC-A-610 | IPC-A-610, *Acceptability of Electronic Assemblies*, IPC. | The minimum vertical solder fill of a plated through hole (75 %). |
+| CDA | Copper Development Association, alloy data (copper.org): C26000, C51000, C17200, C14500. | The electrical conductivity (% IACS) of brass, phosphor bronze, beryllium copper and tellurium copper pins. |
+| IPC-2221B | IPC-2221B, *Generic Standard on Printed Board Design*, IPC, 2012. | Conductor current capacity, I = k·ΔT^0.44·A^0.725 (k = 0.048 external, 0.024 internal; A in mil²) for vias and tracks; the electrical conductor spacing by voltage [Table 6-1] for the clearance check. |
 
 ### Numerical methods
 
@@ -74,6 +89,11 @@ Rules this list follows:
 | Liu 1985 | J. W. H. Liu, "Modification of the minimum-degree algorithm by multiple elimination," *ACM Trans. Math. Softw.*, vol. 11, no. 2, pp. 141–153, 1985. | The multiple minimum degree ordering (SuperLU's `MMD_AT_PLUS_A`). |
 | Oppenheim 2010 | A. V. Oppenheim, R. W. Schafer, *Discrete-Time Signal Processing*, 3rd ed. Upper Saddle River, NJ: Pearson, 2010. | Linear convolution by FFT: zero padding to at least 2n − 1 points. |
 | Eymard 2000 | R. Eymard, T. Gallouët, R. Herbin, "Finite volume methods," in *Handbook of Numerical Analysis*, vol. VII, P. G. Ciarlet, J. L. Lions (eds.). Amsterdam: North-Holland, 2000, pp. 713–1020. | The finite-volume discretisation of ∇·(ε∇φ) = 0 in the cross-section solver; the flux out of a dual cell as its charge. |
+| Kabsch 1976 | W. Kabsch, "A solution for the best rotation to relate two sets of vectors," *Acta Crystallogr.*, vol. A32, pp. 922–923, 1976. | The least-squares rigid transform that lays a stacked board's connector pins onto ours (SVD of the cross-covariance). |
+| Rosenbrock 1970 | H. H. Rosenbrock, *State-Space and Multivariable Theory*. London: Nelson, 1970. | A rational function's zeros as the finite generalised eigenvalues of its system pencil. |
+| Press 2007 | W. H. Press, S. A. Teukolsky, W. T. Vetterling, B. P. Flannery, *Numerical Recipes: The Art of Scientific Computing*, 3rd ed. Cambridge: Cambridge University Press, 2007. | Newton's method for nonlinear equations (the motor drive's periodic steady state); root bracketing. |
+| Oppenheim 1997 | A. V. Oppenheim, A. S. Willsky, S. H. Nawab, *Signals and Systems*, 2nd ed. Upper Saddle River, NJ: Prentice Hall, 1997. | Fourier series of periodic waveforms and Parseval's relation (a mean square from the line spectrum). |
+| Dijkstra 1959 | E. W. Dijkstra, "A note on two problems in connexion with graphs," *Numer. Math.*, vol. 1, pp. 269–271, 1959. | The shortest copper path from a driver to its receiver (through SciPy). |
 | Abramowitz 1964 | M. Abramowitz, I. A. Stegun (eds.), *Handbook of Mathematical Functions*. Washington, DC: NBS, 1964. | Gauss–Legendre quadrature [§25.4]. |
 
 ## Assumptions
@@ -92,3 +112,14 @@ Rules this list follows:
 | A10 | The CISPR 25 voltage-method limit table (class 5 and the step per class) as commonly published; the edition is not verified. | The module says to check it against the edition the test plan cites. |
 | A11 | Emission is differential mode only: the loop's own field, no common-mode cable currents, no switch-node dV/dt through stray capacitance. | The estimate ranks layouts; real emissions are often dominated by common mode (README, ARCHITECTURE). |
 | A12 | Harmonics within one receiver bandwidth add as magnitudes (in phase) in a peak reading (`receiver_sum`). | Their phases are locked but the receiver's filter is not modelled per harmonic there; the in-phase sum is the upper bound, at most 20·log10(RBW/f0) dB above one harmonic. |
+| A13 | Converters run in continuous conduction (CCM) in the loop and loss models. | The usual operating point at rated load; below half the ripple current the model says so in a note. |
+| A14 | The hot loop's overshoot is at least L·I/t_r: the loop's inductance carrying the pulse current's change over the edge time. | The inductive kick of the commutation; the ringing estimate (C_oss) is reported beside it and the larger one is judged. |
+| A15 | The copper's heat follows its temperature (ρ(T), first order); the current pattern is not re-solved with temperature-dependent conductivity. | The current distribution changes little with a few tens of kelvin of rise; the heat (∝ ρ) changes most. |
+| A16 | A diode-rectified stage loses ½·Q_oss·V per hard edge (its switch's own output energy), a synchronous one Q_oss·V. | Synchronous: the switch's charge plus the rectifier FET's charged through it; a diode's own capacitance is small. An estimate where datasheets give only Q_oss. |
+| A17 | A via barrel's current capacity is that of an internal IPC-2221 conductor of the barrel wall's cross-section. | IPC-2221's chart is for traces; a barrel through the board is cooled like an internal conductor. The older chart fit is the conservative one (as PCB Thermal uses it). |
+| A18 | A pin's solder is SAC305 at ~13 % IACS (1.3 × 10⁻⁷ Ω·m), and a lead is 0.25 mm thinner than its hole when no pin diameter is given. | Typical values; both can be set per part (`tht:` settings, GT fields). |
+| A19 | A rail's impedance is checked against its target up to 100 MHz by default (`check_to`). | Above it the package and the die's own capacitance usually decouple; settable per rail. |
+| A20 | A net's loop inductance, its ideal reference and the board-wide offset are taken at f_ref = max(f0, 1 MHz). | Below ~1 MHz a plane's return current still follows resistance more than inductance; emissions come from the edges, well above. |
+| A21 | A lumped part gets 0.3 nH of pad and escape inductance (`MOUNT_L`) on top of its own model; vias are modelled explicitly. | A typical value for a small SMD part's pads and short escapes. |
+| A22 | Between solved frequencies, transfers and loop moments are interpolated linearly in log-log. | Exact for power laws, the usual shape between resonances; the solve frequencies are refined where the values bend. |
+| A23 | A motor bridge's copper heat leaves out the motor's PWM ripple current (out through the motor pin). | It is small next to the switching current in the hot loops; the six-step currents and the switching currents are included. |

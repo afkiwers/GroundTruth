@@ -8,9 +8,11 @@ LISN (a filter, spread spectrum). `evaluate(setup, change)` recomputes the figur
 (power.stage_spectrum, emission_arrays, conducted_arrays, cm_estimate), so evaluate(setup) reproduces the stage's
 own numbers and every option is a difference on the same model.
 
-- snubber: an RC across the switch node (C_s, R_s) on a grid around Z0 = sqrt(L/C_oss): the best damping, and the
+- snubber: an RC across the switch node (C_s, R_s) on a grid around Z0 = sqrt(L/C_oss) [McMurray 1972]: the best
+  damping, and the
   lowest-loss one that meets the overshoot target. Its R dissipates C_s·V²·f_sw.
-- edge: a slower switch-node edge (gate resistor): less spectrum above 1/(π·tr) and less overshoot, for ½·V·I·Δtr·f_sw
+- edge: a slower switch-node edge (gate resistor): less spectrum above 1/(π·tr) [Paul 2006] and less overshoot, for
+  ½·V·I·Δtr·f_sw [Erickson 2001]
   more switching loss per hard edge.
 - loop: the largest hot-loop inductance that meets the targets (the moment scales with the loop, same shape).
 - filter: a damped LC at the input connector (input_filter_advice made concrete), its attenuation from a two-port
