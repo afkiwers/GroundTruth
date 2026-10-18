@@ -7,6 +7,19 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `references` (2026-10-18, committed, not merged):** at the user's "add references of the
+  assumptions/methods/theorems, also call them out locally where they are used, in all calculations".
+  - [REFERENCES.md](REFERENCES.md) lists every source by key (68 sources: electromagnetics, lines and EMC, power
+    electronics, heat transfer, numerics, standards by edition) and the model's assumptions A1–A29, each with its
+    reason and evidence.
+  - The code cites the keys where it applies them: solver, emi, analysis, components, rules, thermal, and the
+    tests that check against exact results.
+  - Rules the list follows: a source is cited only for what it contains; a section or equation number only where it
+    was checked (Wadell's section numbers were dropped for that reason); what has no published source is an
+    assumption.
+  - Checks: `tools/dev/ast_same.py main` reports only comments and docstrings changed (35 files);
+    `tools/dev/ref_keys.py` (new) finds 0 unknown keys and every listed key cited. CLAUDE.md has the rule for new
+    code.
 - **Branch `audit-3` (2026-10-18, merged into `main` as c3dbeb6 at the user's "Merge"):** the audit's round 3 (VALIDATION_AUDIT.md "Round 3"),
   at the user's four items:
   - "Fix this" (inner-layer Z0, solder mask): a path's line is the field-solved cut at its longest track
