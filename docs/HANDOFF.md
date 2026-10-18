@@ -1,8 +1,8 @@
 # GroundTruth handover
 
-## Current state (2026-10-16, end of session 10)
+## Current state (2026-10-19, after audit round 4)
 
-**Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (the audit's outstanding items, with the commands, for the move to a bigger machine). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
+**Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
