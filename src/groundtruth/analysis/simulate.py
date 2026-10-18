@@ -1609,8 +1609,8 @@ def grid_sensitive_note(worst: dict, m_worst: float, m_low: float, warn_db: floa
     finer = f"{2 * resolution:g}x" if resolution >= 1 else "2x"
     return (f"the worst emission ({worst['f'] / 1e6:.4g} MHz, margin {worst['margin_db']:+.1f} dB) comes from a "
             f"plane resonance above {GRID_SENSITIVE_F / 1e6:g} MHz ({rise:+.0f} dB over the loop's low-frequency "
-            f"value): such peaks can change by several dB with the grid. Check it at {finer} resolution "
-            "(Preferences, or --resolution)")
+            f"value): on a coarse grid such a peak can sit several per cent off in frequency and several dB off in "
+            f"height. Check it at {finer} resolution (Preferences, or --resolution)")
 
 
 def unsolved_band(run: ModelRun, f_limit: float) -> Optional[dict]:
