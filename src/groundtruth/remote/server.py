@@ -97,8 +97,11 @@ if not torch.cuda.is_available():
           or torch.version.cuda is None else "no NVIDIA GPU, or its driver is too old for CUDA %s"
           % torch.version.cuda)}))
 else:
-    print(json.dumps({"gpus": [torch.cuda.get_device_name(k) for k in range(torch.cuda.device_count())],
-                      "why": ""}))
+    names = [torch.cuda.get_device_name(k) for k in range(torch.cuda.device_count())]
+    # CUDA can load and still show no device (CUDA_VISIBLE_DEVICES set empty: PyTorch 2.7 on Windows): say so
+    print(json.dumps({"gpus": names, "why": "" if names else "PyTorch %s loads CUDA but sees no device "
+                      "(CUDA_VISIBLE_DEVICES=%r)" % (torch.__version__, __import__("os").environ.get(
+                          "CUDA_VISIBLE_DEVICES"))}))
 """
 
 

@@ -367,6 +367,11 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   (`simulate`'s `sub = max(2, …)`): 769 / 742 MHz. All seven grids from 1.0 to 0.1 mm now read 717-797 MHz. On
   refboard the fine route models have 0.2 mm cells at 1x (2 × 2 already), so the change reaches 4x and up
   there.
+  **A finer sampling does not help** (round 4, `tools/dev/neck_converge.py`, `out/neck/`): at 0.075 mm and up to
+  12 × 12 per cell the seven grids read 763 / 783 / 775 / 763 / 807 / 768 / 743 MHz (±4.1 %), against 763 / 758 /
+  736 / 762 / 716 / 768 / 743 (±3.5 %) at today's 0.15 mm and 6 × 6 (on this machine's run; 1.0 mm read 797 in
+  round 3's). The scatter is how the grid falls on the island and the neck, not how wide the neck reads, so
+  `RASTER_MM` stays 0.15 mm and the cap 6 × 6.
   Current densities follow (`Solution.node_field(copper=True)`): the DC paths' A/mm² maps, peaks and sustained
   values, the thermal heat and the motor bridges' RMS maps take a strip's current over its own width. Before,
   a 0.35 mm neck on a 1 mm grid read about a third of its density. Sums over the cells weight each node by the
@@ -421,6 +426,15 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
     it into the 0.5-1 GHz band there. Its stitching vias join the same layers on both grids. Above 1 GHz 4x has a
     peak at 1260-1300 MHz that 2x has not (45-52 vs 20-28 mm²). The note's threshold went down to 600 MHz so that the
     mode is flagged at 1x too.
+  - **8x (2026-10-18, round 4, `out/converge/spi_sck_widths_8x.json`, 256 152 nodes, 44 min on 4 threads).** 4x
+    vs 8x: 0.8 dB rms (1.6 max) at 0.5-1 GHz, 2.9 dB rms (5.1 max) at 1-1.5 GHz. 4x is converged below 1 GHz. The
+    F.Cu/In1 mode stays at 1020 MHz (62 mm² at 8x). 4x's 1260-1300 MHz peak is the +3V3 F.Cu pour against the In1
+    +3V3 plane near (120-123, 123) mm, excited on both grids through the same vias and C1104, only weaker at 8x:
+    one mode a few per cent apart in frequency, not a missing connection. So `grid_sensitive_note` asks for 4x
+    below `GRID_CHECK_8X_F` (1 GHz) and 8x above, and from 8x on says the height is good to a few dB.
+    The 8x run first stalled: a 400 MB Krylov basis allowed a GMRES restart of ~26 at ~1 M unknowns, too short near
+    the resonances; `peec.GMRES_RESTART_MIN` = 100 (a plugin Simulate at 8x builds this same model), with
+    `simulate.solve_bytes` counting the longer basis.
 - Vertical branches: each via/THT pad of a plane net chains its connections between consecutive plane
   layers where its own net's copper is (a GND via through a +3V3 area of In2 doesn't connect there).
   `via_impedance`: barrel R (25 µm plating) plus partial self-L.
@@ -513,8 +527,10 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   capacitance `driver_pf`. The route is a **signal path**: a lossless line per stretch between series parts (its
   own Z0 and εeff, `simulate._line_of`: since 2026-10-18 the 2D field solver's cut of the board across the
   stretch's longest track, at its middle (`line_cache`: analysis/si.SectionCache, the one Run checks' impedance
-  checks use: every net's copper in the cut, the stackup's dielectrics and solder mask, equal cuts solved once);
-  where no clean cut exists (the track widens into a pad or pour there, no reference copper) the closed forms: an
+  checks use: every net's copper in the cut, the stackup's dielectrics and solder mask, equal cuts solved once),
+  else a quarter from either end, else the same on the next two longest tracks (`LINE_CUT_TRACKS`, round 4: refboard's
+  Net-(U301--) had no cut at its longest track's middle);
+  where no clean cut exists at any of them (the track widens into a pad or pour there, no reference copper) the closed forms: an
   outer layer a microstrip, Hammerstad & Jensen 1980 with thickness, on the dielectric height; an inner layer an
   offset stripline (Wheeler's for each half, combined) on the dielectric heights to both neighbours.
   VALIDATION_AUDIT.md ISSUE-5: the IPC-2141 / single-correction forms on the foils' centre spacing read +21 %
@@ -1487,6 +1503,36 @@ conducted emission or a ringing set by C_oss; design changes can.
   ADC input measuring rail 1's current, was refused for the RAIL in its name. `is_power_net` now takes a name
   with a measuring word (`MEASURE_NAME`: ADC, SENSE, SNS, MEAS, MON, IMON, VMON, ISNS, FB, FEEDBACK) as a signal
   unless a power pin is on the net (detect_dump: the same detection on refboard and board2).
+
+## Interleaved stages (`analysis/interleave.py`, 2026-10-18, branch `next-steps`)
+The phases of one controller (refboard's LTC7890 runs SW1 and SW2 180° apart) switch at one frequency, so
+at the LISN and at the antenna their emissions add as phasors. Before, each stage was reported alone. DC and
+thermal need nothing: each switch node's variance stays in its own copper (VALIDATION_AUDIT round 3).
+- **Settings:** `interleave: <group>` and `phase_deg` per converter (the delay in degrees of the switching period;
+  without it the group's n stages sit 360°·k/n apart in the settings' order, `group_phases`). Detection proposes a
+  group named after the IC that switches two or more stages (`detect._stage_controller`: an integrated stage's own
+  IC, else the one IC on the switch node or on the high-side gate, through a gate resistor at most), 360°/n apart,
+  with a reason that asks to check the datasheet. On refboard: conv1 0°, conv2 180°, "U303 phases".
+- **Per stage** (`stage_phasors`, end of `finish_converter`, only for a stage in a group): the hot-loop current's
+  complex harmonics = its magnitudes (`setup.currents`, exactly the stage's own) × unit phasors of the trapezoid
+  (signed sincs, delay e^(-j2πn(start + D/2)); a boost's high side starts at (1 − D_hs)·T) × the ringing rational
+  at jω × (1 + Y·V/I) [Paul 2006]. A boost's conducted current is its ripple triangle (`ripple_phase`). Conducted:
+  × the complex LISN transfer (`complex_transfer`, interpolated as `bridge._interp_complex`). Radiated: × the loop
+  moment as a complex vector (`simulate.band_vectors`, which `band_moments` now takes the norm of; between solves
+  the magnitude log-log as before [A22], the direction per component linear in log f).
+- **Per group** (`interleave_groups`, in `simulate.finish_issues`, so also after `split.merge_parts`): harmonic n of
+  a stage delayed by φ turns by e^(-jnφ); the records are added per harmonic number and read by the stage's own
+  receivers (`conducted_table`, `emission_table`, its spread). The same sum in phase is kept for comparison. The
+  group's dict goes on each member (`ConverterResult.interleave`, in the JSON summary); the records are released.
+  Not combined (a note): stages at different f_sw or spread; conducted only when every member has an estimate
+  against the same standard; CE101 stays per stage. Issues `power:<group>:interleave:conducted|emi`; the stages'
+  own issues stay (each alone).
+- **Assumption** [A35]: each stage's transfer and moment from its own model, added by superposition.
+- **Validation** (`tests/test_interleave.py`): the phasors against the DFT of sampled trapezoids (three duties and
+  delays) and triangles, the ringing rational against `ringing_response`; synthetic records 180° apart (odd
+  harmonics exactly 0, even ×2) and 120° apart (only multiples of 3, ×3); end to end, two identical stages on
+  `hot_loop_board(connector=True)`: 180° apart the conducted reading at f_sw falls by more than 60 dB and 2·f_sw is
+  +6.02 dB, in phase both +6.02 dB and the radiated worst +6.02 dB.
 
 ## Motor bridges (`analysis/motor.py`, `analysis/bridge.py`, `emi/pwm_lines.py`, `ui/bridges_panel.py`)
 A three-phase BLDC drive (a starter/generator, an ESC): three half-bridge legs on

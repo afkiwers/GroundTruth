@@ -12,7 +12,9 @@ change it, so a finer copper sampling can be tried without touching the code.
     .venv/Scripts/python tools/dev/neck_converge.py --raster 0.075 --sub-max 12   # a finer copper sampling
 
 Results on 2026-10-18 (ARCHITECTURE "A strip is as wide as the copper it crosses"): 0.35 mm neck 797 / 756 / 736 /
-764 / 717 / 769 / 742 MHz at d = 1.0 / 0.7 / 0.5 / 0.35 / 0.25 / 0.15 / 0.1 mm; 3 mm neck 1237-1271 MHz.
+764 / 717 / 769 / 742 MHz at d = 1.0 / 0.7 / 0.5 / 0.35 / 0.25 / 0.15 / 0.1 mm; 3 mm neck 1237-1271 MHz. Round 4
+(the bigger machine): 763 / 758 / 736 / 762 / 716 / 768 / 743 MHz, and with --raster 0.075 --sub-max 12
+763 / 783 / 775 / 763 / 807 / 768 / 743 MHz: a finer sampling does not narrow the spread.
 """
 from __future__ import annotations
 

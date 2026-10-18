@@ -66,7 +66,11 @@ from .kernel import (GMD_FLAT, MU0, filament_mutual, leggauss, segment_mutual, s
 SIGMA_CU = 5.8e7            # S/m, annealed copper at 20 °C [IEC 60028]
 VIA_PLATING = 25e-6         # m, a via barrel's plating [A3]
 EPS0 = 8.8541878128e-12
-GMRES_MEMORY = 4e8          # bytes allowed for the Krylov basis (sets the restart length)
+GMRES_MEMORY = 4e8          # bytes allowed for the Krylov basis (sets the restart length) ...
+GMRES_RESTART_MIN = 100     # ... but a restart at least this long: refboard's board-wide model at 8x (~1 M
+                            # unknowns) got 26 from 400 MB and stalled near every resonance above 600 MHz (2026-10-18);
+                            # with ~150 each solve converged in 116-163 iterations. Costs 1.6 GB per solve at 1 M
+                            # unknowns, only when the iterations need it (the basis grows); simulate.solve_bytes counts it
 GMRES_FIRST_ROWS = 16       # basis rows allocated at first; doubled as the iterations need them (_gmres)
 GMRES_EXTRA_CYCLES = 24     # restarts beyond max_cycles while the residual still falls ...
 GMRES_PROGRESS = 0.7        # ... to at most this fraction per restart (stagnation stops at once)
@@ -1774,6 +1778,12 @@ class _HostMath:
 
 
 # --------------------------------------------------------------------------- helpers
+def gmres_restart(n: int) -> int:
+    """GMRES's restart length for n unknowns: as long as GMRES_MEMORY allows, at most 200 and at least
+    GMRES_RESTART_MIN (a short restart stalls near a plane resonance; [Saad 2003] on restarted GMRES's stagnation)."""
+    return int(min(200, max(GMRES_RESTART_MIN, GMRES_MEMORY // (16 * n))))
+
+
 def _gmres(op: Callable, b, tol: float, max_cycles: int = 8,
            restart: Optional[int] = None, bnorm: Optional[float] = None,
            max_its: Optional[int] = None, vec=_HOST_VECTORS, extra_cycles: int = 0) -> tuple:
@@ -1796,7 +1806,7 @@ def _gmres(op: Callable, b, tol: float, max_cycles: int = 8,
     if bnorm == 0 or vec.norm(b) <= tol * bnorm:
         return x, 0, True
     if restart is None:
-        restart = int(min(200, max(20, GMRES_MEMORY // (16 * n))))
+        restart = gmres_restart(n)
     its = 0
     r = vec.copy(b)
     last = math.inf
