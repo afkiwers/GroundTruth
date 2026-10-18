@@ -7,6 +7,17 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `mil461h` (2026-10-18, from `main`, not merged):** the user: "Add both, let the user decide which
+  revision". `analysis.mil461: G | H` (default G).
+  - Read from both standards (the PDFs in `Downloads\GroundTruth audit sources`): only CE101 differs for the code.
+    461H's 5.4.1 takes ships and submarines to 20 kHz (aircraft stay at 10 kHz), and CE101-1 goes on to 66 dBµA at
+    20 kHz on the same line. Its relaxation is "the lesser of 20 log(I/3) or 35 dB"; 461G's is 20 log(I/3) to
+    185 A, then 35 dB.
+  - Code: `Ce101.revision`, `.range`, `ships_dc_h`; `power.ce101_transfer`, `bridge._ce101_complex_transfer` (the
+    CE102 band's solves from 10 kHz [A34]); two more conducted solves at 14.1 and 20 kHz for ships under H.
+  - Tests: the limit against both figures, the setting, a 12 kHz converter read only under H (the lead current at
+    14.1 / 20 kHz against the analytic C-against-LISN divider within 5 %), a bridge's rows to 20 kHz.
+  - Still waiting on the user: whether to model the combined emission of interleaved stages.
 - **Branch `small-fixes` (2026-10-18, from `references`; both merged into `main` as 6e5f00a at the user's "Merge"):** at the user's "keep going".
   - The Mac launcher is committed executable, which fixes `test_the_mac_launcher_is_lf_and_executable`.
   - The grid note says a coarse grid moves a resonance's frequency too, not only its height.
@@ -15,8 +26,7 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
   - Every model samples its copper at least 2 × 2 per cell (`simulate`, `sub = max(2, …)`), so cells of 0.15 mm
     and less carry strip widths too. The neck test case at 0.15 / 0.1 mm: 793 / 735 → 769 / 742 MHz. On kraft
     this only reaches 4x and up.
-  - Waiting on the user: MIL-STD-461H's CE101 to 20 kHz (follow 461H or keep 461G), and whether to model the
-    combined emission of interleaved stages.
+  - The user answered the 461H question with "Add both" (branch `mil461h`); interleaving is still open.
 - **Branch `references` (2026-10-18, merged into `main` with `small-fixes` as 6e5f00a):** at the user's "add references of the
   assumptions/methods/theorems, also call them out locally where they are used, in all calculations".
   - [REFERENCES.md](REFERENCES.md) lists every source by key (68 sources: electromagnetics, lines and EMC, power
@@ -59,7 +69,7 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
       in `out/converge/spi_sck_head_*`, `spi_sck_widths*` and `hot_new_*`.
   - The MIL-STD-461 sources are downloaded to `Downloads\GroundTruth audit sources`, including 461H (2026-04-17,
     supersedes 461G): RE102 aircraft is split into `re102_aircraft_external` (2 MHz-18 GHz), `re102_helicopter` and
-    `re102_space` (10 kHz-18 GHz). CE101 to 20 kHz (461H) is not implemented.
+    `re102_space` (10 kHz-18 GHz). CE101 to 20 kHz (461H) followed on branch `mil461h`.
   - Full suite before the last small edits: 859 passed, 1 skipped, 4 failed. Those were 3 GUI timing tests on the
     loaded machine and the launcher's git mode.
   - **Next, the user's request:** "add references of the assumptions/methods/theorems, also call them out locally

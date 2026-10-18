@@ -9,14 +9,15 @@ Kpi = tuple  # (title, value, sub, status, tip)
 
 
 def _ce101_row(r, warn_db: float) -> list:
-    """The CE101 row of a stage or bridge (MIL-STD-461 input lead current, 30 Hz-10 kHz), when CE101 is set."""
+    """The CE101 row of a stage or bridge (MIL-STD-461 input lead current, 30 Hz-10 kHz; 461H ships to 20 kHz),
+    when CE101 is set."""
     from ..components.values import format_si
     w = getattr(r, "ce101_worst", None)
     if not w:
         return []
     m = w["margin_db"]
     return [("CE101 margin", f"{m:+.1f} dB", f"@ {format_si(w['f'], 'Hz')}", _margin_status(m, warn_db),
-             f"input lead current below 10 kHz against {r.ce101_limit} (negative: over)")]
+             f"input lead current (CE101) against {r.ce101_limit} (negative: over)")]
 
 
 def _margin_status(margin_db: Optional[float], warn_db: float) -> str:

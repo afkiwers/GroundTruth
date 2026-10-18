@@ -628,3 +628,29 @@ def test_ce101_of_a_bridge_is_its_commutation_through_the_bus_capacitors_and_lea
     assert br.ce101_worst["current_a"] == pytest.approx(abs(line) * gauss, rel=0.02)
     # the sweep: a CE101 margin at each speed
     assert all(row.get("ce101_margin_db") is not None for row in br.sweep)
+
+
+def test_under_461h_a_bridges_ships_ce101_runs_to_20_khz_on_the_conducted_solves(solved_ce101):
+    """MIL-STD-461H's ships limit (CE101-1 to 20 kHz) on the same solved bridge: the rows go on past 10 kHz up to
+    20 kHz, and the transfer there is the conducted band's (the LISN as specified at the input [A34]), joined to the
+    CE101 solves below 10 kHz."""
+    from groundtruth.analysis.bridge import _ce101_complex_transfer, _complex_transfer, ce101_bridge_rows
+    from groundtruth.emi.conducted import Ce101
+    board, cfg, r = solved_ce101
+    br = r.bridges[0]
+    legs = [s for s in r.converter_setups if s.spec.bridge]
+    rows = ce101_bridge_rows(None, legs, br.waveform, Ce101("ships", 48.0, 30.0, "H"))
+    fr = [row["f"] for row in rows]
+    assert min(fr) >= 30.0 and 10e3 < max(fr) <= 20e3
+    assert all(row["limit_dbua"] is not None for row in rows)
+    s = legs[0]
+    fs, ts = _ce101_complex_transfer(s, 20e3)
+    low, tl = _complex_transfer(s, ce101=True)
+    up, tu = _complex_transfer(s)
+    assert list(fs[fs < 10e3]) == list(low) and np.allclose(ts[fs < 10e3], tl)
+    above = (up >= 10e3) & (up <= 30e3)
+    assert above.any() and list(fs[fs >= 10e3]) == list(up[above]) and np.allclose(ts[fs >= 10e3], tu[above])
+    # 461G (and 461H aircraft) stop at 10 kHz, on the CE101 solves alone
+    g = ce101_bridge_rows(None, legs, br.waveform, Ce101("ships", 48.0, 30.0, "G"))
+    assert max(row["f"] for row in g) <= 10e3
+    assert _ce101_complex_transfer(s, 10e3)[0].tolist() == low.tolist()

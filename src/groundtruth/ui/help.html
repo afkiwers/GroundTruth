@@ -1044,8 +1044,10 @@ memory), <code>threads</code> (solves in parallel), <code>conducted</code> (cisp
 <code>conducted_class</code>, <code>limit_class</code> (CISPR 32 class A or B for radiated), <code>radiated_limit</code>
 (another radiated limit: MIL-STD-461G RE102 by name, e.g. <code>re102_ground_army</code> or
 <code>re102_aircraft_external</code> (fixed wing, from 2 MHz) or <code>re102_helicopter</code> (from 10 kHz), at 1 m with the standard's bandwidths; or a curve of your own: a name, the
-distance and its points), <code>ce101</code> (MIL-STD-461G CE101,
-the input leads' current from 30 Hz to 10 kHz: <code>aircraft</code> or <code>ships</code>; a motor bridge's
+distance and its points), <code>mil461</code> (the MIL-STD-461 revision, <code>G</code> or <code>H</code>: under H
+the ships' CE101 limit runs to 20 kHz; nothing else here differs), <code>ce101</code> (MIL-STD-461 CE101,
+the input leads' current from 30 Hz to 10 kHz, ships under 461H to 20 kHz: <code>aircraft</code> or
+<code>ships</code>; a motor bridge's
 commutation lines, strongest at six times the electrical frequency, read through the bus capacitors and the test
 leads, which can resonate in this band; shown as <i>CE101 margin</i> and in the emission plots), <code>gpu</code> (auto,
 on, off). In the plugin, <a href="#prefs">Preferences</a> sets the resolution and can replace <code>threads</code>,
