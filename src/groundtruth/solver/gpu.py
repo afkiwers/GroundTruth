@@ -472,6 +472,37 @@ class TorchMath:
         return self.t.cat([self._dinv(o, r1 + self._spmv(self.data["Ar"], y)), y])
 
 
+class DeviceTooSmall(RuntimeError):
+    """The device's free memory cannot hold the model (device_bytes): the solve goes to the CPU."""
+
+
+DEVICE_MEMORY_SHARE = 0.8   # a model uses at most this share of the device's free memory
+
+
+def _free_bytes(dev: Device) -> Optional[int]:
+    """The device's free memory (bytes), None where it is not known (a CPU device, an older PyTorch)."""
+    if dev.device.type != "cuda":
+        return None
+    try:
+        return int(dev.torch.cuda.mem_get_info(dev.device)[0])
+    except Exception:       # noqa: BLE001 - not known: no check
+        return None
+
+
+def device_bytes(stack) -> int:
+    """About what solves on `stack` put on a device (bytes): the kernel spectra of both strip orientations (N x N
+    real values per padded pixel), the FFT work arrays (three complex N-layer grids), the incidence matrices (CSR,
+    and their transposes), the Krylov basis at its longest (peec.gmres_restart) and a few more vectors."""
+    from .peec import gmres_restart
+    pix = sum(int(np.prod(P)) for P, n in ((stack.Px, stack.nxb), (stack.Py, stack.ns - stack.nxb)) if n > 0)
+    n = stack.nb + stack.n_nodes
+    kernels = stack.N * stack.N * pix * 8
+    ffts = 3 * stack.N * pix * 16
+    incidence = 2 * (stack.Ar.nnz * 16 + (stack.Ar.shape[0] + stack.Ar.shape[1]) * 8)
+    basis = (gmres_restart(n) + 1) * n * 16
+    return int(kernels + ffts + incidence + basis + 20 * n * 16)
+
+
 def _csr(t, device, A):
     """A scipy sparse matrix (real) as a torch CSR tensor on the device."""
     A = A.tocsr()

@@ -49,12 +49,15 @@ class PathLine:
     er: Optional[float] = None
     tan_d: float = 0.0
     sigma: float = 5.8e7
+    planes_h_m: tuple = ()           # the dielectric heights to its return planes (one: microstrip, two: stripline)
 
     def alpha(self, f: np.ndarray) -> np.ndarray:
         """The attenuation (Np/m) at f: α = R'/(2 Z0) + G' Z0 / 2, the low-loss line [Pozar 2012].
 
-        Conductor: the strip's R' = 1/(σ·w·t_eff), t_eff = δ(1 - e^(-t/δ)) [A2], and the return plane as much again
-        (Pozar's wide-strip conductor loss α_c = R_s/(Z0·W), both conductors alike [A36]). Dielectric: G' = ωC'·tan δ
+        Conductor: the strip's R' = 1/(σ·w·t_eff), t_eff = δ(1 - e^(-t/δ)) [A2], and each return plane's from the
+        current it carries spread under the strip as 1/(1 + (x/h)²) [Johnson 1993] (plane_resistance; a stripline's
+        two planes share it inversely to their heights [A36]); without the heights, the plane as much as the strip
+        (Pozar's wide-strip α_c = R_s/(Z0·W)). Dielectric: G' = ωC'·tan δ
         with C' = √εeff/(c·Z0), the loss tangent weighted by the field's share in the dielectric, the filling
         factor εr(εeff - 1)/(εeff(εr - 1)) (1 for a stripline, εeff = εr) [Pozar 2012]."""
         f = np.asarray(f, float)
@@ -63,7 +66,15 @@ class PathLine:
         mu0 = 4e-7 * math.pi
         delta = 1.0 / np.sqrt(np.pi * np.maximum(f, 1.0) * mu0 * self.sigma)
         teff = delta * (1.0 - np.exp(-self.thickness_m / delta))
-        r = 2.0 / (self.sigma * self.width_m * teff)
+        r_sheet = 1.0 / (self.sigma * teff)                  # ohm per square
+        hs = [h for h in self.planes_h_m if h > 0]
+        if hs:
+            # the current divides between the planes inversely to their heights (images of the strip in each)
+            shares = [1.0] if len(hs) == 1 else [hs[1] / sum(hs), hs[0] / sum(hs)]
+            plane = sum(s * s * plane_resistance(self.width_m, h) for s, h in zip(shares, hs))
+        else:
+            plane = 1.0 / self.width_m
+        r = r_sheet * (1.0 / self.width_m + plane)
         er = self.er or self.eeff
         fill = 1.0 if er - 1.0 < 1e-6 or self.eeff >= er else er * (self.eeff - 1.0) / (self.eeff * (er - 1.0))
         g = 2 * np.pi * f * math.sqrt(self.eeff) / (C0 * self.z0) * self.tan_d * fill
@@ -73,6 +84,16 @@ class PathLine:
         """γ·l = (α + jβ)·l at f, β = ω√εeff / c."""
         f = np.asarray(f, float)
         return (self.alpha(f) + 1j * 2 * np.pi * f * math.sqrt(self.eeff) / C0) * self.length_m
+
+
+def plane_resistance(w: float, h: float) -> float:
+    """A return plane's resistance per metre and per ohm of sheet resistance under a strip of width w at height h
+    (m): its current density is the strip's uniform current spread by the plane's response 1/(1 + (x/h)²)
+    [Johnson 1993], J = [atan((x + a)/h) - atan((x - a)/h)] / (π·w) with a = w/2, and ∫J² dx in closed form
+    (Parseval: the transform is sinc(k·a)·e^(-h|k|)): [a·atan(a/h) - (h/2)·ln(1 + a²/h²)] / (π·a²). It tends to
+    1/(2πh) for a thin strip and to 1/w for a wide one (Pozar's wide-strip plane)."""
+    a = w / 2
+    return (a * math.atan(a / h) - h / 2 * math.log1p(a * a / (h * h))) / (math.pi * a * a)
 
 
 @dataclass
