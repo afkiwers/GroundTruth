@@ -7,6 +7,31 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `audit-3` (2026-10-18, committed, not merged):** the audit's round 3 (VALIDATION_AUDIT.md "Round 3"),
+  at the user's four items:
+  - "Fix this" (inner-layer Z0, solder mask): a path's line is the field-solved cut at its longest track
+    (`simulate.line_cache`, `si.SectionCache`), with the closed forms as the fallback (SP-26). On kraft, the cut reads
+    43.0-43.6 Ω outer and 35.6-41.7 Ω inner.
+  - "Is that a bad thing?" (interleaved phases): no, not for DC or thermal. The switch-node variance stays in each
+    node's own copper, so the cross term is exactly 0.
+  - "Try to fix this" (resonances above 1 GHz): strips are as wide as their copper (`Grid.wx/wy/ox/oy`,
+    `PlaneStack._widths`, `_narrow_self`, `_side_mutual`, `M_near`, CPU and GPU), and densities and heat follow
+    (`node_field(copper=True)`, `Grid.copper_area`); SP-27.
+    - The neck test case converges: 797-717 MHz where it was 722 to 900+.
+    - On kraft above 1 GHz, the grid-to-grid rms went from 7.0 to 4.0 dB (1x vs 2x) and from 5.3 to 4.4 dB
+      (2x vs 4x). The largest mode, F.Cu/In1 by C1105/C1110, is at 940 / 1020 / 1020 MHz at 1x / 2x / 4x (it was at
+      1060 / 1100 / 1060). So 2x and 4x agree on it, and 1x places it 8 % low, inside 0.5-1 GHz.
+    - The user chose "commit, keep digging": `GRID_SENSITIVE_F` is now 600 MHz.
+    - **Open:** 2x and 4x still differ by several dB above 1 GHz (4x has a peak at 1260-1300 MHz). Also open: a
+      sub-grid for cells ≤ 0.15 mm (point-sampled now, strips full; 2x there gave 769 instead of 793 MHz). Logs are
+      in `out/converge/spi_sck_head_*`, `spi_sck_widths*` and `hot_new_*`.
+  - The MIL-STD-461 sources are downloaded to `Downloads\GroundTruth audit sources`, including 461H (2026-04-17,
+    supersedes 461G): RE102 aircraft is split into `re102_aircraft_external` (2 MHz-18 GHz), `re102_helicopter` and
+    `re102_space` (10 kHz-18 GHz). CE101 to 20 kHz (461H) is not implemented.
+  - Full suite before the last small edits: 859 passed, 1 skipped, 4 failed. Those were 3 GUI timing tests on the
+    loaded machine and the launcher's git mode.
+  - **Next, the user's request:** "add references of the assumptions/methods/theorems, also call them out locally
+    where they are used, in all calculations".
 - **Branch `audit-2` (2026-10-18, merged into `main` as c5c313e at the user's "Merge"):** the audit's round 2, at the user's "continue with fixing the other
   issues as well a continue your audit" (VALIDATION_AUDIT.md "Round 2"): the venv rebuilt in place (it had been
   moved from `PCB-EMI\.venv`; the editable install and every launcher pointed there); ISSUE-7 fixed (the switch

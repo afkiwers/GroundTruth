@@ -79,7 +79,7 @@ REFINE_MARGIN_DB = 20.0     # ...unless the emission there stays this far below 
 WORST_SOLVED_LOG = 0.05     # the worst harmonic gets its own solve unless one lies within ±5 %
 SHUNT_MIN_SHARE = 0.01      # a shunt part on a signal path gets a loop of its own when it carries this share of the
                             # path's current at any harmonic (find_shunts, prepare_route)
-GRID_SENSITIVE_F = 1e9      # a worst emission above this from a board-wide plane resonance (rise >= GRID_SENSITIVE_RISE
+GRID_SENSITIVE_F = 600e6    # a worst emission above this from a board-wide plane resonance (rise >= GRID_SENSITIVE_RISE
 GRID_SENSITIVE_RISE_DB = 6.0  # dB over the low-frequency loop moment) within GRID_SENSITIVE_DB of the warning level
 GRID_SENSITIVE_DB = 10.0    # gets a note: such peaks moved several dB between grids (grid_sensitive_note)
 RASTER_MM = 0.15            # copper is sampled at this pitch or finer, so thin webs between antipads conduct
@@ -793,19 +793,46 @@ def _choose_pitch(h_mm: float, bbox, n_layers: int, max_nodes: int, grid_mm="aut
     return d
 
 
-def _line(board: Board, route: Route, ref_layer: str) -> tuple[float, float]:
+def _line(board: Board, route: Route, ref_layer: str, cache=None) -> tuple[float, float]:
     """(Z0, εeff) of the route's main layer."""
-    return _line_of(board, route.segments, ref_layer)
+    return _line_of(board, route.segments, ref_layer, cache)
 
 
-def _line_of(board: Board, segments: list, ref_layer: str) -> tuple[float, float]:
-    """(Z0, εeff) of a stretch of route: its longest layer, the median track width there."""
+def line_cache(model: "BoardModel"):
+    """The board's cross-section cache (analysis/si.SectionCache) for the signal paths' lines, made once per model:
+    equal cuts (a straight run) are solved once for every route."""
+    with model._lock:
+        if getattr(model, "_line_cache", None) is None:
+            from .si import SectionCache
+            model._line_cache = SectionCache(model.board, model.copper)
+        return model._line_cache
+
+
+def _line_of(board: Board, segments: list, ref_layer: str, cache=None) -> tuple[float, float]:
+    """(Z0, εeff) of a stretch of route: its longest layer, the median track width there.
+
+    With `cache` (line_cache: what Run checks' signal-integrity checks solve): the 2D field solver on the board's own
+    cut across the stretch's longest track, at its middle (the copper of every net in the cut, the stackup's
+    dielectrics and solder mask; within 0.2 % of exact, tests/test_xsection.py). Where no clean cut exists (the
+    track widens into a pad or a pour there, no reference copper in the cut) and without a cache, the closed forms
+    below. (Before 2026-10-18 the closed forms always: ~10 % high on very asymmetric inner layers, a few per cent on
+    outer layers for the solder mask they leave out; VALIDATION_AUDIT.md ISSUE-5.)"""
     lengths: dict[str, float] = {}
     for s in segments:
         lengths[s.layer] = lengths.get(s.layer, 0.0) + s.length
     layer = max(lengths, key=lengths.get) if lengths else ref_layer
     widths = [s.width for s in segments if s.layer == layer and s.kind == "track"] or [0.2]
     w = float(np.median(widths))
+    if cache is not None:
+        tracks = [s for s in segments if s.layer == layer and s.kind == "track" and s.length > 0 and s.net]
+        if tracks:
+            s = max(tracks, key=lambda x: x.length)
+            (ax, ay), (bx, by) = s.start, s.end
+            n = math.hypot(bx - ax, by - ay)
+            got = cache.solve_at(((ax + bx) / 2, (ay + by) / 2), ((bx - ax) / n, (by - ay) / n), layer, [s.net],
+                                 s.width)
+            if got is not None and got[0].z0() > 0:
+                return float(got[0].z0()), float(got[0].eeff())
     st = board.stackup
     neigh = st.neighbours(layer)
     t = st.layer(layer).thickness if st.layer(layer) else 0.035
@@ -864,8 +891,9 @@ def shunt_route(route: Route, shunt: dict) -> Route:
 
 
 def path_elements(board: Board, config: Config, route: Route, ref_layer: str,
-                  shunts: Optional[list[dict]] = None) -> tuple[list, list[dict]]:
-    """The route as emi/path.py elements: a line per stretch between series parts (its own Z0 and εeff), each
+                  shunts: Optional[list[dict]] = None, cache=None) -> tuple[list, list[dict]]:
+    """The route as emi/path.py elements: a line per stretch between series parts (its own Z0 and εeff, from the
+    board's cut when `cache`, line_cache, is given: _line_of), each
     part a series impedance (its component model; none: a short), each shunt (find_shunts) at its place. Also the
     summary rows for the result."""
     elements, rows, stretch = [], [], []
@@ -878,7 +906,7 @@ def path_elements(board: Board, config: Config, route: Route, ref_layer: str,
         """End the current stretch of track: one line element with its own Z0 and eps_eff (from its layer and
         median width) and its length, and its summary row."""
         if stretch:
-            z0, eeff = _line_of(board, stretch, ref_layer)
+            z0, eeff = _line_of(board, stretch, ref_layer, cache)
             length = sum(s.length for s in stretch)
             elements.append(PathLine(z0, eeff, length * 1e-3))
             rows.append({"kind": "line", "length_mm": length, "z0": z0, "eeff": eeff,
@@ -1028,7 +1056,7 @@ def _amplified_route(model: "BoardModel", setup: RouteSetup, freqs, amps, source
     els, shunt_sets = [], []
     for k, sr in enumerate(stages):
         sh = find_shunts(model, sr)
-        e, r = path_elements(board, config, sr, main_ref, sh)
+        e, r = path_elements(board, config, sr, main_ref, sh, line_cache(model))
         els.append(e)
         shunt_sets.append(sh)
         rows += r
@@ -1290,7 +1318,7 @@ def prepare_route(model: BoardModel, spec: NetSpec, route: Route) -> tuple[Optio
     setup = RouteSetup(spec, route, res, ModelRun(st, exc), cavity, drv_ret, rcv_ret, route_refs, main_ref, h_mm,
                        freqs, issues=issues, t_start=t_start)
     # Current on the line per harmonic: driver resistance (+ series parts), line Z0/εeff, receiver load
-    res.z0, res.eeff = _line(board, route, main_ref)
+    res.z0, res.eeff = _line(board, route, main_ref, line_cache(model))
     for ref in route.parts:
         mdl = config.model_for(ref)
         if mdl is not None and mdl.kind == "resistor":
@@ -1314,7 +1342,7 @@ def prepare_route(model: BoardModel, spec: NetSpec, route: Route) -> tuple[Optio
                 return None, res, issues
         else:
             shunts = find_shunts(model, route)
-            elements, rows = path_elements(board, config, route, main_ref, shunts)
+            elements, rows = path_elements(board, config, route, main_ref, shunts, line_cache(model))
             pr = path_currents(freqs, amps, elements, source, load)
             setup.currents = np.abs(pr.i_mean)
             setup.path = (rows, pr)
@@ -1570,7 +1598,9 @@ def grid_sensitive_note(worst: dict, m_worst: float, m_low: float, warn_db: floa
     moment per ampere there, m_worst, at least GRID_SENSITIVE_RISE_DB over its low-frequency value m_low) and its
     margin is within GRID_SENSITIVE_DB of the warning level: on kraft_flux_mini_2 (6 layers) such peaks changed by
     several dB between the 1x, 2x and 4x grids (two resonances near each other reinforce on one grid and not on
-    the next; ARCHITECTURE "Board-wide resonances above 1 GHz"), while the 740 MHz resonance agreed to 0.6 dB."""
+    the next; ARCHITECTURE "Board-wide resonances above 1 GHz"). The threshold was 1 GHz; since the strips carry
+    their copper's width (2026-10-18) the 1x grid places kraft's largest mode (F.Cu/In1) at 940 MHz, where 2x and 4x
+    have it at 1020, and the grids disagree from ~620 MHz up (they agree within 0.5 dB at 540-580 MHz), so 600 MHz."""
     if worst is None or worst.get("margin_db") is None or worst["f"] < GRID_SENSITIVE_F or m_low <= 0 or m_worst <= 0:
         return None
     rise = 20 * math.log10(m_worst / m_low)
@@ -1578,7 +1608,7 @@ def grid_sensitive_note(worst: dict, m_worst: float, m_low: float, warn_db: floa
         return None
     finer = f"{2 * resolution:g}x" if resolution >= 1 else "2x"
     return (f"the worst emission ({worst['f'] / 1e6:.4g} MHz, margin {worst['margin_db']:+.1f} dB) comes from a "
-            f"plane resonance above {GRID_SENSITIVE_F / 1e9:g} GHz ({rise:+.0f} dB over the loop's low-frequency "
+            f"plane resonance above {GRID_SENSITIVE_F / 1e6:g} MHz ({rise:+.0f} dB over the loop's low-frequency "
             f"value): such peaks can change by several dB with the grid. Check it at {finer} resolution "
             "(Preferences, or --resolution)")
 

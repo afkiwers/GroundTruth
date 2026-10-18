@@ -1441,9 +1441,9 @@ def dc_summary(st: StackBuild, sol: Solution, current: float, name: str, plating
     maps, best, best_s = {}, (0.0, "", (0.0, 0.0)), (0.0, "", (0.0, 0.0))
     for k, layer in enumerate(st.names):
         g = st.grids[k]
-        dens = sol.sheet_current(k, st.d) * current / st.t[k] * 1e-6          # A/mm²
+        dens = sol.sheet_current(k, st.d, True) * current / st.t[k] * 1e-6    # A/mm² in the copper
         if sol_d is not None:
-            dd = sol_d.sheet_current(k, st.d) * (k_r * current) / st.t[k] * 1e-6
+            dd = sol_d.sheet_current(k, st.d, True) * (k_r * current) / st.t[k] * 1e-6
             dens = np.sqrt(dens * dens + dd * dd)                               # RMS over the two states
         maps[layer] = dens
         if not dens.size or dens.max() <= 0:
@@ -2041,7 +2041,7 @@ def dc_vector_maps(st: StackBuild, sol: Solution, current: float) -> dict:
     """{layer: (Jx, Jy)} current density vectors of a DC solution in A/mm² (as the density maps of dc_summary)."""
     out = {}
     for k, layer in enumerate(st.names):
-        kx, ky = sol.sheet_vectors(k, st.d)
+        kx, ky = sol.sheet_vectors(k, st.d, True)
         scale = current / st.t[k] * 1e-6
         out[layer] = ((kx * scale).astype(np.float32), (ky * scale).astype(np.float32))
     return out
@@ -2074,7 +2074,8 @@ def dc_analysis(model: BoardModel, setup: "ConverterSetup") -> tuple[list[dict],
             k_r, sol_d = ripple
             st = run.build
             setup.res.dc_ripple_sq[name] = {
-                layer: ((sol_d.sheet_current(k, st.d) * (k_r * current) / st.t[k] * 1e-6) ** 2).astype(np.float32)
+                layer: ((sol_d.sheet_current(k, st.d, True) * (k_r * current) / st.t[k] * 1e-6) ** 2
+                        ).astype(np.float32)
                 for k, layer in enumerate(st.names)}
             setup.res.dc_ripple_branch[name] = (st, np.asarray(sol_d.I_branch).real * (k_r * current))
             notes.append(f"DC {name}: the high side carries it for D = {setup.res.duty:.2f}, the low side "

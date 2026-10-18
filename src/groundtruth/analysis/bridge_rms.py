@@ -160,7 +160,7 @@ class RmsBasis:
         if runs:
             st = runs[0][2].build
             sols = [run.ok()[DC_F] for _, _, run in runs]
-            fields = {layer: [tuple(f.real * 1e-6 / st.t[k] for f in sol.node_field(k, st.d)) for sol in sols]
+            fields = {layer: [tuple(f.real * 1e-6 / st.t[k] for f in sol.node_field(k, st.d, True)) for sol in sols]
                       for k, layer in enumerate(st.names)}
             self.slow = (st, [(0 if src == "hs" else 3) + c for src, c, _ in runs], fields,
                          np.array([sol.I_branch.real for sol in sols]))
@@ -176,7 +176,8 @@ class RmsBasis:
                     got.append((column(s), sols[f]))
                     st = s.cond.build
             if got:
-                fields = {layer: [tuple(x * 1e-6 / st.t[k] for x in sol.node_field(k, st.d)) for _, sol in got]
+                fields = {layer: [tuple(x * 1e-6 / st.t[k] for x in sol.node_field(k, st.d, True))
+                                  for _, sol in got]
                           for k, layer in enumerate(st.names)}
                 self.fast[n] = (st, [c for c, _ in got], fields, np.array([sol.I_branch for _, sol in got]))
 
@@ -233,7 +234,9 @@ class RmsBasis:
             out["maps"][layer] = dens
             out["grids"][layer] = g
             sl = self.model.board.stackup.layer(layer)
-            copper_w += float(rho * np.maximum(v, 0.0).sum() * (sl.thickness if sl else 0.035) * g.d * g.d)
+            # densities in the copper: each cell's heat over its copper (Grid.copper_area)
+            copper_w += float(rho * (np.maximum(v, 0.0) * g.copper_area()).sum() * (sl.thickness if sl else 0.035)
+                              * g.d * g.d)
             if not dens.size or dens.max() <= 0:
                 continue
             i, j = np.unravel_index(int(np.argmax(dens)), dens.shape)
