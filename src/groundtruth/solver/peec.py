@@ -1,5 +1,8 @@
 """Quasi-static PEEC solver for return currents in a stack of copper layers.
 
+PEEC [Ruehli 1974] with partial inductances [Ruehli 1972] in modified nodal form [Ho 1975]; quasi-static [A1].
+Source keys: docs/REFERENCES.md.
+
 Every plane layer is rasterised on the same xy grid. Unknowns are the currents in x/y strips between
 neighbouring nodes of each layer, displacement currents between facing planes, currents in vertical and
 lumped branches (stitching vias, through-hole pads, decaps, 0R, ferrites), plus all node potentials:
@@ -7,21 +10,23 @@ lumped branches (stitching vias, through-hole pads, decaps, 0R, ferrites), plus 
     Z·I - A·V = -jω·ψ        (KVL per branch; ψ = flux coupled from the known signal current)
     Aᵀ·I      = J            (KCL; +1 A injected at the receiver return node, -1 A at the driver's)
 
-Z = R_s(f) + jω·L_p for the strips, where L_p holds all mutual partial inductances between parallel
-strips on every pair of layers. On a uniform grid each layer pair's L_p is a convolution kernel that only
-depends on the grid offset and the layer distance Δz, so L_p·I is evaluated with FFTs and never formed.
-Plane-pair capacitance (C = ε0·εr·d²/t per cell, from the stackup, plus dielectric loss ωC·tanδ) and the
-vertical/lumped branches are diagonal in Z.
+Z = R_s(f) + jω·L_p for the strips (R_s with the skin depth [Ramo 1994] [A2]), where L_p holds all mutual
+partial inductances between parallel strips on every pair of layers. On a uniform grid each layer pair's L_p is a
+convolution kernel that only depends on the grid offset and the layer distance Δz, so L_p·I is evaluated with FFTs
+and never formed. Plane-pair capacitance (C = ε0·εr·d²/t per cell, from the stackup, plus dielectric loss ωC·tanδ
+[Pozar 2012]) and the vertical/lumped branches are diagonal in Z.
 
 Two objects split the work:
   * PlaneStack - everything that does not depend on the signal route: topology, kernels, and a cache of
     per-frequency operators (preconditioner factorisations). All routes on a board, and every fix candidate,
     share it. A candidate via is `stack.with_branches([...])`, solved with the base factorisation plus a
-    Woodbury low-rank update instead of a new factorisation.
+    Woodbury low-rank update [Woodbury 1950] instead of a new factorisation.
   * RouteExcitation - one signal's loop: ψ, injection nodes, trace self-inductance.
 
-Solver: right-preconditioned GMRES (block classical Gram-Schmidt via BLAS, so it stops on the true residual).
-Preconditioner: Z replaced by diag(Z), applied through the sparse Schur complement Aᵀ·diag(Z)⁻¹·A (SuperLU).
+Solver: right-preconditioned GMRES [Saad 1986] [Saad 2003] (block classical Gram-Schmidt via BLAS, run twice
+[Giraud 2005], so it stops on the true residual). Preconditioner: Z replaced by diag(Z), applied through the sparse
+Schur complement Aᵀ·diag(Z)⁻¹·A of the saddle-point system [Benzi 2005] (SuperLU [Demmel 1999], MMD ordering
+[Liu 1985]).
 The L_p product is done in double precision: near plane resonances the system is ill-conditioned and the
 ~1e-7 error of a single-precision FFT product stalled GMRES (measured 10 000+ iterations vs ~20). With plane
 capacitance, the "sheet" preconditioner keeps each position's cross-layer inductance block (the cavity mode);
@@ -58,8 +63,8 @@ from . import gpu
 from .kernel import (GMD_FLAT, MU0, filament_mutual, leggauss, segment_mutual, segment_vector_potential, strip_kernel,
                      strip_self, strip_self_numeric)
 
-SIGMA_CU = 5.8e7
-VIA_PLATING = 25e-6
+SIGMA_CU = 5.8e7            # S/m, annealed copper at 20 °C [IEC 60028]
+VIA_PLATING = 25e-6         # m, a via barrel's plating [A3]
 EPS0 = 8.8541878128e-12
 GMRES_MEMORY = 4e8          # bytes allowed for the Krylov basis (sets the restart length)
 GMRES_FIRST_ROWS = 16       # basis rows allocated at first; doubled as the iterations need them (_gmres)
@@ -520,10 +525,11 @@ class TraceSegment:
 
 def via_impedance(length_m: float, drill_m: float, sigma: float = SIGMA_CU, filled: bool = False
                   ) -> Callable[[float], complex]:
-    """Barrel of a plated via between two layers: R (plating) + jωL (partial self inductance). filled: a part's
-    pin soldered in the hole carries the current over the whole cross-section (copper-equivalent)."""
+    """Barrel of a plated via between two layers: R (plating) + jωL (partial self inductance [Paul 2010]). filled: a
+    part's pin soldered in the hole carries the current over the whole cross-section (copper-equivalent)."""
     r = max(drill_m / 2, 5e-5)
-    # the barrel as a tube: its partial self inductance is a filament's at its radius (a tube's GMD); its
+    # the barrel as a tube [A3]: its partial self inductance is a filament's at its radius (a thin tube's GMD
+    # [Grover 1946]); its
     # resistance that of the plating ring 2 pi r t (or of the whole hole when a pin fills it)
     L = float(filament_mutual(max(length_m, 1e-6), np.array(0.0), np.array(r)))
     area = math.pi * r * r if filled else math.pi * 2 * r * VIA_PLATING
@@ -543,8 +549,8 @@ def track_impedance(length_m: float, width_m: float, thickness_m: float = 35e-6,
         """The bridge's impedance at f: R with the copper's effective thickness for the skin depth, + jwL."""
         t = thickness_m
         if f > 0:
-            # skin depth delta = 1 / sqrt(pi f mu0 sigma); the current flows in an effective thickness
-            # delta (1 - e^(-t/delta)): t at low frequencies, delta once delta << t
+            # skin depth delta = 1 / sqrt(pi f mu0 sigma) [Ramo 1994]; the current flows in an effective thickness
+            # delta (1 - e^(-t/delta)) [A2]: t at low frequencies, delta once delta << t
             delta = 1 / math.sqrt(math.pi * f * MU0 * sigma)
             t = delta * (1 - math.exp(-thickness_m / delta))
         return complex(length_m / (sigma * width_m * t), 2 * math.pi * f * L)
@@ -871,7 +877,8 @@ class PlaneStack:
                 between |= node[m]
             share = np.minimum(fill[p.upper], fill[p.lower])     # facing copper area of the cell
             # a parallel-plate capacitor per cell where both planes have copper and no layer between them does
-            # (copper in between shields: its own pairs cover it); C = eps/t x the facing area
+            # (copper in between shields: its own pairs cover it); C = eps/t x the facing area (parallel plates,
+            # fringing left out [Pozar 2012])
             ii, jj = np.nonzero(node[p.upper] & node[p.lower] & ~between & (share > 0))
             cap.append(np.column_stack([np.full(len(ii), p.upper), np.full(len(ii), p.lower), ii, jj,
                                         p.c_per_area * cell * share[ii, jj], np.full(len(ii), p.tan_delta)]))
@@ -994,7 +1001,7 @@ class PlaneStack:
 
     def with_branches(self, extra: list[Branch]) -> "PlaneStack":
         """This stack plus a few branches (candidate vias / parts). Shares grids and kernels; solves reuse
-        this stack's factorisations through a low-rank (Woodbury) update."""
+        this stack's factorisations through a low-rank (Woodbury) update [Woodbury 1950]."""
         extra = [b for b in extra if self.nid[b.a] >= 0 and self.nid[b.b] >= 0 and b.a != b.b]
         if not extra:
             return self
@@ -1053,8 +1060,8 @@ class PlaneStack:
         (tools/dev/mem_profile.py). Only the distinct pairs (42) made the compiled loop 10-35 % slower (_mac.py)."""
         nx, ny, d = self.nx, self.ny, self.d
         N = self.N
-        # FFT sizes: a linear (not circular) convolution of an n-point array with a 2n-1 point kernel needs at
-        # least 2n-1 points; next_fast_len rounds up to a size with small prime factors (fast FFTs)
+        # FFT sizes [Oppenheim 2010]: a linear (not circular) convolution of an n-point array with a 2n-1 point
+        # kernel needs at least 2n-1 points; next_fast_len rounds up to a size with small prime factors (fast FFTs)
         self.Px = (next_fast_len(2 * (nx - 1) - 1), next_fast_len(2 * ny - 1))
         self.Py = (next_fast_len(2 * nx - 1), next_fast_len(2 * (ny - 1) - 1))
         Kx = np.empty((self.Px[0] // 2 + 1, self.Px[1] // 2 + 1, N, N))
@@ -1171,8 +1178,9 @@ class PlaneStack:
 
     # ------------------------------------------------------------------ operators
     def surface_resistance(self, f: float, t: float) -> float:
-        """Sheet resistance (ohm per square) of copper t thick at f: 1/(sigma t) at DC, the skin depth's effective
-        thickness delta (1 - e^(-t/delta)) above (as track_impedance). A square strip's R is its sheet resistance."""
+        """Sheet resistance (ohm per square) of copper t thick at f: 1/(sigma t) at DC, the skin depth's [Ramo 1994]
+        effective thickness delta (1 - e^(-t/delta)) above [A2] (as track_impedance). A square strip's R is its sheet
+        resistance."""
         if f <= 0:
             return 1 / (self.sigma * t)
         delta = 1 / math.sqrt(math.pi * f * MU0 * self.sigma)
@@ -1186,7 +1194,7 @@ class PlaneStack:
         # a square strip's R is the sheet resistance; one φ of the pitch wide, sheet resistance / φ
         R_strip = (np.concatenate([rs[self.xa[:, 0]], rs[self.ya[:, 0]]]) / self.strip_width if self.ns
                    else np.zeros(0))
-        if self.ncap:   # Y = jωC(1 - j·tanδ): susceptance plus dielectric-loss conductance
+        if self.ncap:   # Y = jωC(1 - j·tanδ): susceptance plus dielectric-loss conductance [Pozar 2012]
             C, tand = self.cap[:, 4], self.cap[:, 5]
             z_cap = 1.0 / (w * C * tand + 1j * w * C) if w > 0 else np.full(self.ncap, 1e18 + 0j)
         else:
@@ -1317,7 +1325,7 @@ class PlaneStack:
             k0 = base.nb
             U = self.ArT[:, k0:].toarray()                      # Schur change: S = S_base + U·diag(1/z_new)·Uᵀ
             SiU = bop.solve_S(U)
-            small = np.diag(z_tail[k0 - self.ns:]) + U.T @ SiU   # C⁻¹ + Uᵀ S⁻¹ U   (Woodbury)
+            small = np.diag(z_tail[k0 - self.ns:]) + U.T @ SiU   # C⁻¹ + Uᵀ S⁻¹ U   [Woodbury 1950]
             small_inv = np.linalg.inv(small)
 
             def solve_S(v, b=bop.solve_S, SiU=SiU, Ut=U.T, small_inv=small_inv):
@@ -1522,7 +1530,8 @@ class PlaneStack:
         return out
 
     def moment(self, trace: list[TraceSegment], Ib: np.ndarray) -> np.ndarray:
-        """m = ½ ∮ r × I dl over the closed loop (signal path, plane strips, displacement currents, branches)."""
+        """m = ½ ∮ r × I dl over the closed loop (signal path, plane strips, displacement currents, branches): the
+        magnetic dipole moment [Jackson 1999, §5.6]."""
         # m = 1/2 sum over every piece of the closed loop of r x (I dl); for a straight piece from a to b this is
         # I (a x b) / 2 exactly. The loop is closed (KCL holds), so the result does not depend on the origin.
         m = np.zeros(3, complex)
@@ -1768,7 +1777,8 @@ class _HostMath:
 def _gmres(op: Callable, b, tol: float, max_cycles: int = 8,
            restart: Optional[int] = None, bnorm: Optional[float] = None,
            max_its: Optional[int] = None, vec=_HOST_VECTORS, extra_cycles: int = 0) -> tuple:
-    """Restarted GMRES with classical Gram-Schmidt + reorthogonalisation (BLAS gemv on the basis, no copies).
+    """Restarted GMRES [Saad 1986] [Saad 2003] with classical Gram-Schmidt + reorthogonalisation [Giraud 2005] (BLAS
+    gemv on the basis, no copies).
     Stops when the true residual ‖b - op(x)‖ ≤ tol·bnorm (default ‖b‖; a warm start passes the norm of the
     original right-hand side with b = its remaining residual), or unconverged after max_cycles restarts or
     max_its iterations (x is then the best so far). extra_cycles more restarts are allowed as long as each one
@@ -1776,8 +1786,8 @@ def _gmres(op: Callable, b, tol: float, max_cycles: int = 8,
     resonance converges steadily but slowly (kraft_flux_mini_2's board-wide model at 4x resolution, 1.58 GHz:
     ~2x per cycle, done after 11 cycles of 52).
 
-    The small least-squares problem is kept triangular with Givens rotations, so each iteration costs O(j) for
-    it: np.linalg.lstsq on the whole Hessenberg matrix every iteration took 18 ms at j = 120 and 44 ms at 200,
+    The small least-squares problem is kept triangular with Givens rotations [Saad 2003], so each iteration costs
+    O(j) for it: np.linalg.lstsq on the whole Hessenberg matrix every iteration took 18 ms at j = 120 and 44 ms at 200,
     more than the rest of an iteration on long solves."""
     n = len(b)
     if bnorm is None:
@@ -1867,7 +1877,8 @@ def _gmres(op: Callable, b, tol: float, max_cycles: int = 8,
 
 
 def _trace_self(trace: list[TraceSegment], trace_t: float) -> float:
-    """Partial self inductance of the whole signal path (all segment pairs, weighted by their currents)."""
+    """Partial self inductance of the whole signal path (all segment pairs, weighted by their currents), as a sum of
+    partial self and mutual inductances [Paul 2010]."""
     segs = [s for s in trace if np.linalg.norm(s.b - s.a) > 0]
     L = 0.0
     # L = sum_ij I_i I_j M_ij: the self terms, plus each mutual pair twice (M is symmetric)
@@ -1879,7 +1890,7 @@ def _trace_self(trace: list[TraceSegment], trace_t: float) -> float:
 
 
 def _trace_resistance(trace: list[TraceSegment], f: float, sigma: float, trace_t: float) -> float:
-    """The resistance of the known current path's horizontal segments at f (skin depth as track_impedance),
+    """The resistance of the known current path's horizontal segments at f (skin depth as track_impedance [A2]),
     each weighted by the square of its share of the current (I^2 R power, per A)."""
     R = 0.0
     for s in trace:
@@ -1930,21 +1941,21 @@ def _narrow_self(d: float, phi: float, t: float) -> float:
     numeric flat-strip integral the kernels' self term is (kernel.strip_self_numeric, zero thickness), and the
     copper thickness t's change to it from the GMD formula (kernel.strip_self), as a difference to the full
     strip's (the GMD formula alone was 1.5 % off the integral: two touching half-pitch strips read 1.5 % above
-    the one strip they make)."""
+    the one strip they make). The GMD formula is [Grover 1946]; the split of a strip's partials [A4]."""
     def thick(w):
         """What thickness t lowers a strip w wide by (GMD formula)."""
         return strip_self(d, w) - strip_self(d, w, t)
     return strip_self_numeric(d, phi * d) - strip_self_numeric(d, d) - thick(phi * d) + thick(d)
 
 
-NEAR_AXIAL = 2      # PlaneStack._widths: side-by-side partial strips corrected up to this many strips along
+NEAR_AXIAL = 2      # PlaneStack._widths: side-by-side partial strips corrected up to this many strips along [A4]
 
 
 def _side_mutual(length: float, wa, wb, gap, steps=0.0, n: int = 8) -> np.ndarray:
     """Mutual partial inductance (H) of two flat coplanar parallel strips `length` long, widths wa and wb, centre
     distance gap across them and `steps` lengths apart along them (wa, wb, gap: fractions of `length`; arrays
     broadcast): each strip n filaments across its width, the mean of their filament mutuals (as
-    kernel.strip_self_numeric). Touching filaments are kept a filament's GMD apart."""
+    kernel.strip_self_numeric; filament mutuals [Grover 1946]). Touching filaments are kept a filament's GMD apart."""
     wa, wb, gap, steps = (np.atleast_1d(v) for v in np.broadcast_arrays(*(np.asarray(v, float) for v in
                                                                             (wa, wb, gap, steps))))
     wa, wb, gap = wa * length, wb * length, gap * length
@@ -1958,8 +1969,9 @@ def _side_mutual(length: float, wa, wb, gap, steps=0.0, n: int = 8) -> np.ndarra
 
 def _sheet_blocks(L_self: float, centre: np.ndarray, sums: np.ndarray) -> np.ndarray:
     """N×N layer block for strips at one position whose quadratic form gives every layer pair its sheet
-    (plane-pair cavity) inductance D_kl = 2·Σ(M_kk − M_kl) ≈ μ0·Δz per square - the inductance a diagonal
-    preconditioner misses (7x for a 1.2 mm core), which is what makes GMRES slow near plane resonances.
+    (plane-pair cavity) inductance D_kl = 2·Σ(M_kk − M_kl) ≈ μ0·Δz per square (a parallel-plate line's
+    [Pozar 2012]) - the inductance a diagonal preconditioner misses (7x for a 1.2 mm core), which is what makes
+    GMRES slow near plane resonances.
     B = β·11ᵀ − D/2, β chosen so a pair's common mode keeps L_self + M_kl and B stays positive definite."""
     N = len(sums)
     D = np.maximum(2.0 * (sums[0, 0] - sums), 0.0)
