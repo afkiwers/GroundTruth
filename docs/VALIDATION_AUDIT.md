@@ -403,15 +403,16 @@ The user: "continue with fixing the other issues as well a continue your audit",
   | | Old | New | After rounds 3 and 4 (2026-10-18 evening) |
   |---|---|---|---|
   | Line Z0, outer / inner | 52.7 / 54.5 Ω | 44.8 / 38.6 Ω | field-solved cut: 43.1-43.8 / 35.6-41.7 Ω |
-  | Worst margin SPI_SCK / SPI_MISO / SPI_MOSI | +15.3 / +18.8 / +18.8 dB | +13.9 / +18.1 / +17.8 dB | +11.4 / +14.8 / +15.4 dB |
-  | Other nets' worst margins | – | within −0.7 to +0.6 dB of old | SW_CLK +32.8 → +40.5 dB; Net-(U301--) +45.7 → +22.1 and ADC_I_RAIL_1 +34.2 → +21.4 dB (a lossless line at a resonance, round 4); the rest within −1.5 to +2.1 dB |
+  | Worst margin SPI_SCK / SPI_MISO / SPI_MOSI | +15.3 / +18.8 / +18.8 dB | +13.9 / +18.1 / +17.8 dB | +11.4 / +14.8 / +15.4 dB; with lossy path lines (round 4) +11.8 / +15.2 / +15.8 dB |
+  | Other nets' worst margins | – | within −0.7 to +0.6 dB of old | SW_CLK +32.8 → +40.5 dB; Net-(U301--) +45.7 → +22.1 and ADC_I_RAIL_1 +34.2 → +21.4 dB, a lossless line at a resonance: with the lines' loss (round 4) +33.5, ADC_I_RAIL_2 +35.4; the rest within −1.5 to +2.1 dB |
   | conv1 switch-node copper loss, sustained density | 19.5 mW, 28.5 A/mm² | 27.7 mW, 35.9 A/mm² | 29.7 mW, 37.4 A/mm² |
   | conv2 switch-node copper loss | 17.6 mW | 20.3 mW | 21.5 mW |
   | Hot-loop L, radiated and conducted margins, other DC paths | – | unchanged | hot loops +6 % (conv1 1.48 → 1.57 nH), margins within 0.2 dB, control loops unchanged |
 
-  The last column: the current board (`Downloadslux-2lux-2.kicad_pcb`, 2026-10-17, the same results as round
+  The last column: the current board (`Downloads\refboard\refboard.kicad_pcb`, 2026-10-17, the same results as round
   2's board where the code did not change: conv1's loop 11.2 kHz / 76.8° / 20.2 dB, 37 errors, 50 warnings),
-  `out/refboard_refresh/now2/`, 18 min on 16 CPU threads.
+  `out/refboard_refresh/now2/`, 18 min on 16 CPU threads; with lossy path lines `out/path_loss/full/` (the converters and the
+  issue counts the same).
 
   The four stages are bucks with CISPR 32 and no spread, so ISSUE-1, -9 and -10 do not show there. The emission
   margins move little because these short lines are capacitive loads at most harmonics; long or terminated lines
@@ -516,6 +517,21 @@ the last digit or two.
   A finer sampling does not narrow the spread (NEXT_STEPS asked for ±2 % before trying it on refboard), so `RASTER_MM`
   stays: the remaining scatter is how the grid falls on the geometry, ±4 % on a resonance set by a neck narrower
   than the pitch.
+- **Loss in the signal path's lines (NEXT_STEPS 6, at the user's "Fix those").** `PathLine.alpha` (copper from the
+  skin depth, strip and plane alike [A36]; dielectric G = ωC tan δ with the filling factor), γ = α + jβ in the
+  cascade. Verified: a matched 100 mm microstrip's end voltage against e^(-αl) with Pozar's α at 0.3 / 1 / 3 GHz
+  within 0.5 %, an open quarter-wave stub's input against Z0·tanh(αl) within 0.5 % (tests/test_path.py). On refboard:
+  ADC_I_RAIL_1 +21.4 → +33.5 dB (C304 carries 1.0 × the input current, not 4.5 ×), ADC_I_RAIL_2 +30.1 → +35.4,
+  the SPI nets +0.4 dB, the converters and the issue counts unchanged (`out/path_loss/full/`). Net-(U301--) stays at
+  +22.1 dB: its worst is a board-wide plane resonance at 1590 MHz, not the path (the grid note applies).
+- **The GPU path on a small GPU (NEXT_STEPS 7).** All of it is complex128, which a GeForce card runs at 1/64 of
+  its FP32 rate: the RTX 3050 Laptop GPU was 3.5 × slower than the CPU on a small board and > 6 × on refboard, and two
+  processes on it (a split Simulate's workers) stalled each other for hours (`tools/dev/gpu_contention.py`). `auto`
+  now times the solver's convolution on the device against the CPU and uses it from 1.5 × (`gpu._speedup`; the
+  3050: 0.3-0.8 ×, declined with the reason in the run's summary); one process at a time holds a device
+  (`gpu._DeviceLock`, taken before anything runs on it, the speed check included). With the GPU visible,
+  test_split's lead-split test passes (it hung for hours), and two `on` processes take turns (38 s and 74 s).
+  Tests: a slower device declined with its ratio, a busy device leaves auto on the CPU without touching it.
 - **Interleaved stages (the user: "Yes, build it").** `analysis/interleave.py` (ARCHITECTURE "Interleaved stages",
   REFERENCES A35). Verified: the phasors against the DFT of sampled trapezoids and triangles (0.002 rad, 0.2 %),
   the ringing rational against `ringing_response`; 180° and 120° sums exactly; two identical stages end to end
@@ -535,8 +551,8 @@ the last digit or two.
   CE101 reads the CE102 band's solves (the LISN as specified, REFERENCES A34).
 - The emission estimate's model limits are unchanged: quasi-static, differential mode only, no cables; it ranks
   layouts, it is not a compliance prediction.
-- The signal path's lines are lossless (`emi/path.py`): at a line resonance a shunt's current, and the margin, are
-  very sensitive to Z0 (refboard's ADC_I_RAIL_1: 13 dB for a 7 % Z0 change). NEXT_STEPS item 6.
+- The signal path's lines carry their copper and dielectric loss since round 4 (the plane's loss taken as the
+  strip's, A36); before, a line resonance beside a shunt had an unbounded Q.
 - Published refboard numbers: refreshed in round 4 (the table under Round 2; the README's loop and Sharper-map figures). README figures from
   other settings or tools (the safety counts, the PDN grids) were not re-taken.
 
