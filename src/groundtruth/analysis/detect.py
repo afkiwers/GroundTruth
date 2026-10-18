@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from ..components.defaults import ref_prefix, suggest_model
-from ..components.models import ComponentModel
+from ..components.models import ComponentModel, amplifier_pins
 from ..config.settings import BridgeSpec, Config, ConverterSpec, LegSpec, NetSpec, _natural_key
 from ..core.board import Board, Footprint, Pad
 
@@ -243,9 +243,60 @@ def _suggest(board: Board, config: Config, net: str, by_net: dict, fp_of: dict, 
                                    "(GT sig_drv:<pin>) and the op-amps on the way (amp_in / amp_out)")
         if through:
             reasons.append(f"through {', '.join(through)} (between labelled nets)")
-    spec = NetSpec(name, driver_pin, receivers, cls.freq, cls.rise_time, source="auto", reviewed=False,
+    freq, rise = cls.freq, cls.rise_time
+    if cls is GENERIC:                  # no class from the names: an op-amp on the path may say how fast it can be
+        drv = next((p for p in pads if p.pin == driver_pin), None)
+        amp = _amplifier_signal(config, drv.net if drv else "", pads, fp_of, freq, rise)
+        if amp is not None:
+            freq, rise, why_amp = amp
+            reasons.append(why_amp)
+    spec = NetSpec(name, driver_pin, receivers, freq, rise, source="auto", reviewed=False,
                    signal_class=cls.name, through=through)
     return DetectedNet(spec, cls, confidence, reasons), group | joined
+
+
+SLEW_SWING = 0.8       # an op-amp's edge: 10 to 90 % of the swing at its slew rate
+AMP_SWING_V = 3.3      # the swing assumed for that edge (NetSpec.amplitude_v's default)
+
+
+def _amplifier_signal(config: Config, driver_net: str, pads: list, fp_of: dict, freq: float, rise: float
+                      ) -> Optional[tuple[float, float, str]]:
+    """(frequency, edge, reason) for a net with no class from its names when the op-amps that drive it (parts
+    modelled as amplifiers, components.models.amplifier_pins, whose output is on the driver's net: the driver
+    itself, or a series part away) give a slew rate or a bandwidth: the fastest full swing the slowest of them can
+    make [A37]. An op-amp further along (a labelled path's later stage) does not limit the driver's signal: the
+    path model applies its gain pole and slew cap there (emi/path.amplified_path). Its edge is the longer of the slew
+    limit, SLEW_SWING·V / SR, and the bandwidth's, 0.35 / BW (a single pole's 10-90 % rise, ln 9 / 2π
+    [Johnson 1993]; BW = the model's `bandwidth`, else GBW / |gain|, as ComponentModel.amp_gain); its frequency
+    the lowest of `freq`, BW and the slew's full-power frequency SR / (π·V) (a sine of V peak to peak has the slope
+    π·f·V). None when no op-amp there has either value (the generic `freq` / `rise` stay)."""
+    found = []                          # (frequency, edge, ref, slew, bandwidth) per op-amp with a value
+    for ref in sorted({p.footprint for p in pads}):
+        fp = fp_of.get(ref)
+        m = _model(config, fp) if fp is not None else None
+        pins = amplifier_pins(fp, m) if m is not None else None
+        if pins is None or not driver_net or pins[1].net != driver_net:
+            continue
+        slew = m.params.get("slew")
+        bw = m.params.get("bandwidth")
+        if not bw and m.params.get("gbw"):
+            bw = m.params["gbw"] / max(abs(m.params.get("gain") or 1.0), 1.0)
+        if not slew and not bw:
+            continue
+        t = max(rise, 0.35 / bw if bw else 0.0, SLEW_SWING * AMP_SWING_V / slew if slew else 0.0)
+        f = min(freq, bw or freq, slew / (math.pi * AMP_SWING_V) if slew else freq)
+        found.append((f, t, ref, slew, bw))
+    if not found:
+        return None
+    _, t, ref, slew, bw = max(found, key=lambda x: x[1])          # the slowest edge on the path ...
+    f = min(x[0] for x in found)                                   # ... and the lowest frequency
+    from ..components.values import format_si
+    got = ", ".join(x for x in (f"slew rate {slew / 1e6:.3g} V/µs" if slew else "",
+                                f"bandwidth {format_si(float(f'{bw:.3g}'), 'Hz')}" if bw else "") if x)
+    t3, f3 = float(f"{t:.3g}"), float(f"{f:.3g}")
+    return f3, t3, (f"{format_si(t3, 's')} edges at {format_si(f3, 'Hz')} from {ref}'s {got}: the fastest full "
+                  f"{AMP_SWING_V:g} V swing it can make, not the 10 MHz / 2 ns default; set the real signal if it is "
+                  "slower")
 
 
 PATH_MAX_NETS = 24     # a labelled path's search stops growing here (it follows series parts, not a whole board)
