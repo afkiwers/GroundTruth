@@ -876,8 +876,9 @@ def _line_loss(board: Board, segments: list, ref_layer: str) -> dict:
         return {}
     er = sum(st.epsilon_between(layer, n) for n in neigh) / len(neigh)
     tan_d = sum(st.loss_tangent_between(layer, n) for n in neigh) / len(neigh)
+    hs = tuple(st.dielectric_between(layer, n) * 1e-3 for n in neigh[:2])
     return {"width_m": float(np.median(widths)) * 1e-3, "thickness_m": cu.thickness * 1e-3, "er": er,
-            "tan_d": tan_d}
+            "tan_d": tan_d, "planes_h_m": hs}
 
 
 def find_shunts(model: "BoardModel", route: Route) -> list[dict]:
@@ -945,7 +946,8 @@ def path_elements(board: Board, config: Config, route: Route, ref_layer: str,
             rows.append({"kind": "line", "length_mm": length, "z0": z0, "eeff": eeff,
                          "nets": sorted({s.net for s in stretch if s.net}),
                          **({"width_mm": loss["width_m"] * 1e3, "thickness_mm": loss["thickness_m"] * 1e3,
-                             "er": loss["er"], "tan_d": loss["tan_d"]} if loss else {})})
+                             "er": loss["er"], "tan_d": loss["tan_d"],
+                             "planes_h_mm": [h * 1e3 for h in loss["planes_h_m"]]} if loss else {})})
             stretch.clear()
     for i, seg in enumerate(route.segments):
         if seg.kind != "part":
