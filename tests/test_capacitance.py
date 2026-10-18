@@ -105,15 +105,17 @@ def test_the_plane_crossing_obeys_kcl_and_the_tank_law(cavity_sim):
     assert math.cos(np.angle(cap) - np.angle(via)) < -0.9          # antiphase: circulating
 
 
-def test_a_worst_emission_from_a_plane_resonance_above_1_ghz_gets_a_grid_note():
-    """Board-wide resonances above 1 GHz changed by several dB between grids on kraft_flux_mini_2 (the 740 MHz one
-    agreed to 0.6 dB): a worst emission from one, near the warning level, says so and names the next resolution."""
+def test_a_worst_emission_from_a_plane_resonance_above_600_mhz_gets_a_grid_note():
+    """Board-wide resonances above 600 MHz changed by several dB between grids on kraft_flux_mini_2 (they agreed
+    within 0.5 dB at 540-580 MHz): a worst emission from one, near the warning level, says so and names the next
+    resolution."""
     from groundtruth.analysis.simulate import grid_sensitive_note
     worst = {"f": 1.22e9, "margin_db": 4.1}
     note = grid_sensitive_note(worst, m_worst=183e-6, m_low=19.7e-6, warn_db=6.0)
     assert note and "1220 MHz" in note and "+19 dB" in note and "2x resolution" in note
     assert "4x resolution" in grid_sensitive_note(worst, 183e-6, 19.7e-6, 6.0, resolution=2)
-    assert grid_sensitive_note({"f": 0.74e9, "margin_db": 4.1}, 183e-6, 19.7e-6, 6.0) is None    # below 1 GHz
+    assert grid_sensitive_note({"f": 0.55e9, "margin_db": 4.1}, 183e-6, 19.7e-6, 6.0) is None    # below 600 MHz
+    assert grid_sensitive_note({"f": 0.94e9, "margin_db": 4.1}, 183e-6, 19.7e-6, 6.0)             # 1x's F.Cu/In1 mode
     assert grid_sensitive_note({"f": 1.22e9, "margin_db": 30.0}, 183e-6, 19.7e-6, 6.0) is None   # far below
     assert grid_sensitive_note(worst, 25e-6, 19.7e-6, 6.0) is None                               # no resonance
     assert grid_sensitive_note({"f": 1.22e9, "margin_db": None}, 183e-6, 19.7e-6, 6.0) is None

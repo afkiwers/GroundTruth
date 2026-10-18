@@ -346,6 +346,30 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   model's grid-to-grid spread from 5.5 to 1.9 dB rms (0.71 vs 0.49 mm, 25 frequencies, 200 MHz–1.6 GHz) and
   its f0 bias from up to +14 dB to −0.5 dB. Plane-pair capacitance uses each cell's copper fraction
   (`Grid.fill`).
+- **A strip is as wide as the copper it crosses** (2026-10-18, `Grid.wx/wy`, `Grid.ox/oy`,
+  `PlaneStack._widths`). The sub-grid counts how many of a border's fine strips the copper crosses: that share
+  of d is the strip's width φ, and their mean position is where its copper's centre sits across the cell. A
+  strip's R is the sheet resistance / φ. Its partial self inductance gets what a φd-wide strip adds to the
+  kernels' full square one (`_narrow_self`: the numeric strip integral the kernels use, plus the copper
+  thickness by the GMD formula). Side-by-side neighbours where one is narrower get their mutual inductance
+  corrected for their real widths and centre distance, up to `NEAR_AXIAL` = 2 strips along (`_side_mutual`,
+  a sparse `M_near` added to the L_p product on the CPU and the GPU). Before, every strip was a full cell wide.
+  A neck narrower than the pitch then conducted as if it were a pitch wide, and plane edges sat on the nearest
+  cell line, so resonances set by narrow copper moved with the grid. Test case: a 15 × 15 mm island joined to its
+  plate by a 0.35 × 3 mm neck over a 0.2 mm cavity, resonating at ~740 MHz. At d = 1.0 / 0.7 / 0.5 mm it read
+  900+ / 900+ / 832 MHz and now reads 797 / 756 / 736 (764 / 717 at 0.35 / 0.25 mm). On a 0.35 mm grid, a neck aligned with one cell row and
+  one straddling two read 754 and 817 MHz with full-width strips, 754 and 781 with the widths alone, and 751
+  and 759 with the side-by-side correction (SP-27). What remains at coarse grids is the sampling: a 0.35 mm
+  neck covers 3 of a 1 mm cell's 7 sub-rows, so it reads 0.43 mm wide. Only grids with a sub-grid (`sub` > 1)
+  carry widths; with `sub` = 1 (Simulate's cells of 0.15 mm and less) every strip stays full: the neck read 793 /
+  735 MHz at 0.15 / 0.1 mm, as before, and a 2× sub-grid there would give 769 at 0.15 (not adopted yet: it changes
+  every fine route model).
+  Current densities follow (`Solution.node_field(copper=True)`): the DC paths' A/mm² maps, peaks and sustained
+  values, the thermal heat and the motor bridges' RMS maps take a strip's current over its own width. Before,
+  a 0.35 mm neck on a 1 mm grid read about a third of its density. Sums over the cells weight each node by the
+  mean width of its strips (`Grid.copper_area`), so the heat map adds up to the solver's R/φ·I². The cell
+  area fill would not do: an antipad lowers it, not the width that carries the current. The cross-section and
+  the EMI current maps keep the current per cell width (what a cut across the cells adds up).
 - **Tracks of plane nets stay joined on every grid** (`_rasterise_lines`). Their centrelines are walked
   through the grid and their cells and strips forced, so escapes narrower than the grid conduct. The walk takes
   the nearest of the four cells around each point that already holds the track's net (else the nearest free
@@ -372,9 +396,19 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   - 1440 MHz, GND F.Cu-In1, 142 mm²: at 1x only.
   4x needs 3-10x the GMRES iterations (200-900; once not converged at 980 MHz), and 8x would take hours per
   frequency on a laptop, so it isn't proven which grid is right up there. Simulate says so instead
-  (`grid_sensitive_note`, the user's choice of three options): when a net's worst emission is above 1 GHz, comes
-  from a plane resonance (the loop moment ≥ 6 dB over its low-frequency value) and is within 10 dB of the warning
-  level, its notes say the peak can change by several dB with the grid and name the next resolution to check.
+  (`grid_sensitive_note`, the user's choice of three options): when a net's worst emission is above
+  `GRID_SENSITIVE_F` (1 GHz until 2026-10-18, now 600 MHz, below), comes from a plane resonance (the loop moment
+  ≥ 6 dB over its low-frequency value) and is within 10 dB of the warning level, its notes say the peak can change
+  by several dB with the grid and name the next resolution to check.
+  - **2026-10-18, the code of that day** (later changes since session 8 had moved the low end: the 20 MHz loop is
+    15.0 mm² on every grid, the 740 MHz cavity is gone). 1x / 2x, the same 25 harmonics
+    (`out/converge/spi_sck_head_*.json` before the strip widths, `spi_sck_widths*.json` after): the rms (max)
+    difference of |m| between 1x and 2x went from 7.0 (16.7) to 4.0 (8.0) dB at 1-1.5 GHz with the strip widths
+    ("A strip is as wide as the copper it crosses"), but from 2.7 (7.8) to 6.3 (17.2) dB at 0.5-1 GHz. A 1x-only
+    mode of the F.Cu GND / In1 +3V3 pair at (119-121, 128-130) mm by C1105 / C1110 (113 mm², 0.14 A per A of
+    displacement current per cell; 17 mm² at 2x) moved from 1060 to 940 MHz instead of going away. The GND via at
+    (132.95, 132.60) joins the same layers on both grids, so it is not a lost via. Not understood yet (open);
+    the note's threshold went down to 600 MHz so that the mode is flagged where it now is.
 - Vertical branches: each via/THT pad of a plane net chains its connections between consecutive plane
   layers where its own net's copper is (a GND via through a +3V3 area of In2 doesn't connect there).
   `via_impedance`: barrel R (25 µm plating) plus partial self-L.
@@ -465,12 +499,16 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   `c_n = 2AD|sinc(nD)||sinc(n f0 tr)|` (a `fall_time` of its own: `c_n = 2|X_n|`, `X_n = A/(j2πn)·[sinc(n f0 tr) −
   e^(−j2πnD) sinc(n f0 tf)]`) from a **Thevenin source**: `driver_ohms` (25 Ω) + jω·`driver_nh`, optional output
   capacitance `driver_pf`. The route is a **signal path**: a lossless line per stretch between series parts (its
-  own Z0 and εeff from the stackup, `simulate._line_of`: an outer layer a microstrip, Hammerstad & Jensen 1980
-  with their thickness corrections, on the dielectric height to its plane; an inner layer an offset stripline,
-  Wheeler's stripline for each half combined, on the dielectric heights to both neighbours; validated against
-  the 2D field solver, VALIDATION_AUDIT.md ISSUE-5: on kraft_flux_mini_2 within +3-4 % (outer, the solder mask
-  not modelled) and ±8 % (inner) of the as-built cut, where the IPC-2141 / single-correction forms on the foils'
-  centre spacing read +21 % and +52 %), each series part its component model's impedance
+  own Z0 and εeff, `simulate._line_of`: since 2026-10-18 the 2D field solver's cut of the board across the
+  stretch's longest track, at its middle (`line_cache`: analysis/si.SectionCache, the one Run checks' impedance
+  checks use: every net's copper in the cut, the stackup's dielectrics and solder mask, equal cuts solved once);
+  where no clean cut exists (the track widens into a pad or pour there, no reference copper) the closed forms: an
+  outer layer a microstrip, Hammerstad & Jensen 1980 with thickness, on the dielectric height; an inner layer an
+  offset stripline (Wheeler's for each half, combined) on the dielectric heights to both neighbours.
+  VALIDATION_AUDIT.md ISSUE-5: the IPC-2141 / single-correction forms on the foils' centre spacing read +21 %
+  (outer) and +52 % (inner) on kraft_flux_mini_2; the closed forms now +3-4 % (no mask) and ±8 %; the cut is the
+  field solution itself (SP-26: within 1 % of a section built from the stackup), each series part its component
+  model's impedance
   (`ComponentModel.impedance`: R, L, ferrite, C with ESR/ESL; no model: a short), solved as a cascade per
   harmonic. The receivers load it with `load_pf` (5 pF each) and optionally `load_ohms` in parallel (a
   termination). The emission uses the **complex mean current along the path** (lines: Ī = I_in·sin(βl)/βl −

@@ -272,6 +272,10 @@ class TorchMath:
             G = t.einsum("tsp,spc->tpc", o.K, Fr).contiguous()
             Y = t.fft.ifft2(t.view_as_complex(G).view(N, *o.P))
             out[o.lo:o.hi] = Y.reshape(-1)[o.outof]
+        if "dL" in self.data:               # strips narrower than the pitch (PlaneStack._widths)
+            out += self.data["dL"] * I
+            if "M_near" in self.data:
+                out += self._spmv(self.data["M_near"], I.contiguous())
         return out
 
     def matvec(self, op, x):
@@ -324,6 +328,10 @@ def _stack_data(dev: Device, stack) -> dict:
             kernels[key] = _orients(dev, stack)
         data = {"Ar": _csr(t, dev.device, stack.Ar), "ArT": _csr(t, dev.device, stack.ArT),
                 "orients": kernels[key]}
+        if getattr(stack, "dL", None) is not None:
+            data["dL"] = t.as_tensor(stack.dL.astype(complex), dtype=t.complex128, device=dev.device)
+        if getattr(stack, "M_near", None) is not None:
+            data["M_near"] = _csr(t, dev.device, stack.M_near)
         cache[key] = data
         return data
 
