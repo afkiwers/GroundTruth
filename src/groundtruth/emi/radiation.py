@@ -62,8 +62,15 @@ RE102_LIMITS = {
                                 (2e6, 24.0), (100e6, 24.0), (18e9, 69.0)),
     "re102_ground_navy_fixed": _re102("RE102 ground, Navy fixed & Air Force (Fig. RE102-4)",
                                       (2e6, 44.0), (100e6, 44.0), (18e9, 89.0)),
-    "re102_aircraft_external": _re102("RE102 aircraft, fixed wing external & helicopters (Fig. RE102-3)",
-                                      (10e3, 60.0), (2e6, 24.0), (100e6, 24.0), (18e9, 69.0)),
+    # fixed wing external applies from 2 MHz ("Fixed wing external (2 MHz to 18 GHz)" in both 461G and 461H); the
+    # curve from 10 kHz is the helicopters' (461H: "Space and Helicopters (10 kHz to 18 GHz)"). Before 2026-10-18
+    # one entry from 10 kHz for both
+    "re102_aircraft_external": _re102("RE102 aircraft, fixed wing external (Fig. RE102-3)",
+                                      (2e6, 24.0), (100e6, 24.0), (18e9, 69.0)),
+    "re102_helicopter": _re102("RE102 helicopters (and space, 461H) (Fig. RE102-3)",
+                               (10e3, 60.0), (2e6, 24.0), (100e6, 24.0), (18e9, 69.0)),
+    "re102_space": _re102("RE102 space systems (461H Fig. RE102-3; 461G: as helicopters)",
+                          (10e3, 60.0), (2e6, 24.0), (100e6, 24.0), (18e9, 69.0)),
     "re102_aircraft_internal": _re102("RE102 aircraft, fixed wing internal < 25 m (Fig. RE102-3)",
                                       (2e6, 34.0), (100e6, 34.0), (18e9, 79.0)),
     "re102_aircraft_internal_25m": _re102("RE102 aircraft, fixed wing internal ≥ 25 m (Fig. RE102-3)",

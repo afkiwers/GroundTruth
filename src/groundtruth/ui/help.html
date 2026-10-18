@@ -845,7 +845,9 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   never simulated shows the levels without sizes until its first Simulate. Memory and time grow about as much as the nodes: 2× to 4× on a
   laptop, 8× and up on a machine with lots of memory. A solve that runs out of memory is retried on its own, then
   reported. The standard grid is converged for the numbers (margins, inductances) up to about 1 GHz; a finer one
-  mainly sharpens the maps and resolves narrow copper. Above 1 GHz the board-wide model's plane resonances can
+  mainly sharpens the maps. Copper narrower than a cell keeps its own width on any grid (sampled at 0.15 mm):
+  a thin neck between two pours has its own resistance, inductance and current density, not a whole cell's.
+  Above about 600 MHz the board-wide model's plane resonances can
   change by several dB with the grid: when a net's worst emission comes from one, its notes say so and name the
   resolution to check it at. <b>Sharper map</b> solves one view with 4× the nodes of what was simulated.
   Applies from the next Simulate. The command line has <code>--resolution N</code>.</td></tr>
@@ -1039,7 +1041,7 @@ drives the <code>groundtruth</code> command line for CI, with the same results.<
 memory), <code>threads</code> (solves in parallel), <code>conducted</code> (cispr32, cispr25, mil461 or none) and
 <code>conducted_class</code>, <code>limit_class</code> (CISPR 32 class A or B for radiated), <code>radiated_limit</code>
 (another radiated limit: MIL-STD-461G RE102 by name, e.g. <code>re102_ground_army</code> or
-<code>re102_aircraft_external</code>, at 1 m with the standard's bandwidths; or a curve of your own: a name, the
+<code>re102_aircraft_external</code> (fixed wing, from 2 MHz) or <code>re102_helicopter</code> (from 10 kHz), at 1 m with the standard's bandwidths; or a curve of your own: a name, the
 distance and its points), <code>ce101</code> (MIL-STD-461G CE101,
 the input leads' current from 30 Hz to 10 kHz: <code>aircraft</code> or <code>ships</code>; a motor bridge's
 commutation lines, strongest at six times the electrical frequency, read through the bus capacitors and the test
@@ -1350,9 +1352,10 @@ smaller but dense, which a regular grid lets it apply with FFTs.</p>
   Their loop moments combine as m(f) = m<sub>route</sub>(f0) + [m<sub>board</sub>(f) − m<sub>board</sub>(f0)], so the
   coarse grid's bias at f0 cancels.</li>
 <li><b>The current on the trace.</b> The driver is a Thévenin source (resistance, inductance, capacitance) with the
-  trapezoid's harmonics. The route is a chain of lossless transmission lines (an outer layer a microstrip, an
-  inner layer a stripline that need not sit in the middle between its planes; Z0 and εeff from the stackup's
-  dielectric heights) and series parts, solved at each harmonic and loaded by the receivers. A net's
+  trapezoid's harmonics. The route is a chain of lossless transmission lines (Z0 and εeff of each stretch from
+  the board's own cross-section there, solved as the Signal integrity checks solve it: the copper around the
+  track, the stackup's dielectrics and the solder mask; closed forms where no clean cut exists) and series parts,
+  solved at each harmonic and loaded by the receivers. A net's
   <code>current_a</code> replaces this: the line's peak current at the fundamental. Shunt parts and
   op-amp stages become current loops of their own, added per harmonic with their own currents.</li>
 <li><b>Frequencies.</b> The solves happen at actual harmonics of the signal. The solver then adds solves in the

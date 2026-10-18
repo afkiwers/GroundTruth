@@ -129,7 +129,10 @@ NO_STAGES = ("no power stage or motor bridge results: run Simulate first (the DC
 def _layer_currents(board: Board, converters, bridges=()) -> dict:
     """Per copper layer: the DC paths' current density (A/mm²) on one grid (the finest of the paths' and bridges'
     grids on that layer), per power stage, and the motor bridges' mean square RMS density (A²/mm⁴), per bridge:
-    {layer: (X, Y, d, t, {stage: (JX, JY)}, {bridge: J²})}."""
+    {layer: (X, Y, d, t, {stage: (JX, JY)}, {bridge: J²})}. The densities are in the copper (a strip narrower than
+    the pitch carries its current in its own width, Solution.node_field), so t (mm) is per sample: the copper
+    thickness x the share of the sample's cell that carries current (Grid.copper_area), and ρ·J²·t·d² is the
+    sample's heat."""
     per_layer: dict[str, list] = {}
     for c in converters:
         for name, layers in (getattr(c, "dc_vectors", None) or {}).items():
@@ -160,12 +163,14 @@ def _layer_currents(board: Board, converters, bridges=()) -> dict:
         X, Y = np.meshgrid(x0 + np.arange(nx) * d, y0 + np.arange(ny) * d, indexing="ij")
         per_stage: dict[str, tuple] = {}
         per_rms: dict[str, np.ndarray] = {}
+        area = np.zeros((nx, ny))               # the samples' current-carrying share (the largest of the grids')
         for stage, g, jx, jy in items:
             i = np.rint((X - g.x0) / g.d).astype(np.int64)
             j = np.rint((Y - g.y0) / g.d).astype(np.int64)
             inside = (i >= 0) & (i < g.nx) & (j >= 0) & (j < g.ny)
             ii, jj = np.where(inside, i, 0), np.where(inside, j, 0)
             on = inside & g.node[ii, jj]
+            area = np.maximum(area, np.where(on, g.copper_area()[ii, jj], 0.0))
             if jy is None:                    # a bridge's RMS density
                 R = per_rms.setdefault(stage, np.zeros((nx, ny)))
                 R += np.where(on, np.nan_to_num(jx[ii, jj]) ** 2, 0.0)
@@ -174,7 +179,7 @@ def _layer_currents(board: Board, converters, bridges=()) -> dict:
             JX += np.where(on, np.nan_to_num(jx[ii, jj]), 0.0)
             JY += np.where(on, np.nan_to_num(jy[ii, jj]), 0.0)
         t = board.stackup.layer(layer).thickness if board.stackup.layer(layer) else 0.035
-        out[layer] = (X, Y, d, t, per_stage, per_rms)
+        out[layer] = (X, Y, d, t * area, per_stage, per_rms)
     return out
 
 

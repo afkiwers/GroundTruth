@@ -1,9 +1,10 @@
 # Validation audit: Signal paths, Converters, DC loads
 
-Round 1 on branch `validation-audit` (merged f171f99, 2026-10-17); round 2 on `audit-2` (2026-10-18). This file is
+Round 1 on branch `validation-audit` (merged f171f99, 2026-10-17); round 2 on `audit-2` (2026-10-18, merged c5c313e);
+round 3 on `audit-3` (2026-10-18). This file is
 the audit's record: the system overview, the validation matrix with every row's outcome, the issue log with
-evidence, and the final assessment. The independent checks are `tests/test_validation_audit.py` (52 test functions,
-92 cases); each matrix row names its test or the existing test it rests on. Status words: **Verified** (an independent method agrees within the stated tolerance),
+evidence, and the final assessment. The independent checks are `tests/test_validation_audit.py` (56 test functions,
+100 cases); each matrix row names its test or the existing test it rests on. Status words: **Verified** (an independent method agrees within the stated tolerance),
 **Verified (conditions)** (only under the conditions named), **Covered** (an existing analytic test, reviewed, not
 re-derived here), **Limitation** (known model error, quantified, not fixed), **Unverified** (no independent
 evidence available), **Fixed** (a defect, corrected, with a regression test that fails on the old code).
@@ -121,13 +122,15 @@ pins); `radiation` (signal paths and converters); the component models (all thre
 | SP-16 | Plane-pair capacitance, cavity resonance f10 | ε0εrA/t; c/(2a√εr) | exact / 3 % | Covered (test_capacitance) |
 | SP-17 | Shunt loops on a board (50 Ω shunt vs load_ohms), op-amp board path | equivalent circuits | 0.1-0.4 dB | Covered (test_path) |
 | SP-18 | Signal-path Bode: RC pole, op-amp pole | 1/(2π(R_drv+R)C), GBW/gain | 1 % | Covered (test_transfer) |
-| SP-19 | Board-wide resonance heights above 1 GHz | grid convergence | – | Limitation (documented in ARCHITECTURE: several dB between grids; a note says so) |
+| SP-19 | Board-wide resonance heights above 1 GHz | grid convergence | – | Improved above 1 GHz (round 3: strips as wide as their copper, SP-27; refboard 1x vs 2x rms 7.0 → 4.0 dB), worse at 0.5-1 GHz (a 1x-only mode moved to 940 MHz: 2.7 → 6.3 dB); the grid note now from 600 MHz. Limitation, open |
 | SP-20 | Route finding through series parts, `route_missing` | – | – | Covered (test_path, test_checks) |
 | SP-21 | Tier 1 gap_crossing: a slot's length, below min_gap_mm none | constructed geometry | 0.01 mm | Verified (round 2, 3 cases) |
 | SP-22 | Tier 1 split between two nets named; reference_net over the other net | constructed geometry | 0.05 mm | Verified (round 2) |
 | SP-23 | Tier 1 edge_proximity within edge_factor·h, its distance | constructed geometry | 0.01 mm | Verified (round 2; h is the foils' centre spacing: the limit ~17 % wider than with the dielectric, conservative) |
 | SP-24 | Tier 1 off_plane for the uncovered length | constructed geometry | 0.05 mm | Verified (round 2) |
-| SP-25 | RE102 limit curves (MIL-STD-461G Figs. RE102-1 to -4) | the standard's figures | exact | Verified (round 2, test_CV26) |
+| SP-25 | RE102 limit curves (MIL-STD-461G Figs. RE102-1 to -4) | the standard's figures | exact | Verified (round 2, test_CV26); round 3: fixed wing from 2 MHz, helicopter / space curves apart (461H) |
+| SP-26 | The path's line: the field-solved cut of the board at the stretch (solder mask, as-built planes) | the 2D field solver on a hand-built section | 1 % | **Fixed** (ISSUE-5's remainder, round 3), Verified (In1.Cu, B.Cu with mask) |
+| SP-27 | Strips narrower than the pitch: width, centre, inductance, a neck's resonance on and off the cell rows | the copper's own width; a single strip's integral; the aligned neck | one sub-pitch / 1 % / 2 % | **Fixed** (round 3), Verified (6 cases) |
 
 ### Converters
 
@@ -410,18 +413,76 @@ The user: "continue with fixing the other issues as well a continue your audit",
   margins move little because these short lines are capacitive loads at most harmonics; long or terminated lines
   depend on Z0 more.
 
+## Round 3 (2026-10-18, branch `audit-3`)
+
+The user: "Fix this" (inner-layer Z0 and solder mask), "Is that a bad thing?" (interleaved phases), "Try to fix this"
+(resonance heights above 1 GHz), and the MIL-STD-461 sources downloaded for review.
+
+- **ISSUE-5's remainder fixed (SP-26).** A path's line is now the field-solved cut of the board at its longest track
+  on the main layer (`analysis/si.SectionCache`, the SI module's cuts: as-built planes, laminate between the foils,
+  solder mask), once per model (`simulate.line_cache`); the closed forms remain the fallback where no cut can be
+  made. Test: the cut against a hand-built section within 1 % on In1.Cu and on B.Cu with its mask; the closed form
+  differs by more. On refboard (read-only) the closed forms had read 3-4 % high on the outer layers
+  (43.0-43.6 Ω by the cut) and −7.5 to +8.3 % on the inner ones (35.6-41.7 Ω); one stretch (U301−) has no cut there
+  and keeps the closed form.
+- **MIL-STD-461H** (17 April 2026, supersedes 461G; the full standard is in the downloads). Against 461G, for what
+  the code uses: RE102-3 now has "Space and Helicopters" from 10 kHz, fixed wing external from 2 MHz in both
+  editions. The aircraft key had the 10 kHz start; it is now three keys: `re102_aircraft_external` (fixed wing,
+  2 MHz-18 GHz), `re102_helicopter`, `re102_space` (10 kHz-18 GHz). CE101-1 extends to 20 kHz in 461H; the code
+  follows 461G (to 10 kHz). The LISN, CE102, Table II, CE101-4 and RE102-1/-2/-4 are unchanged.
+- **Interleaved phases (ISSUE-7's assumption): no error for DC and thermal.** The switching variance
+  D(1−D)·|J_hs − J_ls|² is confined to each switch node's own copper, and two stages' switch nodes are different
+  nets, so their cross term is exactly zero, locked or not. The combined *emission* of interleaved stages is
+  not modelled (README, not done).
+- **Resonances above 1 GHz (SP-19): the cause and a fix.**
+  - The loss physics converges: a plate pair's cavity Q 35.6 against 36.0 by 1/Q = tanδ + δs/h, its peaks within
+    0.3 dB from d = 1 to 0.25 mm. The demo board converges within ~1 dB.
+  - What does not: copper narrower than the grid. A 15 × 15 mm island joined to its plate by a 0.35 × 3 mm neck
+    (~740 MHz) read 900+ / 900+ / 832 / 881 / 722 / 793 / 735 MHz at d = 1.0 / 0.7 / 0.5 / 0.35 / 0.25 / 0.15 / 0.1 mm; the same island with a
+    3 mm neck converged at fine grids (1240 / 1243 MHz at 0.15 / 0.1 mm). Every strip was a full cell wide, so a neck
+    conducted as if it were a pitch wide, and its inductance was the grid's.
+  - Fix (`peec.Grid.wx/wy/ox/oy`, `PlaneStack._widths`, CPU and GPU): a strip is as wide as the copper the sub-grid
+    sees cross its border, R/φ and the narrower strip's partial self inductance; side-by-side partial strips get
+    their mutual inductance for their real widths and centre distance. Now 797 / 756 / 736 / 764 / 717 MHz from 1.0 to
+    0.25 mm, a ±5 % scatter around ~750 MHz where it was 722 to 900+. At 0.15 and 0.1 mm Simulate takes no sub-grid
+    (the grid itself is the 0.15 mm sampling), so strips stay full there (793 / 735 MHz, unchanged); a 2× sub-grid
+    gave 769 MHz at 0.15 mm (not adopted: it would change every fine route model). The 3 mm neck: 1237 / 1254 / 1269 / 1252 / 1271 MHz from 1.0
+    to 0.25 mm (1296 / 1349 / 1324 / 1275 / 1294 before; 1240 at 0.15 mm). On
+    one 0.35 mm grid, the neck aligned with a cell row or straddling two reads 751 / 759 MHz (754 / 817 before).
+  - Densities follow: the DC maps, peaks, thermal heat and bridge RMS maps take a strip's current over its own
+    width (a 0.35 mm neck on a 1 mm grid read about a third of its A/mm²); the heat adds up to the solver's loss
+    (CV-28).
+  - refboard's SPI_SCK board-wide model, 1x / 2x, the same 25 harmonics 540-1460 MHz, before
+    (`out/converge/spi_sck_head_*.json`, this round's starting code) and after (`spi_sck_widths.json`): the rms (max)
+    |m| difference between the grids went from 7.0 (16.7) to 4.0 (8.0) dB at 1-1.5 GHz, but from 2.7 (7.8) to
+    6.3 (17.2) dB at 0.5-1 GHz. The cause: a 1x-only mode of the F.Cu GND / In1 +3V3 pair at (119-121, 128-130) mm
+    by C1105 / C1110 (113 mm² at 1x, 17 at 2x) moved from 1060 to 940 MHz instead of going away. Its stitching via
+    joins the same layers on both grids; why the mode survives at 1x is open. `grid_sensitive_note` now applies from
+    600 MHz (it was 1 GHz), so the mode is flagged where it now sits. The 20 MHz loop is the same before and after
+    (14.97 / 15.04 mm²). 4x: running when this was committed (HANDOFF has it once done).
+- **Not changed:** CE101 to 20 kHz (461H), the combined emission of interleaved stages, a sub-grid below 0.15 mm
+  cells.
+
 ## Remaining risks and unverified items
-- SP-19: board-wide resonance heights above 1 GHz depend on the grid by several dB (documented; a note says so).
-- ISSUE-5's remainder: very asymmetric inner layers up to ~10 % high, and no solder mask in the closed forms (the
-  SI module's field-solved cut would remove both).
-- ISSUE-7's assumption: two stages' switch-node variances add as independent (unlocked phases). Two phases of one
-  controller (interleaved) are locked: their cross term is not modelled.
+- SP-19: board-wide resonance heights above ~600 MHz still depend on the grid by several dB on refboard (1x vs 2x rms
+  4.0 dB at 1-1.5 GHz, 6.3 dB at 0.5-1 GHz from a 1x-only F.Cu/In1 mode, cause open); a note says so.
+- ISSUE-5: where no cut can be made (a stretch's centre off its net's copper), the closed forms remain: very
+  asymmetric inner layers up to ~10 % high, no solder mask.
+- Copper narrower than the 0.15 mm sub-grid pitch is still sampled at that pitch (a 0.35 mm neck reads 0.29 or 0.43
+  mm wide, by where it falls).
+- MIL-STD-461H: CE101-1 to 20 kHz not implemented (the code follows 461G there).
 - The emission estimate's model limits are unchanged: quasi-static, differential mode only, no cables; it ranks
   layouts, it is not a compliance prediction.
 - Published refboard numbers in HANDOFF and README predate the fixes: the SPI margins about 1 dB lower now,
   conv1's switch-node copper about 42 % more.
 
 ## Final run
+- **Round 3, full suite** (`out/audit_validation/full_round3.log`, 76 min, the machine also running neck sweeps):
+  **859 passed, 1 skipped, 4 failed**: the launcher's git mode (as before) and three GUI timing tests (0.53-1.06 s
+  against 0.5 s). Re-run under the same load, two of them fail on round 3's code and on the code before it
+  (HEAD 20ec0a9, a worktree: 0.64 s and 0.87 s), so the load, not the change. After the run, the grid note's
+  threshold and one test line changed; their files (test_capacitance, test_validation_audit, test_ce101) were
+  run again: 113 passed.
 - **Round 2, full suite** on the final code with the rebuilt venv (`out/audit_validation/full_round2.log`, 37 min):
   **852 passed, 1 skipped, 3 failed**, none from the audit:
   - `test_server_setup::test_the_mac_launcher_is_lf_and_executable`: the launcher's git mode (below);
