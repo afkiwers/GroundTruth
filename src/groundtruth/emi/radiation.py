@@ -1,15 +1,15 @@
 """Differential-mode radiated field estimate of a small current loop, and its limits: CISPR 32 class A or B, or a
 curve the user gives (`RadiatedLimit`: MIL-STD-461 RE102 for their platform, a customer's own).
 
-|E|max = η0·k²·|m| / (4π·r) · √(1 + 1/(k·r)²)     (V/m, free space, broadside)
+|E|max = η0·k²·|m| / (4π·r) · √(1 + 1/(k·r)²)     (V/m, free space, broadside [Balanis 2016, §5.2])
 
-the far field (1.316e-14 · f² · |m| / r) with the small loop's induction term, which matters at MIL-STD-461's 1 m
-below ~50 MHz (k·r = 1 at 48 MHz); at CISPR's 10 m from 30 MHz on it adds at most 0.11 dB.
+the far field (1.316e-14 · f² · |m| / r [Paul 2006]) with the small loop's induction term, which matters at
+MIL-STD-461's 1 m below ~50 MHz (k·r = 1 at 48 MHz); at CISPR's 10 m from 30 MHz on it adds at most 0.11 dB.
 
 |m| is the loop's magnetic dipole moment (A·m²) from the solver. A ground-plane reflection (as on
-an OATS / semi-anechoic chamber) can add up to +6 dB; it is included by default.
-This is a ranking estimate for one net's loop. Common-mode currents on cables usually dominate
-real emissions, but return-path detours are the main thing that drives those currents.
+an OATS / semi-anechoic chamber) can add up to +6 dB; it is included by default [A7].
+This is a ranking estimate for one net's loop, differential mode only [A11]. Common-mode currents on cables usually
+dominate real emissions, but return-path detours are the main thing that drives those currents.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ import numpy as np
 
 C0 = 299_792_458.0
 
-# CISPR 32 radiated emission limits (dBµV/m): (f_lo, f_hi, limit, standard distance m)
+# CISPR 32 radiated emission limits (dBµV/m) [CISPR 32, Annex A]: (f_lo, f_hi, limit, standard distance m)
 # Below 1 GHz: quasi-peak at 10 m. Above 1 GHz: average at 3 m.
 CISPR32 = {
     "B": [(30e6, 230e6, 30.0, 10.0), (230e6, 1e9, 37.0, 10.0), (1e9, 3e9, 50.0, 3.0), (3e9, 6e9, 54.0, 3.0)],
@@ -42,8 +42,8 @@ class RadiatedLimit:
     bands: str = "mil461"
 
 
-# MIL-STD-461G Table II resolution bandwidths, as [(upper frequency, bandwidth)]: 1 kHz to 150 kHz, 10 kHz to 30
-# MHz, 100 kHz to 1 GHz, 1 MHz above
+# MIL-STD-461G Table II resolution bandwidths [MIL-STD-461G, Table II], as [(upper frequency, bandwidth)]: 1 kHz to
+# 150 kHz, 10 kHz to 30 MHz, 100 kHz to 1 GHz, 1 MHz above
 MIL461_RBW = [(150e3, 1e3), (30e6, 10e3), (1e9, 100e3), (np.inf, 1e6)]
 
 
@@ -52,7 +52,8 @@ def _re102(name: str, *points) -> RadiatedLimit:
     return RadiatedLimit(name, tuple(points), 1.0, "mil461")
 
 
-# MIL-STD-461G (11 December 2015) RE102, Figures RE102-1 to -4: the breakpoints as printed (the levels at 10 kHz,
+# MIL-STD-461G (11 December 2015) RE102, Figures RE102-1 to -4 [MIL-STD-461G] (the helicopter and space curves
+# from 10 kHz: [MIL-STD-461H]): the breakpoints as printed (the levels at 10 kHz,
 # 2 MHz, 100 MHz and 18 GHz are on the figures' grid lines or labelled; the rise above 100 MHz is ~20 dB/decade). The
 # submarine internal curve's low end is not labelled: read from the figure (88 dBµV/m at 10 kHz falling to 50 at
 # ~0.8 MHz, ±1 dB). The applicable range is the curve's: ground and Air Force aircraft from 2 MHz (5.18.1); the
@@ -111,11 +112,11 @@ def loop_field(f, m_abs, r, ground_reflection: bool = True):
     broadside: the far field with the induction term (see the module)."""
     f = np.asarray(f, float)
     r = np.asarray(r, float)
-    # eta0 k^2 / (4 pi) with k = 2 pi f / c: 377 * (2 pi / c)^2 / (4 pi) = 1.316e-14 (s^2 ohm / m^2); the small loop's
-    # E_phi is that times (1 + 1/(j k r)): |.| = sqrt(1 + 1/(k r)^2)
+    # eta0 k^2 / (4 pi) with k = 2 pi f / c: 377 * (2 pi / c)^2 / (4 pi) = 1.316e-14 (s^2 ohm / m^2) [Paul 2006]; the
+    # small loop's E_phi is that times (1 + 1/(j k r)): |.| = sqrt(1 + 1/(k r)^2) [Balanis 2016, §5.2]
     kr = 2 * np.pi * np.maximum(f, 1.0) * r / C0
     e = 1.316e-14 * f ** 2 * np.asarray(m_abs, float) / r * np.sqrt(1.0 + 1.0 / kr ** 2)
-    # the worst case of the direct and the floor-reflected wave arriving in phase (a factor 2, +6 dB)
+    # the worst case of the direct and the floor-reflected wave arriving in phase (a factor 2, +6 dB) [A7]
     return e * (2.0 if ground_reflection else 1.0)
 
 
@@ -142,7 +143,7 @@ def limits(freqs, cls: Union[str, RadiatedLimit] = "B") -> tuple[np.ndarray, np.
     return lim, dist
 
 
-# CISPR 16 receiver resolution bandwidth: 120 kHz (30 MHz-1 GHz, quasi-peak) and 1 MHz above 1 GHz.
+# CISPR 16 receiver resolution bandwidth [CISPR 16-1-1]: 120 kHz (30 MHz-1 GHz, quasi-peak) and 1 MHz above 1 GHz.
 # A table is [(upper frequency, bandwidth), ...] in ascending order.
 RBW_BANDS = [(1e9, 120e3), (np.inf, 1e6)]
 
@@ -160,7 +161,8 @@ def receiver_sum(freqs, peaks, bands=RBW_BANDS) -> np.ndarray:
     """What a peak detector reads at each harmonic: the coherent sum of all harmonics within ±RBW/2.
 
     Harmonics of a periodic signal are phase-locked, so when they are closer together than the receiver
-    bandwidth (switching frequencies below 120 kHz in the radiated band) they add up in one reading. A
+    bandwidth (switching frequencies below 120 kHz in the radiated band) they add up in one reading, here as
+    magnitudes (all in phase: the peak detector's worst case [A12]). A
     per-harmonic comparison would be too optimistic by up to 20·log10(RBW/f0) dB. For f0 above the
     bandwidth every window holds just its own harmonic and nothing changes."""
     f = np.asarray(freqs, float)

@@ -4,13 +4,13 @@ A controller with spread spectrum moves its switching frequency between f0 and f
 sweeps across n·f0 … n·f0·(1 + spread). How much that lowers a reading depends on the receiver: its resolution
 bandwidth (RBW), its detector and how long it dwells at each frequency, and on how the frequency moves. A slow
 sweep passes through the receiver's filter at full amplitude, so a peak detector sees no reduction; fast
-modulation or random hopping spreads the power, and the filter only catches its share.
+modulation or random hopping spreads the power, and the filter only catches its share [Hardin 1994].
 
 Rather than a rule of thumb, `receiver_gain` simulates the receiver: the harmonic's complex baseband signal over
-one dwell time, a Gaussian filter of the given 6 dB bandwidth tuned across the swept band, and the detector (peak:
+one dwell time, a Gaussian filter [A8] of the given 6 dB bandwidth tuned across the swept band, and the detector (peak:
 largest envelope; average: mean envelope). The result is the reading relative to the unmodulated harmonic.
-Validated in tests/test_spread.py against sinusoidal FM (the Bessel line amplitudes), a slow sweep (no reduction)
-and random hopping (Rayleigh statistics).
+Validated in tests/test_spread.py against sinusoidal FM (the Bessel line amplitudes [Haykin 2001]), a slow sweep
+(no reduction) and random hopping (Rayleigh statistics [Papoulis 2002]). Source keys: docs/REFERENCES.md.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from typing import Optional
 import numpy as np
 
 MODES = ("triangle", "random", "sine")
-DWELL_S = 0.015                 # MIL-STD-461G Table II minimum dwell time per frequency (above 1 kHz)
+DWELL_S = 0.015                 # minimum dwell time per frequency above 1 kHz [MIL-STD-461G, Table II]
 LN2 = math.log(2.0)
 
 
@@ -170,7 +170,8 @@ def _gain(n: int, f0: float, spread: Spread, rbw: float, detector: str, dwell: f
                 best = vals[i]
             best_fc, step = grid[i], grid[1] - grid[0]
     if detector == "peak" and spread.mode == "random" and d < dwell:
-        # a shortened random dwell: the peak of N ≈ RBW·dwell Rayleigh samples grows as sqrt(ln N) (tests:
+        # a shortened random dwell: the peak of N ≈ RBW·dwell Rayleigh samples grows as sqrt(ln N) (the extreme
+        # value of N Rayleigh samples, σ·sqrt(2 ln N) [Papoulis 2002]; tests:
         # test_random_hopping_follows_rayleigh_statistics), so scale to the full dwell's N
         best *= math.sqrt(math.log(rbw * dwell) / math.log(rbw * d))
     return min(best, 1.0)
@@ -233,7 +234,8 @@ MAX_SLOPE = 0.5                 # a wide sweep's reading falls at most as 1/sqrt
 def _extrapolate(log_n: np.ndarray, log_g: np.ndarray, at: np.ndarray) -> np.ndarray:
     """log gain beyond the last simulated harmonic: the slope of the last two simulated ones in log-log, kept
     between 0 (no further reduction: the safe side) and -MAX_SLOPE. A sweep much wider than the bandwidth reads
-    ∝ width^(-1/2) for both modulations: a linear sweep through a Gaussian filter peaks at (1 + (μa/π)²)^(-1/4) ∝
+    ∝ width^(-1/2) for both modulations: a linear sweep through a Gaussian filter peaks at (1 + (μa/π)²)^(-1/4) (a
+    Gaussian filter's response to a linear chirp, derived in closed form) ∝
     μ^(-1/2) with μ ∝ width (test_a_fast_sweep_through_the_filter_reads_the_chirp_gain), and random hopping's
     Rayleigh envelope at sqrt(RBW/width) (test_random_hopping_follows_rayleigh_statistics)."""
     slope = 0.0

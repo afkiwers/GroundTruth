@@ -3,18 +3,19 @@
 The hot loop's pulsed current divides between the input capacitors and the input lines. The solver gives the
 fraction that reaches the input connector, where one LISN (line impedance stabilisation network) per line closes
 the loop: the differential-mode current runs out on one line and back on the other, through both LISNs in series.
-Each LISN's receiver reads the voltage across its 50 ohm port.
+Each LISN's receiver reads the voltage across its 50 ohm port [Paul 2006].
 
 A switching waveform is a set of phase-locked CW harmonics. While f_sw exceeds the receiver bandwidth each reading
-holds one harmonic, and peak, quasi-peak and average detectors all read its RMS value, so the estimate is
+holds one harmonic, and peak, quasi-peak and average detectors all read its RMS value [CISPR 16-1-1], so the estimate is
 compared with the average limit (the strictest). Below that, neighbouring harmonics add up in one reading
-(`receiver_sum`).
+(`receiver_sum`, [A12]).
 
-Not modelled: common-mode emission (switch-node dV/dt through stray capacitance to the chassis or heatsink),
+Not modelled [A11]: common-mode emission (switch-node dV/dt through stray capacitance to the chassis or heatsink),
 which often dominates above a few MHz.
 
 The limit tables were entered from the standards' tables as commonly published: check them against the edition
-your test plan cites (CISPR 25 in particular differs between editions and is band-limited).
+your test plan cites (CISPR 25 in particular differs between editions and is band-limited [A10]). Source keys in
+square brackets: docs/REFERENCES.md.
 """
 from __future__ import annotations
 
@@ -55,30 +56,32 @@ class Lisn:
 
 
 LISNS = {
-    # CISPR 16-1-2 V-network: nominal impedance 50 ohm || (50 uH + 5 ohm)
+    # CISPR 16-1-2 V-network: nominal impedance 50 ohm || (50 uH + 5 ohm) [CISPR 16-1-2]
     "cispr32": Lisn("50 Ω ∥ (50 µH + 5 Ω) (CISPR 16-1-2)", 50e-6, 5.0, 0.0, 0.0),
-    # CISPR 25 artificial network: nominal 50 ohm || 5 uH
+    # CISPR 25 artificial network: nominal 50 ohm || 5 uH [CISPR 25]
     "cispr25": Lisn("50 Ω ∥ 5 µH (CISPR 25)", 5e-6, 0.0, 0.0, 0.0),
-    # MIL-STD-461G Figure 6, as drawn: 50 uH, 8 uF + 5 ohm to the reference on the supply side, 0.25 uF to the signal
-    # port with 1 kohm across it (the receiver's 50 ohm in parallel: 47.6 ohm; before 2026-10-18 the 1 kohm was left
-    # out, 0.4 dB high). Its impedance is specified with the power input unterminated (4.3.6 c), as modelled here
+    # MIL-STD-461G Figure 6 [MIL-STD-461G], as drawn: 50 uH, 8 uF + 5 ohm to the reference on the supply side, 0.25 uF
+    # to the signal port with 1 kohm across it (the receiver's 50 ohm in parallel: 47.6 ohm; before 2026-10-18 the 1
+    # kohm was left out, 0.4 dB high). Its impedance is specified with the power input unterminated (4.3.6 c), as
+    # modelled here
     "mil461": Lisn("50 µH (MIL-STD-461)", 50e-6, 5.0, 8e-6, 0.25e-6, R_p=1e3),
 }
 
 # Receiver resolution bandwidth tables [(upper frequency, bandwidth)]
 BANDS = {
-    "cispr32": [(150e3, 200.0), (30e6, 9e3), (np.inf, 120e3)],          # CISPR 16-1-1 bands A, B, C/D
+    "cispr32": [(150e3, 200.0), (30e6, 9e3), (np.inf, 120e3)],          # [CISPR 16-1-1] bands A, B, C/D
     "cispr25": [(150e3, 200.0), (30e6, 9e3), (np.inf, 120e3)],
-    "mil461": [(150e3, 1e3), (30e6, 10e3), (np.inf, 100e3)],            # MIL-STD-461G Table II
+    "mil461": [(150e3, 1e3), (30e6, 10e3), (np.inf, 100e3)],            # [MIL-STD-461G, Table II]
 }
 
 # Limits: [(f_lo, f_hi, dBµV at f_lo, dBµV at f_hi)], linear in log f within a band; the lowest applies where
 # bands meet or overlap.
-CISPR32_AV = {   # CISPR 32 Table A.10 / A.11, AC mains port, average detector
+CISPR32_AV = {   # CISPR 32 Table A.10 / A.11, AC mains port, average detector [CISPR 32, Annex A]
     "B": [(0.15e6, 0.5e6, 56.0, 46.0), (0.5e6, 5e6, 46.0, 46.0), (5e6, 30e6, 50.0, 50.0)],
     "A": [(0.15e6, 0.5e6, 66.0, 66.0), (0.5e6, 30e6, 60.0, 60.0)],
 }
 # CISPR 25 voltage method, average detector, class 5 and the step to each lower class (class 1 = class 5 + 4 steps)
+# [CISPR 25] [A10]
 CISPR25_AV5 = [   # (f_lo, f_hi, class 5 dBµV, dB per class)
     (0.15e6, 0.30e6, 50.0, 10.0),     # LW
     (0.53e6, 1.8e6, 34.0, 8.0),       # MW
@@ -89,6 +92,7 @@ CISPR25_AV5 = [   # (f_lo, f_hi, class 5 dBµV, dB per class)
     (68e6, 87e6, 18.0, 6.0),          # VHF
     (76e6, 108e6, 18.0, 6.0),         # FM
 ]
+# CE102's relaxation for sources above 28 V, dB [MIL-STD-461G, Figure CE102-1]
 MIL461_RELAX = {"basic": 0.0, "28v": 0.0, "115v": 6.0, "220v": 9.0, "270v": 10.0, "440v": 12.0}
 
 
@@ -206,7 +210,8 @@ def conducted_table(freqs, line_current, standard: str, cls: str = "B", per_deca
 # --------------------------------------------------------------------------- MIL-STD-461G CE101
 # CE101, "conducted emissions, audio frequency currents, power leads": the current in each power lead (and return),
 # 30 Hz to 10 kHz, read with a current probe 5 cm from the LISN (Figure CE101-6) and a peak detector, in dBµA.
-# Limits and bandwidths entered from MIL-STD-461G (11 December 2015): Figures CE101-1 and CE101-4, Table II.
+# Limits and bandwidths entered from MIL-STD-461G (11 December 2015): Figures CE101-1 and CE101-4, Table II
+# [MIL-STD-461G]. MIL-STD-461H (2026) extends CE101-1 to 20 kHz; the code follows 461G here [MIL-STD-461H].
 CE101_RANGE = (30.0, 10e3)              # Hz
 CE101_TOP_SOLVE = 9.9e3                 # the highest CE101 solve: CE102's band starts at 10 kHz with another LISN
 CE101_LEAD_F = (15.0, 9.95e3)           # where a LISN branch is the CE101 lead (above the DC solves' 10 Hz)

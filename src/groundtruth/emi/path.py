@@ -2,7 +2,7 @@
 
 A path from a driver pin to a receiver pin may run through several nets joined by series parts (a 33 Ω damping
 resistor, a ferrite bead, an AC-coupling capacitor). Each stretch of track between two parts is a lossless line
-(its own Z0 and εeff), each part a series impedance (components.models.ComponentModel.impedance). The source is
+(its own Z0 and εeff [A9]), each part a series impedance (components.models.ComponentModel.impedance). The source is
 a voltage behind R + jωL with an optional output capacitance; the load a resistance (optional) in parallel with
 the receivers' capacitance. The cascade is solved per harmonic: from the load back to the source for the input
 impedances, then forward for the voltage and current at every element.
@@ -14,12 +14,12 @@ returned for a single line, which this reduces to exactly with one line, no part
 Shunt parts (PathShunt: a termination to ground, a filter capacitor, a part to a rail) split the path into groups.
 The current that leaves the path at a shunt returns through the plane from that shunt's ground pin, so each shunt
 is a current loop of its own (the path from the driver up to it), the receivers' loop the last. By superposition
-the loop currents are the drops of the groups' mean currents: loop k carries Ī_k - Ī_(k+1), the receivers' loop
-Ī_last, so every group carries exactly its mean current (`loop_currents`). A group too short for a mean of its own
-(below SHORT_GROUP of the path, at least SHORT_GROUP_M: a part at the receiver) takes the previous group's mean
-split as the currents divide at its node: with a point current there instead, the weights grew to ±16 at 3 GHz on a
-40 mm line (standing waves make the mean and the end current very different), and the loops' few per cent of
-geometric difference to several dB.
+[Desoer 1969] the loop currents are the drops of the groups' mean currents: loop k carries Ī_k - Ī_(k+1), the
+receivers' loop Ī_last, so every group carries exactly its mean current (`loop_currents`). A group too short for a
+mean of its own (below SHORT_GROUP of the path, at least SHORT_GROUP_M: a part at the receiver) takes the previous
+group's mean split as the currents divide at its node: with a point current there instead, the weights grew to ±16
+at 3 GHz on a 40 mm line (standing waves make the mean and the end current very different), and the loops' few per
+cent of geometric difference to several dB.
 """
 from __future__ import annotations
 
@@ -129,7 +129,7 @@ def path_currents(freqs, v_source, elements: list, source: PathSource, load: Pat
     for k in range(len(elements) - 1, -1, -1):
         e = elements[k]
         if isinstance(e, PathLine):
-            # a line transforms the impedance behind it: Z_in = Z0 (Z + j Z0 tan bl) / (Z0 + j Z tan bl)
+            # a line transforms the impedance behind it: Z_in = Z0 (Z + j Z0 tan bl) / (Z0 + j Z tan bl) [Pozar 2012]
             t = np.tan(w * math.sqrt(e.eeff) / C0 * e.length_m)
             z = e.z0 * (z + 1j * e.z0 * t) / (e.z0 + 1j * z * t)
         elif isinstance(e, PathShunt):
@@ -169,7 +169,8 @@ def path_currents(freqs, v_source, elements: list, source: PathSource, load: Pat
             bl = w * math.sqrt(e.eeff) / C0 * e.length_m
             b = np.maximum(bl, 1e-12)
             # the line's mean current (as spectrum.line_current), then its ABCD matrix carries v and i to its end:
-            # V2 = V1 cos bl - j Z0 I1 sin bl,  I2 = I1 cos bl - j (V1 / Z0) sin bl
+            # V2 = V1 cos bl - j Z0 I1 sin bl,  I2 = I1 cos bl - j (V1 / Z0) sin bl  (a lossless line's ABCD matrix
+            # [Pozar 2012])
             i_avg = i * np.sin(b) / b - 1j * (v / e.z0) * (1 - np.cos(b)) / b
             acc += e.length_m * i_avg
             g_acc = g_acc + e.length_m * i_avg
@@ -215,8 +216,8 @@ def amplified_path(freqs, v_source, stages: list[list], amps: list[PathAmp], sou
         r = path_currents(f, v, elements, src, ld)
         out.append(r)
         if k < len(amps):
-            # the amplifier isolates the stages: its output is a new Thevenin source, gain x its input voltage
-            # behind z_out (the stage after it does not load the stage before it)
+            # the amplifier isolates the stages: its output is a new Thevenin source [Desoer 1969], gain x its input
+            # voltage behind z_out (the stage after it does not load the stage before it)
             a = amps[k]
             v = np.array([complex(a.gain(float(fk))) for fk in f]) * r.v_end
             if a.slew:
