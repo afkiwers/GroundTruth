@@ -15,6 +15,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Optional
 
 import wx
 import wx.html
@@ -23,27 +24,115 @@ from . import theme
 
 PAGE = Path(__file__).with_name("help.html")
 SHELL = Path(__file__).with_name("help_shell.html")
+# docs/REFERENCES.md (the sources of the formulas and the model's assumptions): next to the groundtruth package in an
+# installed plugin (tools/make_pcm_package.py, tools/install_plugin.py copy it to <plugin>/docs), in the repo's docs
+REFERENCES = (Path(__file__).resolve().parents[2] / "docs" / "REFERENCES.md",
+              Path(__file__).resolve().parents[3] / "docs" / "REFERENCES.md")
 TOPICS = ("workflow", "together", "checks", "nets", "converters", "bridges", "dcloads", "pdn", "si", "safety", "parts",
           "fields", "issues", "heatmap", "fixes", "history", "thermal", "prefs", "export", "drawing", "labels",
-          "siglabels", "settings", "speed", "methods", "limits", "server")
+          "siglabels", "settings", "speed", "methods", "limits", "references", "server")
 # the sidebar's groups, by section; a section not listed goes under "More"
 GROUPS = (("Getting started", ("workflow", "together", "checks")),
           ("The tabs", ("nets", "converters", "bridges", "dcloads", "pdn", "si", "parts", "issues", "heatmap", "fixes",
                         "history")),
           ("Analyses and output", ("fields", "safety", "thermal", "prefs", "export", "drawing")),
           ("Labels and settings", ("labels", "siglabels", "settings")),
-          ("Under the hood", ("speed", "server", "methods", "limits")))
+          ("Under the hood", ("speed", "server", "methods", "limits", "references")))
 
 
 def page() -> str:
-    """The help page in the window's theme colours, with the schematic-field table from components/fields.py (wx's
-    simple HTML view)."""
+    """The help page in the window's theme colours, with the schematic-field table from components/fields.py and the
+    references from docs/REFERENCES.md (wx's simple HTML view)."""
     pal = theme.palette()
     text = PAGE.read_text(encoding="utf-8")
     for key, value in (("@BG@", pal.bg), ("@TEXT@", pal.text), ("@LINK@", pal.accent), ("@WARN@", pal.warn),
-                       ("@PART_FIELDS@", field_rows())):
+                       ("@PART_FIELDS@", field_rows()), ("@REFERENCES@", references_html())):
         text = text.replace(key, value)
     return text
+
+
+def references_path() -> Optional[Path]:
+    """docs/REFERENCES.md where it is (installed plugin or repo), or None."""
+    return next((p for p in REFERENCES if p.is_file()), None)
+
+
+def references_html() -> str:
+    """docs/REFERENCES.md as HTML for the help's References section (its own title left out: the section has one),
+    with a link that opens the file itself; a note when the file is not there."""
+    path = references_path()
+    if path is None:
+        return "<p>The list (docs/REFERENCES.md) is not installed with this copy of the plugin.</p>"
+    body = re.sub(r"\A#\s[^\n]*\n", "", path.read_text(encoding="utf-8"))
+    return markdown_html(body) + f'<p><a href="{path.as_uri()}">Open REFERENCES.md</a> ({escape_html(str(path))})</p>'
+
+
+def escape_html(text: str) -> str:
+    """Text for HTML: &, < and > escaped."""
+    from html import escape
+    return escape(text, quote=False)
+
+
+def _inline(text: str) -> str:
+    """One line's Markdown inline marks as HTML: `code` (taken out first, so nothing inside it is read as a mark),
+    **bold**, *italic*, [text](url)."""
+    codes: list[str] = []
+
+    def keep(m) -> str:
+        """A code span, set aside behind a placeholder."""
+        codes.append(f"<code>{escape_html(m.group(1))}</code>")
+        return f"\0{len(codes) - 1}\0"
+    text = escape_html(re.sub(r"`([^`]+)`", keep, text))
+    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+    text = re.sub(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", r"<i>\1</i>", text)
+    text = re.sub(r"\[([^\]]+)\]\(([^)\s]+)\)", r'<a href="\2">\1</a>', text)
+    return re.sub(r"\0(\d+)\0", lambda m: codes[int(m.group(1))], text)
+
+
+def markdown_html(text: str) -> str:
+    """The Markdown the docs use, as plain HTML both help views show: headings (## → h4, ### → h5), paragraphs,
+    bullet lists (a line starting "- ", continued by indented lines) and pipe tables (the first row a header, the
+    second the |---| rule)."""
+    out: list[str] = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if not line.strip():
+            i += 1
+            continue
+        m = re.match(r"(#{2,6})\s+(.*)", line)
+        if m:
+            level = min(len(m.group(1)) + 2, 6)
+            out.append(f"<h{level}>{_inline(m.group(2))}</h{level}>")
+            i += 1
+        elif line.startswith("|"):
+            rows = []
+            while i < len(lines) and lines[i].startswith("|"):
+                cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+                if not all(re.fullmatch(r":?-+:?", c) for c in cells):          # the header's rule row
+                    rows.append(cells)
+                i += 1
+            html = ["<table border='1' cellpadding='3' cellspacing='0'>"]
+            for k, cells in enumerate(rows):
+                tag = "th" if k == 0 else "td"
+                html.append("<tr>" + "".join(f"<{tag} valign='top'>{_inline(c)}</{tag}>" for c in cells) + "</tr>")
+            out.append("\n".join(html) + "</table>")
+        elif line.startswith("- "):
+            items = []
+            while i < len(lines) and (lines[i].startswith("- ") or (items and lines[i].startswith("  "))):
+                if lines[i].startswith("- "):
+                    items.append(lines[i][2:].strip())
+                else:
+                    items[-1] += " " + lines[i].strip()
+                i += 1
+            out.append("<ul>" + "".join(f"<li>{_inline(t)}</li>" for t in items) + "</ul>")
+        else:
+            para = []
+            while i < len(lines) and lines[i].strip() and not re.match(r"#{2,6}\s|\||- ", lines[i]):
+                para.append(lines[i].strip())
+                i += 1
+            out.append(f"<p>{_inline(' '.join(para))}</p>")
+    return "\n".join(out)
 
 
 def field_rows() -> str:
@@ -81,7 +170,8 @@ def sections() -> tuple[str, list[tuple[str, str, str]]]:
     """help.html as (its introduction, [(anchor, title, body)] per section): the page's parts between its <hr>
     lines, each starting with `<a name="X"></a><h3>Title</h3>`; the contents list is left out (the sidebar takes
     its place)."""
-    text = PAGE.read_text(encoding="utf-8").replace("@PART_FIELDS@", field_rows())
+    text = PAGE.read_text(encoding="utf-8").replace("@PART_FIELDS@", field_rows()).replace("@REFERENCES@",
+                                                                                         references_html())
     body = re.search(r"<body[^>]*>(.*)</body>", text, re.S).group(1)
     head, _, rest = body.partition("<hr>")
     intro = re.sub(r"<p><b>Contents</b></p>.*$", "", head, flags=re.S)          # the old contents list

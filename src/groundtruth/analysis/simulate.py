@@ -14,7 +14,7 @@ Two plane models per route, because the two jobs need very different resolution:
 With `analysis.plane_capacitance: false` only the fine model runs, at the harmonics.
 
 Reference frequency: loop inductance, the ideal comparison and the board-wide offset are taken at
-f_ref = max(f0, 1 MHz). Below about 1 MHz the return still follows resistance rather than inductance, so a
+f_ref = max(f0, 1 MHz) [A20]. Below about 1 MHz the return still follows resistance rather than inductance, so a
 DC-DC converter switching at 10 kHz is judged where its edges radiate, not at its fundamental.
 
 Parallel: solves at different frequencies, for different routes and in the final per-route step are independent,
@@ -22,7 +22,7 @@ so they run in a thread pool (`analysis.threads`). SciPy's sparse LU, the FFTs a
 4-core laptop four board-wide solves ran 2.3x faster than one after another, with identical results.
 
 Emission: harmonic current on the line (driver resistance, line Z0/εeff, receiver load) × loop moment per
-ampere → far-field estimate → CISPR 32 margin.
+ampere → far-field estimate → CISPR 32 margin. Source keys in square brackets: docs/REFERENCES.md.
 """
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ from .pins import column_conductance, feed_layer, params_cache, segment_impedanc
 from .route import SHUNT_KINDS, Route, RouteSegment, RouteVia, return_pad, shunt_parts, signal_nets  # noqa: F401
 from .section import corridor_mm, route_section
 
-MOUNT_L = 0.3e-9            # pad + escape inductance added to lumped parts (vias are modelled explicitly)
+MOUNT_L = 0.3e-9            # pad + escape inductance added to lumped parts (vias are modelled explicitly) [A21]
 MAX_PART_BRANCHES = 8       # a lumped part is spread over its pads as up to this many parallel branches
 INJECT_MAX_MM = 3.0         # return pin must be within this distance of its net's copper
 INJECT_FALLBACK_MM = 5.0    # ...or of any plane copper
@@ -419,8 +419,11 @@ class BoardModel:
                 pts = arc_points(t.start, t.mid, t.end) if t.is_arc else [t.start, t.end]
                 lines[t.layer].setdefault(t.net, []).append((pts, t.width))
         names, grids = [], []
-        # sample the copper at RASTER_MM or finer (up to 6 x 6 per cell), so thin webs between antipads conduct
-        sub = max(1, min(6, math.ceil(d / RASTER_MM - 1e-9)))
+        # sample the copper at RASTER_MM or finer (2 x 2 to 6 x 6 per cell), so thin webs between antipads conduct
+        # and every strip carries its copper's width (peec.Grid.wx): with one sample per cell (cells of RASTER_MM and
+        # less, before 2026-10-18) the strips were full cells, and a 0.35 mm neck's island resonance read 793 MHz at
+        # 0.15 mm cells against 769 with 2 x 2 (and 736-797 on the coarser grids, which had their sub-grid)
+        sub = max(2, min(6, math.ceil(d / RASTER_MM - 1e-9)))
         for layer in layers:
             geoms = {}
             # the reference nets first: where two nets' copper share a node, the first one keeps it
@@ -1609,8 +1612,8 @@ def grid_sensitive_note(worst: dict, m_worst: float, m_low: float, warn_db: floa
     finer = f"{2 * resolution:g}x" if resolution >= 1 else "2x"
     return (f"the worst emission ({worst['f'] / 1e6:.4g} MHz, margin {worst['margin_db']:+.1f} dB) comes from a "
             f"plane resonance above {GRID_SENSITIVE_F / 1e6:g} MHz ({rise:+.0f} dB over the loop's low-frequency "
-            f"value): such peaks can change by several dB with the grid. Check it at {finer} resolution "
-            "(Preferences, or --resolution)")
+            f"value): on a coarse grid such a peak can sit several per cent off in frequency and several dB off in "
+            f"height. Check it at {finer} resolution (Preferences, or --resolution)")
 
 
 def unsolved_band(run: ModelRun, f_limit: float) -> Optional[dict]:
@@ -1687,7 +1690,7 @@ def _route_issues(setup: RouteSetup, rules, a):
 
 def _interp_loglog(f, fs, vs):
     """Interpolate positive values vs at fs to f linearly in log-log (exact for power laws, the usual shape of a
-    transfer or moment between resonances); one point: a constant."""
+    transfer or moment between resonances [A22]); one point: a constant."""
     fs = np.asarray(fs, float)
     vs = np.maximum(np.asarray(vs, float), 1e-30)
     if len(fs) == 1:

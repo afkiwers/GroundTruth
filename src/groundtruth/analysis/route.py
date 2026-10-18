@@ -161,7 +161,8 @@ def signal_nets(board: Board, config: Config, net: str, through=()) -> set[str]:
 
 class _Graph:
     """The copper of the route's nets as a weighted graph: nodes are (layer, point) places, edges the copper
-    joining them, weighted by length (mm). The shortest path from the driver to the receiver is the route."""
+    joining them, weighted by length (mm). The shortest path from the driver to the receiver is the route
+    (Dijkstra's algorithm [Dijkstra 1959])."""
 
     def __init__(self):
         """An empty graph."""

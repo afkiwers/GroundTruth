@@ -4,7 +4,8 @@ currents), and an EMI receiver reading it.
 The current is periodic in the electrical period T_e = n·T (n PWM periods), so its lines lie on the grid
 f_l = l / T_e: the PWM harmonics with sidebands every electrical frequency. It is taken as piecewise linear between
 breakpoints (switching edges as ramps of the edge time): then its second derivative is a train of impulses, the
-slope changes ds_j at t_j, and its Fourier coefficients are exactly
+slope changes ds_j at t_j, and its Fourier coefficients are exactly (differentiating the waveform to impulses
+[Paul 2006])
 
     c_l = -1 / (T_e (2 pi f_l)^2) · sum_j ds_j · exp(-j 2 pi f_l t_j)
 
@@ -12,7 +13,7 @@ Most breakpoints sit at the same few places within every PWM period (the switchi
 constant); their sum over the periods is an FFT over the period index, so millions of lines cost little. The rest
 (a freewheeling current running out during a commutation) are summed directly.
 
-A receiver tuned to f_c passes the lines through its resolution bandwidth (Gaussian, -6 dB at ±RBW/2, as
+A receiver tuned to f_c passes the lines through its resolution bandwidth (Gaussian, -6 dB at ±RBW/2 [A8], as
 emi/spread.py); the envelope of what passes is periodic in T_e, computed by an inverse FFT, and read by the peak
 detector (its maximum) or the average detector (its mean). Lines closer than the RBW therefore add as the
 waveform makes them add, not as the sum of their magnitudes.

@@ -42,7 +42,7 @@ def test_SP1_trapezoid_harmonics_match_a_sampled_fft(duty, tr, tf):
 
 def test_SP2_microstrip_and_stripline_closed_forms_against_the_2d_field_solver():
     """SP-2: the path's Z0 and εeff (Hammerstad microstrip, IPC-2141 stripline) against the project's 2D electrostatic
-    solver (itself validated against Cohn's exact results) and against Cohn's exact zero-thickness stripline
+    solver (itself validated against Cohn's exact results) and against Cohn's exact zero-thickness stripline [Cohn 1954]
     Z0 = 30π/√εr · K(k)/K(k'), k = sech(πw/2b). Closed forms are expected within a few per cent."""
     from scipy.special import ellipk
     from groundtruth.emi.spectrum import microstrip, stripline

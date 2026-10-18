@@ -3,8 +3,8 @@ power stage's filters or a PDN, with its poles and zeros.
 
 A response computed from a rational model (a closed form in s) has exact poles and zeros (`exact_rational`: the
 roots of its numerator and denominator). A response that is only known at frequencies (a field solve, a path with
-transmission lines) is fitted with a rational function by **vector fitting** (Gustavsen & Semlyen, IEEE Trans.
-Power Delivery 14(3) 1999, with the relaxation of Gustavsen 2006):
+transmission lines) is fitted with a rational function by **vector fitting** [Gustavsen 1999], with the relaxation
+of [Gustavsen 2006] (source keys: docs/REFERENCES.md):
 
     H(s) ≈ Σ_n r_n / (s − a_n) + d + s·e
 
@@ -13,9 +13,9 @@ with σ(s) = Σ c̃_n/(s − a_n) + d̃ on the same poles (linear least squares 
 a relative fit, so a response spanning decades is fitted at its low values too); the zeros of σ are the new poles
 (the eigenvalues of A − b·c̃ᵀ/d̃ in a real state-space realisation), unstable ones mirrored into the left half
 plane. With the poles settled, the residues, d and e are fitted once more. The zeros of the fit are the finite
-generalised eigenvalues of the Rosenbrock pencil [[A, b], [c, d]] − s·[[I, 0], [0, −e]]. Poles whose share of the
-response is negligible are pruned. The order is raised (2, 4, … MAX_ORDER) until the relative RMS error is below
-FIT_TOL. Validated against known rational functions in tests/test_transfer.py.
+generalised eigenvalues of the Rosenbrock pencil [Rosenbrock 1970] [[A, b], [c, d]] − s·[[I, 0], [0, −e]]. Poles whose
+share of the response is negligible are pruned. The order is raised (2, 4, … MAX_ORDER) until the relative RMS error is
+below FIT_TOL. Validated against known rational functions in tests/test_transfer.py.
 
 A pole or zero s = σ + jω is reported by its natural frequency f0 = |s|/2π and its quality factor Q = |s|/(−2σ)
 (a real one: its corner frequency, no Q).

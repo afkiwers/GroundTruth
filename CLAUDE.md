@@ -268,6 +268,11 @@ in `tools/dev/`, never only in the scratchpad.
   be easily read/understood by a human"). Keep it so for new code (`tools/dev/undocumented.py`).
 - Every new physics feature needs a validation test against an analytic result (see `tests/test_solver.py`,
   `tests/test_multilayer.py`, `tests/test_capacitance.py`).
+- Every formula, method, theorem and assumption cites its source where the code uses it, as a key of
+  [docs/REFERENCES.md](docs/REFERENCES.md) in square brackets (`[Grover 1946]`, `[Jackson 1999, §5.6]`, `[A12]`);
+  what has no published source is an assumption there, with its reason and evidence (the user, 2026-10-18: "add
+  references of the assumptions/methods/theorems, also call them out locally where they are used, in all
+  calculations"). `tools/dev/ref_keys.py` checks that every cited key is in the list.
 - Check grid convergence on the real board before trusting a new model result. Compare two grid budgets.
   That is how the rasterisation topology bug was found (see HANDOFF).
 - Git: the user asked for a repo. `main` holds the reviewed state; unmerged branches are listed in HANDOFF (all earlier feature

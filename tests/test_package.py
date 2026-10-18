@@ -20,7 +20,7 @@ def test_the_pcm_package_has_kicads_layout_and_valid_metadata(tmp_path):
     assert {n.split("/")[0] for n in names} == {"metadata.json", "plugins", "resources"}
     assert {"plugins/plugin.json", "plugins/groundtruth_action.py", "plugins/requirements.txt",
             "plugins/groundtruth/solver/peec.py", "plugins/demo/groundtruth_demo.kicad_pro",
-            "resources/icon.png"} <= names
+            "plugins/docs/REFERENCES.md", "resources/icon.png"} <= names     # the references: the help shows them
     assert not [n for n in names if "__pycache__" in n or n.endswith((".pyc", ".lck", ".kicad_prl"))]
     m = json.loads(z.read("metadata.json"))
     plugin = json.loads(z.read("plugins/plugin.json"))

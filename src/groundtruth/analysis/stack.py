@@ -64,8 +64,8 @@ def fit_placement(ours: list[tuple[float, float]], theirs: list[tuple[float, flo
     best = None
     for mirrored in ((False, True) if flip == "auto" else (flip == "yes",)):
         q = Q * np.array([-1.0, 1.0]) if mirrored else Q
-        # the Kabsch algorithm: centre both point sets, the SVD of their cross-covariance gives the rotation
-        # that best lays one onto the other (least squares), the centroids' difference the offset
+        # the Kabsch algorithm [Kabsch 1976]: centre both point sets, the SVD of their cross-covariance gives the
+        # rotation that best lays one onto the other (least squares), the centroids' difference the offset
         pc, qc = P.mean(axis=0), q.mean(axis=0)
         H = (q - qc).T @ (P - pc)
         U, _, Vt = np.linalg.svd(H)

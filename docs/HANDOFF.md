@@ -7,6 +7,38 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `small-fixes` (2026-10-18, from `references`, not merged):** at the user's "keep going".
+  - The Mac launcher is committed executable, which fixes `test_the_mac_launcher_is_lf_and_executable`.
+  - The grid note says a coarse grid moves a resonance's frequency too, not only its height.
+  - README: the plane-displacement example is the current one (F.Cu/In1 by C1105/C1110 at 1020 MHz, 4.6×). The
+    740 MHz cavity it quoted no longer appears.
+  - Every model samples its copper at least 2 × 2 per cell (`simulate`, `sub = max(2, …)`), so cells of 0.15 mm
+    and less carry strip widths too. The neck test case at 0.15 / 0.1 mm: 793 / 735 → 769 / 742 MHz. On kraft
+    this only reaches 4x and up.
+  - Waiting on the user: MIL-STD-461H's CE101 to 20 kHz (follow 461H or keep 461G), and whether to model the
+    combined emission of interleaved stages.
+- **Branch `references` (2026-10-18, committed, not merged):** at the user's "add references of the
+  assumptions/methods/theorems, also call them out locally where they are used, in all calculations".
+  - [REFERENCES.md](REFERENCES.md) lists every source by key (68 sources: electromagnetics, lines and EMC, power
+    electronics, heat transfer, numerics, standards by edition) and the model's assumptions A1–A33, each with its
+    reason and evidence.
+  - The code cites the keys where it applies them: solver, emi, analysis, components, rules, thermal, and the
+    tests that check against exact results.
+  - Rules the list follows: a source is cited only for what it contains; what has no published source is an
+    assumption. Locations: the MIL-STD-461G ones were checked against the standard; the few book sections are the
+    usual ones for those editions but were not re-read (the list says which); Wadell's section numbers were dropped.
+  - Checks: `tools/dev/ast_same.py main` reports only comments and docstrings changed (35 files);
+    `tools/dev/ref_keys.py` (new) finds 0 unknown keys and every listed key cited. CLAUDE.md has the rule for new
+    code.
+  - The user: "add a link to the help inside the plugin that links to the references.md so users can view it from
+    there". The help has a section **References and assumptions** (`#references`, under "Under the hood"). It is
+    REFERENCES.md rendered by `help.markdown_html` (headings, lists, tables, inline marks), so it reads in both help
+    views and offline. A link opens the file itself. The methods section, the limits section and the contents link
+    to it.
+    - The package and the development install ship the file as `<plugin>/docs/REFERENCES.md`
+      (`make_pcm_package.EXTRA`, `install_plugin.install`); `help.REFERENCES` looks there and in the repo's docs.
+    - Test: `test_the_help_shows_the_references_with_every_source_and_assumption` (every key in the section), plus
+      the package and install tests.
 - **Branch `audit-3` (2026-10-18, merged into `main` as c3dbeb6 at the user's "Merge"):** the audit's round 3 (VALIDATION_AUDIT.md "Round 3"),
   at the user's four items:
   - "Fix this" (inner-layer Z0, solder mask): a path's line is the field-solved cut at its longest track
@@ -22,8 +54,8 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
       (2x vs 4x). The largest mode, F.Cu/In1 by C1105/C1110, is at 940 / 1020 / 1020 MHz at 1x / 2x / 4x (it was at
       1060 / 1100 / 1060). So 2x and 4x agree on it, and 1x places it 8 % low, inside 0.5-1 GHz.
     - The user chose "commit, keep digging": `GRID_SENSITIVE_F` is now 600 MHz.
-    - **Open:** 2x and 4x still differ by several dB above 1 GHz (4x has a peak at 1260-1300 MHz). Also open: a
-      sub-grid for cells ≤ 0.15 mm (point-sampled now, strips full; 2x there gave 769 instead of 793 MHz). Logs are
+    - **Open:** 2x and 4x still differ by several dB above 1 GHz (4x has a peak at 1260-1300 MHz). The sub-grid for
+      cells ≤ 0.15 mm followed on `small-fixes` (2 × 2 at least: 769 / 742 MHz at 0.15 / 0.1 mm). Logs are
       in `out/converge/spi_sck_head_*`, `spi_sck_widths*` and `hot_new_*`.
   - The MIL-STD-461 sources are downloaded to `Downloads\GroundTruth audit sources`, including 461H (2026-04-17,
     supersedes 461G): RE102 aircraft is split into `re102_aircraft_external` (2 MHz-18 GHz), `re102_helicopter` and

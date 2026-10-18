@@ -64,12 +64,15 @@ EPOCH = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 # also packed, as plugins/tools/...: GPU support for the plugin on a PC with a graphics card, run there (the
-# separate GPU package, make_gpu_package.py, was dropped on 2026-10-14: these were all it held)
-EXTRA = ("tools/install_gpu.py", "tools/check_gpu.py", "tools/install_gpu_amd.cmd", "tools/GPU_README.md")
+# separate GPU package, make_gpu_package.py, was dropped on 2026-10-14: these were all it held); and as
+# plugins/docs/REFERENCES.md the sources and assumptions, which the help's References section shows (ui/help.py)
+EXTRA = ("tools/install_gpu.py", "tools/check_gpu.py", "tools/install_gpu_amd.cmd", "tools/GPU_README.md",
+         "docs/REFERENCES.md")
 
 
 def package_dest(path: str) -> str:
-    """plugin/... -> plugins/..., src/groundtruth/... -> plugins/groundtruth/..., tools/x -> plugins/tools/x"""
+    """plugin/... -> plugins/..., src/groundtruth/... -> plugins/groundtruth/..., tools/x -> plugins/tools/x,
+    docs/x -> plugins/docs/x"""
     if path.startswith("plugin/"):
         return "plugins/" + path[len("plugin/"):]
     return "plugins/" + (path[len("src/"):] if path.startswith("src/") else path)
