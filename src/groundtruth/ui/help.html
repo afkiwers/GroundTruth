@@ -31,6 +31,7 @@ next one).</p>
 <li><a href="#server">Compute server: set up and run</a></li>
 <li><a href="#methods">How the simulation works (the algorithms)</a></li>
 <li><a href="#limits">What the numbers mean, and their limits</a></li>
+<li><a href="#references">References and assumptions</a></li>
 </ul>
 
 <hr><a name="workflow"></a><h3>The usual workflow</h3>
@@ -1256,7 +1257,8 @@ power stages: one big item can't be split further.</p>
 </ul>
 <hr><a name="methods"></a><h3>How the simulation works (the algorithms)</h3>
 <p>Simulate uses one field solver for everything electrical. Nets, converters, DC paths, bridges and the fix search
-differ only in the current they drive into it. Thermal has a solver of its own.</p>
+differ only in the current they drive into it. Thermal has a solver of its own. Where each formula and method comes
+from, and what the model assumes, is in <a href="#references">References and assumptions</a>.</p>
 
 <p><b>This is not FEM.</b> The field solver uses PEEC (partial element equivalent circuit), an integral-equation
 method from the method-of-moments family. Only the copper is meshed: each layer's copper is cut into small strips, and
@@ -1416,6 +1418,13 @@ heating.</p>
   yet), so large parts come out on the hot side.</li>
 <li>Results depend on what you enter: frequencies, edge times, currents, part models. Orange rows are still
   guesses.</li>
+<li>Each assumption the model makes is listed, with its reason, under
+  <a href="#references">References and assumptions</a>.</li>
 </ul>
+<hr><a name="references"></a><h3>References and assumptions</h3>
+<p>The sources of the formulas, methods and theorems GroundTruth calculates with, and the assumptions of its models.
+The code cites the same keys where it uses them: <code>[Grover 1946]</code> in a comment means that line applies that
+source, <code>[A12]</code> that it relies on assumption A12. This is the project's docs/REFERENCES.md.</p>
+@REFERENCES@
 <p><a href="#top">Back to the top</a></p>
 </body></html>

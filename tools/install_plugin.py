@@ -88,6 +88,9 @@ def install(dest_plugins: Path, dry_run: bool = False) -> Path:
                                                   "__pycache__", "*.pyc"))
     shutil.copytree(ROOT / "src" / "groundtruth", target / "groundtruth",
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    # the sources and assumptions the help's References section shows (ui/help.py looks for <plugin>/docs)
+    (target / "docs").mkdir(exist_ok=True)
+    shutil.copy2(ROOT / "docs" / "REFERENCES.md", target / "docs" / "REFERENCES.md")
     for cmd in target.glob("*.cmd"):        # cmd.exe misreads labels and blocks in LF files: always CRLF
         cmd.write_bytes(cmd.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
     (target / "version.txt").write_text(f"GroundTruth development install ({_commit()}, "
