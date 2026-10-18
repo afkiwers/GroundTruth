@@ -240,6 +240,20 @@ def _complex_transfer(setup: ConverterSetup, ce101: bool = False) -> tuple[np.nd
     return fs, np.array([complex(sols[f].I_branch[setup.lisn]) for f in fs])
 
 
+def _ce101_complex_transfer(setup: ConverterSetup, top: float) -> tuple[np.ndarray, np.ndarray]:
+    """A leg's complex CE101 transfer up to `top` (Hz): its CE101 solves below 10 kHz and, where the limit goes on
+    (MIL-STD-461H, ships: to 20 kHz), the conducted band's from 10 kHz (as power.ce101_transfer) [A34]."""
+    from ..emi.conducted import CE101_RANGE
+    fs, ts = _complex_transfer(setup, ce101=True)
+    if top <= CE101_RANGE[1]:
+        return fs, ts
+    up, tu = _complex_transfer(setup)
+    keep = (up >= CE101_RANGE[1]) & (up <= top * 1.5)
+    f = np.concatenate([fs, up[keep]])
+    order = np.argsort(f)
+    return f[order], np.concatenate([ts, tu[keep]])[order]
+
+
 def _interp_complex(f: np.ndarray, fs: np.ndarray, ts: np.ndarray) -> np.ndarray:
     """A complex transfer at frequencies f from its solved values ts at fs: the magnitude interpolated in log-log
     (straight for a power law), the phase (unwrapped, so it does not jump by 2 pi) in log frequency."""
@@ -534,18 +548,18 @@ def ce101_spec(model: BoardModel, w: DriveWaveform):
 
 def ce101_bridge_rows(model: BoardModel, legs: list, w: DriveWaveform, ce) -> list[dict]:
     """CE101 rows [{f, current_a, i_dbua, limit_dbua, margin_db}] of the input lead for a drive waveform: each
-    leg's high-side line spectrum below 10 kHz (lines every electrical frequency: the six-step commutation at 6·f_e
-    and its neighbours) times the leg's CE101 transfer, added as phasors, read by the current probe's receiver
-    (Table II's 10 Hz / 100 Hz bandwidths, peak detector)."""
-    from ..emi.conducted import CE101_BANDS, CE101_RANGE, ce101_rows
+    leg's high-side line spectrum within the limit's range (10 kHz; 461H ships 20 kHz: lines every electrical
+    frequency, the six-step commutation at 6·f_e and its neighbours) times the leg's CE101 transfer, added as
+    phasors, read by the current probe's receiver (Table II's 10 Hz / 100 Hz / 1 kHz bandwidths, peak detector)."""
+    from ..emi.conducted import CE101_BANDS, ce101_rows
+    lo, hi = ce.range
     contributions, freqs = [], None
     for s in legs:
-        fs, ts = _complex_transfer(s, ce101=True)
+        fs, ts = _ce101_complex_transfer(s, hi)
         if len(fs) < 2:
             continue
-        f, ph, _ = line_spectrum(w.t, w.hs[:, _column(s, legs)], w.period, w.T, w.params.rise_time,
-                                 CE101_RANGE[1] * 1.05)
-        sel = f >= CE101_RANGE[0] / 1.1
+        f, ph, _ = line_spectrum(w.t, w.hs[:, _column(s, legs)], w.period, w.T, w.params.rise_time, hi * 1.05)
+        sel = f >= lo / 1.1
         freqs = f[sel]                   # the same line grid for every leg (one drive waveform)
         contributions.append(ph[sel] * _interp_complex(freqs, fs, ts))
     if not contributions or not len(freqs):
@@ -555,7 +569,7 @@ def ce101_bridge_rows(model: BoardModel, legs: list, w: DriveWaveform, ce) -> li
     def rbw(x):
         """The current probe receiver's bandwidth at frequency x."""
         return float(receiver_bandwidth([x], CE101_BANDS)[0])
-    tun = tunings_for(CE101_RANGE[0], CE101_RANGE[1], rbw)
+    tun = tunings_for(lo, hi, rbw)
     reading = receiver(freqs, line, 1.0 / w.period, tun, rbw, "peak")
     i_db = 20 * np.log10(np.maximum(reading / math.sqrt(2), 1e-30) / 1e-6)
     return ce101_rows(tun, i_db, reading, ce, REPORT_PER_DECADE)
@@ -575,7 +589,8 @@ def _ce101(model: BoardModel, bs: BridgeSetup, legs: list):
         return
     res.ce101 = ce101_bridge_rows(model, legs, w, ce)
     if not res.ce101:
-        res.notes.append(f"CE101: no drive lines below 10 kHz at this operating point (f_e {w.f_e:.4g} Hz)")
+        res.notes.append(f"CE101: no drive lines below {ce.range[1] / 1e3:g} kHz at this operating point "
+                         f"(f_e {w.f_e:.4g} Hz)")
         return
     compared = [r for r in res.ce101 if r["margin_db"] is not None]
     if not compared:

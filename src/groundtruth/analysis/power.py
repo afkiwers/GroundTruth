@@ -886,6 +886,11 @@ def _conducted_start(setup: ConverterSetup, with_fsw: bool = True) -> list[float
     picks = {float(setup.spec.f_sw)} if with_fsw else set()
     setup.ce101_freqs = ce101_points(setup)
     picks |= set(setup.ce101_freqs)
+    cfg = setup.config
+    if setup.ce101_freqs and cfg is not None and cfg.analysis.ce101 == "ships" and cfg.analysis.mil461 == "H":
+        # MIL-STD-461H takes ships' CE101 to 20 kHz: that part reads the CE102 band's solves (ce101_transfer), which
+        # start at 10 kHz and step to ~24 kHz; two more in between, with the LISN at the input like the rest
+        picks |= {float(f) for f in np.geomspace(10e3, 20e3, 3)[1:]}
     rng = frequency_range(setup.standard, setup.standard_class) if setup.standard != "none" else None
     if rng:
         lo, hi = rng
@@ -899,13 +904,15 @@ def _conducted_start(setup: ConverterSetup, with_fsw: bool = True) -> list[float
 def ce101_points(setup: ConverterSetup) -> list[float]:
     """The CE101 band's solves (log-spaced from 30 Hz to CE101_TOP_SOLVE, CE101_PER_DECADE per decade) when
     CE101 is on and the stage has content there: a bridge leg (the drive's lines every electrical frequency) or a
-    converter with switching harmonics below 10 kHz. Above 10 kHz the harmonics belong to CE102."""
+    converter with switching harmonics within the limit's range. Above 10 kHz the CE101 lead is not in the model
+    (CE102's LISN is): MIL-STD-461H's ships range up to 20 kHz reads those solves (ce101_transfer)."""
     from ..emi.conducted import CE101_RANGE, CE101_TOP_SOLVE
     cfg = setup.config
     if cfg is None or cfg.analysis.ce101 == "none" or setup.standard == "none":
         return []
     cf = setup.c_freqs
-    if not setup.spec.bridge and not np.any((cf >= CE101_RANGE[0]) & (cf <= CE101_RANGE[1])):
+    top = cfg.analysis.ce101_spec(0.0, 0.0).range[1]
+    if not setup.spec.bridge and not np.any((cf >= CE101_RANGE[0]) & (cf <= top)):
         return []
     lo, hi = CE101_RANGE[0], CE101_TOP_SOLVE
     n = max(int(math.ceil(math.log10(hi / lo) * CE101_PER_DECADE)), 2)
@@ -923,6 +930,19 @@ def _transfer(setup: ConverterSetup, ce101: bool = False) -> tuple[list[float], 
     low = set(setup.ce101_freqs)
     fs = sorted(f for f in sols if (f in low) == ce101)
     return fs, np.array([abs(sols[f].I_branch[setup.lisn]) for f in fs])
+
+
+def ce101_transfer(setup: ConverterSetup, top: float) -> tuple[list[float], np.ndarray]:
+    """The input lead's current per A of loop current over a CE101 limit's range up to `top` (Hz): the CE101 solves
+    (the CE101 lead at the input) below 10 kHz, and where the range goes on (MIL-STD-461H, ships: to 20 kHz) the
+    CE102 band's solves from 10 kHz, whose input is the LISN as specified: the test's setup there [A34]."""
+    from ..emi.conducted import CE101_RANGE
+    fs, hs = _transfer(setup, ce101=True)
+    if top <= CE101_RANGE[1]:
+        return fs, hs
+    up, hu = _transfer(setup)
+    pairs = sorted([*zip(fs, hs), *((f, h) for f, h in zip(up, hu) if CE101_RANGE[1] <= f <= top * 1.5)])
+    return [float(f) for f, _ in pairs], np.array([h for _, h in pairs])
 
 
 def spread_of(spec: ConverterSpec):
@@ -1333,24 +1353,25 @@ def finish_converter(model: BoardModel, setup: ConverterSetup) -> ConverterResul
 
 
 def _ce101_stage(setup: ConverterSetup, res: ConverterResult, a):
-    """MIL-STD-461 CE101 of a converter (analysis.ce101): its harmonics between 30 Hz and 10 kHz times the CE101
-    solves' transfer to the input lead, read by the current probe (emi/conducted.ce101_table). A converter has
-    harmonics there only when it switches below 10 kHz; otherwise a note says what CE101 would see instead. Spread
-    spectrum is not applied (conservative)."""
-    from ..emi.conducted import CE101_RANGE, ce101_table
+    """MIL-STD-461 CE101 of a converter (analysis.ce101): its harmonics within the limit's range (30 Hz to 10 kHz;
+    461H ships to 20 kHz) times the transfer to the input lead (ce101_transfer), read by the current probe
+    (emi/conducted.ce101_table). A converter has harmonics there only when it switches below the range's top;
+    otherwise a note says what CE101 would see instead. Spread spectrum is not applied (conservative)."""
+    from ..emi.conducted import ce101_table
     spec = setup.spec
     ce = a.ce101_spec(spec.v_in or res.v_in, (res.input or {}).get("i_in_a"))
     if ce is None:
         return
     res.ce101_limit = ce.describe()
     cf = setup.c_freqs
-    sel = (cf >= CE101_RANGE[0]) & (cf <= CE101_RANGE[1])
+    lo, hi = ce.range
+    sel = (cf >= lo) & (cf <= hi)
     if not sel.any():
-        res.notes.append(f"CE101: no switching harmonic below 10 kHz (f_sw {format_si(spec.f_sw, 'Hz')}); the input "
-                         "lead's current there comes from load changes, burst mode or a motor drive behind the "
-                         "stage, which are not modelled for a converter")
+        res.notes.append(f"CE101: no switching harmonic below {hi / 1e3:g} kHz (f_sw "
+                         f"{format_si(spec.f_sw, 'Hz')}); the input lead's current there comes from load changes, "
+                         "burst mode or a motor drive behind the stage, which are not modelled for a converter")
         return
-    fs, hs = _transfer(setup, ce101=True)
+    fs, hs = ce101_transfer(setup, hi)
     if not len(fs):
         res.notes.append("CE101 not estimated: no LISN at the input connector (set the stage's input_connector)")
         return

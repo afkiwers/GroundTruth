@@ -366,7 +366,9 @@ class AnalysisSettings:
                                           # refinement round while threads would idle (simulate.solve_setups)
     conducted: str = "cispr32"            # conducted emission of converters: cispr32 | cispr25 | mil461 | none
     conducted_class: str = "B"            # cispr32: A | B, cispr25: 1-5, mil461: basic | 28V | 115V | 220V | 270V | 440V
-    ce101: str = "none"                   # MIL-STD-461G CE101 (30 Hz-10 kHz lead current): none | aircraft | ships
+    mil461: str = "G"                     # MIL-STD-461 revision: G (2015) | H (2026); only CE101 differs here
+    ce101: str = "none"                   # MIL-STD-461 CE101 (lead current, 30 Hz-10 kHz; ships under 461H to
+                                          # 20 kHz): none | aircraft | ships
     ce101_source_v: Optional[float] = None    # nominal EUT source voltage (CE101-4 curve); default: the stage's input
     ce101_load_a: Optional[float] = None      # EUT load current (CE101-1 relaxation); default: the stage's input current
 
@@ -388,7 +390,7 @@ class AnalysisSettings:
         from ..emi.conducted import Ce101
         v = self.ce101_source_v if self.ce101_source_v is not None else (source_v or 0.0)
         i = self.ce101_load_a if self.ce101_load_a is not None else (load_a or 0.0)
-        return Ce101(self.ce101, float(v), float(i))
+        return Ce101(self.ce101, float(v), float(i), self.mil461)
 
 
 @dataclass
@@ -1128,6 +1130,8 @@ def config_from_data(data: Any) -> Config:
             gpu=_gpu(a.get("gpu", "auto"), errors),
             conducted=str(a.get("conducted", "cispr32")).lower().replace(" ", "").replace("-", ""),
             conducted_class=str(a.get("conducted_class", "B")),
+            # "G", "H", "461H" or "MIL-STD-461H" all name the revision
+            mil461=str(a.get("mil461", "G")).strip().upper().removeprefix("MIL-STD-").removeprefix("461"),
             ce101=str(a.get("ce101", "none")).lower(),
             ce101_source_v=None if a.get("ce101_source_v") in (None, "auto")
             else _num(a.get("ce101_source_v"), "analysis.ce101_source_v", "V"),
@@ -1136,7 +1140,9 @@ def config_from_data(data: Any) -> Config:
         )
         if cfg.analysis.conducted not in CONDUCTED_STANDARDS:
             errors.append(f"analysis.conducted must be one of {', '.join(CONDUCTED_STANDARDS)}")
-        from ..emi.conducted import CE101_PLATFORMS
+        from ..emi.conducted import CE101_PLATFORMS, MIL461_REVISIONS
+        if cfg.analysis.mil461 not in MIL461_REVISIONS:
+            errors.append(f"analysis.mil461 must be one of {', '.join(MIL461_REVISIONS)} (MIL-STD-461G or 461H)")
         if cfg.analysis.ce101 not in CE101_PLATFORMS:
             errors.append(f"analysis.ce101 must be one of {', '.join(CE101_PLATFORMS)}")
         elif cfg.analysis.ce101 != "none" and cfg.analysis.conducted == "none":

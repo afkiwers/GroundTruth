@@ -218,7 +218,8 @@ def _num(v, fmt: str, sort_value=None) -> str:
 
 
 def _ce101_card(r, warn: float) -> list:
-    """The MIL-STD-461 CE101 card of a stage or bridge (input lead current, 30 Hz-10 kHz), when CE101 is set."""
+    """The MIL-STD-461 CE101 card of a stage or bridge (input lead current, 30 Hz-10 kHz; 461H ships to
+    20 kHz), when CE101 is set."""
     from ..components.values import format_si
     w = getattr(r, "ce101_worst", None)
     if not w:
