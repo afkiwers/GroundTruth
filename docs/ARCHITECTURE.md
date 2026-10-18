@@ -1005,7 +1005,12 @@ for a boost; duty = the high-side conduction time). The inductor current is cont
     against a dense RBW/8 scan: within 0.03 dB. This also changes conducted spread readings slightly (up).
 - The CE102 relaxation for 115-440 V sources was already applied (`MIL461_RELAX`).
 - **CE101** (the user: "this is a valid frequency range though ... implement"; limits read from the released
-  MIL-STD-461G of 11 December 2015, Figures CE101-1 to -4, Table II): `emi/conducted` `Ce101` (platform, source V,
+  MIL-STD-461G of 11 December 2015, Figures CE101-1 to -4, Table II; and since 2026-10-18 the revision is a setting,
+  `analysis.mil461: G | H` (the user: "Add both, let the user decide which revision"). MIL-STD-461H of 17 April 2026
+  takes ships' CE101-1 on to 66 dBµA at 20 kHz (5.4.1) and caps its relaxation at 35 dB; nothing else the code uses
+  differs. `Ce101.range` and `Ce101.curve` follow the revision. Between 10 and 20 kHz there is no CE101 lead in the
+  model, so `power.ce101_transfer` and `bridge._ce101_complex_transfer` take the CE102 band's solves there, with the
+  LISN as specified at the input [A34]; `_conducted_start` adds two solves at 14.1 and 20 kHz for that case): `emi/conducted` `Ce101` (platform, source V,
   load A), `CE101_CURVES` (CE101-4 curves #1/#2, CE101-1 ships DC with its load-current relaxation; the AC ship
   curves CE101-2/-3 are not entered), `CE101_BANDS` (10 Hz to 1 kHz, 100 Hz to 10 kHz), `ce101_arrays` / `ce101_rows`
   (thinned by excess over the limit: the limit falls 20 dB/decade). The test reads each power lead with a current

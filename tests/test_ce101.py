@@ -96,6 +96,72 @@ def test_a_slow_converters_lead_current_is_the_capacitor_against_the_lead_divide
     assert r.ce101_worst == min(r.ce101, key=lambda row: row["margin_db"])
 
 
+def test_mil_std_461h_takes_the_ships_curve_to_20_khz_and_caps_its_relaxation_at_35_db():
+    """MIL-STD-461H (17 April 2026) against 461G, as both standards print it [MIL-STD-461G] [MIL-STD-461H]: CE101-1
+    (ships, DC) is the same line, 95 dBµA to 2.6 kHz, continued from 10 kHz (76 dBµA in 461G) to 66 dBµA at 20 kHz
+    (5.4.1: ships and submarines 30 Hz to 20 kHz); its relaxation is "the lesser of 20 log(I/3) or 35 dB" (461G:
+    20 log(I/3) up to 185 A, then 35 dB). Aircraft (CE101-4) stay at 30 Hz-10 kHz, unchanged."""
+    f = np.array([30.0, 2.6e3, 10e3, 20e3, 25e3])
+    h = ce101_limit(f, Ce101("ships", 48.0, 2.0, "H"))
+    line_10k = 95.0 + (66.0 - 95.0) * math.log(10 / 2.6) / math.log(20 / 2.6)
+    assert h[:4] == pytest.approx([95.0, 95.0, line_10k, 66.0]) and np.isnan(h[4])
+    assert abs(line_10k - 76.0) < 0.2                      # the same line as 461G's to 10 kHz, within the drawing
+    g = ce101_limit(f, Ce101("ships", 48.0, 2.0, "G"))
+    assert g[:3] == pytest.approx([95.0, 95.0, 76.0]) and np.isnan(g[3])
+    air = ce101_limit(f, Ce101("aircraft", 28.0, 0.0, "H"))
+    assert air[2] == pytest.approx(80.0) and np.isnan(air[3])
+    assert Ce101("ships", 48.0, 0.0, "H").range == (30.0, 20e3) and Ce101("aircraft", 48.0, 0.0, "H").range[1] == 10e3
+    # between 168.7 A (20 log(I/3) = 35) and 185 A the two revisions differ: 461H caps at 35 dB
+    assert Ce101("ships", 48.0, 180.0, "G").relax_db == pytest.approx(20 * math.log10(60.0))
+    assert Ce101("ships", 48.0, 180.0, "H").relax_db == pytest.approx(35.0)
+    assert Ce101("ships", 48.0, 30.0, "H").relax_db == pytest.approx(20.0)
+    assert Ce101("ships", 48.0, 2.0, "H").describe().startswith("MIL-STD-461H CE101 (Figure CE101-1, ships DC to 20")
+    assert Ce101("ships", 48.0, 2.0).describe().startswith("MIL-STD-461G CE101 (Figure CE101-1, ships DC to 10")
+
+
+def test_the_revision_is_the_users_setting():
+    """analysis.mil461: G (the default) or H, written as G, H, 461H or MIL-STD-461H; anything else is refused."""
+    assert config_from_data({}).analysis.mil461 == "G"
+    for text in ("H", "h", "461H", "MIL-STD-461H"):
+        assert config_from_data({"analysis": {"mil461": text}}).analysis.mil461 == "H", text
+    with pytest.raises(ConfigError, match="analysis.mil461 must be one of G, H"):
+        config_from_data({"analysis": {"mil461": "461J"}})
+    a = config_from_data({"analysis": {"ce101": "ships", "conducted": "mil461", "mil461": "H"}}).analysis
+    assert a.ce101_spec(48.0, 5.0) == Ce101("ships", 48.0, 5.0, "H")
+
+
+def _relaxed(r) -> float:
+    """The relaxation a result's CE101 limit names (0 without one)."""
+    import re
+    m = re.search(r"relaxed ([0-9.]+) dB", r.ce101_limit)
+    return float(m.group(1)) if m else 0.0
+
+
+def test_under_461h_a_ships_converter_switching_at_12_khz_is_read_to_20_khz(tmp_path):
+    """A stage switching at 12 kHz: under 461G no harmonic is in CE101's 30 Hz-10 kHz (a note says so); under 461H
+    ships' CE101 reaches 20 kHz, so its fundamental is read, from the conducted band's solves (the LISN as specified
+    at the input [A34]; two extra ones at 14.1 and 20 kHz). There the line current per A of loop current is C1
+    against the two LISNs, |Z_C1 / (Z_C1 + 2 Z_LISN)| (the copper adds milliohms)."""
+    spec = ConverterSpec(**{**SPEC.__dict__, "input_connector": ["J1.1", "J1.2"], "f_sw": 12e3})
+    board = hot_loop_board(20.0, caps=(("C1", "470u", "end", 0.0),), connector=True)
+    g, _, _ = run(tmp_path, board, "ce101g", spec=spec, conducted="mil461", ce101="ships", mil461="G")
+    assert g.ce101 == [] and any(n.startswith("CE101: no switching harmonic below 10 kHz") for n in g.notes)
+    h, _, sc = run(tmp_path, board, "ce101h", spec=spec, conducted="mil461", ce101="ships", mil461="H")
+    assert h.ce101_limit.startswith("MIL-STD-461H CE101 (Figure CE101-1, ships DC to 20 kHz")
+    assert [round(row["f"]) for row in h.ce101] == [12000]
+    row = h.ce101[0]
+    expect = 95.0 + (66.0 - 95.0) * math.log(12 / 2.6) / math.log(20 / 2.6)
+    assert row["limit_dbua"] == pytest.approx(expect + _relaxed(h)) and row["margin_db"] is not None
+    tf = {round(t["f"]): t["ratio"] for t in h.input_transfer}
+    assert {14142, 20000} <= set(tf)
+    m = sc.config.model_for("C1")
+    for f in (14142.0, 20000.0):
+        w = 2 * math.pi * f
+        z_c = complex(m.get("ESR"), w * (m.get("ESL") + MOUNT_L) - 1 / (w * m.get("C")))
+        z_lisn = 2 * LISNS["mil461"].impedance(f)[0]
+        assert tf[round(f)] == pytest.approx(abs(z_c / (z_c + z_lisn)), rel=0.05), f
+
+
 def test_a_fast_converter_has_no_ce101_harmonics_and_says_so(tmp_path):
     """At 200 kHz every harmonic is above 10 kHz: no CE101 solves, no rows, a note naming what CE101 would see."""
     spec = ConverterSpec(**{**SPEC.__dict__, "input_connector": ["J1.1", "J1.2"]})

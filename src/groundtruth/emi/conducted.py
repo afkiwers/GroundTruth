@@ -207,12 +207,18 @@ def conducted_table(freqs, line_current, standard: str, cls: str = "B", per_deca
     return rows
 
 
-# --------------------------------------------------------------------------- MIL-STD-461G CE101
+# --------------------------------------------------------------------------- MIL-STD-461G / H CE101
 # CE101, "conducted emissions, audio frequency currents, power leads": the current in each power lead (and return),
-# 30 Hz to 10 kHz, read with a current probe 5 cm from the LISN (Figure CE101-6) and a peak detector, in dBµA.
-# Limits and bandwidths entered from MIL-STD-461G (11 December 2015): Figures CE101-1 and CE101-4, Table II
-# [MIL-STD-461G]. MIL-STD-461H (2026) extends CE101-1 to 20 kHz; the code follows 461G here [MIL-STD-461H].
-CE101_RANGE = (30.0, 10e3)              # Hz
+# 30 Hz to 10 kHz (461H: to 20 kHz for surface ships and submarines), read with a current probe 5 cm from the LISN
+# (Figure CE101-6) and a peak detector, in dBµA. Limits and bandwidths entered from MIL-STD-461G (11 December 2015)
+# and MIL-STD-461H (17 April 2026), checked against both: Figures CE101-1 and CE101-4, Table II [MIL-STD-461G]
+# [MIL-STD-461H]. The revision is the user's choice (analysis.mil461). Between them only CE101 differs here: 461H's
+# CE101-1 continues the same line from 76 dBµA at 10 kHz to 66 dBµA at 20 kHz, and its relaxation above 3 A is "the
+# lesser of 20 log(I/3) or 35 dB" (461G: 20 log(I/3) from 3 to 185 A, 35 dB from 185 A); CE101-4 (aircraft, 30 Hz to
+# 10 kHz) and the LISN, CE102, Table II are the same.
+MIL461_REVISIONS = ("G", "H")
+CE101_RANGE = (30.0, 10e3)              # Hz (461G; 461H aircraft)
+CE101_RANGE_H_SHIPS = (30.0, 20e3)      # Hz, 461H surface ships and submarines (5.4.1)
 CE101_TOP_SOLVE = 9.9e3                 # the highest CE101 solve: CE102's band starts at 10 kHz with another LISN
 CE101_LEAD_F = (15.0, 9.95e3)           # where a LISN branch is the CE101 lead (above the DC solves' 10 Hz)
 CE101_PLATFORMS = ("none", "aircraft", "ships")
@@ -230,50 +236,65 @@ CE101_CURVES = {   # (f Hz, dBµA) breakpoints, straight on a log-frequency axis
     # source voltage: curve #1 above 28 V, curve #2 at 28 V or below
     "aircraft_above_28v": ((30.0, 110.0), (1e3, 110.0), (10e3, 90.0)),
     "aircraft_28v": ((30.0, 100.0), (1e3, 100.0), (10e3, 80.0)),
-    # Figure CE101-1: surface ships and submarines, DC (relaxed with the load current, Ce101.relax_db)
+    # Figure CE101-1: surface ships and submarines, DC (relaxed with the load current, Ce101.relax_db); 461G to
+    # 10 kHz, 461H to 20 kHz
     "ships_dc": ((30.0, 95.0), (2.6e3, 95.0), (10e3, 76.0)),
+    "ships_dc_h": ((30.0, 95.0), (2.6e3, 95.0), (20e3, 66.0)),
 }
 
 
 @dataclass(frozen=True)
 class Ce101:
     """The CE101 limit that applies: the platform (aircraft: Figure CE101-4; ships: Figure CE101-1, DC), the
-    nominal source voltage (picks CE101-4's curve) and the EUT's load current (relaxes CE101-1)."""
+    nominal source voltage (picks CE101-4's curve), the EUT's load current (relaxes CE101-1) and the standard's
+    revision (MIL461_REVISIONS: 461H takes CE101-1 to 20 kHz)."""
     platform: str
     source_v: float
     load_a: float = 0.0
+    revision: str = "G"
 
     @property
     def curve(self) -> str:
         """The key of the curve in CE101_CURVES."""
         if self.platform == "ships":
-            return "ships_dc"
+            return "ships_dc_h" if self.revision == "H" else "ships_dc"
         return "aircraft_above_28v" if self.source_v > 28.0 else "aircraft_28v"
 
     @property
+    def range(self) -> tuple[float, float]:
+        """The frequencies the limit applies at (Hz): 30 Hz to 10 kHz, for ships under 461H to 20 kHz."""
+        return CE101_RANGE_H_SHIPS if self.platform == "ships" and self.revision == "H" else CE101_RANGE
+
+    @property
     def relax_db(self) -> float:
-        """CE101-1's relaxation: none up to 3 A, 20·log(I/3) between 3 and 185 A, 35 dB from 185 A. CE101-4 has
-        none for DC sources."""
+        """CE101-1's relaxation above 3 A: 461G 20·log(I/3) between 3 and 185 A and 35 dB from 185 A; 461H the
+        lesser of 20·log(I/3) and 35 dB. CE101-4 has none for DC sources."""
         if self.platform != "ships" or self.load_a <= 3.0:
             return 0.0
-        return 35.0 if self.load_a >= 185.0 else 20.0 * math.log10(self.load_a / 3.0)
+        db = 20.0 * math.log10(self.load_a / 3.0)
+        if self.revision == "H":
+            return min(db, 35.0)
+        return 35.0 if self.load_a >= 185.0 else db
 
     def describe(self) -> str:
         """In words, for reports ("MIL-STD-461G CE101 (Figure CE101-4 curve #1, source above 28 V)")."""
+        std = f"MIL-STD-461{self.revision} CE101"
         if self.platform == "ships":
             relax = f", relaxed {self.relax_db:.1f} dB for {self.load_a:.3g} A" if self.relax_db else ""
-            return f"MIL-STD-461G CE101 (Figure CE101-1, ships DC{relax})"
+            top = "20 kHz" if self.range[1] > CE101_RANGE[1] else "10 kHz"
+            return f"{std} (Figure CE101-1, ships DC to {top}{relax})"
         which = "#1, source above 28 V" if self.source_v > 28.0 else "#2, source 28 V or below"
-        return f"MIL-STD-461G CE101 (Figure CE101-4 curve {which})"
+        return f"{std} (Figure CE101-4 curve {which})"
 
 
 def ce101_limit(freqs, ce: Ce101) -> np.ndarray:
-    """dBµA per frequency (RMS, as the standard's limits), NaN outside 30 Hz-10 kHz."""
+    """dBµA per frequency (RMS, as the standard's limits), NaN outside the limit's range (Ce101.range)."""
     f = np.asarray(freqs, float)
     pts = CE101_CURVES[ce.curve]
     fs, vs = np.log([p[0] for p in pts]), np.array([p[1] for p in pts])
     out = np.interp(np.log(np.maximum(f, 1e-30)), fs, vs) + ce.relax_db
-    return np.where((f >= CE101_RANGE[0]) & (f <= CE101_RANGE[1]), out, np.nan)
+    lo, hi = ce.range
+    return np.where((f >= lo) & (f <= hi), out, np.nan)
 
 
 def ce101_arrays(freqs, line_current, ce: Ce101) -> dict[str, np.ndarray]:
@@ -288,12 +309,12 @@ def ce101_arrays(freqs, line_current, ce: Ce101) -> dict[str, np.ndarray]:
 
 
 def ce101_rows(f, i_dbua, current_a, ce: Ce101, per_decade: Optional[int] = None) -> list[dict]:
-    """Report rows {f, current_a, i_dbua, limit_dbua, margin_db} within 30 Hz-10 kHz: one per receiver bin (the
-    strongest reading in it), with per_decade at most that many per decade (radiation.thin_rows)."""
+    """Report rows {f, current_a, i_dbua, limit_dbua, margin_db} within the limit's range (Ce101.range): one per
+    receiver bin (the strongest reading in it), with per_decade at most that many per decade (radiation.thin_rows)."""
     f = np.asarray(f, float)
     i_dbua = np.asarray(i_dbua, float)
     lim = ce101_limit(f, ce)
-    inside = np.nonzero((f >= CE101_RANGE[0]) & (f <= CE101_RANGE[1]))[0]
+    inside = np.nonzero((f >= ce.range[0]) & (f <= ce.range[1]))[0]
     rows = []
     # thinned by the excess over the limit, not the reading: the limit falls 20 dB/decade above 1 kHz (2.6 kHz
     # for ships), so the strongest reading of a decade need not be its worst margin
