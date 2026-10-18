@@ -73,8 +73,10 @@ def test_SP2_microstrip_and_stripline_closed_forms_against_the_2d_field_solver()
 
 
 def _ladder(freqs, v_s, elements, src, load, sections=600):
-    """An independent solver for a signal path: every line a ladder of `sections` lumped L-C cells (L' = Z0·√εeff/c,
-    C' = √εeff/(Z0·c)), parts as series or shunt impedances, the Thevenin source and the load, solved by nodal
+    """An independent solver for a signal path: every line a ladder of `sections` lumped cells (L' = Z0·√εeff/c,
+    C' = √εeff/(Z0·c); with its width the losses as their own R' and G': the strip's and the plane's skin-depth
+    resistance 2/(σ·w·δ(1 - e^(-t/δ))), G' = ωC'·tan δ times the microstrip filling factor [Pozar 2012]), parts as
+    series or shunt impedances, the Thevenin source and the load, solved by nodal
     analysis per frequency. Returns (mean current along the path weighted by length, current into the path, voltage
     at the end) per frequency, the mean over the line cells' series currents and the parts' currents."""
     from groundtruth.emi.path import PathLine, PathShunt
@@ -88,10 +90,17 @@ def _ladder(freqs, v_s, elements, src, load, sections=600):
             if isinstance(e, PathLine):
                 dl = e.length_m / sections
                 lp, cp = e.z0 * math.sqrt(e.eeff) / C0, math.sqrt(e.eeff) / (e.z0 * C0)
+                rp = gp = 0.0
+                if e.width_m:
+                    delta = 1 / math.sqrt(math.pi * f * 4e-7 * math.pi * e.sigma)
+                    rp = 2 / (e.sigma * e.width_m * delta * (1 - math.exp(-e.thickness_m / delta)))
+                    er = e.er or e.eeff
+                    fill = 1.0 if e.eeff >= er else er * (e.eeff - 1) / (e.eeff * (er - 1))
+                    gp = w * cp * e.tan_d * fill
                 for _ in range(sections):            # symmetric π cells: C·dl/2 at both ends (second order)
-                    series.append((cur, n, 1j * w * lp * dl, dl))
-                    shunts.append((cur, 1j * w * cp * dl / 2))
-                    shunts.append((n, 1j * w * cp * dl / 2))
+                    series.append((cur, n, (rp + 1j * w * lp) * dl, dl))
+                    shunts.append((cur, (gp + 1j * w * cp) * dl / 2))
+                    shunts.append((n, (gp + 1j * w * cp) * dl / 2))
                     cur, n = n, n + 1
             elif isinstance(e, PathShunt):
                 z = e.z(f)
@@ -558,7 +567,8 @@ def test_CV11_part_losses_match_an_independent_loss_budget(tmp_path, topology, r
 def test_SP9_a_simulated_route_s_emission_is_its_path_current_times_its_moment(tmp_path):
     """SP-9: end to end on a microstrip board: every emission row is the dipole field of its own m·I (one harmonic
     per 120 kHz window at 50 MHz), and the path's mean current at the worst harmonic is what an independent ladder of
-    the reported stretches gives from the driver's harmonic behind 25 Ω, loaded by 5 pF."""
+    the reported stretches (with their copper and dielectric loss, as reported) gives from the driver's harmonic
+    behind 25 Ω, loaded by 5 pF."""
     from boardgen import microstrip_board
     from conftest import SIG, make
     from groundtruth.analysis.simulate import simulate
@@ -571,7 +581,9 @@ def test_SP9_a_simulated_route_s_emission_is_its_path_current_times_its_moment(t
         e = 2 * ETA0 * k ** 2 * row["m_m2"] / (4 * math.pi * r) * math.sqrt(1 + 1 / (k * r) ** 2)
         assert row["e_dbuv"] == pytest.approx(20 * math.log10(e / math.sqrt(2) / 1e-6), abs=0.01)
     p = res.path
-    lines = [PathLine(r["z0"], r["eeff"], r["length_mm"] * 1e-3) for r in p["elements"] if r["kind"] == "line"]
+    lines = [PathLine(r["z0"], r["eeff"], r["length_mm"] * 1e-3, width_m=r["width_mm"] * 1e-3,
+                      thickness_m=r["thickness_mm"] * 1e-3, er=r["er"], tan_d=r["tan_d"])
+             for r in p["elements"] if r["kind"] == "line"]
     assert len(lines) == len(p["elements"])
     amp = _fft_harmonics(SIG.freq, SIG.amplitude_v, 0.5, SIG.rise_time, SIG.rise_time, 200)
     n = round(p["f"] / SIG.freq)

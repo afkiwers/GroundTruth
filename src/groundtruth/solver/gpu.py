@@ -9,8 +9,14 @@ computes in double precision:
     node-sized vector of each preconditioner application crosses over (~1 MB per iteration).
 Double precision only: single precision stalled GMRES near plane resonances (see peec.py).
 
-`auto` uses the GPU when one is there and stays on the CPU otherwise (also when PyTorch is not installed, without
-importing anything); `on` refuses to run without one; `off` never looks. A solve the GPU cannot finish (out of
+`auto` uses the GPU when one is there and is faster than the CPU at the solver's double-precision work (timed
+once per process, _speedup: a GeForce card computes FP64 at 1/64 of its FP32 rate, and an RTX 3050 Laptop GPU was
+3.5x slower than its 16-thread CPU on a small board, > 6x on refboard with its 4 GB full; 2026-10-19), and
+stays on the CPU otherwise (also when PyTorch is not installed, without importing anything); `on` uses any GPU
+that works and refuses to run without one; `off` never looks. One process at a time uses a GPU (_DeviceLock, a
+lock file per device): two processes on one GPU took turns so badly that a split Simulate's two worker processes
+did not finish in hours (Windows, WDDM time-slicing between CUDA contexts; every GMRES iteration syncs with the
+CPU's factorisation solve). Under `auto` a process that finds the GPU busy runs on the CPU, under `on` it waits. A solve the GPU cannot finish (out of
 memory, an operation the device lacks) is done again on the CPU, and the run reports how often (`Run`).
 
 Development and tests: GROUNDTRUTH_GPU_DEVICE=cpu runs this same code with PyTorch on the CPU, so the GPU path is
@@ -29,6 +35,8 @@ import numpy as np
 
 MODES = ("auto", "on", "off")
 ENV_DEVICE = "GROUNDTRUTH_GPU_DEVICE"
+GPU_MIN_SPEEDUP = 1.5       # auto: the GPU at least this much faster than the CPU at the solver's convolution
+BENCH_SHAPE = (6, 384, 384)  # the benchmark's layers and FFT grid: a 6-layer board's model
 
 
 class GpuUnavailable(RuntimeError):
@@ -50,6 +58,8 @@ class Run:
     device: Optional[Device] = None
     fallbacks: int = 0                 # solves the GPU could not finish, done again on the CPU
     error: str = ""                    # the first such failure
+    note: str = ""                     # why a GPU that is there was not used (too slow here, busy in another process)
+    lock: Optional[object] = field(default=None, repr=False)   # the _DeviceLock this run holds
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     @property
@@ -71,7 +81,8 @@ class Run:
 
     def summary(self) -> dict:
         """Where the solves ran, as plain data for the result and the reports (see describe)."""
-        return {"device": self.label, "gpu_fallbacks": self.fallbacks, "gpu_error": self.error}
+        return {"device": self.label, "gpu_fallbacks": self.fallbacks, "gpu_error": self.error,
+                "gpu_note": self.note}
 
 
 _probed: dict = {}
@@ -89,7 +100,7 @@ def probe(mode: str) -> Optional[Device]:
     with _probe_lock:
         key = (mode, forced)
         if key not in _probed:
-            _probed[key] = _find(forced)
+            _probed[key] = _find(forced, timed=mode == "auto" and not forced)
         found, why = _probed[key]
     if found is None and mode == "on":
         raise GpuUnavailable(f"analysis.gpu is on, but {why}. Install PyTorch with GPU support (tools/install_gpu.py; "
@@ -97,9 +108,17 @@ def probe(mode: str) -> Optional[Device]:
     return found
 
 
-def _find(forced: str) -> tuple[Optional[Device], str]:
+def probe_note(mode: str) -> str:
+    """Why `mode` found no device to use (after probe), "" when it found one or never looked."""
+    forced = os.environ.get(ENV_DEVICE, "").strip()
+    found, why = _probed.get((mode, forced), (None, ""))
+    return "" if found is not None else why
+
+
+def _find(forced: str, timed: bool = False) -> tuple[Optional[Device], str]:
     """(device, "") for the first usable one (the forced one from GROUNDTRUTH_GPU_DEVICE, else CUDA/ROCm), or
-    (None, why not). "Usable" is tested, not assumed: a small complex128 FFT and matrix product must run there."""
+    (None, why not). "Usable" is tested, not assumed: a small complex128 FFT and matrix product must run there; with
+    `timed` (auto) it must also beat the CPU by GPU_MIN_SPEEDUP at the solver's convolution (_speedup)."""
     try:
         import torch
     except ImportError:
@@ -113,10 +132,112 @@ def _find(forced: str) -> tuple[Optional[Device], str]:
             a = torch.ones((4, 4), dtype=torch.complex128, device=dev)       # double precision works there
             float((torch.fft.fft2(a) @ a).abs().sum())
             label = torch.cuda.get_device_name(dev) if dev.type == "cuda" else f"{dev.type} (PyTorch)"
-            return Device(torch, dev, label), ""
         except Exception as e:      # noqa: BLE001 - a device that cannot do this is not one to use
             why = f"the {name} device cannot compute in double precision ({e})"
+            continue
+        if timed:
+            try:
+                k = _speedup(torch, dev)
+            except Exception as e:  # noqa: BLE001 - the benchmark failed: the GPU is not one to rely on
+                return None, f"the {label} failed the speed check ({type(e).__name__}: {e})"
+            if k < GPU_MIN_SPEEDUP:
+                return None, (f"the {label} computes the solver's double-precision FFTs at {k:.2g}x the CPU's speed "
+                              f"here, used from {GPU_MIN_SPEEDUP:g}x; analysis.gpu: on uses it anyway")
+        return Device(torch, dev, label), ""
     return None, why
+
+
+def _speedup(torch, dev) -> float:
+    """CPU time / device time of the solver's convolution (PlaneStack._conv, TorchMath.Lp): a layer stack's
+    FFTs, the layer-kernel multiply-add and the inverse FFTs on BENCH_SHAPE, complex128, the best of three after a
+    warm-up on each side (the CPU with the solver's own FFT workers)."""
+    import time
+    from scipy.fft import fft2, ifft2
+    from .peec import fft_workers
+    n, p0, p1 = BENCH_SHAPE
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((n, p0, p1)) + 1j * rng.standard_normal((n, p0, p1))
+    k = rng.standard_normal((n, n, p0 * p1))
+
+    def cpu():
+        """The host's convolution (as PlaneStack._conv's numpy path)."""
+        f = fft2(x, axes=(1, 2), workers=fft_workers()).reshape(n, -1)
+        out = np.einsum("tsp,sp->tp", k, f)
+        ifft2(out.reshape(n, p0, p1), axes=(1, 2), workers=fft_workers())
+
+    xd = torch.as_tensor(x, device=dev)
+    kd = torch.as_tensor(k, device=dev)
+
+    def gpu():
+        """The device's convolution (as TorchMath.Lp), synchronised."""
+        f = torch.view_as_real(torch.fft.fft2(xd)).reshape(n, -1, 2)
+        g = torch.einsum("tsp,spc->tpc", kd, f).contiguous()
+        torch.fft.ifft2(torch.view_as_complex(g).view(n, p0, p1))
+        if dev.type == "cuda":
+            torch.cuda.synchronize(dev)
+
+    def best(fn):
+        """The shortest of three timed runs after one untimed."""
+        fn()
+        times = []
+        for _ in range(3):
+            t0 = time.perf_counter()
+            fn()
+            times.append(time.perf_counter() - t0)
+        return min(times)
+    return best(cpu) / max(best(gpu), 1e-9)
+
+
+class _DeviceLock:
+    """A machine-wide lock on one GPU: an OS lock on a file in the temp folder named after the device (its UUID
+    where PyTorch gives one, so the GPUs a compute server's slots each see as cuda:0 keep their own locks), held by
+    the process for as long as its run uses the device (msvcrt on Windows, fcntl elsewhere)."""
+
+    def __init__(self, dev: Device):
+        """The lock of `dev` (not taken yet)."""
+        import re
+        import tempfile
+        try:
+            ident = str(dev.torch.cuda.get_device_properties(dev.device).uuid)
+        except Exception:   # noqa: BLE001 - an older PyTorch: the name and the visible devices instead
+            ident = f"{dev.name}-{os.environ.get('CUDA_VISIBLE_DEVICES', '')}-{dev.device}"
+        self.path = os.path.join(tempfile.gettempdir(),
+                                 "groundtruth-gpu-" + re.sub(r"[^A-Za-z0-9]+", "-", ident) + ".lock")
+        self.fd: Optional[int] = None
+
+    def acquire(self, wait: bool) -> bool:
+        """Take the lock; with `wait` until it is free, else only when it is free now (True when taken)."""
+        import time
+        fd = os.open(self.path, os.O_RDWR | os.O_CREAT)
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.fd = fd
+                return True
+            except OSError:
+                if not wait:
+                    os.close(fd)
+                    return False
+                time.sleep(0.5)
+
+    def release(self):
+        """Give the lock back (closing the file releases it on every OS)."""
+        if self.fd is None:
+            return
+        try:
+            if os.name == "nt":
+                import msvcrt
+                os.lseek(self.fd, 0, 0)
+                msvcrt.locking(self.fd, msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        os.close(self.fd)
+        self.fd = None
 
 
 @contextmanager
@@ -125,18 +246,70 @@ def use(mode: str):
     if _active[0] is not None:
         yield _active[0]
         return
-    run = Run(probe(mode))
+    # the GPU's lock first, before anything runs on it (the probe's speed check included: two processes timing it
+    # at once stalled each other as two solving would)
+    lock, busy = _claim(mode)
+    if busy:                        # auto: another process has the GPU, this run takes the CPU
+        run = Run(None, note=busy)
+    else:
+        try:
+            run = Run(probe(mode), note=probe_note(mode) if mode == "auto" else "")
+        except BaseException:
+            if lock is not None:
+                lock.release()
+            raise
+        if run.device is None or run.device.device.type == "cpu":
+            if lock is not None:    # declined (slower than the CPU here) or a forced CPU device: not held
+                lock.release()
+        else:
+            run.lock = lock
     _active[0] = run
     try:
         yield run
     finally:
         _active[0] = None
+        if run.lock is not None:
+            run.lock.release()
+
+
+def _candidate() -> Optional[Device]:
+    """The CUDA/ROCm device a probe would test, without running anything on it (None: no PyTorch, no such
+    device, or GROUNDTRUTH_GPU_DEVICE forcing one, which needs no lock)."""
+    if os.environ.get(ENV_DEVICE, "").strip():
+        return None
+    try:
+        import torch
+    except ImportError:
+        return None
+    try:
+        if not torch.cuda.is_available() or torch.cuda.device_count() == 0:
+            return None
+        dev = torch.device("cuda")
+        return Device(torch, dev, torch.cuda.get_device_name(dev))
+    except Exception:       # noqa: BLE001 - a broken CUDA install: probe() says why
+        return None
+
+
+def _claim(mode: str) -> tuple[Optional["_DeviceLock"], str]:
+    """(the GPU's lock, taken; "") before a run probes or uses it, (None, "") when there is nothing to lock (off,
+    no GPU, a forced device), or under auto (None, why) when another process holds it (on waits for it)."""
+    if mode == "off":
+        return None, ""
+    cand = _candidate()
+    if cand is None:
+        return None, ""
+    lock = _DeviceLock(cand)
+    if lock.acquire(wait=mode == "on"):
+        return lock, ""
+    return None, f"the {cand.name} is in use by another process"
 
 
 def describe(summary: dict) -> str:
     """Run.summary() as a phrase: "GPU NVIDIA RTX A4000", "CPU", or with the solves that fell back."""
     device = summary.get("device") or "CPU"
     text = device if device == "CPU" else f"GPU {device}"
+    if device == "CPU" and summary.get("gpu_note"):
+        text += f" ({summary['gpu_note']})"
     n = summary.get("gpu_fallbacks") or 0
     if n:
         text += f" ({n} solve(s) done on the CPU instead: {summary.get('gpu_error', '')})"

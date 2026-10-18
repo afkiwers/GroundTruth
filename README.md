@@ -129,7 +129,12 @@ the CPU as before, so this is only worth doing on the machine that has the card.
 
 The solver computes in double precision. Data-centre cards (A100, H100) do that at full speed; GeForce and most
 workstation cards at a small fraction of their single-precision speed. The speed-up therefore depends on the card:
-measure it with `tools/dev/gpu_check.py` (below).
+measure it with `tools/dev/gpu_check.py` (below). With `analysis.gpu: auto` GroundTruth measures it too: once per
+session it times the solver's FFT convolution on the GPU against the CPU and uses the GPU only from 1.5x; otherwise
+the run says "solved on CPU (the … GPU computes … at 0.3x the CPU's speed here …)". An RTX 3050 Laptop GPU beside a
+16-thread CPU measured 0.3-0.8x, and a full refboard Simulate took over 2 h on it against 18 min on the CPU.
+`gpu: on` uses the GPU regardless. One process at a time computes on a GPU: under auto a second one runs on the CPU
+("in use by another process"), under on it waits; two processes sharing one card had stalled each other for hours.
 
 **How to install it**
 

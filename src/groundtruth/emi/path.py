@@ -1,8 +1,10 @@
 """The current along a signal path: a Thevenin source, line sections and series parts, a load (per harmonic).
 
 A path from a driver pin to a receiver pin may run through several nets joined by series parts (a 33 Ω damping
-resistor, a ferrite bead, an AC-coupling capacitor). Each stretch of track between two parts is a lossless line
-(its own Z0 and εeff [A9]), each part a series impedance (components.models.ComponentModel.impedance). The source is
+resistor, a ferrite bead, an AC-coupling capacitor). Each stretch of track between two parts is a line (its own Z0
+and εeff [A9]) with the copper's and the dielectric's loss when its width and stackup are known (PathLine.alpha;
+without them lossless, as before 2026-10-19: a quarter-wave stretch at a shunt's resonance then had an unbounded
+Q, refboard's ADC_I_RAIL_1 moving 13 dB for a 7 % change of Z0), each part a series impedance (components.models.ComponentModel.impedance). The source is
 a voltage behind R + jωL with an optional output capacitance; the load a resistance (optional) in parallel with
 the receivers' capacitance. The cascade is solved per harmonic: from the load back to the source for the input
 impedances, then forward for the voltage and current at every element.
@@ -37,10 +39,40 @@ SHORT_GROUP_M = 1e-3        # of its own: loop_currents
 
 @dataclass
 class PathLine:
-    """A stretch of track between two parts (or a path end), a lossless line."""
+    """A stretch of track between two parts (or a path end): a line of Z0 and εeff, lossy when width_m is given
+    (the strip's copper: thickness_m, sigma; the dielectric: er, tan_d), else lossless."""
     z0: float
     eeff: float
     length_m: float
+    width_m: Optional[float] = None
+    thickness_m: float = 35e-6
+    er: Optional[float] = None
+    tan_d: float = 0.0
+    sigma: float = 5.8e7
+
+    def alpha(self, f: np.ndarray) -> np.ndarray:
+        """The attenuation (Np/m) at f: α = R'/(2 Z0) + G' Z0 / 2, the low-loss line [Pozar 2012].
+
+        Conductor: the strip's R' = 1/(σ·w·t_eff), t_eff = δ(1 - e^(-t/δ)) [A2], and the return plane as much again
+        (Pozar's wide-strip conductor loss α_c = R_s/(Z0·W), both conductors alike [A36]). Dielectric: G' = ωC'·tan δ
+        with C' = √εeff/(c·Z0), the loss tangent weighted by the field's share in the dielectric, the filling
+        factor εr(εeff - 1)/(εeff(εr - 1)) (1 for a stripline, εeff = εr) [Pozar 2012]."""
+        f = np.asarray(f, float)
+        if self.width_m is None or self.width_m <= 0:
+            return np.zeros(len(f))
+        mu0 = 4e-7 * math.pi
+        delta = 1.0 / np.sqrt(np.pi * np.maximum(f, 1.0) * mu0 * self.sigma)
+        teff = delta * (1.0 - np.exp(-self.thickness_m / delta))
+        r = 2.0 / (self.sigma * self.width_m * teff)
+        er = self.er or self.eeff
+        fill = 1.0 if er - 1.0 < 1e-6 or self.eeff >= er else er * (self.eeff - 1.0) / (self.eeff * (er - 1.0))
+        g = 2 * np.pi * f * math.sqrt(self.eeff) / (C0 * self.z0) * self.tan_d * fill
+        return r / (2 * self.z0) + g * self.z0 / 2
+
+    def gamma_l(self, f: np.ndarray) -> np.ndarray:
+        """γ·l = (α + jβ)·l at f, β = ω√εeff / c."""
+        f = np.asarray(f, float)
+        return (self.alpha(f) + 1j * 2 * np.pi * f * math.sqrt(self.eeff) / C0) * self.length_m
 
 
 @dataclass
@@ -129,9 +161,10 @@ def path_currents(freqs, v_source, elements: list, source: PathSource, load: Pat
     for k in range(len(elements) - 1, -1, -1):
         e = elements[k]
         if isinstance(e, PathLine):
-            # a line transforms the impedance behind it: Z_in = Z0 (Z + j Z0 tan bl) / (Z0 + j Z tan bl) [Pozar 2012]
-            t = np.tan(w * math.sqrt(e.eeff) / C0 * e.length_m)
-            z = e.z0 * (z + 1j * e.z0 * t) / (e.z0 + 1j * z * t)
+            # a line transforms the impedance behind it: Z_in = Z0 (Z + Z0 tanh γl) / (Z0 + Z tanh γl) [Pozar 2012]
+            # (lossless, γl = jβl: tanh = j tan βl, the form used before); Z0 kept real (the low-loss line)
+            t = np.tanh(e.gamma_l(f))
+            z = e.z0 * (z + e.z0 * t) / (e.z0 + z * t)
         elif isinstance(e, PathShunt):
             zp = _series_z(e, f)
             parts_z[k] = zp
@@ -166,15 +199,16 @@ def path_currents(freqs, v_source, elements: list, source: PathSource, load: Pat
             continue
         g_len += e.length_m
         if isinstance(e, PathLine):
-            bl = w * math.sqrt(e.eeff) / C0 * e.length_m
-            b = np.maximum(bl, 1e-12)
-            # the line's mean current (as spectrum.line_current), then its ABCD matrix carries v and i to its end:
-            # V2 = V1 cos bl - j Z0 I1 sin bl,  I2 = I1 cos bl - j (V1 / Z0) sin bl  (a lossless line's ABCD matrix
-            # [Pozar 2012])
-            i_avg = i * np.sin(b) / b - 1j * (v / e.z0) * (1 - np.cos(b)) / b
+            gl = e.gamma_l(f)
+            x = np.where(np.abs(gl) > 1e-12, gl, 1e-12)
+            # the line's mean current, the integral of I(z) = I1 cosh γz - (V1/Z0) sinh γz over its length (lossless:
+            # γ = jβ, spectrum.line_current's form), then its ABCD matrix carries v and i to its end:
+            # V2 = V1 cosh γl - Z0 I1 sinh γl,  I2 = I1 cosh γl - (V1 / Z0) sinh γl  [Pozar 2012]
+            ch, sh = np.cosh(gl), np.sinh(gl)
+            i_avg = i * np.sinh(x) / x - (v / e.z0) * (np.cosh(x) - 1) / x
             acc += e.length_m * i_avg
             g_acc = g_acc + e.length_m * i_avg
-            v, i = v * np.cos(bl) - 1j * i * e.z0 * np.sin(bl), i * np.cos(bl) - 1j * (v / e.z0) * np.sin(bl)
+            v, i = v * ch - i * e.z0 * sh, i * ch - (v / e.z0) * sh
         else:
             # a series part: the same current through it, the voltage drops by I Z
             acc += e.length_m * i
