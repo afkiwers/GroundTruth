@@ -1,7 +1,8 @@
 # groundtruth architecture
 
 How the code is organised, what the physics is, and why things were decided the way they are.
-Status and next steps are in [HANDOFF.md](HANDOFF.md).
+Status and next steps are in [HANDOFF.md](HANDOFF.md). The sources of the formulas and methods, and the model's
+assumptions, are in [REFERENCES.md](REFERENCES.md): the code cites them where it uses them (`[Grover 1946]`, `[A12]`).
 
 ## Data flow
 

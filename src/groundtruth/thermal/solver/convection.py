@@ -67,8 +67,8 @@ def h_forced(v: float, L: float, t_film: float) -> float:
 
 def h_radiation(t_c, t_surr_c, eps):
     """Linearised radiation coefficient (W/m²K); works with numpy arrays."""
-    # eps sigma (T^4 - Ts^4) = h_rad (T - Ts) with h_rad = eps sigma (T^2 + Ts^2)(T + Ts) [Incropera 2011]: exact, but h_rad
-    # depends on T, so the coupled loop updates it each iteration
+    # eps sigma (T^4 - Ts^4) = h_rad (T - Ts) with h_rad = eps sigma (T^2 + Ts^2)(T + Ts) [Incropera 2011]: exact, but
+    # h_rad depends on T, so the coupled loop updates it each iteration
     T = t_c + 273.15
     Ts = t_surr_c + 273.15
     return eps * STEFAN_BOLTZMANN * (T * T + Ts * Ts) * (T + Ts)

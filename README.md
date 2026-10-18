@@ -1212,8 +1212,11 @@ server must run the same GroundTruth code (and NumPy major version) as the plugi
 The plugin window stays responsive. Reading the board, the analysis and every call into KiCad run in the background, and **Cancel** stops a running analysis. If KiCad shows a dialog or runs a tool in the PCB editor, it refuses all requests; the plugin then waits a few seconds and asks you to close the dialog or press Esc.
 
 For contributors (and for picking the work up in a new session): [CLAUDE.md](CLAUDE.md),
-[docs/HANDOFF.md](docs/HANDOFF.md) (status, open problems, next steps), and
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (physics, data flow, design decisions).
+[docs/HANDOFF.md](docs/HANDOFF.md) (status, open problems, next steps),
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (physics, data flow, design decisions),
+[docs/REFERENCES.md](docs/REFERENCES.md) (the sources of every formula, method and theorem, and the model's
+assumptions, which the code cites where it uses them) and [docs/VALIDATION_AUDIT.md](docs/VALIDATION_AUDIT.md)
+(the independent checks of the results).
 
 ## License
 
