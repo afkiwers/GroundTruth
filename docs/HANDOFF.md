@@ -2,12 +2,12 @@
 
 ## Current state (2026-10-16, end of session 10)
 
-**Start here.** Then the dated "Session 10, …" entries below (newest first), "Where things are", and
+**Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (the audit's outstanding items, with the commands, for the move to a bigger machine). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `mil461h` (2026-10-18, from `main`, not merged):** the user: "Add both, let the user decide which
+- **Branch `mil461h` (2026-10-18, from `main`, merged into `main` at the user's "merge what can be merged before I copy"):** the user: "Add both, let the user decide which
   revision". `analysis.mil461: G | H` (default G).
   - Read from both standards (the PDFs in `Downloads\GroundTruth audit sources`): only CE101 differs for the code.
     461H's 5.4.1 takes ships and submarines to 20 kHz (aircraft stay at 10 kHz), and CE101-1 goes on to 66 dBµA at
