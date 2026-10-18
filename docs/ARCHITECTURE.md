@@ -399,8 +399,9 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   frequency on a laptop, so it isn't proven which grid is right up there. Simulate says so instead
   (`grid_sensitive_note`, the user's choice of three options): when a net's worst emission is above
   `GRID_SENSITIVE_F` (1 GHz until 2026-10-18, now 600 MHz, below), comes from a plane resonance (the loop moment
-  ≥ 6 dB over its low-frequency value) and is within 10 dB of the warning level, its notes say the peak can change
-  by several dB with the grid and name the next resolution to check.
+  ≥ 6 dB over its low-frequency value) and is within 10 dB of the warning level, its notes say the peak can sit
+  several per cent off in frequency and several dB off in height on a coarse grid (since 2026-10-18; it said
+  "several dB" before the 4x run below showed the frequency move too) and name the next resolution to check.
   - **2026-10-18, the code of that day** (later changes since session 8 had moved the low end: the 20 MHz loop is
     15.0 mm² on every grid, the 740 MHz cavity is gone). 1x / 2x / 4x, the same 25 harmonics
     (`out/converge/spi_sck_head_*.json` before the strip widths, `spi_sck_widths*.json` after). The rms (max)

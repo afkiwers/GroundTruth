@@ -849,8 +849,9 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   mainly sharpens the maps. Copper narrower than a cell keeps its own width on any grid (sampled at 0.15 mm):
   a thin neck between two pours has its own resistance, inductance and current density, not a whole cell's.
   Above about 600 MHz the board-wide model's plane resonances can
-  change by several dB with the grid: when a net's worst emission comes from one, its notes say so and name the
-  resolution to check it at. <b>Sharper map</b> solves one view with 4× the nodes of what was simulated.
+  move with the grid, by several per cent in frequency and several dB in height (on one 6-layer board the largest
+  sat 8 % low at 1×, where 2× and 4× agreed): when a net's worst emission comes from one, its notes say so and name
+  the resolution to check it at. <b>Sharper map</b> solves one view with 4× the nodes of what was simulated.
   Applies from the next Simulate. The command line has <code>--resolution N</code>.</td></tr>
 <tr><td valign="top"><b>Solver threads</b>, <b>GPU</b></td><td>how many models are solved at once (auto: the
   physical cores, at most 4, and no more than fit in the free memory: fewer at high resolutions) and whether a graphics card does the iterations (auto: one if this computer has one;
