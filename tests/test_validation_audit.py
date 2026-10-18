@@ -415,7 +415,9 @@ def test_CV26_the_mil_std_461g_ce101_and_re102_limits_are_its_figures():
            "re102_ship_below_deck": [(10e3, 90), (100e6, 56), (18e9, 102)],
            "re102_submarine_external": [(10e3, 60), (2e6, 24), (100e6, 24), (18e9, 69)],
            "re102_submarine_internal": [(10e3, 88), (100e6, 50), (18e9, 95)],
-           "re102_aircraft_external": [(10e3, 60), (2e6, 24), (100e6, 24), (18e9, 69)],
+           "re102_aircraft_external": [(2e6, 24), (100e6, 24), (18e9, 69)],
+           "re102_helicopter": [(10e3, 60), (2e6, 24), (100e6, 24), (18e9, 69)],
+           "re102_space": [(10e3, 60), (2e6, 24), (100e6, 24), (18e9, 69)],
            "re102_aircraft_internal": [(2e6, 34), (100e6, 34), (18e9, 79)],
            "re102_aircraft_internal_25m": [(2e6, 44), (100e6, 44), (18e9, 89)],
            "re102_ground_army": [(2e6, 24), (100e6, 24), (18e9, 69)],
@@ -1018,6 +1020,128 @@ def test_DC6_a_load_off_the_rail_s_copper_is_an_error_not_a_crash(tmp_path):
     board, cfg = board_with(tmp_path, 20.0, [("U2.2", 1.0)], "off")       # U2.2 is a GND pad
     res = simulate(board, cfg).dc_loads[0]
     assert res.error and "rail" in res.error
+
+
+@pytest.mark.parametrize("layer", ["In1.Cu", "B.Cu"])
+def test_SP26_the_path_s_line_is_the_field_solved_cut_of_the_board(tmp_path, layer):
+    """SP-26 (ISSUE-5, round 3): with the board's line cache, a stretch's Z0 and εeff are the 2D field solution of
+    its own cut: an offset stripline on In1 (0.1 mm to the F.Cu pour, 0.5 mm to In2: the closed form read ~5 % high)
+    and a microstrip on B.Cu under a 20 µm solder mask (εr 3.3; the closed form leaves it out). Against a Section
+    built here from the stackup's numbers, within 1 %."""
+    from boardgen import BoardGen
+    from groundtruth.adapters.file_source import load_board
+    from groundtruth.analysis.route import RouteSegment
+    from groundtruth.analysis.si import SectionCache
+    from groundtruth.analysis.simulate import _line_of
+    from groundtruth.geometry.copper import CopperMap
+    from groundtruth.solver.xsection import Rect, Section, Slab, solve
+    g = BoardGen(layers=4, size=(30.0, 20.0), dielectrics=[0.1, 0.5, 0.2], mask=0.02)
+    g.plane("GND", "F.Cu")
+    g.plane("GND", "In2.Cu")
+    g.track((5.0, 10.0), (25.0, 10.0), "SIG", layer, width=0.15)
+    board = load_board(g.write(tmp_path / "cut.kicad_pcb"))
+    seg = RouteSegment((5.0, 10.0), (25.0, 10.0), layer, 0.15, "track", "", 0, "SIG")
+    z, e = _line_of(board, [seg], "In2.Cu", SectionCache(board, CopperMap(board)))
+    z_closed, _ = _line_of(board, [seg], "In2.Cu")
+    st = board.stackup
+    c = {x.name: (x.z * 1e-3, x.thickness * 1e-3) for x in st.copper}
+    W, w = 8e-3, 0.15e-3
+
+    def foil(name, x0, x1, cid):
+        """A foil at its height (y up, the top surface at 0)."""
+        zc, th = c[name]
+        return Rect(x0, x1, -(zc + th / 2), -(zc - th / 2), cid)
+    er = st.dielectrics[0].epsilon_r
+    # the laminate between the outer foils' inner faces (an outer track stands on it); the mask on the laminate
+    # beside the bottom track, m_t thick (as analysis/si.SectionCache lays it: not over the track's top)
+    bot = -(c["B.Cu"][0] - c["B.Cu"][1] / 2)
+    top = -(c["F.Cu"][0] + c["F.Cu"][1] / 2)
+    slabs = [Slab(bot, top, er)]
+    m_t, m_er = st.mask_bottom.thickness * 1e-3, st.mask_bottom.epsilon_r
+    slabs.append(Slab(bot - m_t, bot, m_er))
+    if layer == "In1.Cu":
+        rects = [foil("F.Cu", -W, W, 0), foil("In2.Cu", -W, W, 0), foil("In1.Cu", -w / 2, w / 2, 1)]
+        box = (-W, W, bot - 1e-3, top + 1e-3)
+    else:
+        rects = [foil("In2.Cu", -W, W, 0), foil("B.Cu", -w / 2, w / 2, 1)]
+        box = (-W, W, bot - 4e-3, top + 1e-3)
+    ref = solve(Section(rects, slabs, box))
+    assert z == pytest.approx(ref.z0(), rel=0.01) and e == pytest.approx(ref.eeff(), rel=0.01), (layer, z, ref.z0())
+    assert abs(z_closed / z - 1) > 0.01                # what the cut changes against the closed forms
+
+
+@pytest.mark.parametrize("d, y", [(1.0, 12.0), (1.0, 12.4), (0.5, 12.1), (0.35, 12.0)])
+def test_SP27_a_strip_narrower_than_the_pitch_keeps_its_copper_width(d, y):
+    """SP-27: a 0.35 mm wide copper strip along x, rasterised on pitches 1-3 x its width: the x strips of each column
+    together carry its width (to one sub-grid pitch), centred where the copper is."""
+    from shapely.geometry import box
+    from groundtruth.solver.peec import build_grid
+    w = 0.35
+    sub = math.ceil(d / 0.15)
+    g = build_grid({"N": box(2.0, y - w / 2, 18.0, y + w / 2)}, (0.0, 0.0, 20.0, 24.0), d, sub=sub)
+    cols = range(int(4 / d), int(16 / d))
+    for i in cols:
+        jj = np.nonzero(g.xb[i])[0]
+        assert abs(g.wx[i, jj].sum() * d - w) <= d / sub + 1e-9, (i, g.wx[i, jj])
+        centre = g.y0 + np.sum((jj + g.ox[i, jj]) * g.wx[i, jj]) / g.wx[i, jj].sum() * d
+        assert centre == pytest.approx(y, abs=d / sub)
+
+
+def test_SP27_two_touching_partial_strips_are_one_strip_of_their_width():
+    """SP-27: two side-by-side strips of width φd touching (centres φd apart) carrying half the current each have the
+    inductance of one 2φd strip (kernel.strip_self_numeric, 24 sub-strips, zero thickness), from the full strip's
+    self term (the kernels'), what a narrower strip adds and the side-by-side mutual the stack uses
+    (PlaneStack._widths), within 1 %."""
+    from groundtruth.solver.kernel import strip_kernel, strip_self_numeric
+    from groundtruth.solver.peec import _narrow_self, _side_mutual
+    d = 1e-3
+    full = strip_kernel(3, 3, d)[2, 2]
+    assert full == pytest.approx(strip_self_numeric(d, d), rel=1e-6)
+    for phi in (0.1, 0.15, 0.3, 0.5):
+        self_ = full + _narrow_self(d, phi, 0.0)
+        m = float(_side_mutual(d, phi, phi, phi)[0])
+        assert (self_ + m) / 2 == pytest.approx(strip_self_numeric(d, 2 * phi * d), rel=0.01), phi
+
+
+def _neck_island(d, y_neck, w_neck=0.35):
+    """A 15 x 15 mm island on the top plate joined to the rest of it by a w x 3 mm neck centred at y_neck, a full
+    bottom plate 0.2 mm below (εr 4.5, tan δ 0.02), probed between the plates in the island's far corner; the
+    simulation's sub-grid (≤ 0.15 mm)."""
+    from shapely.geometry import box
+    from shapely.ops import unary_union
+    from groundtruth.solver.peec import EPS0, MultiPlaneProblem, PlaneLayer, PlanePair, TraceSegment, build_grid
+    T = 0.2e-3
+    bb = (0.0, 0.0, 40.0, 24.0)
+    top = unary_union([box(0, 0, 18, 24), box(18, y_neck - w_neck / 2, 21, y_neck + w_neck / 2),
+                       box(21, 4.5, 36, 19.5)])
+    sub = math.ceil(d / 0.15)
+    g_top = build_grid({"GND": top}, bb, d, sub=sub)
+    g_bot = build_grid({"GND": box(*bb)}, bb, d, sub=sub)
+    i, j = round((35.0 - g_top.x0) / d), round((19.0 - g_top.y0) / d)
+    x, yy = g_top.x0 + i * d, g_top.y0 + j * d
+    probe = [TraceSegment(np.array([x * 1e-3, yy * 1e-3, -T]), np.array([x * 1e-3, yy * 1e-3, 0.0]), 0.3e-3)]
+    return MultiPlaneProblem([PlaneLayer("top", 0.0, g_top), PlaneLayer("bottom", -T, g_bot)], probe,
+                             (1, i, j), (0, i, j), [], capacitance=[PlanePair(0, 1, EPS0 * 4.5 / T, 0.02)])
+
+
+def _peak(p, fs):
+    """The frequency of Re Z's peak (a parabola through the highest sample and its neighbours, on log f)."""
+    r = np.array([complex(p.solve(f).Z_loop).real for f in fs])
+    k = int(np.argmax(r))
+    assert 0 < k < len(fs) - 1, "peak outside the sweep"
+    a, b, _ = np.polyfit(np.log(fs[k - 1:k + 2]), r[k - 1:k + 2], 2)
+    return math.exp(-b / (2 * a))
+
+
+def test_SP27_a_neck_s_resonance_does_not_depend_on_where_it_sits_on_the_grid():
+    """SP-27: the neck island's resonance (the island's C against the neck's L, ~750 MHz) with the 0.35 mm neck on a
+    0.35 mm grid: aligned with one cell row (one full strip, the neck exactly) and straddling two (two partial strips
+    side by side) agree within 2 %. With full-width strips the straddling neck read 817 against 754 MHz; with the
+    widths but the strips' mutual a pitch apart, 781."""
+    fs = np.geomspace(650e6, 900e6, 16)
+    aligned = _peak(_neck_island(0.35, 11.9), fs)
+    straddling = _peak(_neck_island(0.35, 12.0), fs)
+    assert straddling == pytest.approx(aligned, rel=0.02), (aligned, straddling)
 
 
 def _tier1(tmp_path, name, zones, holes=()):

@@ -119,8 +119,10 @@ def test_the_built_in_re102_curves_follow_the_figures():
     assert v[4] == pytest.approx(24.0 + 45.0 / math.log10(180.0), abs=0.01)       # 1 GHz: ~44 dBµV/m
     assert v[5] == pytest.approx(69.0)
     assert limit_range(lim) == (2e6, 18e9)
-    air = limits(np.array([10e3, 2e6, 1e9]), RE102_LIMITS["re102_aircraft_external"])[0]
+    air = limits(np.array([10e3, 2e6, 1e9]), RE102_LIMITS["re102_helicopter"])[0]
     assert air == pytest.approx([60.0, 24.0, 24.0 + 45.0 / math.log10(180.0)], abs=0.01)
+    fixed = limits(np.array([10e3, 2e6]), RE102_LIMITS["re102_aircraft_external"])[0]     # from 2 MHz
+    assert np.isnan(fixed[0]) and fixed[1] == pytest.approx(24.0)
     ship = limits(np.array([10e3, 100e6, 18e9]), RE102_LIMITS["re102_ship_below_deck"])[0]
     assert ship == pytest.approx([90.0, 56.0, 102.0])
     assert all(c.points[-1][0] == 18e9 for c in RE102_LIMITS.values())
