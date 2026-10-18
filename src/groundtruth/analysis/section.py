@@ -8,10 +8,10 @@ every plane layer, and the sheet current crossing it along the route is integrat
 t is the route's direction there, n its normal. The minus sign: a return flows against the signal, so the return a
 layer carries counts positive, and a current flowing with the signal (induced, or circulating between layers)
 negative. I_l is complex (the solution's phase); the views use Re(I_l), the part in phase with the 1 A signal (the
-excitation is real). Over a cut across all the copper Σ_l I_l = 1 at any frequency (KCL: everything that returns
-from the receiver to the driver crosses it); inside ±half_mm it is the part of the return that stays near the
-trace, so where the sum dips the return has left the route (a detour). Copper of the route's own nets (a pour it
-runs through) is left out: it carries the signal itself.
+excitation is real). Over a cut across all the copper Σ_l I_l = 1 at any frequency (KCL [Desoer 1969]: everything that
+returns from the receiver to the driver crosses it); inside ±half_mm it is the part of the return that stays near the
+trace, so where the sum dips the return has left the route (a detour). Copper of the route's own nets (a pour it runs
+through) is left out: it carries the signal itself.
 
 No wx or kipy here: the plugin, the HTML report and the CLI's PNGs draw it (report/plots.draw_section).
 """

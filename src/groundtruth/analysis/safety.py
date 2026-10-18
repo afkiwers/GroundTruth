@@ -42,10 +42,10 @@ from ..components.fields import read as read_field
 from ..components.models import model_pads
 from ..core.board import Board, Footprint
 
-# IPC-2221B Table 6-1 (electrical conductor spacing), mm, by the voltage between the conductors (DC or AC peak):
-# (upper end of the band V, B1 internal layers, B2 external uncoated up to 3050 m, B4 external with permanent
-# polymer coating). Above 500 V: the 500 V value plus PER_VOLT_ABOVE_500 per volt over it. Two independent
-# reproductions and the table as remembered agree on these columns (the A5-A7 and B3 columns are not built in).
+# IPC-2221B Table 6-1 (electrical conductor spacing) [IPC-2221B], mm, by the voltage between the conductors (DC or AC
+# peak): (upper end of the band V, B1 internal layers, B2 external uncoated up to 3050 m, B4 external with permanent
+# polymer coating). Above 500 V: the 500 V value plus PER_VOLT_ABOVE_500 per volt over it. Two independent reproductions
+# and the table as remembered agree on these columns (the A5-A7 and B3 columns are not built in).
 IPC2221B = ((15, 0.05, 0.10, 0.05), (30, 0.05, 0.10, 0.05), (50, 0.10, 0.60, 0.13), (100, 0.10, 0.60, 0.13),
             (150, 0.20, 0.60, 0.40), (170, 0.20, 1.25, 0.40), (250, 0.20, 1.25, 0.40), (300, 0.20, 1.25, 0.40),
             (500, 0.25, 2.50, 0.80))

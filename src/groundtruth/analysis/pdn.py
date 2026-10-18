@@ -1,6 +1,7 @@
 """Power-distribution network (PDN) impedance of a supply rail: what its ICs see between their supply and ground pins.
 
-An engineer checks a rail by its impedance against frequency at the IC: below a target Z_t = V·ripple / I_step the
+An engineer checks a rail by its impedance against frequency at the IC: below a target Z_t = V·ripple / I_step
+[Smith 1999] the
 rail holds its voltage within the ripple when the IC's current steps by I_step, whatever the frequency of the step.
 Above the target somewhere, a load step there rings the rail: the decaps, planes, vias and the regulator decide
 where. (settings `pdn:`, config.PdnSpec; the plan's milestone M1.)
@@ -19,7 +20,7 @@ CE-style log spacing from 10 kHz to 1 GHz, then refined where |Z| bends (a decap
 anti-resonance between two decaps or a decap and the plane), see PdnSetup.refine.
 
 Checks (issues):
-- pdn_impedance: |Z| above the target below `check_to` (default 100 MHz: above it the package and the die's own
+- pdn_impedance: |Z| above the target below `check_to` (default 100 MHz [A19]: above it the package and the die's own
   capacitance decouple), with the frequency, the margin and the part holding the rail there;
 - decap_missing: a supply pin with no decap pad on the rail within `decap_mm` (default 3 mm).
 

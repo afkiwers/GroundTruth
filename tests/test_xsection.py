@@ -1,6 +1,7 @@
 """The 2D cross-section solver (solver/xsection.py) against exact and accepted closed-form results: Cohn's
-zero-thickness stripline and edge-coupled stripline (conformal mapping, exact), Hammerstad & Jensen's microstrip
-(1980, Z0 within 0.01 %, εeff within 0.2 % of exact), and the physics the crosstalk figures rest on."""
+zero-thickness stripline [Cohn 1954] and edge-coupled stripline [Cohn 1955] (conformal mapping, exact), Hammerstad &
+Jensen's microstrip [Hammerstad 1980] (Z0 within 0.01 %, εeff within 0.2 % of exact), and the physics the crosstalk
+figures rest on. Source keys: docs/REFERENCES.md."""
 import math
 
 import pytest
@@ -58,7 +59,7 @@ def test_a_stripline_matches_cohns_exact_impedance(w_b):
 
 
 def test_edge_coupled_stripline_matches_cohns_even_and_odd_modes():
-    """Cohn 1955: Z_even, Z_odd = 30π/sqrt(εr)·K(k')/K(k) with k_e = tanh(πw/2b)·tanh(π(w+s)/2b), k_o =
+    """[Cohn 1955]: Z_even, Z_odd = 30π/sqrt(εr)·K(k')/K(k) with k_e = tanh(πw/2b)·tanh(π(w+s)/2b), k_o =
     tanh(πw/2b)·coth(π(w+s)/2b); Zdiff = 2·Z_odd, Zcomm = Z_even/2 within 0.5 %. A uniform dielectric has no
     forward crosstalk (L_m/L = C_m/C); the backward coefficient equals the even/odd one, (Ze - Zo)/(2(Ze + Zo))."""
     b, w, s, er = 1e-3, 0.5e-3, 0.25e-3, 4.0

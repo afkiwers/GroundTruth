@@ -178,3 +178,34 @@ def test_the_help_lists_every_field_the_plugin_reads():
     assert "@PART_FIELDS@" not in text
     for p in PARAMS:
         assert f"<b>{p.field}</b>" in text
+
+
+def test_the_help_shows_the_references_with_every_source_and_assumption(tmp_path, monkeypatch):
+    """The help's References section is docs/REFERENCES.md rendered (the user: "add a link to the help inside the
+    plugin that links to the references.md"): every key of the list is in it as a table cell, the Markdown marks are
+    HTML, the methods and limits sections link to it, and it opens the file itself. An installed plugin finds the
+    file in <plugin>/docs; without it the section says so instead of failing."""
+    import re
+    from pathlib import Path
+    from groundtruth.ui import help as h
+    text = h.page()
+    assert '<a name="references"></a>' in text and "@REFERENCES@" not in text
+    section = text[text.index('<a name="references"></a>'):]
+    md = (Path(h.__file__).resolve().parents[3] / "docs" / "REFERENCES.md").read_text(encoding="utf-8")
+    keys = [line.split("|")[1].strip() for line in md.splitlines()
+            if line.startswith("| ") and not line.startswith(("| Key", "| Id", "|---"))]
+    assert len(keys) > 90
+    for key in keys:
+        assert f"<td valign='top'>{key}</td>" in section, key
+    assert "<i>IBM J. Res. Develop.</i>" in section and "<code>[Grover 1946]</code>" in section
+    assert not re.search(r"\*\*|\| ---|^#", section, re.M)                 # no Markdown left over
+    assert section.count('href="#references"') == 0 and text.count('href="#references"') >= 3
+    assert re.search(r'<a href="file:///[^"]+/docs/REFERENCES\.md">Open REFERENCES\.md</a>', section)
+    # the installed layout: <plugin>/groundtruth/ui/help.py finds <plugin>/docs/REFERENCES.md
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "REFERENCES.md").write_text("# References\n\n| Key | Source |\n|---|---|\n| X 2000 | *Y* |\n",
+                                                     encoding="utf-8")
+    monkeypatch.setattr(h, "REFERENCES", (tmp_path / "docs" / "REFERENCES.md", tmp_path / "none.md"))
+    assert "<td valign='top'><i>Y</i></td>" in h.references_html()
+    monkeypatch.setattr(h, "REFERENCES", (tmp_path / "none.md",))
+    assert "not installed" in h.references_html()

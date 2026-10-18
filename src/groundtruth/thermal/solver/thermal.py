@@ -1,9 +1,10 @@
-"""3-D steady-state conduction model of the board.
+"""3-D steady-state conduction model of the board (finite volumes [Patankar 1980]; source keys:
+docs/REFERENCES.md).
 
 The board is discretised on the adaptive mesh of ``mesh.py``: square columns of
 several sizes, each split through the stack into slabs (one per copper layer,
 graded sub-slabs per dielectric). Copper slabs get an effective conductivity
-from their local copper coverage (and cut-cell face apertures in-plane), and
+from their local copper coverage (and cut-cell face apertures in-plane) [A29], and
 dielectric slabs carry the extra through-plane conduction of via and PTH
 barrels. Faces lose heat by convection and radiation (to ambient, or to a lumped
 enclosure).
@@ -410,6 +411,7 @@ class ThermalModel:
                 e = env.enclosure
                 a_in = 2 * (e.length * e.width + e.length * e.height + e.width * e.height) * 1e-6
                 # radiation from a body enclosed by a surface: effective emissivity 1 / (1/e1 + A1/A2 (1/e2 - 1))
+                # (the two-surface enclosure [Incropera 2011])
                 ratio = 2 * self.board_area / a_in
                 eps_t = 1 / (1 / eps_t + ratio * (1 / e.emissivity_inside - 1))
                 eps_b = 1 / (1 / eps_b + ratio * (1 / e.emissivity_inside - 1))

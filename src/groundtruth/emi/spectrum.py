@@ -1,4 +1,6 @@
-"""Harmonic content of a trapezoidal digital signal, trace impedance, and the current on the line."""
+"""Harmonic content of a trapezoidal digital signal, trace impedance, and the current on the line.
+
+Source keys in square brackets: docs/REFERENCES.md."""
 from __future__ import annotations
 
 import math
@@ -11,7 +13,7 @@ C0 = 299_792_458.0
 
 def trapezoid_harmonics(f0: float, rise_time: float, amplitude: float, duty: float = 0.5,
                         f_max: float = 6e9, fall_time: Optional[float] = None) -> tuple[np.ndarray, np.ndarray]:
-    """Frequencies and peak amplitudes of the harmonics of a trapezoidal wave.
+    """Frequencies and peak amplitudes of the harmonics of a trapezoidal wave [Paul 2006].
 
     Equal edges: c_n = 2·A·D·|sinc(nπD)|·|sinc(nπ·f0·tr)|. A different fall time tf (duty D at half amplitude):
     c_n = 2·|X_n|, X_n = A/(j2πn)·[sinc(n·f0·tr) - e^(-j2πnD)·sinc(n·f0·tf)] (the edges' derivative, integrated);
@@ -33,13 +35,13 @@ def trapezoid_harmonics(f0: float, rise_time: float, amplitude: float, duty: flo
 
 
 def analysis_band(f0: float, rise_time: float) -> float:
-    """Highest frequency worth evaluating: a decade above the second corner (1/π·tr), capped at 6 GHz."""
+    """Highest frequency worth evaluating: a decade above the second corner (1/π·tr), capped at 6 GHz [A6]."""
     return min(6e9, max(10 / (math.pi * rise_time), 3 * f0))
 
 
 def microstrip(w: float, h: float, er: float, t: float = 35e-6) -> tuple[float, float]:
-    """Hammerstad & Jensen (1980) microstrip with their thickness corrections: (Z0, effective εr). w, h, t in any
-    consistent unit.
+    """Hammerstad & Jensen [Hammerstad 1980] microstrip with their thickness corrections: (Z0, effective εr). w, h, t in
+    any consistent unit.
 
     Z01(u) = 60·ln(f(u)/u + √(1 + (2/u)²)) is the line in air, εe(u) the effective permittivity's fit; a thickness t
     widens the strip by Δu1 = (t/h)/π·ln(1 + 4e/((t/h)·coth²√(6.517u))) in air and by Δur = ½(1 + sech√(εr − 1))·Δu1
@@ -74,8 +76,8 @@ def microstrip_z0(w: float, h: float, er: float, t: float = 35e-6) -> float:
 
 
 def stripline(w: float, b: float, er: float, t: float = 35e-6) -> tuple[float, float]:
-    """Symmetric stripline, b = plane-to-plane spacing: (Z0, εr). Wheeler (1978, Wadell's Transmission Line Design
-    Handbook 3.5.1) with the strip's thickness:
+    """Symmetric stripline, b = plane-to-plane spacing: (Z0, εr). Wheeler's formula [Wheeler 1978] (as collected in
+    [Wadell 1991]) with the strip's thickness:
 
     Z0 = 30/√εr · ln{1 + 4/(πW')·[8/(πW') + √((8/(πW'))² + 6.27)]},  W' = (w + Δw)/(b − t),
     Δw/(b − t) = x/(π(1 − x))·{1 − ½·ln[(x/(2 − x))² + (0.0796x/(w/b + 1.1x))^m]},  m = 2/(1 + ⅔·x/(1 − x)), x = t/b.
@@ -99,7 +101,7 @@ def stripline(w: float, b: float, er: float, t: float = 35e-6) -> tuple[float, f
 def offset_stripline(w: float, h1: float, h2: float, er: float, t: float = 35e-6) -> tuple[float, float]:
     """A stripline between two planes that is not centred: h1, h2 the dielectric heights from the strip's faces to
     each plane, (Z0, εr). The usual combination of the two symmetric striplines it lies between (each with the strip
-    h_i from both planes, b_i = 2·h_i + t): Z0 = 2·Z(b1)·Z(b2)/(Z(b1) + Z(b2)) (Wadell 3.5.3; Cohn). Against the 2D
+    h_i from both planes, b_i = 2·h_i + t): Z0 = 2·Z(b1)·Z(b2)/(Z(b1) + Z(b2)) [Wadell 1991]. Against the 2D
     field solver (tests/test_validation_audit.py SP-2): within 1.5 % while the nearer plane is at least 0.35 of the
     spacing away, 5.5 % at 0.2, 10 % (high) at 0.1. Centred (h1 = h2) it is stripline() exactly."""
     z1 = stripline(w, 2 * h1 + t, er, t)[0]
@@ -109,7 +111,7 @@ def offset_stripline(w: float, h1: float, h2: float, er: float, t: float = 35e-6
 
 def line_current(freqs, v_source, source_ohms: float, z0: float, eeff: float, length_m: float,
                  load_farads: float) -> np.ndarray:
-    """Average current along a lossless line driven by a source (amplitudes v_source, resistance
+    """Average current along a lossless line [A9] driven by a source (amplitudes v_source, resistance
     source_ohms) and ended by a capacitive receiver load, per harmonic.
 
     Electrically short lines carry the capacitive charging current V/(Rs + 1/jωC_total); long lines
@@ -121,12 +123,12 @@ def line_current(freqs, v_source, source_ohms: float, z0: float, eeff: float, le
     beta_l = w * math.sqrt(eeff) / C0 * length_m             # electrical length (radians) of the line
     zl = 1.0 / (1j * w * max(load_farads, 1e-15))             # the receivers' capacitance as the load
     t = np.tan(beta_l)
-    # the transmission-line input impedance of a line of length l ended in Z_L
+    # the transmission-line input impedance of a line of length l ended in Z_L [Pozar 2012]
     z_in = z0 * (zl + 1j * z0 * t) / (z0 + 1j * zl * t)
     i_in = np.asarray(v_source, float) / (source_ohms + z_in)
     v_in = i_in * z_in
     bl = np.maximum(beta_l, 1e-12)
-    # On the line I(x) = I_in cos(beta x) - j (V_in / Z0) sin(beta x); its mean over the length is this closed
-    # form (sin(bl)/bl -> 1 for a short line: the whole line carries I_in)
+    # On the line I(x) = I_in cos(beta x) - j (V_in / Z0) sin(beta x) [Pozar 2012]; its mean over the length is this
+    # closed form (sin(bl)/bl -> 1 for a short line: the whole line carries I_in)
     i_avg = i_in * np.sin(bl) / bl - 1j * (v_in / z0) * (1 - np.cos(bl)) / bl
     return np.abs(i_avg)

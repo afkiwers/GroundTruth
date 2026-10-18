@@ -488,7 +488,7 @@ class DiffPairSpec:
 
     @property
     def skew_limit(self) -> float:
-        """The allowed delay mismatch (s): max_skew, else a tenth of the edge (the common mode a skew makes is about
+        """The allowed delay mismatch (s): max_skew, else a tenth of the edge [A33] (the common mode a skew makes is about
         half the swing times skew / rise time: 5 % at a tenth)."""
         return self.max_skew if self.max_skew is not None else self.rise_time / 10
 
@@ -498,7 +498,7 @@ class SiSettings:
     """The `si:` section (analysis/si.py, the plan's M3)."""
     impedance: list = field(default_factory=list)       # ImpedanceTarget
     pairs: list = field(default_factory=list)           # DiffPairSpec
-    crosstalk_max: float = 0.05         # NEXT or FEXT above this share of the aggressor's swing: an issue
+    crosstalk_max: float = 0.05         # NEXT or FEXT above this share of the aggressor's swing: an issue [A33]
     stub_factor: float = 3.0            # a via stub resonating below this times the signal's knee (0.35 / t_r)
     step_mm: float = 2.0                # cross-sections along a track this far apart
 
@@ -560,7 +560,8 @@ class VictimSettings:
     induced_warning_v: float = 0.3   # peak voltage induced in a victim net's loop
     injected_warning_ma: float = 1.0  # peak current the phase nodes push into a victim net
     drive_ohms: float = 50.0      # a victim net's driver (push-pull output); a resistor driving it counts as itself
-    input_pf: float = 5.0         # a victim net's receiver input
+                                  # [A32]
+    input_pf: float = 5.0         # a victim net's receiver input [A32]
 
 
 @dataclass

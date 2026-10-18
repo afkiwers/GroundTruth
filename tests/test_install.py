@@ -22,5 +22,6 @@ def test_reinstall_replaces_the_files_in_the_same_folder(tmp_path):
     assert inst.install(tmp_path) == target
     assert not (target / "stale.py").exists() and not (target / "groundtruth" / "old_module.py").exists()
     assert (target / "plugin.json").exists() and (target / "groundtruth" / "analysis" / "detect.py").exists()
+    assert (target / "docs" / "REFERENCES.md").exists()          # the help's References section shows it
     assert not list(target.rglob("__pycache__"))
     assert target.stat().st_ino == folder_id                     # the same folder, emptied and refilled

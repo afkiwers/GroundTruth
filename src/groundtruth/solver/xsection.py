@@ -3,15 +3,15 @@
 A cut across one or more parallel traces, perpendicular to them: conductors are rectangles at fixed potentials (one
 reference conductor, id 0, at 0 V: planes, pours, other nets; signal conductors 1..n), dielectrics are horizontal
 slabs (εr per layer: the board's cores and prepregs, the solder mask, air elsewhere). Laplace's equation
-∇·(εr ∇φ) = 0 is solved by finite volumes on a rectilinear grid graded towards every edge (potentials at the grid
-nodes, εr per cell; each cell adds the conductances εr·(dy/2)/dx and εr·(dx/2)/dy to its four edges, the five-point
-scheme of the bilinear finite-volume method). The outer box has zero normal flux (Neumann); it is placed far enough
-out that the box does not matter (tests/test_xsection.py checks against exact results).
+∇·(εr ∇φ) = 0 is solved by finite volumes [Eymard 2000] on a rectilinear grid graded towards every edge (potentials
+at the grid nodes, εr per cell; each cell adds the conductances εr·(dy/2)/dx and εr·(dx/2)/dy to its four edges,
+the five-point scheme of the bilinear finite-volume method). The outer box has zero normal flux (Neumann); it is
+placed far enough out that the box does not matter (tests/test_xsection.py checks against exact results).
 
 The charge on a conductor is the discrete Gauss law: the total flux leaving the dual cells of its nodes,
 Q_m = ε0·Σ_{n∈m} (Aφ)_n. Driving each signal conductor at 1 V in turn gives the Maxwell capacitance matrix C (F/m)
 with the dielectrics and C0 in air. For a TEM line the inductance does not depend on the dielectric:
-L = μ0·ε0·C0⁻¹ (H/m). From C and L:
+L = μ0·ε0·C0⁻¹ (H/m) [Paul 2008]. From C and L (quasi-TEM [A5]; the modal relations [Paul 2008]):
 
 - one line (the others held at 0 V): Z0 = 1/(c·sqrt(C_ii·C0_ii)), εeff = C_ii/C0_ii;
 - a pair driven differentially (+I, -I): L_d = L11 + L22 - 2·L12, C_d = 1/(P11 + P22 - 2·P12) with P = C⁻¹
@@ -20,7 +20,7 @@ L = μ0·ε0·C0⁻¹ (H/m). From C and L:
 - crosstalk between an aggressor a and a victim v (weakly coupled lines): backward (near-end) coefficient
   K_b = (L_m/L + C_m/C)/4, forward (far-end) K_f = (L_m/L - C_m/C)/2 with L_m/L = L_av/sqrt(L_aa·L_vv) and
   C_m/C = -C_av/sqrt(C_aa·C_vv) (Maxwell C_av is negative). NEXT = K_b·min(1, 2·T_d/t_r) of the aggressor's swing,
-  FEXT = K_f·T_d/t_r, T_d the coupled length's delay (Johnson & Graham; Hall, Hall & McCall).
+  FEXT = K_f·T_d/t_r, T_d the coupled length's delay [Johnson 1993] [Hall 2000].
 
 Units: SI (metres) inside; the callers convert from the board's millimetres.
 """
@@ -32,8 +32,8 @@ from typing import Callable, Optional
 
 import numpy as np
 
-EPS0 = 8.8541878128e-12
-C_LIGHT = 299792458.0
+EPS0 = 8.8541878128e-12        # F/m [CODATA 2018]
+C_LIGHT = 299792458.0           # m/s, exact (SI)
 MU0 = 4e-7 * math.pi
 
 

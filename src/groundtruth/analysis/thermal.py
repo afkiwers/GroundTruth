@@ -4,16 +4,17 @@ parts' losses heat PCB Thermal's 3-D thermal model (thermal/solver) of the same 
 Heat in the copper: every power stage's DC paths (switch node → inductor, input, output and ground returns, each
 with its prescribed current, the switching split included) are resampled onto one grid per copper layer and
 added as vectors, because paths share copper (GND carries both returns: adding their squared densities would be
-wrong). Heat per sample: ρ(T)·|J|²·t·A, with copper resistivity following temperature (α = 0.00393 /K): the
+wrong). Heat per sample: ρ(T)·|J|²·t·A, with copper resistivity following temperature (α = 0.00393 /K [IEC 60028]): the
 currents stay as prescribed and the heat is rescaled with the local temperature each coupled iteration (first
-order: the current pattern itself is not re-solved with temperature-dependent conductivity).
+order: the current pattern itself is not re-solved with temperature-dependent conductivity [A15]).
 
-Heat in the parts (through their pads, as PCB Thermal does): switch conduction (D·I²·R_DS(on) high side,
-(1−D)·I²·R_DS(on) low side, a catch diode (1−D)·I·V_f), switching on the hard-switched transistor (a buck's high
-side, a boost's low side): the overlap ½·V·I·t_edge·f_sw per hard edge (synchronous: the turn-on edge only; with a
-diode both) and the output charge, Q_oss·V·f_sw synchronous (½·Q_oss·V·f_sw with a diode; C_oss·V² in place of
-Q_oss·V when no q_oss is given), inductor I²·DCR, and the series parts on the DC paths (shunts, a surge stopper's
-FET) from GroundTruth's own DC solution. Missing data (no R_DS(on), no DCR) leaves that loss out, with a note.
+Heat in the parts (through their pads, as PCB Thermal does; the loss models [Erickson 2001]): switch conduction
+(D·I²·R_DS(on) high side, (1−D)·I²·R_DS(on) low side, a catch diode (1−D)·I·V_f), switching on the hard-switched
+transistor (a buck's high side, a boost's low side): the overlap ½·V·I·t_edge·f_sw per hard edge (synchronous: the
+turn-on edge only; with a diode both) and the output charge, Q_oss·V·f_sw synchronous (½·Q_oss·V·f_sw with a diode
+[A16]; C_oss·V² in place of Q_oss·V when no q_oss is given), inductor I²·DCR, and the series parts on the DC paths
+(shunts, a surge stopper's FET) from GroundTruth's own DC solution. Missing data (no R_DS(on), no DCR) leaves that loss
+out, with a note.
 
 A motor bridge (analysis/bridge.py) heats its copper with its RMS current density (bridge_rms.py: the six-step
 drive's currents from the battery to the motor and the switching currents, as mean squares, so added as heat,

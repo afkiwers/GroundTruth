@@ -9,11 +9,12 @@ The copper is linear, so the current density anywhere is a sum of unit solutions
 - Fast (the PWM harmonics): a leg's switching current circulates in its hot loop (bus capacitors, high side,
   phase node, low side, ground), whose solves at n·f_pwm (n = 1..3) the leg already has (analysis/bridge.py).
 
-The mean square density is then exact for the waveform's spectrum, without stepping through time:
+The mean square density is then exact for the waveform's spectrum (Parseval's relation [Oppenheim 1997]), without
+stepping through time:
     <|J|²> = Σ_cd G_cd J_c·J_d  +  Σ_n ½·Re Σ_kl C_n,kl F_n,k·conj(F_n,l)
 with G the slow sources' correlation (mean·mean + the slow lines) and C_n the legs' cross spectrum in band n (the
 lines nearest n·f_pwm; what lies above the third band is put in it). The motor's ripple current (the PWM part of
-the phase current, out through the motor pin) is left out: it is small next to the switching current.
+the phase current, out through the motor pin) is left out [A23]: it is small next to the switching current.
 """
 from __future__ import annotations
 
