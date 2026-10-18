@@ -21,6 +21,11 @@ driver 527 / CUDA 12.0). The notes below were written on the old laptop (user `i
   build, not the CPU one: `pip install torch --index-url https://download.pytorch.org/whl/cu118`), so `gpu: auto`
   sees the RTX 3050; since 2026-10-19 auto times it against the CPU and keeps to the CPU here (0.3-0.8x; a full
   kraft Simulate took > 2 h on it, 18 min on the CPU). `gpu: on` / `--gpu on` still forces it.
+- **No release key here** (`%LOCALAPPDATA%\GroundTruth\release` is on the laptop): `tools/make_pcm_package.py` would
+  create a new one, and the user's compute servers trust the laptop's. Don't build packages here until the user has
+  copied the key over (the user chose to skip the package on 2026-10-19). KiCad has GroundTruth from the Plugin and
+  Content Manager (`Documents\KiCad\10.0\3rdparty\plugins`), so `tools/install_plugin.py` would show every button
+  twice: don't run it either.
 
 - **Do not use the default `python`**: it's MSYS/MinGW 3.12 and cannot install PyPI wheels.
   The project venv uses python.org 3.13: `.venv\Scripts\python`. Recreate with
