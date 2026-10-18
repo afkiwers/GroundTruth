@@ -20,6 +20,15 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
   - Checks: `tools/dev/ast_same.py main` reports only comments and docstrings changed (35 files);
     `tools/dev/ref_keys.py` (new) finds 0 unknown keys and every listed key cited. CLAUDE.md has the rule for new
     code.
+  - The user: "add a link to the help inside the plugin that links to the references.md so users can view it from
+    there". The help has a section **References and assumptions** (`#references`, under "Under the hood"). It is
+    REFERENCES.md rendered by `help.markdown_html` (headings, lists, tables, inline marks), so it reads in both help
+    views and offline. A link opens the file itself. The methods section, the limits section and the contents link
+    to it.
+    - The package and the development install ship the file as `<plugin>/docs/REFERENCES.md`
+      (`make_pcm_package.EXTRA`, `install_plugin.install`); `help.REFERENCES` looks there and in the repo's docs.
+    - Test: `test_the_help_shows_the_references_with_every_source_and_assumption` (every key in the section), plus
+      the package and install tests.
 - **Branch `audit-3` (2026-10-18, merged into `main` as c3dbeb6 at the user's "Merge"):** the audit's round 3 (VALIDATION_AUDIT.md "Round 3"),
   at the user's four items:
   - "Fix this" (inner-layer Z0, solder mask): a path's line is the field-solved cut at its longest track
