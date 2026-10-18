@@ -476,3 +476,41 @@ def test_a_path_chain_lists_its_parts_in_route_order_and_what_is_across_it(tmp_p
     assert c.text() == "U1.1 → R1 33 → U5 ×2 → R2 4k7 → U2.1", c.text()
     blocked = path_chain(board, sc.config, NetSpec("SIG_A", "U1.1", ["U2.1"], 20e6, 1e-9))
     assert blocked.error.startswith("no copper path") and blocked.parts == []
+
+
+def _pozar_alpha(f, w, z0, eeff, er, tan_d, sigma=5.8e7):
+    """A microstrip's attenuation (Np/m) by Pozar's closed forms: conductor α_c = R_s/(Z0·W) with R_s = √(ωμ0/2σ)
+    (δ ≪ t), dielectric α_d = k0·εr(εeff - 1)·tan δ / (2√εeff(εr - 1)) [Pozar 2012]."""
+    rs = math.sqrt(2 * math.pi * f * 4e-7 * math.pi / (2 * sigma))
+    k0 = 2 * math.pi * f / 299792458.0
+    return rs / (z0 * w) + k0 * er * (eeff - 1) * tan_d / (2 * math.sqrt(eeff) * (er - 1))
+
+
+@pytest.mark.parametrize("f", [300e6, 1e9, 3e9])
+def test_a_matched_lossy_line_attenuates_as_pozars_microstrip(f):
+    """A 0.2 mm wide, 35 µm thick microstrip (Z0 50 Ω, εeff 3.4 on εr 4.5, tan δ 0.02), 100 mm long, into its own Z0:
+    the end voltage is the input's times e^(-αl), α from Pozar's microstrip formulas (δ ≪ t at these frequencies:
+    t_eff = δ within 0.01 %), within 0.5 %; the lossless line (no width) keeps |V| (A36)."""
+    z0, eeff, er, tan_d, w, length = 50.0, 3.4, 4.5, 0.02, 0.2e-3, 0.1
+    line = PathLine(z0, eeff, length, width_m=w, thickness_m=35e-6, er=er, tan_d=tan_d)
+    r = path_currents([f], [1.0], [line], PathSource(z0), PathLoad(0.0, z=lambda _f: complex(z0)))
+    v_in = 1.0 / 2                                        # the matched source divides the open-circuit 1 V by 2
+    got = abs(r.v_end[0]) / v_in
+    assert got == pytest.approx(math.exp(-_pozar_alpha(f, w, z0, eeff, er, tan_d) * length), rel=0.005)
+    lossless = path_currents([f], [1.0], [PathLine(z0, eeff, length)], PathSource(z0),
+                             PathLoad(0.0, z=lambda _f: complex(z0)))
+    assert abs(lossless.v_end[0]) == pytest.approx(v_in, rel=1e-9)
+
+
+def test_an_open_quarter_wave_stub_is_z0_tanh_alpha_l_not_a_short():
+    """A stripline (εeff = εr 4.2, tan δ 0.02) a quarter wave long at 1 GHz with its end open: its input is
+    Z0·tanh(αl) [Pozar 2012] (lossless: 0, so a shunt beside it would see an unbounded resonance); the current
+    into it from a 1 Ω source is 1 V / (1 Ω + Z_in), within 0.5 %."""
+    f, z0, er = 1e9, 40.0, 4.2
+    length = 299792458.0 / (f * math.sqrt(er)) / 4
+    line = PathLine(z0, er, length, width_m=0.15e-3, thickness_m=35e-6, er=er, tan_d=0.02)
+    alpha = float(line.alpha([f])[0])
+    z_in = z0 * math.tanh(alpha * length)
+    assert z_in > 0.5                                     # a real loss: half an ohm and more, not 0
+    r = path_currents([f], [1.0], [line], PathSource(1.0), PathLoad(1e-18))
+    assert abs(r.i_in[0]) == pytest.approx(1.0 / (1.0 + z_in), rel=0.005)

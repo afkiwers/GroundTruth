@@ -7,6 +7,19 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `path-loss-gpu` (2026-10-19, from `main`, not merged):** the user: "Fix those" (NEXT_STEPS items 6 and 7;
+  VALIDATION_AUDIT Round 4 has the evidence).
+  - Item 6: the signal path's lines are lossy (`emi/path.PathLine.alpha`, `simulate._line_loss`, REFERENCES A36):
+    kraft's ADC_I_RAIL_1 +21.4 → +33.5 dB, ADC_I_RAIL_2 +35.4, the SPI nets +0.4 dB; the converters and the
+    issue counts unchanged. Net-(U301--) stays +22.1 dB (a plane resonance at 1590 MHz, not its path).
+  - Item 7: `gpu: auto` times the solver's convolution on the GPU against the CPU and uses it only from 1.5x (the
+    RTX 3050 here: 0.3-0.8x, so auto keeps to the CPU and says why); one process at a time holds a GPU, the lock
+    taken before anything runs on it (the speed check too). test_split's lead-split test passes with the GPU
+    visible; `tools/dev/gpu_contention.py` measures CPU vs GPU, alone and in N processes.
+  - The path rows in the report carry each line's width, foil, εr and tan δ; SP-9's independent ladder has the same
+    losses as R' and G' per cell and agrees within 1 %.
+  - Full suite with the GPU visible (`out/full_suite_gpu.log`, 31 min): 881 passed, 5 skipped, 1 failed (SP-9, its
+    reference still lossless; fixed: test_validation_audit + test_path 132 passed, history and report 17 passed).
 - **Branch `next-steps` (2026-10-18, from `main`, merged into `main` as 7013642 at the user's "Yes"; on the bigger machine, see CLAUDE.md "Environment"):**
   the user: "read docs/NEXT_STEPS.md and finish the work"; VALIDATION_AUDIT "Round 4" has the evidence.
   - The move: `out/` copied by the user, the venv rebuilt (python.org 3.13, the constraints file, PyTorch cu118 for

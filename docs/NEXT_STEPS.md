@@ -10,7 +10,7 @@ says what to do next, those say how to work in this repo.
 so 8x converges at all), 2 decided (a finer sampling does not help: `RASTER_MM` stays), 3 done (`_line_of` tries
 more places: no kraft path falls back), 4 see its section, 5 built at the user's "Yes, build it"
 (`analysis/interleave.py`). Item 4 done on the current board (`Downloads\flux-2`, 2026-10-17; VALIDATION_AUDIT's
-table under Round 2, the README's loop figure). A new item 6 came out of it:
+table under Round 2, the README's loop figure). Items 6 and 7 below followed (branch `path-loss-gpu`, done; VALIDATION_AUDIT Round 4). Item 6 came out of item 4:
 
 **6. Loss in the signal path's lines.** `emi/path.py` cascades lossless lines. /CPU/ADC_I_RAIL_1 (88 mm into the ADC's
 5 pF, C304 at the start) is a quarter wave at 310 MHz; C304's ESL resonates with the line's input there, and the

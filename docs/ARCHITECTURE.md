@@ -297,6 +297,17 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
   - Device copies: per stack the incidence matrices (`_gpu`; a with_branches stack gets its own, `gpu.derived`)
     and per grid the kernels and strip indices (`_gpu_kernels`, shared with the derived stacks, so fix candidates
     do not upload them again); per operator R, z and Dinv. `drop_factorisations` frees them (`gpu.release`).
+  - **First real GPU (2026-10-19, an RTX 3050 Laptop GPU, 4 GB, beside a 16-thread CPU).** Everything here is
+    complex128, and a GeForce card computes FP64 at 1/64 of its FP32 rate: a small two-stage board 38 s on the
+    GPU against 11 s on the CPU, a full kraft Simulate > 2 h against 18 min (4 GB full). And two processes on
+    one GPU (a split Simulate's workers) took turns so badly that neither finished in hours, where each alone took
+    45 s: under Windows' WDDM the CUDA contexts time-slice, and every GMRES iteration syncs with the CPU's
+    factorisation solve (`tools/dev/gpu_contention.py`). So `auto` now times the solver's convolution on the device
+    against the CPU once per process (`_speedup`, BENCH_SHAPE 6 × 384², ~2 s after PyTorch's import) and uses the
+    device only from `GPU_MIN_SPEEDUP` = 1.5x (the 3050: 0.8x, declined with that reason in the run's summary,
+    `describe`); `on` uses any working device. And one process at a time holds a device (`_DeviceLock`, a lock
+    file per device UUID in the temp folder): under `auto` a process that finds it taken runs on the CPU (said
+    in the summary), under `on` it waits.
   - `gpu.use(mode)` around simulate, the fix search, the aligned comparison and Sharper map; `auto` without a GPU
     or PyTorch stays on the CPU (importing PyTorch takes 2 s, the GIL held ≤ 31 ms at a time: no GUI stall). Any
     device failure in a solve except SolverError (out of memory, a missing operation) → that solve again on the
@@ -524,7 +535,12 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
 - **Line current** (`emi/path.path_currents`, built by `simulate.path_elements`): trapezoid harmonics
   `c_n = 2AD|sinc(nD)||sinc(n f0 tr)|` (a `fall_time` of its own: `c_n = 2|X_n|`, `X_n = A/(j2πn)·[sinc(n f0 tr) −
   e^(−j2πnD) sinc(n f0 tf)]`) from a **Thevenin source**: `driver_ohms` (25 Ω) + jω·`driver_nh`, optional output
-  capacitance `driver_pf`. The route is a **signal path**: a lossless line per stretch between series parts (its
+  capacitance `driver_pf`. The route is a **signal path**: a line per stretch between series parts, with the
+  copper's and the dielectric's loss since 2026-10-19 (`PathLine.alpha`: R' from the skin depth for the strip and
+  as much again for its plane [A36], G' = ωC'·tan δ with the microstrip filling factor, γ = α + jβ in the cascade;
+  lossless, a quarter-wave stretch beside a capacitor's ESL resonated with an unbounded Q: kraft's ADC_I_RAIL_1
+  moved 13 dB for a 7 % Z0 change, C304 carrying 4.5 × the input current; with the loss 1.0 ×, the margin +33.5 dB,
+  the SPI nets +0.4 dB) (its
   own Z0 and εeff, `simulate._line_of`: since 2026-10-18 the 2D field solver's cut of the board across the
   stretch's longest track, at its middle (`line_cache`: analysis/si.SectionCache, the one Run checks' impedance
   checks use: every net's copper in the cut, the stackup's dielectrics and solder mask, equal cuts solved once),
