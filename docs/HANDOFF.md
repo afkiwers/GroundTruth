@@ -7,7 +7,7 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `audit-3` (2026-10-18, committed, not merged):** the audit's round 3 (VALIDATION_AUDIT.md "Round 3"),
+- **Branch `audit-3` (2026-10-18, merged into `main` as c3dbeb6 at the user's "Merge"):** the audit's round 3 (VALIDATION_AUDIT.md "Round 3"),
   at the user's four items:
   - "Fix this" (inner-layer Z0, solder mask): a path's line is the field-solved cut at its longest track
     (`simulate.line_cache`, `si.SectionCache`), with the closed forms as the fallback (SP-26). On kraft, the cut reads
