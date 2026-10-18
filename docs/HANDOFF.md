@@ -7,7 +7,7 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `next-steps` (2026-10-18, from `main`, not merged; on the bigger machine, see CLAUDE.md "Environment"):**
+- **Branch `next-steps` (2026-10-18, from `main`, merged into `main` as 7013642 at the user's "Yes"; on the bigger machine, see CLAUDE.md "Environment"):**
   the user: "read docs/NEXT_STEPS.md and finish the work"; VALIDATION_AUDIT "Round 4" has the evidence.
   - The move: `out/` copied by the user, the venv rebuilt (python.org 3.13, the constraints file, PyTorch cu118 for
     the RTX 3050). The kraft board here is the user's copy `Downloads\flux\flux\flux.kicad_pcb`, **dated
