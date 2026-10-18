@@ -52,7 +52,7 @@ from ..emi.spectrum import analysis_band, microstrip, offset_stripline, trapezoi
 from ..geometry.copper import CopperMap, reference_layers
 from ..geometry.shapes import arc_points
 from ..rules.checks import CheckResult, run_checks
-from ..solver.peec import (EPS0, GMRES_MEMORY, Branch, Grid, PlaneLayer, PlanePair, PlaneStack, RouteExcitation,
+from ..solver.peec import (EPS0, gmres_restart, Branch, Grid, PlaneLayer, PlanePair, PlaneStack, RouteExcitation,
                            Solution, SolverError, TraceSegment, build_grid, thread_budget, track_impedance,
                            via_impedance)
 from ..solver import gpu, peec
@@ -82,9 +82,11 @@ SHUNT_MIN_SHARE = 0.01      # a shunt part on a signal path gets a loop of its o
 GRID_SENSITIVE_F = 600e6    # a worst emission above this from a board-wide plane resonance (rise >= GRID_SENSITIVE_RISE
 GRID_SENSITIVE_RISE_DB = 6.0  # dB over the low-frequency loop moment) within GRID_SENSITIVE_DB of the warning level
 GRID_SENSITIVE_DB = 10.0    # gets a note: such peaks moved several dB between grids (grid_sensitive_note)
+GRID_CHECK_8X_F = 1e9       # the note asks for 4x below this and 8x above it (4x and 8x agree below)
 RASTER_MM = 0.15            # copper is sampled at this pitch or finer, so thin webs between antipads conduct
 F_REF_MIN = 1e6             # loop L, the ideal reference and the board-wide offset at max(f0, this): inductive regime
-MAX_THREADS = 4             # "auto" thread count: physical cores, at most this (memory: ~300 MB per board-wide solve)
+LINE_CUT_TRACKS = 3         # _line_of tries the cut on this many of a stretch's longest tracks before the closed forms
+MAX_THREADS = 4           # "auto" thread count: physical cores, at most this (memory: ~300 MB per board-wide solve)
 ALL_CORES_K = 4             # "Use all cores": at most this many frequencies per run and refinement round
 
 Progress = Callable[[str, float], None]
@@ -816,8 +818,9 @@ def _line_of(board: Board, segments: list, ref_layer: str, cache=None) -> tuple[
 
     With `cache` (line_cache: what Run checks' signal-integrity checks solve): the 2D field solver on the board's own
     cut across the stretch's longest track, at its middle (the copper of every net in the cut, the stackup's
-    dielectrics and solder mask; within 0.2 % of exact, tests/test_xsection.py). Where no clean cut exists (the
-    track widens into a pad or a pour there, no reference copper in the cut) and without a cache, the closed forms
+    dielectrics and solder mask; within 0.2 % of exact, tests/test_xsection.py), else a quarter from either end, else
+    the same on the next longest tracks (LINE_CUT_TRACKS). Where no clean cut exists at any of them (the track
+    widens into a pad or a pour there, no reference copper in the cut) and without a cache, the closed forms
     below. (Before 2026-10-18 the closed forms always: ~10 % high on very asymmetric inner layers, a few per cent on
     outer layers for the solder mask they leave out; VALIDATION_AUDIT.md ISSUE-5.)"""
     lengths: dict[str, float] = {}
@@ -828,14 +831,18 @@ def _line_of(board: Board, segments: list, ref_layer: str, cache=None) -> tuple[
     w = float(np.median(widths))
     if cache is not None:
         tracks = [s for s in segments if s.layer == layer and s.kind == "track" and s.length > 0 and s.net]
-        if tracks:
-            s = max(tracks, key=lambda x: x.length)
+        # the longest tracks first, each at its middle, then a quarter from either end: a cut at one place can fail
+        # (a pad, a via or a pour's edge in it) where one a little further along is clean. On refboard,
+        # Net-(U301--) (1.8 mm of track) had no cut at its longest track's middle and 43.8 ohm at three quarters
+        # (2026-10-18; before, the closed forms took over at the first failed cut)
+        for s in sorted(tracks, key=lambda x: -x.length)[:LINE_CUT_TRACKS]:
             (ax, ay), (bx, by) = s.start, s.end
             n = math.hypot(bx - ax, by - ay)
-            got = cache.solve_at(((ax + bx) / 2, (ay + by) / 2), ((bx - ax) / n, (by - ay) / n), layer, [s.net],
-                                 s.width)
-            if got is not None and got[0].z0() > 0:
-                return float(got[0].z0()), float(got[0].eeff())
+            for t in (0.5, 0.25, 0.75):
+                got = cache.solve_at((ax + t * (bx - ax), ay + t * (by - ay)), ((bx - ax) / n, (by - ay) / n), layer,
+                                     [s.net], s.width)
+                if got is not None and got[0].z0() > 0:
+                    return float(got[0].z0()), float(got[0].eeff())
     st = board.stackup
     neigh = st.neighbours(layer)
     t = st.layer(layer).thickness if st.layer(layer) else 0.035
@@ -1603,17 +1610,26 @@ def grid_sensitive_note(worst: dict, m_worst: float, m_low: float, warn_db: floa
     several dB between the 1x, 2x and 4x grids (two resonances near each other reinforce on one grid and not on
     the next; ARCHITECTURE "Board-wide resonances above 1 GHz"). The threshold was 1 GHz; since the strips carry
     their copper's width (2026-10-18) the 1x grid places refboard's largest mode (F.Cu/In1) at 940 MHz, where 2x and 4x
-    have it at 1020, and the grids disagree from ~620 MHz up (they agree within 0.5 dB at 540-580 MHz), so 600 MHz."""
+    have it at 1020, and the grids disagree from ~620 MHz up (they agree within 0.5 dB at 540-580 MHz), so 600 MHz.
+    Where to check (the 8x run, 2026-10-18): 4x and 8x agree within 0.8 dB rms at 0.5-1 GHz, so below GRID_CHECK_8X_F
+    the note asks for 4x and none is given from 4x on; above it they still differ by 2.9 dB rms (one mode a few per
+    cent apart in frequency, the same copper on both grids), so 8x, and from 8x on the note gives that uncertainty."""
     if worst is None or worst.get("margin_db") is None or worst["f"] < GRID_SENSITIVE_F or m_low <= 0 or m_worst <= 0:
         return None
     rise = 20 * math.log10(m_worst / m_low)
     if rise < GRID_SENSITIVE_RISE_DB or worst["margin_db"] > warn_db + GRID_SENSITIVE_DB:
         return None
-    finer = f"{2 * resolution:g}x" if resolution >= 1 else "2x"
-    return (f"the worst emission ({worst['f'] / 1e6:.4g} MHz, margin {worst['margin_db']:+.1f} dB) comes from a "
+    target = 4.0 if worst["f"] < GRID_CHECK_8X_F else 8.0
+    head = (f"the worst emission ({worst['f'] / 1e6:.4g} MHz, margin {worst['margin_db']:+.1f} dB) comes from a "
             f"plane resonance above {GRID_SENSITIVE_F / 1e6:g} MHz ({rise:+.0f} dB over the loop's low-frequency "
-            f"value): on a coarse grid such a peak can sit several per cent off in frequency and several dB off in "
-            f"height. Check it at {finer} resolution (Preferences, or --resolution)")
+            f"value)")
+    if resolution < target:
+        return (f"{head}: on a coarse grid such a peak can sit several per cent off in frequency and several dB off "
+                f"in height. Check it at {target:g}x resolution (Preferences, or --resolution)")
+    if worst["f"] < GRID_CHECK_8X_F:
+        return None
+    return (f"{head}: above {GRID_CHECK_8X_F / 1e9:g} GHz such peaks still moved by about 3 dB between the 4x and "
+            f"8x grids, so read its height to within a few dB")
 
 
 def unsolved_band(run: ModelRun, f_limit: float) -> Optional[dict]:
@@ -2004,7 +2020,7 @@ def solve_bytes(stack: PlaneStack) -> int:
     """About the memory one solve of this model needs on top of the model itself: a factorisation being made
     (its fill, as SuperLU commits it) and the GMRES basis."""
     n = stack.nb + stack.n_nodes
-    basis = min(GMRES_MEMORY, 201 * n * 16)
+    basis = (gmres_restart(n) + 1) * n * 16      # its longest (peec.gmres_restart: at least GMRES_RESTART_MIN rows)
     return int(factor_bytes(stack) + basis + 12 * n * 16)
 
 
@@ -2253,16 +2269,27 @@ def band_moments(setup: RouteSetup, extra: Optional[dict] = None) -> tuple[list[
     fs = sorted(sols)
     if getattr(setup, "loop_weights", None) is not None and fs:     # signal paths only (not power stages)
         return fs, _loop_moments(setup, run, sols, fs)
+    fs, vs = band_vectors(setup, extra)
+    return fs, np.array([float(np.linalg.norm(v)) for v in vs])
+
+
+def band_vectors(setup, extra: Optional[dict] = None) -> tuple[list[float], list[np.ndarray]]:
+    """The loop moment per ampere as complex vectors (A m² per A, x/y/z) at the solved frequencies of the spectrum
+    model: band_moments' m(f) before its magnitude is taken (with the board-wide model, m_fine(f0) + m_board(f) -
+    m_board(f0)). The interleaved stages' fields add as these vectors (analysis/interleave.py)."""
+    run = setup.spectrum_run
+    sols = {**run.ok(), **(extra or {})}
+    fs = sorted(sols)
     if setup.cavity is None or not fs:
-        return fs, np.array([_m(sols[f]) for f in fs])
+        return fs, [sols[f].m for f in fs]
     fine = setup.fine.ok()
     f_ref = setup.f_ref or setup.spec.freq
     s0 = fine.get(f_ref) or (fine[min(fine)] if fine else None)
     if s0 is None:
-        return fs, np.array([_m(sols[f]) for f in fs])
+        return fs, [sols[f].m for f in fs]
     c0 = sols.get(f_ref) or sols[fs[0]]
     offset = s0.m - c0.m
-    return fs, np.array([float(np.linalg.norm(sols[f].m + offset)) for f in fs])
+    return fs, [sols[f].m + offset for f in fs]
 
 
 def _loops_at(run: ModelRun, f: float, main: np.ndarray) -> list:
@@ -2527,6 +2554,7 @@ def finish_issues(result: SimulationResult, issues: list, route_issues: list, st
                   config: Config, board: Optional[Board] = None) -> list:
     """The end of a Simulate (and of merge_parts): every stage's DC paths together (combine_dc: the combined view in
     result.dc_combined, its issues replacing each stage's own DC-path ones: the copper carries all loads at once),
+    the interleave groups' emissions (analysis/interleave.py: their stages' phasors added, the group on each member),
     the stages' DC branch currents released, then all issues (the checks' and the preparations' `issues`, then the
     combination's, the routes', the stages') deduplicated, waivers applied and sorted. With the board: the
     voltage-aware checks of the solved results (analysis/safety.after_simulate: resistor losses with every stage's
@@ -2539,6 +2567,11 @@ def finish_issues(result: SimulationResult, issues: list, route_issues: list, st
         issues = issues + combo_issues
         stage_issues = [i for i in stage_issues if not (i.check in ("current_density", "via_overload")
                                                         and (":dc:" in (i.key or "") or ":via:" in (i.key or "")))]
+    # interleaved stages (analysis/interleave.py): each group's stages' phasors added, its figures on its members
+    from .interleave import interleave_groups
+    group_issues, group_notes = interleave_groups(result.converters, config)
+    issues = issues + group_issues
+    result.notes += group_notes
     if board is not None:
         from .safety import after_simulate
         issues = issues + after_simulate(board, config, result)

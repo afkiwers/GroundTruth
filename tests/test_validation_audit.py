@@ -1070,6 +1070,36 @@ def test_SP26_the_path_s_line_is_the_field_solved_cut_of_the_board(tmp_path, lay
     assert abs(z_closed / z - 1) > 0.01                # what the cut changes against the closed forms
 
 
+def test_SP26_a_stretch_without_a_cut_at_its_middle_takes_one_further_along(tmp_path):
+    """SP-26 (ISSUE-5's remainder, 2026-10-18): the longest track widens into a pour of its own net at its middle, so
+    no cut can be made there; _line_of takes the cut a quarter along instead (what refboard's U301- needed)
+    and reads the same line as the board without the pour, within 1 %, not the closed forms."""
+    from boardgen import BoardGen
+    from groundtruth.adapters.file_source import load_board
+    from groundtruth.analysis.route import RouteSegment
+    from groundtruth.analysis.si import SectionCache
+    from groundtruth.analysis.simulate import _line_of
+    from groundtruth.geometry.copper import CopperMap
+    zs = {}
+    for pour in (False, True):
+        g = BoardGen(layers=4, size=(30.0, 20.0), dielectrics=[0.1, 0.5, 0.2], mask=0.02)
+        g.plane("GND", "F.Cu")
+        g.plane("GND", "In2.Cu")
+        g.track((5.0, 10.0), (25.0, 10.0), "SIG", "B.Cu", width=0.15)
+        if pour:
+            g.zone("SIG", "B.Cu", [(13.0, 8.0), (17.0, 8.0), (17.0, 12.0), (13.0, 12.0)])
+        board = load_board(g.write(tmp_path / f"cut_{pour}.kicad_pcb"))
+        seg = RouteSegment((5.0, 10.0), (25.0, 10.0), "B.Cu", 0.15, "track", "", 0, "SIG")
+        cache = SectionCache(board, CopperMap(board))
+        if pour:
+            assert cache.solve_at((15.0, 10.0), (1.0, 0.0), "B.Cu", ["SIG"], 0.15) is None   # no cut at the middle
+        zs[pour] = _line_of(board, [seg], "In2.Cu", cache)
+        z_closed, _ = _line_of(board, [seg], "In2.Cu")
+    assert zs[True][0] == pytest.approx(zs[False][0], rel=0.01)
+    assert zs[True][1] == pytest.approx(zs[False][1], rel=0.01)
+    assert abs(z_closed / zs[True][0] - 1) > 0.01      # not the closed forms
+
+
 @pytest.mark.parametrize("d, y", [(1.0, 12.0), (1.0, 12.4), (0.5, 12.1), (0.35, 12.0)])
 def test_SP27_a_strip_narrower_than_the_pitch_keeps_its_copper_width(d, y):
     """SP-27: a 0.35 mm wide copper strip along x, rasterised on pitches 1-3 x its width: the x strips of each column

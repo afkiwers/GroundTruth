@@ -67,6 +67,12 @@ FIELD_TIPS = {
                            "(conducted and radiated estimates). Empty: off.",
     "Spread mode": "random: a new frequency every cycle (or Spread rate hops per second; most controllers' pseudo-"
                    "random dither); triangle: swept up and down at Spread rate.",
+    "Interleave group": "Stages with the same group name are phases of one controller (a dual or multiphase buck): "
+                        "Simulate adds their input currents and hot-loop fields as phasors, so phases 180° apart "
+                        "cancel at the odd harmonics of f_sw. Empty: the stage is analysed alone.",
+    "Phase (°)": "This stage's delay in degrees of the switching period within its group (the controller's "
+                 "datasheet; a dual buck's channels are usually 180° apart). Empty: the group's stages 360°/n apart "
+                 "in list order.",
     "Spread rate (Hz)": "triangle: the modulation frequency (e.g. 10kHz); random: hops per second. Empty: random "
                         "hops every switching cycle; a triangle needs one.",
     "R_DS(on)": "The high-side (or integrated) switch's on-resistance, e.g. 3m (datasheet, at the expected "
@@ -196,6 +202,10 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self.spread_mode.SetSelection(0)
         self.spread_rate = wx.TextCtrl(fw)
         self.spread_rate.SetHint("every cycle")
+        self.interleave = wx.TextCtrl(fw)       # interleaving (analysis/interleave.py): a group name and a phase
+        self.interleave.SetHint("none")
+        self.phase_deg = wx.TextCtrl(fw)
+        self.phase_deg.SetHint("even spread")
         # the part parameters the schematic fields can give: a mark beside each (◆ from the schematic, ! differs)
         self.param_ctrls = {"c_oss": self.c_oss, "q_oss": self.q_oss, "rds_on": self.rds_on,
                             "rds_on_low": self.rds_on_low, "dcr": self.dcr, "diode_vf": self.diode_vf}
@@ -216,6 +226,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
                             ("Input connector", self.inp), ("Output connector", self.out),
                             ("Conducted standard", self.standard), ("Spread spectrum (%)", self.spread),
                             ("Spread mode", self.spread_mode), ("Spread rate (Hz)", self.spread_rate),
+                            ("Interleave group", self.interleave), ("Phase (°)", self.phase_deg),
                             ("R_DS(on)", self.rds_on),
                             ("R_DS(on) low side", self.rds_on_low), ("Inductor DCR", self.dcr),
                             ("Diode V_f (V)", self.diode_vf)):
@@ -314,6 +325,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self.spread.SetValue("" if not c.spread else f"{c.spread * 100:g}")
         self.spread_mode.SetStringSelection(c.spread_mode if c.spread_mode in SPREAD_MODES else SPREAD_MODES[0])
         self.spread_rate.SetValue("" if c.spread_rate is None else format_si(c.spread_rate, "Hz"))
+        self.interleave.SetValue(c.interleave)
+        self.phase_deg.SetValue("" if c.phase_deg is None else f"{c.phase_deg:g}")
         self._show_marks(c)
 
     def _show_marks(self, c: Optional[ConverterSpec]):
@@ -346,7 +359,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             conducted=None if std == STANDARD_CHOICES[0] else std,
             spread=(parse_field(self.spread.GetValue().replace("%", ""), "") or 0.0) / 100 or None,
             spread_mode=self.spread_mode.GetStringSelection(),
-            spread_rate=num(self.spread_rate, "Hz"))
+            spread_rate=num(self.spread_rate, "Hz"),
+            interleave=self.interleave.GetValue().strip(), phase_deg=num(self.phase_deg, "°"))
         from ..config.settings import validate
         from copy import copy
         probe = copy(self.settings.config)
@@ -355,7 +369,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         if not (spec.f_sw and spec.i_out and spec.rise_time):
             problems.append("switching frequency, load current and edge time must be numbers (e.g. 400kHz, 3, 5ns)")
         for ctrl, what in ((self.spread, "spread spectrum (a percentage, e.g. 20)"),
-                           (self.spread_rate, "spread rate (a frequency, e.g. 10kHz)")):
+                           (self.spread_rate, "spread rate (a frequency, e.g. 10kHz)"),
+                           (self.phase_deg, "phase (degrees of the switching period, e.g. 180)")):
             text = ctrl.GetValue().replace("%", "").strip()
             if text and parse_field(text, "Hz") is None:
                 problems.append(f"{what}: '{ctrl.GetValue()}' is not a number")
@@ -406,7 +421,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             # what the form does not show stays as it was (the spread spectrum is on the form since 2026-10-17)
             new = replace(spec, source=old.source, reviewed=True, enabled=old.enabled, r_damp=old.r_damp,
                           duty=old.duty, note=old.note,
-                          snubber=list(old.snubber), snubber_c=old.snubber_c, snubber_r=old.snubber_r)
+                          snubber=list(old.snubber), snubber_c=old.snubber_c, snubber_r=old.snubber_r,
+                          loop=dict(old.loop))
             link_form(self.board, self.settings.config, new, old)
             self.converters[i] = new
             self._commit()

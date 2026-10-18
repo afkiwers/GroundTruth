@@ -239,7 +239,8 @@ Q_oss, R_DS(on), DCR and V_f come from the parts' schematic fields where they ha
 (<a href="#fields">Part parameters from the schematic</a>). The controller's
 <b>spread spectrum</b> is on the form: <b>Spread spectrum (%)</b> (f_sw dithered up to that much above it; empty:
 off), <b>Spread mode</b> (random hops, or a triangle sweep) and <b>Spread rate</b> (the triangle's modulation
-frequency, or random hops per second; empty: every cycle). The buttons are those of the Signal paths
+frequency, or random hops per second; empty: every cycle). <b>Interleave group</b> and <b>Phase (°)</b> mark
+the phases of one controller (<a href="#interleave">Interleaved stages</a> below). The buttons are those of the Signal paths
 tab, and the rows show in KiCad the same way: clicking a row selects the stage's switches and hot-loop capacitors
 and highlights its switch node (<b>Zoom KiCad to the selected power stages</b> also zooms). KiCad shows the row
 you stop on: clicking or arrowing quickly through the rows does not make it select and zoom to each one.</p>
@@ -261,6 +262,19 @@ DCR</b> and <b>Diode V_f (V)</b> are the losses of the thermal solve.</p>
   capacitors carry the loop current, the radiated and the conducted estimate (through a LISN at the input
   connector), a common-mode budget, input-filter guidance, and the DC power paths with their current density and
   via loads.</li>
+<li><a name="interleave"></a><b>Interleaved stages.</b> The channels of a dual or multiphase controller (two
+  bucks driven by one LTC7890, say) switch at one frequency, each delayed by its phase. Give them the same
+  <b>Interleave group</b> name and each its <b>Phase (°)</b> from the controller's datasheet (empty: the group's
+  stages 360°/n apart, in list order). <b>Detect…</b> proposes a group for the stages one IC switches, 0° and 180°
+  for two: check the datasheet, some controllers run their channels in phase. Simulate then adds the stages' input
+  currents at the LISN and their hot loops' fields at the antenna as phasors, per harmonic of f_sw: 180° apart they
+  cancel at the odd harmonics (all of it where the two stages are alike, at the fundamental most of all) and add at
+  the even ones. Each member stage shows the group's conducted and radiated margin <i>together</i>, the same sum
+  <i>in phase</i> for comparison, and each stage's own margin. A group below the EMI margin has its own issue
+  (<i>interleave group …</i>); the stages' own issues stay, they are what each stage would do alone. The group needs
+  its stages at one switching frequency and the same spread spectrum (else it is not combined, a note says why);
+  CE101 stays each stage's own. DC and thermal results need nothing: each switch node's current stays in its own
+  copper.</li>
 <li><b>DC paths on the whole board, and all stages together.</b> Every stage's DC power paths (switch node,
   input, output, ground return) are solved on one copper model of the whole board, so nothing is cut off at the
   edge of a box around the stage and the current spreads as far as the copper takes it. With two or more stages
