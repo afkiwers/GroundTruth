@@ -4,6 +4,9 @@ All lengths in metres here. The plane is a sheet of square strips of side `d`; a
 strip carries current between two neighbouring grid nodes. Mutual partial inductance between
 two parallel strips only depends on their grid offset, so the inductance "matrix" of the plane
 is a convolution kernel and its product with a current vector is an FFT convolution.
+
+Partial inductance as in [Ruehli 1972] and [Paul 2010]; the closed forms for filaments and the GMD of a flat
+strip from [Grover 1946]. Keys: docs/REFERENCES.md.
 """
 from __future__ import annotations
 
@@ -13,13 +16,13 @@ import numpy as np
 from numpy.polynomial import legendre
 
 MU0 = 4e-7 * np.pi
-GMD_FLAT = 0.2235            # geometric mean distance of a thin flat strip, as a fraction of its width
+GMD_FLAT = 0.2235            # geometric mean distance of a thin flat strip, as a fraction of its width [Grover 1946]
 
 
 @lru_cache(maxsize=None)
 def leggauss(n: int) -> tuple[np.ndarray, np.ndarray]:
-    """Gauss-Legendre nodes and weights (cached: numpy solves an eigenvalue problem on every call, which was
-    two thirds of a power stage's model build, ~35 000 calls)."""
+    """Gauss-Legendre nodes and weights [Abramowitz 1964, §25.4] (cached: numpy solves an eigenvalue problem on
+    every call, which was two thirds of a power stage's model build, ~35 000 calls)."""
     x, w = legendre.leggauss(n)
     x.setflags(write=False)
     w.setflags(write=False)
@@ -35,15 +38,15 @@ def filament_mutual(length: float, axial, rho):
     """Mutual partial inductance of two parallel filaments of equal length, axial offset `axial`,
     perpendicular distance `rho` (arrays broadcast). Henry."""
     rho = np.maximum(rho, 1e-12 * length)     # coincident filaments: a tiny distance keeps the log finite
-    # Neumann's double integral of 1/r over the two filaments, done analytically: the second difference of the
-    # antiderivative G at the offsets between their ends (Grover's formula for parallel filaments)
+    # Neumann's double integral of 1/r over the two filaments [Paul 2010], done analytically: the second difference
+    # of the antiderivative G at the offsets between their ends (parallel filaments [Grover 1946])
     return MU0 / (4 * np.pi) * (_g(axial + length, rho) - 2 * _g(axial, rho) + _g(axial - length, rho))
 
 
 def strip_self(length: float, width: float, thickness: float = 0.0) -> float:
     """Partial self inductance of a flat strip (filament formula at the strip's GMD)."""
     # A strip's self inductance equals the mutual inductance of two filaments at its geometric mean distance
-    # from itself; for a thin rectangle that GMD is 0.2235 (width + thickness)
+    # from itself; for a thin rectangle that GMD is 0.2235 (width + thickness) [Grover 1946]
     rho = GMD_FLAT * (width + thickness)
     return float(filament_mutual(length, np.array(0.0), np.array(rho)))
 
@@ -79,8 +82,8 @@ def strip_kernel(n_axial: int, n_lateral: int, d: float, dz: float = 0.0) -> np.
     sa = slice(max(ca - near, 0), ca + near + 1)
     sl = slice(max(cl - near, 0), cl + near + 1)
     An, Ln = A[sa, sl], L[sa, sl]
-    # 8-point Gauss-Legendre across each strip's width: 64 filament pairs per offset, weights w_i w_j / 4 (the
-    # nodes map [-1, 1] onto [-d/2, d/2], and the result is averaged over both widths)
+    # 8-point Gauss-Legendre across each strip's width [Abramowitz 1964, §25.4]: 64 filament pairs per offset,
+    # weights w_i w_j / 4 (the nodes map [-1, 1] onto [-d/2, d/2], and the result is averaged over both widths)
     x, w = leggauss(8)
     y1 = 0.5 * d * x
     W = np.outer(w, w).ravel() / 4.0
@@ -106,13 +109,13 @@ def segment_vector_potential(a: np.ndarray, b: np.ndarray, points: np.ndarray, r
     pu = p @ u                                      # each point's position along the segment's axis
     rho2 = np.einsum("ij,ij->i", p, p) - pu * pu    # and its squared distance from the axis
     rho = np.sqrt(np.maximum(rho2, rho_min * rho_min))
-    # mu0/(4 pi) times the integral of 1/r along the segment, in closed form: asinh of the two ends' axial
-    # offsets over the distance
+    # mu0/(4 pi) times the integral of 1/r along the segment (the magnetostatic vector potential [Jackson 1999,
+    # §5.4]), in closed form: asinh of the two ends' axial offsets over the distance
     return MU0 / (4 * np.pi) * (np.arcsinh((L - pu) / rho) + np.arcsinh(pu / rho))
 
 
 def segment_mutual(a1, b1, a2, b2, rho_min: float, n: int = 16) -> float:
-    """Mutual partial inductance between two straight filaments (Neumann integral, quadrature on
+    """Mutual partial inductance between two straight filaments (Neumann integral [Paul 2010], Gauss quadrature on
     the second one). rho_min keeps collinear/touching segments finite (set it to the GMD)."""
     a2 = np.asarray(a2, float)
     b2 = np.asarray(b2, float)
