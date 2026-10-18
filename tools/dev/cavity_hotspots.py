@@ -29,7 +29,12 @@ def main() -> int:
     ap.add_argument("--f", type=float, required=True, help="frequency, Hz")
     ap.add_argument("--resolution", type=float, default=1.0)
     ap.add_argument("--top", type=int, default=12)
+    ap.add_argument("--gmres-mb", type=float, help="memory for GMRES's Krylov basis, MB (as cavity_converge: 8x "
+                                                   "needs ~2500 to converge)")
     args = ap.parse_args()
+    if args.gmres_mb:
+        from groundtruth.solver import peec
+        peec.GMRES_MEMORY = args.gmres_mb * 1e6
     from groundtruth.adapters.file_source import load_board
     from groundtruth.analysis.simulate import BoardModel, _m, prepare_route
     from groundtruth.components.fields import apply_fields

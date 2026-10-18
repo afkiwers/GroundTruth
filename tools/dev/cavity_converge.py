@@ -104,8 +104,14 @@ def main() -> int:
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--tol", type=float, help="GMRES tolerance (relative residual; Simulate's is 1e-5), with up to "
                                               "30 restarts")
+    ap.add_argument("--gmres-mb", type=float, help="memory for GMRES's Krylov basis, MB (peec.GMRES_MEMORY, 400): it "
+                                                   "sets the restart length, ~26 at 8x with 400 MB, too short to "
+                                                   "converge near the resonances; per solve thread")
     ap.add_argument("--json", help="write the results here")
     args = ap.parse_args()
+    if args.gmres_mb:
+        from groundtruth.solver import peec
+        peec.GMRES_MEMORY = args.gmres_mb * 1e6
     if args.tol:
         from groundtruth.solver.peec import PlaneStack
         tol, cycles, guess = PlaneStack.solve.__defaults__

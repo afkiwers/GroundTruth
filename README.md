@@ -410,6 +410,7 @@ rules: {overshoot_warning: 0.25, overshoot_error: 0.5}   # switch-node overshoot
 | `c_stray` | | Switch node to chassis or heatsink: common-mode estimate. |
 | `input_connector`, `output_connector` | | `[plus, minus]` pins: the LISN, and the load (DC output path and ground return). |
 | `spread`, `spread_mode`, `spread_rate` | –, `random`, per cycle | Spread spectrum (see below). |
+| `interleave`, `phase_deg` | –, 360°/n apart | Interleaved stages: a group name shared by the phases of one controller, and this stage's delay in degrees of the switching period (see below). |
 | `conducted` | `analysis.conducted` | This stage's conducted standard. |
 | `rds_on`, `rds_on_low`, `dcr`, `diode_vf` | –, `rds_on`, –, 0.5 V | Losses for the thermal solve (see "Temperatures"). |
 | `source`, `reviewed`, `note` | `manual`, true | Set by detection (`auto`, unreviewed) and its note. |
@@ -429,6 +430,7 @@ fix advisor's proposed filter is also drawn: its attenuation among the stage's B
 output impedance next to the converter's input impedance −V²/P (Middlebrook's two curves) in the stage's
 "impedances" view.
 - **Spread spectrum:** with `spread: 0.2` the switching frequency is dithered from f_sw to f_sw + 20 %. GroundTruth simulates the EMI receiver (its bandwidth, detector and dwell time) on the swept harmonics instead of using a rule of thumb, because the benefit depends strongly on the modulation. A slow sweep passes a peak detector at full amplitude. Random changes every cycle barely spread the line. A sweep at ~10 kHz gained ~9 dB at the fundamental on the example board. Set `spread_mode: random` (with `spread_rate` hops per second, default every cycle) or `triangle` (with `spread_rate`, the modulation frequency). Datasheets often omit the modulation, so try both. The radiated estimate of the stage is read the same way. Where the sweeps of neighbouring harmonics overlap (high harmonics), a peak detector reads the largest single pass: the harmonics are f_sw apart, more than the receiver bandwidth, so only one is in the filter at a time.
+- **Interleaved stages:** the channels of a dual or multiphase controller (kraft_flux_mini_2's LTC7890 runs SW1 and SW2 180° apart) share one `interleave:` group name, each with its `phase_deg`. Simulate then adds their input currents at the LISN and their hot loops' fields as phasors per harmonic, with each stage's own transfer and loop moment. 180° apart they cancel at the odd harmonics of f_sw and add at the even ones. Each member stage reports the group's margins together, the same sum in phase for comparison, and its own. `groundtruth detect` proposes a group for the stages one IC switches (0° and 180° for two): check the controller's datasheet. The stages need one f_sw and the same spread spectrum; CE101 stays per stage.
 - **Common mode** (budget): the switch node swings the rail voltage with the switching edges. Through its stray capacitance to a chassis or heatsink, that drives a common-mode current back through both LISNs. That capacitance depends on the mechanics, not the board. groundtruth therefore reports the budget: the largest switch-node capacitance to the chassis that keeps the conducted reading under the limit, and the frequency where it binds. With `c_stray: 20pF` in the converter entry it also estimates the common-mode emission and checks it.
 - **What the radiated estimate is:** the hot loop's own (differential-mode) radiation at the limit's distance. Cables driven by the switch node's common-mode voltage usually radiate more, so read it as a lower bound for the product, not a compliance prediction.
 - **Issues:** `hot_loop` (overshoot), `current_density`, `conducted_emission`, `emi_margin` and `plane_resonance`. A loop that cannot be closed in the copper gives `power_loop_broken`. When the loop closes only through copper beyond the default 5 mm around the stage, the model region widens (10, then 20 mm) and a note says so: that detour is usually the finding.
@@ -773,7 +775,7 @@ In KiCad the board copy is the open board with any edits not saved yet (a read-o
 
 **Via loading.** Every via on a power stage's DC path is checked against its IPC-2221 capacity for a 10 K rise, from its drill and the plating (`analysis.via_plating_um`, default 25 µm): `via_overload` warns at `rules.via_load_warning` (100 %) and is an error at `rules.via_load_error` (150 %, about a 25 K rise). IPC-2221 is conservative; the thermal solve gives the actual temperature. A part's plated hole is not checked: its soldered pin carries the current between the layers, so the solver gives it the resistance of the hole's whole cross-section, not of the plating (a DNP part's hole stays plating only).
 
-**Sharper map.** Each pixel of a heatmap is one cell of the solver's grid (0.26 mm for kraft_flux_mini_2's SW1 hot loop). **Sharper map** solves the shown view again with half the cell size (4x the nodes) in the background, about 20 s for a route and up to a minute for a power stage, and shows the result in its place. The numbers in the summary line stay as analysed: the default grid is already converged for them (SW1: 3.43 vs 3.55 nH, -19.5 vs -19.2 dB radiated margin at 4x the nodes), so the finer grid sharpens the picture, not the results.
+**Sharper map.** Each pixel of a heatmap is one cell of the solver's grid (0.35 mm for kraft_flux_mini_2's SW1 hot loop). **Sharper map** solves the shown view again with half the cell size (4x the nodes) in the background, about 20 s for a route and up to a minute for a power stage, and shows the result in its place. The numbers in the summary line stay as analysed: the default grid is already converged for them (SW1, 2026-10-18: 1.57 vs 1.53 nH, -19.8 vs -20.8 dB radiated margin at 4x the nodes), so the finer grid sharpens the picture, not the results.
 
 **Larger heatmaps.** The layer maps are laid out to be as large as the region allows: side by side for a tall, narrow region, in a grid for a square or wide one. Zooming or panning one map (toolbar) shows the same spot on every layer.
 
@@ -1027,7 +1029,8 @@ Issues: `loop_phase_margin` (under 45°, or a gain margin under 6 dB: a warning;
 On kraft_flux_mini_2 (U303's fields set on 2026-10-17 at the user's "add those yourself": Control Mode peak current,
 Vref 0.8V, EA gm 1.8mmho, Vsense Max 50mV for ILIM floating, ITH Range 1V from the datasheet's
 Figure 13, "Maximum Current Sense Threshold vs V_ITH": 0 mV at 0.4 V to 50 mV at 1.4 V; U502 COT, U503 internal): conv1 (28 V, 10 A)
-crosses over at 11.2 kHz with 77° of phase margin and 22.6 dB of gain margin, conv2 (5.4 V, 5 A) at 29 kHz with 91°
+crosses over at 11.2 kHz with 77° of phase margin and 20.2 dB of gain margin (Simulate of 2026-10-18; 22.6 dB when
+this was first written), conv2 (5.4 V, 5 A) at 29 kHz with 91°
 and 20 dB (R311 22 kΩ + C313 2.2 nF (1.9 nF at bias) + C311 5 pF; R306 / R307 and R331 / R332 with R305 / R333 from
 ADJ_RAIL as AC grounds; R309 ∥ R310 and R328 ∥ R329, 4 mΩ; slope compensation assumed at half the down-slope).
 `tools/dev/loop_check.py BOARD SETTINGS [--set conv1:ith_range=0.8] [--png DIR]` prints a stage's loop without a
@@ -1178,6 +1181,7 @@ server must run the same GroundTruth code (and NumPy major version) as the plugi
 - **Done (earlier):**
   - renamed from pcbemi to GroundTruth, with a new toolbar icon;
   - spread-spectrum switching (`spread`, `spread_mode`, `spread_rate`), with the EMI receiver simulated;
+  - interleaved stages (`interleave`, `phase_deg`): a controller's phases added as phasors, conducted and radiated;
   - DC output path and ground return of power stages (`output_connector`), with the resistance split into copper and series parts (current-sense shunts);
   - fix search: each selected fix is checked at every harmonic near the limit on every net, and before/after comparisons are made at the same harmonics.
 - **Done (M6, power stages):**

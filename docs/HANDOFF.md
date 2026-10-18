@@ -7,6 +7,44 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `next-steps` (2026-10-18, from `main`, not merged; on the bigger machine, see CLAUDE.md "Environment"):**
+  the user: "read docs/NEXT_STEPS.md and finish the work"; VALIDATION_AUDIT "Round 4" has the evidence.
+  - The move: `out/` copied by the user, the venv rebuilt (python.org 3.13, the constraints file, PyTorch cu118 for
+    the RTX 3050). The kraft board here is the user's copy `Downloads\flux\flux\flux.kicad_pcb`, **dated
+    2026-10-14**: it has the GT and ADC labels but not U303's controller fields (10-17), and a few GND vias differ
+    from the board round 2 used. Fine for the convergence work (1x reproduces round 3's numbers to 0.01). The
+    current board is `Downloads\flux-2\flux-2.kicad_pcb` (2026-10-17, U303's fields; it reproduces round 2 where
+    the code did not change): item 4 and every published number come from it.
+  - Item 1 (SP-19): the 8x run. 4x vs 8x 0.8 dB rms below 1 GHz (converged), 2.9 dB above. The grid note asks for
+    4x / 8x (`GRID_CHECK_8X_F`). 8x needed `peec.GMRES_RESTART_MIN` = 100: with 400 MB of Krylov basis the restart
+    was ~26 at ~1 M unknowns and stalled; a plugin Simulate at 8x builds the same model. `cavity_converge.py` and
+    `cavity_hotspots.py` got `--gmres-mb`.
+  - Item 2: a finer copper sampling (0.075 mm, 12 × 12) does not narrow the neck's ±4 % scatter: `RASTER_MM` stays.
+  - Item 3: `_line_of` tries three places on the three longest tracks: kraft's U301- had no cut; now none falls back.
+  - Item 5, at the user's "Yes, build it": interleaved stages (`analysis/interleave.py`, ARCHITECTURE "Interleaved
+    stages", help "Interleaved stages", REFERENCES A35): `interleave` + `phase_deg` per stage (form fields on the
+    Converters tab), detection proposes a group per IC, the group's conducted and radiated sums on each member, its
+    own issues. On kraft: conv1 0° / conv2 180° ("U303 phases"), conducted −38.6 dB together (−39.6 in phase),
+    radiated −21.6 dB together (−25.4 in phase, −19.8 / −21.0 alone).
+  - Item 4 (`out/kraft_refresh/now2/`, flux-2, 18 min on the CPU; VALIDATION_AUDIT's table under Round 2): the SPI
+    margins +11.4 / +14.8 / +15.4 dB (2-3 dB lower than round 2), SW_CLK +40.5, the converters within 0.2 dB, the
+    hot loops +6 %, conv1's loop unchanged (11.2 kHz, 77°, 20.2 dB). Two moved by 13-24 dB, both already on `main`:
+    Net-(U301--) and /CPU/ADC_I_RAIL_1. The latter is a lossless line at a resonance: its 88 mm line into 5 pF is a
+    quarter wave at 310 MHz and C304's ESL resonates with it, so the 7 % Z0 change of the field-solved cut (38.6 →
+    36.0 Ω) took C304's share from 0.02 to 4.5 × the input current. **New next step:** loss in the path model's
+    lines (copper and tan δ), so such peaks are damped as on a real board (NEXT_STEPS item 6).
+  - `gpu: auto` on the 4 GB RTX 3050: the full kraft Simulate ran > 2 h on the GPU (memory full, 99 %) and 18 min
+    on the CPU (`--gpu off`). Worse, `test_split.py::test_a_simulate_sent_to_a_member_is_split_by_the_lead_and_
+    equals_one_run` never finishes with the GPU visible (> 4 h; its two split-part worker processes both solve on the
+    one GPU), on `main` too, and passes in 36 s with `CUDA_VISIBLE_DEVICES=""`. The laptop had no usable GPU, so the
+    suite never ran this path. The full suite here runs with the GPU hidden; NEXT_STEPS item 7.
+  - Also: the Converters form's Update kept everything the form does not show except the control-loop overrides
+    (`loop`): it keeps them now. The server's GPU probe gave no reason when CUDA loads but shows no device
+    (`CUDA_VISIBLE_DEVICES` empty): it says so now.
+  - Full suite with `CUDA_VISIBLE_DEVICES=""` (`out/full_suite.log`, 30 min): **876 passed, 4 skipped, 1 failed**,
+    the failure being that probe gap (fixed, `tests/test_remote.py` then 24 passed). `tests/test_gpu.py` with the
+    GPU visible: 6 passed, 2 skipped. undocumented 0, py311 0 rejected, ref_keys 103 / 103.
+
 - **Branch `mil461h` (2026-10-18, from `main`, merged into `main` at the user's "merge what can be merged before I copy"):** the user: "Add both, let the user decide which
   revision". `analysis.mil461: G | H` (default G).
   - Read from both standards (the PDFs in `Downloads\GroundTruth audit sources`): only CE101 differs for the code.
