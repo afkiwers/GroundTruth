@@ -362,9 +362,11 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   one straddling two read 754 and 817 MHz with full-width strips, 754 and 781 with the widths alone, and 751
   and 759 with the side-by-side correction (SP-27). What remains at coarse grids is the sampling: a 0.35 mm
   neck covers 3 of a 1 mm cell's 7 sub-rows, so it reads 0.43 mm wide. Only grids with a sub-grid (`sub` > 1)
-  carry widths; with `sub` = 1 (Simulate's cells of 0.15 mm and less) every strip stays full: the neck read 793 /
-  735 MHz at 0.15 / 0.1 mm, as before, and a 2× sub-grid there would give 769 at 0.15 (not adopted yet: it changes
-  every fine route model).
+  carry widths. Simulate's cells of 0.15 mm and less had none (`sub` = 1, point sampling), so their strips stayed
+  full: the neck read 793 / 735 MHz at 0.15 / 0.1 mm. Since 2026-10-18 every model samples at least 2 × 2 per cell
+  (`simulate`'s `sub = max(2, …)`): 769 / 742 MHz. All seven grids from 1.0 to 0.1 mm now read 717-797 MHz. On
+  refboard the fine route models have 0.2 mm cells at 1x (2 × 2 already), so the change reaches 4x and up
+  there.
   Current densities follow (`Solution.node_field(copper=True)`): the DC paths' A/mm² maps, peaks and sustained
   values, the thermal heat and the motor bridges' RMS maps take a strip's current over its own width. Before,
   a 0.35 mm neck on a 1 mm grid read about a third of its density. Sums over the cells weight each node by the
