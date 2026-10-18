@@ -1543,7 +1543,10 @@ thermal need nothing: each switch node's variance stays in its own copper (VALID
   receivers (`conducted_table`, `emission_table`, its spread). The same sum in phase is kept for comparison. The
   group's dict goes on each member (`ConverterResult.interleave`, in the JSON summary); the records are released.
   Not combined (a note): stages at different f_sw or spread; conducted only when every member has an estimate
-  against the same standard; CE101 stays per stage. Issues `power:<group>:interleave:conducted|emi`; the stages'
+  against the same standard; CE101 likewise (each stage's harmonics in the limit's range times its complex CE101
+  transfer, `bridge._ce101_complex_transfer`; the limit at the stages' input current together, since CE101-1 relaxes
+  with it). Tested end to end on bucks, boosts (the ripple triangle) and a 2 kHz pair's CE101. Issues
+  `power:<group>:interleave:conducted|emi|ce101`; the stages'
   own issues stay (each alone).
 - **Assumption** [A35]: each stage's transfer and moment from its own model, added by superposition.
 - **Validation** (`tests/test_interleave.py`): the phasors against the DFT of sampled trapezoids (three duties and

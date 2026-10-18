@@ -435,7 +435,7 @@ fix advisor's proposed filter is also drawn: its attenuation among the stage's B
 output impedance next to the converter's input impedance −V²/P (Middlebrook's two curves) in the stage's
 "impedances" view.
 - **Spread spectrum:** with `spread: 0.2` the switching frequency is dithered from f_sw to f_sw + 20 %. GroundTruth simulates the EMI receiver (its bandwidth, detector and dwell time) on the swept harmonics instead of using a rule of thumb, because the benefit depends strongly on the modulation. A slow sweep passes a peak detector at full amplitude. Random changes every cycle barely spread the line. A sweep at ~10 kHz gained ~9 dB at the fundamental on the example board. Set `spread_mode: random` (with `spread_rate` hops per second, default every cycle) or `triangle` (with `spread_rate`, the modulation frequency). Datasheets often omit the modulation, so try both. The radiated estimate of the stage is read the same way. Where the sweeps of neighbouring harmonics overlap (high harmonics), a peak detector reads the largest single pass: the harmonics are f_sw apart, more than the receiver bandwidth, so only one is in the filter at a time.
-- **Interleaved stages:** the channels of a dual or multiphase controller (refboard's LTC7890 runs SW1 and SW2 180° apart) share one `interleave:` group name, each with its `phase_deg`. Simulate then adds their input currents at the LISN and their hot loops' fields as phasors per harmonic, with each stage's own transfer and loop moment. 180° apart they cancel at the odd harmonics of f_sw and add at the even ones. Each member stage reports the group's margins together, the same sum in phase for comparison, and its own. `groundtruth detect` proposes a group for the stages one IC switches (0° and 180° for two): check the controller's datasheet. The stages need one f_sw and the same spread spectrum; CE101 stays per stage.
+- **Interleaved stages:** the channels of a dual or multiphase controller (refboard's LTC7890 runs SW1 and SW2 180° apart) share one `interleave:` group name, each with its `phase_deg`. Simulate then adds their input currents at the LISN and their hot loops' fields as phasors per harmonic, with each stage's own transfer and loop moment. 180° apart they cancel at the odd harmonics of f_sw and add at the even ones. Each member stage reports the group's margins together, the same sum in phase for comparison, and its own. `groundtruth detect` proposes a group for the stages one IC switches (0° and 180° for two): check the controller's datasheet. The stages need one f_sw and the same spread spectrum. CE101 is combined the same way (for stages switching within its range), against the limit at the stages' input current together. Tested end to end on two bucks, two boosts (their inductor ripple) and a 2 kHz pair's CE101.
 - **Common mode** (budget): the switch node swings the rail voltage with the switching edges. Through its stray capacitance to a chassis or heatsink, that drives a common-mode current back through both LISNs. That capacitance depends on the mechanics, not the board. groundtruth therefore reports the budget: the largest switch-node capacitance to the chassis that keeps the conducted reading under the limit, and the frequency where it binds. With `c_stray: 20pF` in the converter entry it also estimates the common-mode emission and checks it.
 - **What the radiated estimate is:** the hot loop's own (differential-mode) radiation at the limit's distance. Cables driven by the switch node's common-mode voltage usually radiate more, so read it as a lower bound for the product, not a compliance prediction.
 - **Issues:** `hot_loop` (overshoot), `current_density`, `conducted_emission`, `emi_margin` and `plane_resonance`. A loop that cannot be closed in the copper gives `power_loop_broken`. When the loop closes only through copper beyond the default 5 mm around the stage, the model region widens (10, then 20 mm) and a note says so: that detour is usually the finding.
@@ -983,13 +983,13 @@ safety:
 - `vds_rating`: a power stage's switch-node peak (its rail plus the overshoot of the ringing) against the switches'
   **Vds** field, above `vds_derating` a warning, above the rating an error.
 
-On refboard (+VDC 51.8 V, uncoated): 16 errors (+VDC, V_BATT, the switch nodes and the diode buck's node
-0.20-0.31 mm from GND, +12V, +5V, +3V3 and the 5.4 V output where 0.60 mm is asked), 27 warnings (gate drive,
-bootstrap and controller pins of unknown voltage beside the 51.8 V nets), none coated; ESD infos at J101, J104,
-J106, J1101; 23 capacitors over the 50 % ceramic derating (none over its rating). Simulate of conv1 and conv2:
-the switch nodes peak at 89.6 / 89.9 V (51.8 V + the ringing's 38 V, as the hot-loop check estimates it with the
-default damping) against the EPC2306's 100 V: over 80 % of it, a warning each; the 8 mΩ output shunts dissipate
-0.21 W of their 1 W.
+On refboard (2026-10-19, the current board, +VDC 55 V as in the scratch settings, uncoated): clearance 38
+errors and 13 warnings (since the voltage ranges and riding nets of 2026-10-17 the gate-drive and bootstrap nets carry
+their switch node's voltage, so most of the earlier warnings became errors), none coated; ESD infos at J101, J104,
+J106, J1101; C601 (10 nF, 50 V) over its rating (65 V between GND and the surge stopper's gate), 23 capacitors over
+the 50 % ceramic derating. Simulate of conv1 and conv2: the switch nodes peak at 95.5 / 95.9 V (55 V + the ringing's
+~40 V, as the hot-loop check estimates it with the default damping) against the EPC2306's 100 V: over 80 % of it, a
+warning each; no resistor over its derated power. (Before, with +VDC 51.8 V: 16 errors, 27 warnings, 89.6 / 89.9 V.)
 
 ## Control loop of a buck or boost stage
 

@@ -129,7 +129,8 @@ def stage_phasors(setup, config: Config) -> Optional[dict]:
     spec, a = setup.spec, config.analysis
     out = {"f_sw": float(spec.f_sw), "standard": setup.standard, "cls": setup.standard_class,
            "spread": (spec.spread, spec.spread_mode, spec.spread_rate) if spec.spread else None,
-           "n_cond": None, "cond": None, "n_rad": None, "rad": None, "ce101": bool(setup.res.ce101)}
+           "n_cond": None, "cond": None, "n_rad": None, "rad": None, "n_ce101": None, "ce101": None,
+           "ce101_v": None, "ce101_i": None}
     # conducted: the line current at the LISN per harmonic of the standard's range
     fs, ts = complex_transfer(setup)
     if setup.standard != "none" and len(fs):
@@ -146,6 +147,24 @@ def stage_phasors(setup, config: Config) -> Optional[dict]:
             line = np.abs(setup.c_currents[sel]) * u
             line = line * (_interp_complex(f, fs, ts) if len(fs) > 1 else ts[0])
             out["n_cond"], out["cond"] = n.astype(np.int64), line
+    # CE101 (MIL-STD-461, a stage switching below its range's top): the harmonics within the limit's range times the
+    # complex transfer to the input lead (bridge._ce101_complex_transfer: power._ce101_stage's with the phase)
+    if setup.res.ce101:
+        from .bridge import _ce101_complex_transfer
+        v, i_in = spec.v_in or setup.res.v_in, (setup.res.input or {}).get("i_in_a")
+        ce = a.ce101_spec(v, i_in)
+        cf = setup.c_freqs
+        if ce is not None:
+            lo, hi = ce.range
+            sel = (cf >= lo) & (cf <= hi)
+            fs1, ts1 = _ce101_complex_transfer(setup, hi)
+            if sel.any() and len(fs1):
+                f = cf[sel]
+                n = np.rint(f / spec.f_sw)
+                u = ripple_phase(n, setup.res.ripple["duty"]) if (setup.cond_freqs is not None and
+                                                                   setup.res.ripple) else loop_phase(setup, f)
+                line = np.abs(setup.c_currents[sel]) * u * (_interp_complex(f, fs1, ts1) if len(fs1) > 1 else ts1[0])
+                out.update(n_ce101=n.astype(np.int64), ce101=line, ce101_v=v, ce101_i=i_in)
     # radiated: loop current times its moment vector, per harmonic from half the limit's lowest frequency (as
     # power.finish_converter takes them)
     freqs = setup.harmonics
@@ -155,7 +174,7 @@ def stage_phasors(setup, config: Config) -> Optional[dict]:
         if m is not None:
             i = np.abs(setup.currents[rad]) * loop_phase(setup, freqs[rad])
             out["n_rad"], out["rad"] = np.rint(freqs[rad] / spec.f_sw).astype(np.int64), m * i[:, None]
-    if out["cond"] is None and out["rad"] is None:
+    if out["cond"] is None and out["rad"] is None and out["ce101"] is None:
         return None
     return out
 
@@ -172,12 +191,14 @@ def group_phases(config: Config) -> dict[str, dict[str, float]]:
 
 
 def _add(records: list[tuple[dict, float]], key: str) -> tuple[np.ndarray, np.ndarray]:
-    """(harmonic numbers, the members' phasors added per harmonic) for "cond" or "rad", each member's harmonic n
-    turned by e^(-j·n·φ) (φ its phase): a delay of φ/360 of the period."""
+    """(harmonic numbers, the members' phasors added per harmonic) for "cond", "ce101" (line currents) or "rad"
+    (moment vectors), each member's harmonic n turned by e^(-j·n·φ) (φ its phase): a delay of φ/360 of the period."""
     ns = np.concatenate([d["n_" + key] for d, _ in records])
-    vals = np.concatenate([d[key] * (np.exp(-1j * d["n_" + key] * math.radians(ph)) if key == "cond" else
-                                     np.exp(-1j * d["n_" + key] * math.radians(ph))[:, None])
-                           for d, ph in records])
+    vals = []
+    for d, ph in records:
+        rot = np.exp(-1j * d["n_" + key] * math.radians(ph))
+        vals.append(d[key] * (rot if d[key].ndim == 1 else rot[:, None]))
+    vals = np.concatenate(vals)
     uniq, inv = np.unique(ns, return_inverse=True)
     total = np.zeros((len(uniq),) + vals.shape[1:], complex)
     np.add.at(total, inv, vals)
@@ -220,6 +241,17 @@ def _rows(records: list[tuple[dict, float]], config: Config) -> dict:
         out["radiated"] = rows
         compared = [r for r in rows if r["margin_db"] is not None]
         out["worst"] = min(compared, key=lambda r: r["margin_db"]) if compared else None
+    if all(d["ce101"] is not None for d, _ in records):
+        from ..emi.conducted import ce101_table
+        # the limit at the stages' input current together (CE101-1 relaxes with the load current)
+        i_in = sum(d["ce101_i"] or 0.0 for d, _ in records) or None
+        ce = a.ce101_spec(d0["ce101_v"], i_in)
+        if ce is not None:
+            n, line = _add(records, "ce101")
+            rows = ce101_table(n * f_sw, np.abs(line), ce, per_decade=REPORT_PER_DECADE)
+            out["ce101"], out["ce101_limit"] = rows, ce.describe()
+            compared = [r for r in rows if r["margin_db"] is not None]
+            out["ce101_worst"] = min(compared, key=lambda r: r["margin_db"]) if compared else None
     return out
 
 
@@ -266,14 +298,16 @@ def interleave_groups(converters: list, config: Config) -> tuple[list[Issue], li
                 d["cond"] = None
         if d0["cond"] is not None:
             g["conducted_standard"] = describe(d0["standard"], d0["cls"])
-        if any(d["ce101"] for d, _ in recs):
-            g["notes"].append("CE101 is each stage's own reading (not combined)")
+        if any(d["ce101"] is not None for d, _ in recs) and not all(d["ce101"] is not None for d, _ in recs):
+            g["notes"].append("CE101 not combined: not every stage has harmonics in its range (each stage's own)")
         g.update(_rows(recs, config))
         in_phase = _rows([(d, 0.0) for d, _ in recs], config)
         g["conducted_in_phase_worst"] = in_phase.get("conducted_worst")
         g["radiated_in_phase_worst"] = in_phase.get("worst")
+        g["ce101_in_phase_worst"] = in_phase.get("ce101_worst")
         g["stages_worst"] = {r.net: {"conducted": (r.conducted_worst or {}).get("margin_db"),
-                                     "radiated": (r.worst or {}).get("margin_db")} for r in solved}
+                                     "radiated": (r.worst or {}).get("margin_db"),
+                                     "ce101": (r.ce101_worst or {}).get("margin_db")} for r in solved}
         for r in solved:
             r.interleave = g
         # issues: the group's own, at its first stage
@@ -301,6 +335,17 @@ def interleave_groups(converters: list, config: Config) -> tuple[list[Issue], li
                                     f"{w['margin_db']:+.1f} dB)", loc, layer=lead.layer,
                                     key=f"power:{group}:interleave:emi",
                                     details={k: w[k] for k in ("f", "e_dbuv", "limit_dbuv", "margin_db")}))
+        w = g.get("ce101_worst")
+        if w is not None and w["margin_db"] < rules.emi_margin_db:
+            sev = resolve_severity("conducted_emission", rules.severity, "error" if w["margin_db"] < 0 else "warning")
+            if sev != "off":
+                from ..components.values import format_si
+                issues.append(Issue("conducted_emission", sev, group,
+                                    f"interleave group {group} ({who}): input lead current together "
+                                    f"{w['i_dbua']:.1f} dBµA at {format_si(w['f'], 'Hz')} vs {g['ce101_limit']} "
+                                    f"{w['limit_dbua']:.1f} dBµA (margin {w['margin_db']:+.1f} dB)", loc,
+                                    layer=lead.layer, key=f"power:{group}:interleave:ce101",
+                                    details={k: w[k] for k in ("f", "i_dbua", "limit_dbua", "margin_db")}))
     for r in converters:
         if hasattr(r, "phasors"):
             r.phasors = None
@@ -310,15 +355,17 @@ def interleave_groups(converters: list, config: Config) -> tuple[list[Issue], li
 def interleave_text(g: dict) -> list[str]:
     """A group's figures in a few phrases (the reports and the window): the margins together at the phases, in
     phase, and each stage's own."""
+    from ..components.values import format_si
     who = ", ".join(f"{n} {p:g}°" for n, p in g["phases_deg"].items())
     out = [f"interleaved ({g['group']}: {who})"]
     for what, key, inp in (("conducted", "conducted_worst", "conducted_in_phase_worst"),
+                           ("CE101", "ce101_worst", "ce101_in_phase_worst"),
                            ("radiated", "worst", "radiated_in_phase_worst")):
         w, wi = g.get(key), g.get(inp)
         if w is None:
             continue
-        own = [s[what] for s in g["stages_worst"].values() if s.get(what) is not None]
-        txt = f"{what} margin together {w['margin_db']:+.1f} dB @ {w['f'] / 1e6:.4g} MHz"
+        own = [s[what.lower()] for s in g["stages_worst"].values() if s.get(what.lower()) is not None]
+        txt = f"{what} margin together {w['margin_db']:+.1f} dB @ {format_si(w['f'], 'Hz')}"
         if wi is not None:
             txt += f" (in phase {wi['margin_db']:+.1f} dB"
             txt += f"; each alone from {min(own):+.1f} dB)" if own else ")"

@@ -386,11 +386,20 @@ class TorchMath:
     """PlaneStack.solve's matrix work on the device (peec._HostMath is the numpy twin)."""
 
     def __init__(self, run: Run, stack):
-        """The device math for solves on `stack` in `run` (the stack's device copies made on first use)."""
+        """The device math for solves on `stack` in `run` (the stack's device copies made on first use). Raises
+        DeviceTooSmall before uploading a model the device's free memory cannot hold (PlaneStack.solve then does the
+        solve on the CPU and the run counts it): a 4 GB card did not run out, Windows paged it (> 2 h for a refboard
+        Simulate that took 18 min on the CPU)."""
         self.run = run
         dev = run.device
         self.t, self.d, self.st = dev.torch, dev.device, stack
         self.vec = TorchVectors(dev)
+        if str(dev.device) not in stack.__dict__.get("_gpu", {}):
+            free = _free_bytes(dev)
+            need = device_bytes(stack)
+            if free is not None and need > DEVICE_MEMORY_SHARE * free:
+                raise DeviceTooSmall(f"the model needs ~{need / 1e9:.2g} GB on the {dev.name}, {free / 1e9:.2g} GB "
+                                     "free")
         self.data = _stack_data(dev, stack)
 
     def dev(self, v: np.ndarray):
