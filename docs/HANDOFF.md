@@ -7,7 +7,7 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `path-loss-gpu` (2026-10-19, from `main`, not merged):** the user: "Fix those" (NEXT_STEPS items 6 and 7;
+- **Branch `path-loss-gpu` (2026-10-19, from `main`, merged into `main` as 2a93735 at the user's "Yes"):** the user: "Fix those" (NEXT_STEPS items 6 and 7;
   VALIDATION_AUDIT Round 4 has the evidence).
   - Item 6: the signal path's lines are lossy (`emi/path.PathLine.alpha`, `simulate._line_loss`, REFERENCES A36):
     kraft's ADC_I_RAIL_1 +21.4 → +33.5 dB, ADC_I_RAIL_2 +35.4, the SPI nets +0.4 dB; the converters and the
