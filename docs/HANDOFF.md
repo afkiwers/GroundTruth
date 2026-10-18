@@ -14,9 +14,9 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
     reason and evidence.
   - The code cites the keys where it applies them: solver, emi, analysis, components, rules, thermal, and the
     tests that check against exact results.
-  - Rules the list follows: a source is cited only for what it contains; a section or equation number only where it
-    was checked (Wadell's section numbers were dropped for that reason); what has no published source is an
-    assumption.
+  - Rules the list follows: a source is cited only for what it contains; what has no published source is an
+    assumption. Locations: the MIL-STD-461G ones were checked against the standard; the few book sections are the
+    usual ones for those editions but were not re-read (the list says which); Wadell's section numbers were dropped.
   - Checks: `tools/dev/ast_same.py main` reports only comments and docstrings changed (35 files);
     `tools/dev/ref_keys.py` (new) finds 0 unknown keys and every listed key cited. CLAUDE.md has the rule for new
     code.

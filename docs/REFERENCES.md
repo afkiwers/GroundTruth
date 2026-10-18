@@ -5,8 +5,11 @@ at the place it uses them, in square brackets: `[Grover 1946]` in a docstring or
 that source". A key with a location narrows it down: `[Jackson 1999, §5.6]`.
 
 Rules this list follows:
-- A source is cited only for what it contains. A section or equation number is given only where it was checked;
-  otherwise the citation names the source alone.
+- A source is cited only for what it contains. Locations are given sparingly: the MIL-STD-461G figures and tables
+  were checked against the standard (VALIDATION_AUDIT.md, rounds 2 and 3); the few book sections (Jackson §5.4 and
+  §5.6, Balanis §5.2, Abramowitz & Stegun §25.4, Erickson & Maksimović ch. 12 of the 2nd edition) and the CISPR 32
+  annex and IPC-2221B table are the usual locations in those editions but were not re-read for this list. Section
+  numbers the code had cited without a check (Wadell's) were dropped.
 - What has no published source behind it (a modelling choice, a fitted constant, a default) is an **assumption**:
   it has an id `[A1]`, `[A2]`… in the assumptions table below, with the reason and, where one exists, the evidence
   (a test, a measurement in ARCHITECTURE.md or VALIDATION_AUDIT.md).
