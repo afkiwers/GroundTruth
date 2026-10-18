@@ -7,7 +7,7 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `small-fixes` (2026-10-18, from `references`, not merged):** at the user's "keep going".
+- **Branch `small-fixes` (2026-10-18, from `references`; both merged into `main` as 6e5f00a at the user's "Merge"):** at the user's "keep going".
   - The Mac launcher is committed executable, which fixes `test_the_mac_launcher_is_lf_and_executable`.
   - The grid note says a coarse grid moves a resonance's frequency too, not only its height.
   - README: the plane-displacement example is the current one (F.Cu/In1 by C1105/C1110 at 1020 MHz, 4.6×). The
@@ -17,7 +17,7 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
     this only reaches 4x and up.
   - Waiting on the user: MIL-STD-461H's CE101 to 20 kHz (follow 461H or keep 461G), and whether to model the
     combined emission of interleaved stages.
-- **Branch `references` (2026-10-18, committed, not merged):** at the user's "add references of the
+- **Branch `references` (2026-10-18, merged into `main` with `small-fixes` as 6e5f00a):** at the user's "add references of the
   assumptions/methods/theorems, also call them out locally where they are used, in all calculations".
   - [REFERENCES.md](REFERENCES.md) lists every source by key (68 sources: electromagnetics, lines and EMC, power
     electronics, heat transfer, numerics, standards by edition) and the model's assumptions A1–A33, each with its
