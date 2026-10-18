@@ -18,12 +18,13 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
     `PlaneStack._widths`, `_narrow_self`, `_side_mutual`, `M_near`, CPU and GPU), and densities and heat follow
     (`node_field(copper=True)`, `Grid.copper_area`); SP-27.
     - The neck test case converges: 797-717 MHz where it was 722 to 900+.
-    - On kraft, the 1x-vs-2x spread above 1 GHz went from rms 7.0 to 4.0 dB, but a 1x-only F.Cu/In1 mode by
-      C1105/C1110 moved from 1060 to 940 MHz (0.5-1 GHz rms 2.7 → 6.3 dB).
+    - On kraft above 1 GHz, the grid-to-grid rms went from 7.0 to 4.0 dB (1x vs 2x) and from 5.3 to 4.4 dB
+      (2x vs 4x). The largest mode, F.Cu/In1 by C1105/C1110, is at 940 / 1020 / 1020 MHz at 1x / 2x / 4x (it was at
+      1060 / 1100 / 1060). So 2x and 4x agree on it, and 1x places it 8 % low, inside 0.5-1 GHz.
     - The user chose "commit, keep digging": `GRID_SENSITIVE_F` is now 600 MHz.
-    - **Open:** why that mode survives at 1x (its stitching via joins the same layers on both grids:
-      `out/converge/hot_new_*_940.log`). Also open: a sub-grid for cells ≤ 0.15 mm (point-sampled now, strips
-      full; 2x there gave 769 instead of 793 MHz).
+    - **Open:** 2x and 4x still differ by several dB above 1 GHz (4x has a peak at 1260-1300 MHz). Also open: a
+      sub-grid for cells ≤ 0.15 mm (point-sampled now, strips full; 2x there gave 769 instead of 793 MHz). Logs are
+      in `out/converge/spi_sck_head_*`, `spi_sck_widths*` and `hot_new_*`.
   - The MIL-STD-461 sources are downloaded to `Downloads\GroundTruth audit sources`, including 461H (2026-04-17,
     supersedes 461G): RE102 aircraft is split into `re102_aircraft_external` (2 MHz-18 GHz), `re102_helicopter` and
     `re102_space` (10 kHz-18 GHz). CE101 to 20 kHz (461H) is not implemented.

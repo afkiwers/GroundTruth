@@ -122,7 +122,7 @@ pins); `radiation` (signal paths and converters); the component models (all thre
 | SP-16 | Plane-pair capacitance, cavity resonance f10 | ε0εrA/t; c/(2a√εr) | exact / 3 % | Covered (test_capacitance) |
 | SP-17 | Shunt loops on a board (50 Ω shunt vs load_ohms), op-amp board path | equivalent circuits | 0.1-0.4 dB | Covered (test_path) |
 | SP-18 | Signal-path Bode: RC pole, op-amp pole | 1/(2π(R_drv+R)C), GBW/gain | 1 % | Covered (test_transfer) |
-| SP-19 | Board-wide resonance heights above 1 GHz | grid convergence | – | Improved above 1 GHz (round 3: strips as wide as their copper, SP-27; kraft 1x vs 2x rms 7.0 → 4.0 dB), worse at 0.5-1 GHz (a 1x-only mode moved to 940 MHz: 2.7 → 6.3 dB); the grid note now from 600 MHz. Limitation, open |
+| SP-19 | Board-wide resonance heights above 1 GHz | grid convergence | – | Improved (round 3: strips as wide as their copper, SP-27; kraft above 1 GHz rms 7.0 → 4.0 dB 1x vs 2x, 5.3 → 4.4 dB 2x vs 4x; the largest mode now agrees at 2x and 4x, 1x places it 8 % low); the grid note now from 600 MHz. Limitation (several dB remain) |
 | SP-20 | Route finding through series parts, `route_missing` | – | – | Covered (test_path, test_checks) |
 | SP-21 | Tier 1 gap_crossing: a slot's length, below min_gap_mm none | constructed geometry | 0.01 mm | Verified (round 2, 3 cases) |
 | SP-22 | Tier 1 split between two nets named; reference_net over the other net | constructed geometry | 0.05 mm | Verified (round 2) |
@@ -452,20 +452,27 @@ The user: "Fix this" (inner-layer Z0 and solder mask), "Is that a bad thing?" (i
   - Densities follow: the DC maps, peaks, thermal heat and bridge RMS maps take a strip's current over its own
     width (a 0.35 mm neck on a 1 mm grid read about a third of its A/mm²); the heat adds up to the solver's loss
     (CV-28).
-  - kraft_flux_mini_2's SPI_SCK board-wide model, 1x / 2x, the same 25 harmonics 540-1460 MHz, before
-    (`out/converge/spi_sck_head_*.json`, this round's starting code) and after (`spi_sck_widths.json`): the rms (max)
-    |m| difference between the grids went from 7.0 (16.7) to 4.0 (8.0) dB at 1-1.5 GHz, but from 2.7 (7.8) to
-    6.3 (17.2) dB at 0.5-1 GHz. The cause: a 1x-only mode of the F.Cu GND / In1 +3V3 pair at (119-121, 128-130) mm
-    by C1105 / C1110 (113 mm² at 1x, 17 at 2x) moved from 1060 to 940 MHz instead of going away. Its stitching via
-    joins the same layers on both grids; why the mode survives at 1x is open. `grid_sensitive_note` now applies from
-    600 MHz (it was 1 GHz), so the mode is flagged where it now sits. The 20 MHz loop is the same before and after
-    (14.97 / 15.04 mm²). 4x: running when this was committed (HANDOFF has it once done).
+  - kraft_flux_mini_2's SPI_SCK board-wide model at 1x / 2x / 4x, the same 25 harmonics 540-1460 MHz, before
+    (`out/converge/spi_sck_head_*.json`, this round's starting code, a worktree of 20ec0a9) and after
+    (`spi_sck_widths*.json`). The rms (max) |m| difference between grids, before → after:
+
+    | | 1x vs 2x | 2x vs 4x |
+    |---|---|---|
+    | 0.5-1 GHz | 2.7 (7.8) → 6.3 (17.2) dB | 1.1 (3.3) → 1.5 (2.7) dB |
+    | 1-1.5 GHz | 7.0 (16.7) → 4.0 (8.0) dB | 5.3 (8.3) → 4.4 (7.0) dB |
+
+    The largest mode (F.Cu GND / In1 +3V3 at (119-121, 128-130) mm by C1105 / C1110) was at 1060 / 1100 / 1060 MHz
+    (139 / 61 / 53 mm²) and is at 940 / 1020 / 1020 MHz (113 / 69 / 78 mm²): 2x and 4x agree on it now, 1x places it
+    8 % low, inside 0.5-1 GHz, hence that band's 1x-vs-2x number. Above 1 GHz 4x has a peak at 1260-1300 MHz that 2x
+    has not. `grid_sensitive_note` now applies from 600 MHz (it was 1 GHz), so the mode is flagged at 1x too. The
+    20 MHz loop is the same before and after (14.97 / 15.04 mm²). Which frequency is right for the mode (1020 or
+    1060 MHz) would take 8x.
 - **Not changed:** CE101 to 20 kHz (461H), the combined emission of interleaved stages, a sub-grid below 0.15 mm
   cells.
 
 ## Remaining risks and unverified items
-- SP-19: board-wide resonance heights above ~600 MHz still depend on the grid by several dB on kraft (1x vs 2x rms
-  4.0 dB at 1-1.5 GHz, 6.3 dB at 0.5-1 GHz from a 1x-only F.Cu/In1 mode, cause open); a note says so.
+- SP-19: board-wide resonance heights above ~600 MHz still depend on the grid by several dB on kraft (2x vs 4x rms
+  4.4 dB at 1-1.5 GHz; 1x places the largest mode 8 % low); a note says so. 2x is the grid to check them at.
 - ISSUE-5: where no cut can be made (a stretch's centre off its net's copper), the closed forms remain: very
   asymmetric inner layers up to ~10 % high, no solder mask.
 - Copper narrower than the 0.15 mm sub-grid pitch is still sampled at that pitch (a 0.35 mm neck reads 0.29 or 0.43
