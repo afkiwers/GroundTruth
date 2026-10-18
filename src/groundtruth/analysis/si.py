@@ -16,13 +16,14 @@ Run checks:
   mismatch of the two nets' routed lengths (each layer's delay from its cross-sections) against max_skew (default a
   tenth of the edge).
 - crosstalk: a listed net (the aggressor, its edge and swing from `nets:`) running parallel to another net's track
-  on one layer: near-end NEXT = K_b·min(1, 2·T_d/t_r) and far-end FEXT = |K_f|·T_d/t_r of the swing, K_b and K_f
+  on one layer: near-end NEXT = K_b·min(1, 2·T_d/t_r) and far-end FEXT = |K_f|·T_d/t_r of the swing [Hall 2000]
+  [Johnson 1993], K_b and K_f
   from the pair's cross-section at its closest stretch and T_d the delay of the coupled length (all parallel runs of
   the two nets together, at the closest spacing: an upper estimate). Above `crosstalk_max` (5 %) an issue on the
   victim.
 - via_stub: a via of a listed net or pair whose barrel runs past the layers the net uses: the stub resonates at
-  f = c/(4·l·sqrt(εr)) (a quarter wave, a notch in the transmission); below `stub_factor` (3) times the signal's
-  knee 0.35/t_r it eats into the edge's spectrum.
+  f = c/(4·l·sqrt(εr)) (a quarter wave, a notch in the transmission [Pozar 2012]); below `stub_factor` (3) times
+  the signal's knee 0.35/t_r it eats into the edge's spectrum.
 
 Validated in tests/test_si.py on synthetic boards against closed forms (a microstrip's Z0, a pair's Zdiff, the
 crosstalk of two parallel tracks, a stub's quarter wave) and the solver's own tests (tests/test_xsection.py).
@@ -40,7 +41,8 @@ from typing import Callable, Optional
 from ..core.board import Board, Track
 from ..solver.xsection import C_LIGHT, Rect, Section, SectionResult, Slab, solve
 
-KNEE = 0.35                     # a signal's knee frequency 0.35/t_r: most of an edge's spectrum lies below it
+KNEE = 0.35                     # a signal's knee frequency 0.35/t_r: most of an edge's spectrum lies below it (a
+                                # single-pole response with a 10-90 % rise t_r has its -3 dB point at ln 9/(2π t_r))
 SEGMENT_MIN_MM = 0.2            # shorter track pieces (pad escapes, corners) are not cut
 PARALLEL_DEG = 15.0             # tracks within this angle of each other run parallel (crosstalk)
 COUPLED_MIN_MM = 0.5            # a parallel stretch shorter than this is left out

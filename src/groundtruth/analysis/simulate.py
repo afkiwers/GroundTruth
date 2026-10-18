@@ -14,7 +14,7 @@ Two plane models per route, because the two jobs need very different resolution:
 With `analysis.plane_capacitance: false` only the fine model runs, at the harmonics.
 
 Reference frequency: loop inductance, the ideal comparison and the board-wide offset are taken at
-f_ref = max(f0, 1 MHz). Below about 1 MHz the return still follows resistance rather than inductance, so a
+f_ref = max(f0, 1 MHz) [A20]. Below about 1 MHz the return still follows resistance rather than inductance, so a
 DC-DC converter switching at 10 kHz is judged where its edges radiate, not at its fundamental.
 
 Parallel: solves at different frequencies, for different routes and in the final per-route step are independent,
@@ -22,7 +22,7 @@ so they run in a thread pool (`analysis.threads`). SciPy's sparse LU, the FFTs a
 4-core laptop four board-wide solves ran 2.3x faster than one after another, with identical results.
 
 Emission: harmonic current on the line (driver resistance, line Z0/εeff, receiver load) × loop moment per
-ampere → far-field estimate → CISPR 32 margin.
+ampere → far-field estimate → CISPR 32 margin. Source keys in square brackets: docs/REFERENCES.md.
 """
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ from .pins import column_conductance, feed_layer, params_cache, segment_impedanc
 from .route import SHUNT_KINDS, Route, RouteSegment, RouteVia, return_pad, shunt_parts, signal_nets  # noqa: F401
 from .section import corridor_mm, route_section
 
-MOUNT_L = 0.3e-9            # pad + escape inductance added to lumped parts (vias are modelled explicitly)
+MOUNT_L = 0.3e-9            # pad + escape inductance added to lumped parts (vias are modelled explicitly) [A21]
 MAX_PART_BRANCHES = 8       # a lumped part is spread over its pads as up to this many parallel branches
 INJECT_MAX_MM = 3.0         # return pin must be within this distance of its net's copper
 INJECT_FALLBACK_MM = 5.0    # ...or of any plane copper
@@ -1687,7 +1687,7 @@ def _route_issues(setup: RouteSetup, rules, a):
 
 def _interp_loglog(f, fs, vs):
     """Interpolate positive values vs at fs to f linearly in log-log (exact for power laws, the usual shape of a
-    transfer or moment between resonances); one point: a constant."""
+    transfer or moment between resonances [A22]); one point: a constant."""
     fs = np.asarray(fs, float)
     vs = np.maximum(np.asarray(vs, float), 1e-30)
     if len(fs) == 1:

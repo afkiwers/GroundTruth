@@ -5,7 +5,8 @@ A rail (config DcLoadSpec) is a supply pin, optionally its return pin, and loads
 current and optionally its return pin. It is solved as one DC run on the whole-board copper model
 (power.dc_board_build: every plane net and the rail's nets on every layer with copper, the stages' DC paths share
 it): +I at the source, -I_k at each load on the supply net; with the returns, +I_k at each load's return and -I at
-the source's return on the ground net. The solve is linear, so all loads at once is the superposition of each.
+the source's return on the ground net. The solve is linear, so all loads at once is the superposition of each
+[Desoer 1969].
 
 What comes out (DcLoadResult, a ConverterResult so the DC views, the thermal solve and the combined view take it
 as they take a stage's DC path):

@@ -1,7 +1,8 @@
-"""IPC-2221 current capacity (the conservative older chart fit, as PCB Thermal uses it).
+"""IPC-2221 current capacity (the conservative older chart fit, as PCB Thermal uses it) [IPC-2221B].
 
 I = k · ΔT^0.44 · A^0.725, A in mil², internal conductors k = 0.024. A via barrel is an internal conductor of
-cross-section π·(d + t)·t (d the drill, t the plating: the barrel's mean circumference times its wall)."""
+cross-section π·(d + t)·t (d the drill, t the plating: the barrel's mean circumference times its wall) [A17]. Source
+keys in square brackets: docs/REFERENCES.md."""
 from __future__ import annotations
 
 import math
