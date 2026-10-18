@@ -370,7 +370,7 @@ a warning; `off` drops the check's issues entirely. `--fail-on` then decides whi
 ### Finding the nets to analyse
 
 `groundtruth detect board.kicad_pcb` (or **Detect…** on the plugin's Signal paths tab) suggests nets with their driver, receivers and default timing:
-- **Signal class** comes from the net name and the schematic pin names, for example SPI clock (20 MHz / 2 ns), RMII (50 MHz / 1 ns), USB, SDIO/QSPI, debug clocks, crystals and switching nodes.
+- **Signal class** comes from the net name and the schematic pin names, for example SPI clock (20 MHz / 2 ns), RMII (50 MHz / 1 ns), USB, SDIO/QSPI, debug clocks, crystals and switching nodes. A net with no class gets 10 MHz / 2 ns, unless an op-amp with a `Slew Rate` or `GBW` / `Bandwidth` field drives it (its output on the driver's net): then the fastest full 3.3 V swing that op-amp can make, edge max(0.8·3.3 V / SR, 0.35 / BW) and frequency min(10 MHz, BW, SR / (π·3.3 V)). kraft_flux_mini_2's U301 (TLV6001, 0.5 V/µs) gives Net-(U301--) 5.28 µs at 48.2 kHz instead of GHz content on a current-sense signal.
 - **Driver** comes from the schematic pin types: an output beats a bidirectional pin, which beats a connector/passive pin, which beats an input.
 - **Series parts:** suggestions follow 0R/termination resistors and ferrites, so a series-terminated line is one net.
 - **Excluded:** power nets.

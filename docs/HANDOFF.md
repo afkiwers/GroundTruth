@@ -7,6 +7,12 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `analog-defaults` (2026-10-19, from `main`, not merged):** the user asked how useful the MHz-GHz
+  results are for a signal of a few kHz (Net-(U301--)): not at all; it ran on detection's generic 10 MHz / 2 ns.
+  The user: "use that information otherwise keep 10MHz". `detect._amplifier_signal` [A37]: a net with no class from
+  its names, driven by an op-amp output with a slew rate or bandwidth, gets edge max(0.8·3.3 V / SR, 0.35 / BW) and
+  frequency min(10 MHz, BW, SR / (π·3.3 V)); kraft's Net-(U301--) 5.28 µs at 48.2 kHz. The ADC paths start at the
+  ZXCT1107 (an `open` model, no data) and keep the default; VALIDATION_AUDIT round 4 says what their numbers mean.
 - **Branch `path-loss-gpu` (2026-10-19, from `main`, merged into `main` as 2a93735 at the user's "Yes"):** the user: "Fix those" (NEXT_STEPS items 6 and 7;
   VALIDATION_AUDIT Round 4 has the evidence).
   - Item 6: the signal path's lines are lossy (`emi/path.PathLine.alpha`, `simulate._line_loss`, REFERENCES A36):

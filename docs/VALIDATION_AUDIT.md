@@ -524,6 +524,12 @@ the last digit or two.
   ADC_I_RAIL_1 +21.4 → +33.5 dB (C304 carries 1.0 × the input current, not 4.5 ×), ADC_I_RAIL_2 +30.1 → +35.4,
   the SPI nets +0.4 dB, the converters and the issue counts unchanged (`out/path_loss/full/`). Net-(U301--) stays at
   +22.1 dB: its worst is a board-wide plane resonance at 1590 MHz, not the path (the grid note applies).
+- **What the analog nets' numbers mean.** Net-(U301--), /CPU/ADC_I_RAIL_1 and _2 ran on detection's generic
+  10 MHz / 2 ns (`class: Signal`, unreviewed): a current-sense signal of a few kHz behind a TLV6001 (0.5 V/µs) has
+  nothing near 310 MHz or 1.59 GHz, so their margins there (and the line-loss change on ADC_I_RAIL_1) describe a
+  signal that does not exist. Their real concern is susceptibility (victims.py). Detection now gives a net its
+  driving op-amp's fastest full swing where the op-amp has the data [A37]: Net-(U301--) 5.28 µs at 48.2 kHz; the
+  ADC paths start at the ZXCT1107 (no such data), so they keep 10 MHz / 2 ns until their signal is set by hand.
 - **The GPU path on a small GPU (NEXT_STEPS 7).** All of it is complex128, which a GeForce card runs at 1/64 of
   its FP32 rate: the RTX 3050 Laptop GPU was 3.5 × slower than the CPU on a small board and > 6 × on kraft, and two
   processes on it (a split Simulate's workers) stalled each other for hours (`tools/dev/gpu_contention.py`). `auto`

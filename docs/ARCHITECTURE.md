@@ -1512,7 +1512,9 @@ conducted emission or a ringing set by C_oss; design changes can.
 - A net matched only by a pin name that has zone copper is skipped (a poured supply).
 - `suggest_net(board, config, net)`: the same per-net logic (`_suggest`) for a net the user picked (KiCad
   selection), which never filters a signal out: no class gives the generic class `GENERIC` (10 MHz / 2 ns, to
-  set), fewer than two logic parts fall back to all pads, a poured net is flagged; such doubts go into the
+  set; since 2026-10-19 an op-amp whose output is on the driver's net and that has a slew rate or a bandwidth
+  sets the fastest full swing it can make instead, `_amplifier_signal` [A37]: kraft's Net-(U301--) had 2 ns edges
+  on a current-sense output and its worst "emission" at 1.59 GHz), fewer than two logic parts fall back to all pads, a poured net is flagged; such doubts go into the
   reasons and make the confidence low. Refused with the reason: nets not on the board, reference nets, supply
   nets (`is_power_net`), and switch nodes of the configured power stages. A supply-looking net the user picks is
   added after a question (`suggest_net(as_signal=True)`, `MainFrame.add_nets`): the user's /CPU/ADC_I_RAIL_1, an

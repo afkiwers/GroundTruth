@@ -206,7 +206,10 @@ in the schematic: see <a href="#siglabels">Labelling a signal path</a>.</p>
 <li><b>Add KiCad selection</b> (or KiCad's toolbar button <b>Add selected net to GroundTruth</b>) adds the net
   of the track, via or pad selected in the PCB editor (click or right-click it there first), as an unreviewed
   suggestion with its driver and receivers from the pin types; the status line says what was added, and asks for
-  the frequency and rise time where the net's kind of signal is unknown. Ground nets and power-stage switch
+  the frequency and rise time where the net's kind of signal is unknown. A net of unknown kind driven by an op-amp
+  with a <b>Slew Rate</b> or <b>GBW</b> / <b>Bandwidth</b> field (an analog output, a buffered sensor) gets the
+  fastest full swing that op-amp can make instead of 10 MHz / 2 ns: a TLV6001 (0.5 V/µs) gives 5.28 µs edges at
+  48.2 kHz. Set the real signal if it is slower. Ground nets and power-stage switch
   nodes are refused with the reason. A net that looks like a supply (a power pin on it, a supply name such as
   +3V3, VIN, RAIL) or carries a power stage's current is refused too, but you are asked whether to add it as a
   signal anyway: an ADC input or a sense line measuring a rail is one. A name with a measuring word (ADC, SENSE,
