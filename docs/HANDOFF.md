@@ -7,7 +7,7 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `analog-defaults` (2026-10-19, from `main`, not merged):** the user asked how useful the MHz-GHz
+- **Branch `analog-defaults` (2026-10-19, from `main`, merged into `main` as 33d43ad at the user's "Yes"):** the user asked how useful the MHz-GHz
   results are for a signal of a few kHz (Net-(U301--)): not at all; it ran on detection's generic 10 MHz / 2 ns.
   The user: "use that information otherwise keep 10MHz". `detect._amplifier_signal` [A37]: a net with no class from
   its names, driven by an op-amp output with a slew rate or bandwidth, gets edge max(0.8·3.3 V / SR, 0.35 / BW) and
