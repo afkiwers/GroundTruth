@@ -72,7 +72,8 @@ class Progress:
 
 
 class SPDSolver:
-    """AMG-preconditioned conjugate gradient with a reusable hierarchy.
+    """AMG-preconditioned conjugate gradient [Hestenes 1952] with a reusable hierarchy (pyamg [Bell 2022]: smoothed
+    aggregation [Vanek 1996], else Ruge-Stüben [Ruge 1987]).
 
     The AMG hierarchy is built once and reused while the matrix only changes
     moderately between coupled iterations (temperature-dependent coefficients),

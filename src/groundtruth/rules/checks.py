@@ -240,7 +240,8 @@ class _Checker:
 
     def check_edges(self, net, run: _Run, line: LineString, plane, h: float, gap_zones) -> None:
         """edge_proximity: trace within edge_factor x h of the plane's edge, where the return current crowds and
-        the fringing field radiates more. Small features are ignored: the plane is closed morphologically first
+        the fringing field radiates more (over a wide plane the return spreads as 1/(1 + (x/h)²) [Johnson 1993]: at 3h
+        a tenth of its peak; the factor is a rule of thumb [A26]). Small features are ignored: the plane is closed morphologically first
         (thin slits between pours bridged) and holes below SMALL_HOLE_MM2 (via antipads) don't count as edges;
         the run's ends and the gaps already reported are left out."""
         limit = self.rules.edge_factor * h
@@ -275,7 +276,7 @@ class _Checker:
         """A layer change: when the reference plane changes too, the return current has to cross between the two
         planes near the signal via. Same net on both planes: a via of that net joining them must be within
         stitch_distance (layer_change_stitch). Different nets: a capacitor between them within decap_distance
-        (layer_change_decap), the return crossing as displacement current."""
+        (layer_change_decap), the return crossing as displacement current. Both distances are rules of thumb [A26]."""
         refs_a = [r[0] for r in reference_layers(self.board, layer_a)]
         refs_b = [r[0] for r in reference_layers(self.board, layer_b)]
         if not refs_a or not refs_b or set(refs_a) & set(refs_b):

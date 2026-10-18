@@ -26,7 +26,7 @@ Rules this list follows:
 | Ramo 1994 | S. Ramo, J. R. Whinnery, T. Van Duzer, *Fields and Waves in Communication Electronics*, 3rd ed. New York: Wiley, 1994. | Skin depth δ = 1/√(π f μ0 σ) and the surface resistance of a good conductor. |
 | Pozar 2012 | D. M. Pozar, *Microwave Engineering*, 4th ed. Hoboken, NJ: Wiley, 2012. | Dielectric loss tangent (ε = ε′(1 − j tan δ)); parallel-plate capacitance; cavity resonances and their Q (conductor and dielectric loss add as 1/Q); a parallel-plate line's inductance μh per square; the input impedance of a terminated lossless line and the voltage and current along it. |
 | Paul 2008 | C. R. Paul, *Analysis of Multiconductor Transmission Lines*, 2nd ed. Hoboken, NJ: Wiley–IEEE Press, 2008. | Per-unit-length L and C of a cross-section; L = μ0 ε0 C0⁻¹ for a homogeneous-equivalent TEM line; Z0, εeff; differential and common modes of a pair. |
-| Johnson 1993 | H. W. Johnson, M. Graham, *High-Speed Digital Design: A Handbook of Black Magic*. Englewood Cliffs, NJ: Prentice Hall, 1993. | Near- and far-end crosstalk of coupled lines, the near-end saturating at 2 T_d ≥ t_r. |
+| Johnson 1993 | H. W. Johnson, M. Graham, *High-Speed Digital Design: A Handbook of Black Magic*. Englewood Cliffs, NJ: Prentice Hall, 1993. | Near- and far-end crosstalk of coupled lines, the near-end saturating at 2 T_d ≥ t_r; the return current's spread over a ground plane under a trace, ∝ 1/(1 + (x/h)²). |
 | Hall 2000 | S. H. Hall, G. W. Hall, J. A. McCall, *High-Speed Digital System Design*. New York: Wiley, 2000. | Backward and forward crosstalk coefficients K_b = (L_m/L + C_m/C)/4, K_f = (L_m/L − C_m/C)/2. |
 | CODATA 2018 | E. Tiesinga, P. J. Mohr, D. B. Newell, B. N. Taylor, "CODATA recommended values of the fundamental physical constants: 2018," *Rev. Mod. Phys.*, vol. 93, 025010, 2021. | ε0 = 8.8541878128 × 10⁻¹² F/m (μ0 is taken as 4π × 10⁻⁷ H/m, 5.5 × 10⁻¹⁰ relative from the 2018 value 1.25663706212 × 10⁻⁶ H/m). |
 | IEC 60028 | IEC 60028:1925, *International standard of resistance for copper*. | Annealed copper at 20 °C: ρ = 1/58 Ω·mm²/m (σ = 5.8 × 10⁷ S/m), temperature coefficient 0.00393 /K. |
@@ -75,6 +75,17 @@ Rules this list follows:
 | CDA | Copper Development Association, alloy data (copper.org): C26000, C51000, C17200, C14500. | The electrical conductivity (% IACS) of brass, phosphor bronze, beryllium copper and tellurium copper pins. |
 | IPC-2221B | IPC-2221B, *Generic Standard on Printed Board Design*, IPC, 2012. | Conductor current capacity, I = k·ΔT^0.44·A^0.725 (k = 0.048 external, 0.024 internal; A in mil²) for vias and tracks; the electrical conductor spacing by voltage [Table 6-1] for the clearance check. |
 
+### Heat transfer
+
+| Key | Source | Used for |
+|---|---|---|
+| Incropera 2011 | T. L. Bergman, A. S. Lavine, F. P. Incropera, D. P. DeWitt, *Fundamentals of Heat and Mass Transfer*, 7th ed. Hoboken, NJ: Wiley, 2011. | Natural convection from horizontal plates (Nu = 0.54 Ra^¼, 0.15 Ra^⅓ above; 0.52 Ra^⅕ below), forced convection over a flat plate (0.664 Re^½ Pr^⅓; mixed 0.037 Re^⅘ − 871), linearised radiation, the two-surface enclosure's effective emissivity. |
+| Churchill 1975 | S. W. Churchill, H. H. S. Chu, "Correlating equations for laminar and turbulent free convection from a vertical plate," *Int. J. Heat Mass Transf.*, vol. 18, no. 11, pp. 1323–1329, 1975. | Natural convection from a vertical board, the full-range correlation. |
+| Churchill 1977 | S. W. Churchill, "A comprehensive correlating equation for laminar, assisting, forced and free convection," *AIChE J.*, vol. 23, no. 1, pp. 10–16, 1977. | Mixed convection: Nu³ = Nu_forced³ + Nu_natural³. |
+| Sutherland 1893 | W. Sutherland, "The viscosity of gases and molecular force," *Phil. Mag.*, ser. 5, vol. 36, pp. 507–531, 1893. | Air's viscosity against temperature. |
+| White 2006 | F. M. White, *Viscous Fluid Flow*, 3rd ed. New York: McGraw-Hill, 2006. | Sutherland's constants for air (μ0 = 1.716 × 10⁻⁵ Pa·s at 273 K, S = 110.4 K). |
+| Patankar 1980 | S. V. Patankar, *Numerical Heat Transfer and Fluid Flow*. Washington, DC: Hemisphere, 1980. | The finite-volume discretisation of conduction (heat and DC current) with face conductances between cells. |
+
 ### Numerical methods
 
 | Key | Source | Used for |
@@ -94,6 +105,10 @@ Rules this list follows:
 | Press 2007 | W. H. Press, S. A. Teukolsky, W. T. Vetterling, B. P. Flannery, *Numerical Recipes: The Art of Scientific Computing*, 3rd ed. Cambridge: Cambridge University Press, 2007. | Newton's method for nonlinear equations (the motor drive's periodic steady state); root bracketing. |
 | Oppenheim 1997 | A. V. Oppenheim, A. S. Willsky, S. H. Nawab, *Signals and Systems*, 2nd ed. Upper Saddle River, NJ: Prentice Hall, 1997. | Fourier series of periodic waveforms and Parseval's relation (a mean square from the line spectrum). |
 | Dijkstra 1959 | E. W. Dijkstra, "A note on two problems in connexion with graphs," *Numer. Math.*, vol. 1, pp. 269–271, 1959. | The shortest copper path from a driver to its receiver (through SciPy). |
+| Hestenes 1952 | M. R. Hestenes, E. Stiefel, "Methods of conjugate gradients for solving linear systems," *J. Res. Natl. Bur. Stand.*, vol. 49, no. 6, pp. 409–436, 1952. | Conjugate gradients for the symmetric positive definite thermal and DC systems. |
+| Vanek 1996 | P. Vaněk, J. Mandel, M. Brezina, "Algebraic multigrid by smoothed aggregation for second and fourth order elliptic problems," *Computing*, vol. 56, pp. 179–196, 1996. | The smoothed-aggregation AMG preconditioner. |
+| Ruge 1987 | J. W. Ruge, K. Stüben, "Algebraic multigrid," in *Multigrid Methods*, S. F. McCormick (ed.). Philadelphia: SIAM, 1987, pp. 73–130. | The classical (Ruge-Stüben) AMG, the fallback. |
+| Bell 2022 | N. Bell, L. N. Olson, J. Schroder, "PyAMG: Algebraic multigrid solvers in Python," *J. Open Source Softw.*, vol. 7, no. 72, 4142, 2022. | The AMG implementation used. |
 | Abramowitz 1964 | M. Abramowitz, I. A. Stegun (eds.), *Handbook of Mathematical Functions*. Washington, DC: NBS, 1964. | Gauss–Legendre quadrature [§25.4]. |
 
 ## Assumptions
@@ -123,3 +138,9 @@ Rules this list follows:
 | A21 | A lumped part gets 0.3 nH of pad and escape inductance (`MOUNT_L`) on top of its own model; vias are modelled explicitly. | A typical value for a small SMD part's pads and short escapes. |
 | A22 | Between solved frequencies, transfers and loop moments are interpolated linearly in log-log. | Exact for power laws, the usual shape between resonances; the solve frequencies are refined where the values bend. |
 | A23 | A motor bridge's copper heat leaves out the motor's PWM ripple current (out through the motor pin). | It is small next to the switching current in the hot loops; the six-step currents and the switching currents are included. |
+| A24 | A capacitor is a series R-L-C (ESR, ESL, C, optionally C at its DC bias); an inductor and a ferrite bead a series R-L. | The first-order model of each part; a ferrite's lossy resistance peak is not modelled (its impedance rating sets L at the rated frequency). |
+| A25 | Models suggested from a part's reference, value and package (ESR, ESL, a ferrite's ~600 Ω at 100 MHz when unknown) are typical figures. | Replaced by the part's fields or the user's settings; a note marks each assumed value. |
+| A26 | The Tier 1 rule limits: edge_factor 3·h from a plane's edge, a stitching via within 2 mm of a layer change, a decap within 5 mm, gaps from 0.1 mm. | Rules of thumb for where the return current is affected; all are settings (`rules:`). The 3·h follows the return's spread over a wide plane [Johnson 1993]. |
+| A27 | Material properties are typical published values: copper k = 390 W/(m·K) (electrodeposited and rolled foil, below pure copper's ~400), FR4 0.81 / 0.29 W/(m·K) in plane / through plane, and the other laminates in `thermal/materials.py`. | Laminates vary by resin and glass; a board's own values can be set. |
+| A28 | Air's conductivity as 0.0241·(T/273 K)^0.81 W/(m·K). | A fit to tabulated dry-air values over the board's temperature range. |
+| A29 | A partly covered cell conducts with an effective conductivity from its copper coverage, and between cells in proportion to the shared face's open (copper) fraction (cut-cell). | Keeps a trace's resistance at any angle when it is only a few cells wide; checked against straight, diagonal and angled traces (tests/thermal/test_validation.py). |

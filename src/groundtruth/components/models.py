@@ -87,14 +87,14 @@ class ComponentModel:
         if k == "resistor":
             return complex(max(self.get("R"), SHORT_OHMS), 0)
         if k == "cap":
-            # a real capacitor is a series R-L-C: ESR + j(w ESL - 1/(w C)); below its self-resonance
+            # a real capacitor is a series R-L-C [A24]: ESR + j(w ESL - 1/(w C)); below its self-resonance
             # 1/(2 pi sqrt(ESL C)) it is capacitive, above it inductive (at DC: open)
             c = self.capacitance()
             if c <= 0:
                 return None
             return complex(self.get("ESR"), w * self.get("ESL") - (1 / (w * c) if w > 0 else math.inf))
         if k in ("inductor", "ferrite"):
-            # a series R-L (its winding's DCR and inductance; a ferrite modelled the same way, see defaults.py)
+            # a series R-L (its winding's DCR and inductance; a ferrite modelled the same way [A24], see defaults.py)
             return complex(max(self.get("R"), SHORT_OHMS), w * self.get("L"))
         return None
 
