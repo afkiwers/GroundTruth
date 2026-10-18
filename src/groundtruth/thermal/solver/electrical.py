@@ -1,9 +1,9 @@
 """DC current-flow model of the copper carrying the user's terminals.
 
-Finite-volume discretisation of div(sigma grad V) = 0 over each copper layer of
+Finite-volume discretisation [Patankar 1980] of div(sigma grad V) = 0 over each copper layer of
 each involved net, with via/PTH barrels as vertical conductances. Conductance
 between neighbouring cells is proportional to the open (copper) fraction of the
-face they share (a cut-cell scheme), so traces at any angle keep their true
+face they share (a cut-cell scheme [A29]), so traces at any angle keep their true
 resistance even when only two or three cells wide.
 
 Pads that belong to a terminal or link are merged into one equipotential node

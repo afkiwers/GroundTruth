@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-STEFAN_BOLTZMANN = 5.670374419e-8
+STEFAN_BOLTZMANN = 5.670374419e-8      # W/(m² K⁴), exact (SI) [CODATA 2018]
 
 
 @dataclass(frozen=True)
@@ -30,9 +30,9 @@ class Dielectric:
     rho_cp: float
 
 
-COPPER = Conductor("Copper (ED/rolled)", 1.724e-8, 0.00393, 390.0, 3.45e6)
+COPPER = Conductor("Copper (ED/rolled)", 1.724e-8, 0.00393, 390.0, 3.45e6)    # ρ and α [IEC 60028]; k, ρc_p [A27]
 
-# Typical published values. In-plane conductivity of glass-reinforced laminates
+# Typical published values [A27]. In-plane conductivity of glass-reinforced laminates
 # is higher than through-plane because of the woven glass.
 DIELECTRICS: dict[str, Dielectric] = {
     "FR4": Dielectric("FR4", 0.81, 0.29, 1.9e6),

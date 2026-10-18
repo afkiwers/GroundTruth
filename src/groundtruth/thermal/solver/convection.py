@@ -1,6 +1,6 @@
-"""Heat transfer coefficients from standard correlations (Incropera & DeWitt).
+"""Heat transfer coefficients from standard correlations [Incropera 2011].
 
-All functions take SI units and temperatures in °C unless noted.
+All functions take SI units and temperatures in °C unless noted. Source keys in square brackets: docs/REFERENCES.md.
 """
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ MIN_DT = 0.5  # K, keeps natural-convection coefficients finite near ambient
 
 def air(t_film_c: float):
     """Dry air at 1 atm: (k, nu, Pr, beta)."""
-    # viscosity from Sutherland's law, density from the ideal gas law, conductivity as a power law in T;
-    # beta = 1/T (ideal gas)
+    # viscosity from Sutherland's law [Sutherland 1893] (air's constants [White 2006]), density from the ideal gas
+    # law, conductivity as a power law in T [A28]; beta = 1/T (ideal gas)
     T = t_film_c + 273.15
     mu = 1.716e-5 * (T / 273.15) ** 1.5 * (273.15 + 110.4) / (T + 110.4)  # Sutherland
     rho = 101325.0 / (287.05 * T)
@@ -34,8 +34,8 @@ def _rayleigh(dT, L, t_film):
 
 def h_horizontal(dT: float, L: float, t_film: float, upper: bool) -> float:
     """Horizontal plate, L = area/perimeter. ``upper`` = surface faces up."""
-    # the classic correlations: Nu = 0.54 Ra^1/4 (laminar) or 0.15 Ra^1/3 (turbulent) where a plume rises off
-    # the face, Nu = 0.52 Ra^1/5 where the face blocks it (hot face down)
+    # the classic correlations [Incropera 2011]: Nu = 0.54 Ra^1/4 (laminar) or 0.15 Ra^1/3 (turbulent) where a plume
+    # rises off the face, Nu = 0.52 Ra^1/5 where the face blocks it (hot face down)
     ra, k, _ = _rayleigh(dT, L, t_film)
     hot_up = (dT > 0) == upper  # hot face up or cold face down: buoyant plume forms
     if hot_up:
@@ -46,7 +46,7 @@ def h_horizontal(dT: float, L: float, t_film: float, upper: bool) -> float:
 
 
 def h_vertical(dT: float, H: float, t_film: float) -> float:
-    """Vertical plate of height H (Churchill & Chu, full range)."""
+    """Vertical plate of height H (Churchill & Chu, full range [Churchill 1975])."""
     ra, k, pr = _rayleigh(dT, H, t_film)
     nu = (0.825 + 0.387 * ra ** (1 / 6) / (1 + (0.492 / pr) ** (9 / 16)) ** (8 / 27)) ** 2
     return nu * k / H
@@ -55,7 +55,7 @@ def h_vertical(dT: float, H: float, t_film: float) -> float:
 def h_forced(v: float, L: float, t_film: float) -> float:
     """Flat plate in parallel flow, average over length L (laminar / mixed)."""
     # Nu = 0.664 Re^1/2 Pr^1/3 for a laminar boundary layer; above the transition Reynolds number 5e5 the
-    # mixed laminar-turbulent average (0.037 Re^4/5 - 871) Pr^1/3
+    # mixed laminar-turbulent average (0.037 Re^4/5 - 871) Pr^1/3 [Incropera 2011]
     k, nu, pr, _ = air(t_film)
     re = max(v, 1e-6) * L / nu
     if re < 5e5:
@@ -67,7 +67,7 @@ def h_forced(v: float, L: float, t_film: float) -> float:
 
 def h_radiation(t_c, t_surr_c, eps):
     """Linearised radiation coefficient (W/m²K); works with numpy arrays."""
-    # eps sigma (T^4 - Ts^4) = h_rad (T - Ts) with h_rad = eps sigma (T^2 + Ts^2)(T + Ts): exact, but h_rad
+    # eps sigma (T^4 - Ts^4) = h_rad (T - Ts) with h_rad = eps sigma (T^2 + Ts^2)(T + Ts) [Incropera 2011]: exact, but h_rad
     # depends on T, so the coupled loop updates it each iteration
     T = t_c + 273.15
     Ts = t_surr_c + 273.15
@@ -88,7 +88,7 @@ def board_h(env, side: str, t_surf: float, t_air: float, length: float, width: f
         hn = h_horizontal(dT, L, tf, upper=(side == "top"))
     if env.convection == "forced" and not natural_only:
         hf = h_forced(env.airspeed, length, tf)
-        return (hf ** 3 + hn ** 3) ** (1 / 3)  # Churchill mixed-convection blend
+        return (hf ** 3 + hn ** 3) ** (1 / 3)  # Churchill mixed-convection blend [Churchill 1977]
     return hn
 
 

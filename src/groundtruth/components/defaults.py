@@ -1,4 +1,6 @@
-"""Suggest a model for each footprint from its reference prefix, value and footprint name."""
+"""Suggest a model for each footprint from its reference prefix, value and footprint name. The suggested values
+(ESR and ESL by package, a ferrite's L from its impedance rating) are typical figures, not a part's own [A25]; the
+user's settings and the part's fields replace them. Source keys: docs/REFERENCES.md."""
 from __future__ import annotations
 
 import math
