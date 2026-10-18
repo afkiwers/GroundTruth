@@ -1599,8 +1599,8 @@ def grid_sensitive_note(worst: dict, m_worst: float, m_low: float, warn_db: floa
     margin is within GRID_SENSITIVE_DB of the warning level: on refboard (6 layers) such peaks changed by
     several dB between the 1x, 2x and 4x grids (two resonances near each other reinforce on one grid and not on
     the next; ARCHITECTURE "Board-wide resonances above 1 GHz"). The threshold was 1 GHz; since the strips carry
-    their copper's width (2026-10-18) a 1x-only F.Cu/In1 mode sits at 940 MHz (1060 before), and the grids
-    disagree from ~620 MHz up (they agree within 0.5 dB at 540-580 MHz), so 600 MHz."""
+    their copper's width (2026-10-18) the 1x grid places refboard's largest mode (F.Cu/In1) at 940 MHz, where 2x and 4x
+    have it at 1020, and the grids disagree from ~620 MHz up (they agree within 0.5 dB at 540-580 MHz), so 600 MHz."""
     if worst is None or worst.get("margin_db") is None or worst["f"] < GRID_SENSITIVE_F or m_low <= 0 or m_worst <= 0:
         return None
     rise = 20 * math.log10(m_worst / m_low)

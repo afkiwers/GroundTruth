@@ -401,14 +401,22 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   ≥ 6 dB over its low-frequency value) and is within 10 dB of the warning level, its notes say the peak can change
   by several dB with the grid and name the next resolution to check.
   - **2026-10-18, the code of that day** (later changes since session 8 had moved the low end: the 20 MHz loop is
-    15.0 mm² on every grid, the 740 MHz cavity is gone). 1x / 2x, the same 25 harmonics
-    (`out/converge/spi_sck_head_*.json` before the strip widths, `spi_sck_widths*.json` after): the rms (max)
-    difference of |m| between 1x and 2x went from 7.0 (16.7) to 4.0 (8.0) dB at 1-1.5 GHz with the strip widths
-    ("A strip is as wide as the copper it crosses"), but from 2.7 (7.8) to 6.3 (17.2) dB at 0.5-1 GHz. A 1x-only
-    mode of the F.Cu GND / In1 +3V3 pair at (119-121, 128-130) mm by C1105 / C1110 (113 mm², 0.14 A per A of
-    displacement current per cell; 17 mm² at 2x) moved from 1060 to 940 MHz instead of going away. The GND via at
-    (132.95, 132.60) joins the same layers on both grids, so it is not a lost via. Not understood yet (open);
-    the note's threshold went down to 600 MHz so that the mode is flagged where it now is.
+    15.0 mm² on every grid, the 740 MHz cavity is gone). 1x / 2x / 4x, the same 25 harmonics
+    (`out/converge/spi_sck_head_*.json` before the strip widths, `spi_sck_widths*.json` after). The rms (max)
+    difference of |m| between grids, before → after the strip widths ("A strip is as wide as the copper it
+    crosses"):
+
+    | | 1x vs 2x | 2x vs 4x |
+    |---|---|---|
+    | 0.5-1 GHz | 2.7 (7.8) → 6.3 (17.2) dB | 1.1 (3.3) → 1.5 (2.7) dB |
+    | 1-1.5 GHz | 7.0 (16.7) → 4.0 (8.0) dB | 5.3 (8.3) → 4.4 (7.0) dB |
+
+    The largest mode, the F.Cu GND / In1 +3V3 pair at (119-121, 128-130) mm by C1105 / C1110
+    (`out/converge/hot_new_*.log`), was at 1060 / 1100 / 1060 MHz (139 / 61 / 53 mm²) at 1x / 2x / 4x and is at
+    940 / 1020 / 1020 MHz (113 / 69 / 78 mm²): 2x and 4x now agree on it (1.1 dB), 1x places it 8 % low, which moves
+    it into the 0.5-1 GHz band there. Its stitching vias join the same layers on both grids. Above 1 GHz 4x has a
+    peak at 1260-1300 MHz that 2x has not (45-52 vs 20-28 mm²). The note's threshold went down to 600 MHz so that the
+    mode is flagged at 1x too.
 - Vertical branches: each via/THT pad of a plane net chains its connections between consecutive plane
   layers where its own net's copper is (a GND via through a +3V3 area of In2 doesn't connect there).
   `via_impedance`: barrel R (25 µm plating) plus partial self-L.
