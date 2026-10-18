@@ -58,11 +58,12 @@ from .simulate import (BoardModel, ModelRun, RouteResult, StackBuild, _choose_pi
 
 LOOP_F = 100e6              # hot-loop inductance: far above the input capacitors' self-resonance
 LOOP_F_LO = 30e6            # second point of the series-LC fit
-PACKAGE_H_MM = 0.25         # current path inside a switch package, above its pads
+PACKAGE_H_MM = 0.25         # current path inside a switch package, above its pads [A30]
 CAP_SEARCH_MM = 20.0        # rail capacitors this close to the switching cell are part of the model
 POWER_MARGINS_MM = (5.0, 10.0, 20.0)   # model region around the cell, its capacitors and the input connector;
                                        # widened when the hot loop doesn't close within it
 DEFAULT_R_DAMP = 0.1        # ohm: ringing that decays within a few cycles (no snubber), on top of the loop's own R
+                            # [A31]
 COND_PER_DECADE = 2.5       # initial conducted-band solves per decade
 COND_MAX_SOLVES = 12
 COND_REFINE_DB = 1.0        # split a conducted gap whose log-log interpolation may be off by more than this (dB)

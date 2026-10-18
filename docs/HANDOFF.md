@@ -10,7 +10,7 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
 - **Branch `references` (2026-10-18, committed, not merged):** at the user's "add references of the
   assumptions/methods/theorems, also call them out locally where they are used, in all calculations".
   - [REFERENCES.md](REFERENCES.md) lists every source by key (68 sources: electromagnetics, lines and EMC, power
-    electronics, heat transfer, numerics, standards by edition) and the model's assumptions A1–A29, each with its
+    electronics, heat transfer, numerics, standards by edition) and the model's assumptions A1–A33, each with its
     reason and evidence.
   - The code cites the keys where it applies them: solver, emi, analysis, components, rules, thermal, and the
     tests that check against exact results.
