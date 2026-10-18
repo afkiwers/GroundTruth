@@ -1150,6 +1150,7 @@ server must run the same GroundTruth code (and NumPy major version) as the plugi
 ## Status and roadmap
 
 - **Done (latest, October 2026):**
+  - the sources of every formula, method and theorem, and the model's assumptions, in [docs/REFERENCES.md](docs/REFERENCES.md) and in the help (References and assumptions); the code cites them where it uses them;
   - radiated limits other than CISPR 32: MIL-STD-461G RE102 built in, or a limit curve of your own; spread spectrum in the radiated estimate; MIL-STD-461G CE101;
   - power integrity: PDN impedance per IC against a target, the Power integrity tab;
   - voltage-aware safety checks: clearance by IPC-2221B, capacitor and FET voltage ratings, resistor power, ESD protection, voltage ranges of bootstrap and gate-drive nets;

@@ -7,6 +7,16 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `small-fixes` (2026-10-18, from `references`, not merged):** at the user's "keep going".
+  - The Mac launcher is committed executable, which fixes `test_the_mac_launcher_is_lf_and_executable`.
+  - The grid note says a coarse grid moves a resonance's frequency too, not only its height.
+  - README: the plane-displacement example is the current one (F.Cu/In1 by C1105/C1110 at 1020 MHz, 4.6×). The
+    740 MHz cavity it quoted no longer appears.
+  - Every model samples its copper at least 2 × 2 per cell (`simulate`, `sub = max(2, …)`), so cells of 0.15 mm
+    and less carry strip widths too. The neck test case at 0.15 / 0.1 mm: 793 / 735 → 769 / 742 MHz. On kraft
+    this only reaches 4x and up.
+  - Waiting on the user: MIL-STD-461H's CE101 to 20 kHz (follow 461H or keep 461G), and whether to model the
+    combined emission of interleaved stages.
 - **Branch `references` (2026-10-18, committed, not merged):** at the user's "add references of the
   assumptions/methods/theorems, also call them out locally where they are used, in all calculations".
   - [REFERENCES.md](REFERENCES.md) lists every source by key (68 sources: electromagnetics, lines and EMC, power
@@ -44,8 +54,8 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
       (2x vs 4x). The largest mode, F.Cu/In1 by C1105/C1110, is at 940 / 1020 / 1020 MHz at 1x / 2x / 4x (it was at
       1060 / 1100 / 1060). So 2x and 4x agree on it, and 1x places it 8 % low, inside 0.5-1 GHz.
     - The user chose "commit, keep digging": `GRID_SENSITIVE_F` is now 600 MHz.
-    - **Open:** 2x and 4x still differ by several dB above 1 GHz (4x has a peak at 1260-1300 MHz). Also open: a
-      sub-grid for cells ≤ 0.15 mm (point-sampled now, strips full; 2x there gave 769 instead of 793 MHz). Logs are
+    - **Open:** 2x and 4x still differ by several dB above 1 GHz (4x has a peak at 1260-1300 MHz). The sub-grid for
+      cells ≤ 0.15 mm followed on `small-fixes` (2 × 2 at least: 769 / 742 MHz at 0.15 / 0.1 mm). Logs are
       in `out/converge/spi_sck_head_*`, `spi_sck_widths*` and `hot_new_*`.
   - The MIL-STD-461 sources are downloaded to `Downloads\GroundTruth audit sources`, including 461H (2026-04-17,
     supersedes 461G): RE102 aircraft is split into `re102_aircraft_external` (2 MHz-18 GHz), `re102_helicopter` and

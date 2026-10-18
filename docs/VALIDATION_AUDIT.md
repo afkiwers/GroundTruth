@@ -445,8 +445,8 @@ The user: "Fix this" (inner-layer Z0 and solder mask), "Is that a bad thing?" (i
     sees cross its border, R/φ and the narrower strip's partial self inductance; side-by-side partial strips get
     their mutual inductance for their real widths and centre distance. Now 797 / 756 / 736 / 764 / 717 MHz from 1.0 to
     0.25 mm, a ±5 % scatter around ~750 MHz where it was 722 to 900+. At 0.15 and 0.1 mm Simulate takes no sub-grid
-    (the grid itself is the 0.15 mm sampling), so strips stay full there (793 / 735 MHz, unchanged); a 2× sub-grid
-    gave 769 MHz at 0.15 mm (not adopted: it would change every fine route model). The 3 mm neck: 1237 / 1254 / 1269 / 1252 / 1271 MHz from 1.0
+    (the grid itself is the 0.15 mm sampling), so strips stayed full there (793 / 735 MHz); with the 2 × 2 sub-grid
+    every model now takes (branch `small-fixes`), 769 / 742 MHz. The 3 mm neck: 1237 / 1254 / 1269 / 1252 / 1271 MHz from 1.0
     to 0.25 mm (1296 / 1349 / 1324 / 1275 / 1294 before; 1240 at 0.15 mm). On
     one 0.35 mm grid, the neck aligned with a cell row or straddling two reads 751 / 759 MHz (754 / 817 before).
   - Densities follow: the DC maps, peaks, thermal heat and bridge RMS maps take a strip's current over its own
@@ -467,8 +467,8 @@ The user: "Fix this" (inner-layer Z0 and solder mask), "Is that a bad thing?" (i
     has not. `grid_sensitive_note` now applies from 600 MHz (it was 1 GHz), so the mode is flagged at 1x too. The
     20 MHz loop is the same before and after (14.97 / 15.04 mm²). Which frequency is right for the mode (1020 or
     1060 MHz) would take 8x.
-- **Not changed:** CE101 to 20 kHz (461H), the combined emission of interleaved stages, a sub-grid below 0.15 mm
-  cells.
+- **Not changed:** CE101 to 20 kHz (461H), the combined emission of interleaved stages. (The sub-grid for cells of
+  0.15 mm and less followed on branch `small-fixes`.)
 
 ## Remaining risks and unverified items
 - SP-19: board-wide resonance heights above ~600 MHz still depend on the grid by several dB on kraft (2x vs 4x rms

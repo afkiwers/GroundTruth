@@ -419,8 +419,11 @@ class BoardModel:
                 pts = arc_points(t.start, t.mid, t.end) if t.is_arc else [t.start, t.end]
                 lines[t.layer].setdefault(t.net, []).append((pts, t.width))
         names, grids = [], []
-        # sample the copper at RASTER_MM or finer (up to 6 x 6 per cell), so thin webs between antipads conduct
-        sub = max(1, min(6, math.ceil(d / RASTER_MM - 1e-9)))
+        # sample the copper at RASTER_MM or finer (2 x 2 to 6 x 6 per cell), so thin webs between antipads conduct
+        # and every strip carries its copper's width (peec.Grid.wx): with one sample per cell (cells of RASTER_MM and
+        # less, before 2026-10-18) the strips were full cells, and a 0.35 mm neck's island resonance read 793 MHz at
+        # 0.15 mm cells against 769 with 2 x 2 (and 736-797 on the coarser grids, which had their sub-grid)
+        sub = max(2, min(6, math.ceil(d / RASTER_MM - 1e-9)))
         for layer in layers:
             geoms = {}
             # the reference nets first: where two nets' copper share a node, the first one keeps it
