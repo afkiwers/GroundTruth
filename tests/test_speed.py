@@ -141,7 +141,7 @@ def test_a_simulate_does_not_depend_on_the_order_its_solves_finish(tmp_path, mon
                         capacitance=True, solve_points=3, max_solves=5, cavity_max_nodes=12000)
 
     def in_order(reverse):
-        def run_parallel(tasks, work, threads):
+        def run_parallel(tasks, work, threads, relief=None):
             out = [None] * len(tasks)
             for k in (reversed(range(len(tasks))) if reverse else range(len(tasks))):
                 out[k] = work(tasks[k])

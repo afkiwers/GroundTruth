@@ -7,6 +7,21 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `memory-ladder` (2026-10-19, from `main`, not merged):** an 8x Simulate of CE2264 on DELL-7920-PC failed
+  after 82 min at a board-wide solve ("buck Avionics and Battery Charging/SW1", 243k nodes, solve 130 of 151), peak
+  21.8 GB, 45 GB free, reported as "the thermal solve ran out of memory". The user: "this keeps happening! It should
+  not fail, it should recognise the shortage and proactive work around it to finish the simulation!" The worker's
+  traceback was dropped, so which allocation failed is not known; most likely a SuperLU growth step past the free
+  commit, and the "retry alone" kept the model's cached factorisations. Now (ARCHITECTURE "Working around a
+  shortage", REFERENCES A38): the memory gate before every factorisation (`peec.GATE`, measured fill
+  `lu_nnz`/`lu_bytes`), the ladder (`simulate.MemoryRelief`: freed caches, least fill, the frequency left unsolved),
+  threads re-planned from the measured fill and halved after shortages, the worker told its limit
+  (`sysmem.LIMIT_ENV`), the server's message and traceback fixed. `tests/test_memory_relief.py`. **Not yet run on the
+  real board** (it is on the user's machine, not here): the next step is the user's 8x CE2264 Simulate on the server
+  with this build; its notes say what the run had to do.
+  Also on this branch, the user: "remove the labels from the report. they are actually not helping": the report's
+  maps have no text boxes (via shares, pin letters, switch names; `draw_heatmap(labels=False)`), the plugin's keep
+  them.
 - **Branch `job-version` (2026-10-19, from `main`, merged into `main` as 8cce357 at the user's "merge"):** the user: "add the server's plugin version to the
   table so users can see what plugin version was used for the sim", "add the plugin version to the report as well",
   "like the full one GroundTruth 0.1.41910 (9094c40, built 2026-10-19 12:05)". The server's job answers carry its

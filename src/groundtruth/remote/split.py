@@ -171,7 +171,7 @@ class SplitRun:
             self.job.message = msg
         raw, _peak = _run_child(args_bytes, progress, self.job.cancel, 0.2, self.server._limits(),
                                 module="groundtruth.remote.worker", args=(kind, self.server.threads, self.server.gpu),
-                                raw=True)
+                                raw=True, what="the job")
         return raw
 
     def _peers(self) -> list[dict]:
