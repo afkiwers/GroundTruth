@@ -408,7 +408,7 @@ class ComputeServer:
             raw, job.peak_mb = _run_child(payload, progress, job.cancel, 0.2, self._limits(),
                                           module="groundtruth.remote.worker",
                                           args=(job.kind, self.threads, self.gpu), env_extra=env, raw=True,
-                                          stats=job.live)
+                                          stats=job.live, what="the job")
             data = zlib.compress(raw, 1)
             self._path(job.id, ".out").write_bytes(data)
             job.result_bytes = len(data)
@@ -416,9 +416,14 @@ class ComputeServer:
         except ThermalCancelled:
             job.state = "queued" if self._stop.is_set() else "cancelled"
         except ThermalMemoryError as e:
-            job.state, job.error = "failed", str(e).replace("the thermal solve", "the job").split(". Use")[0] + \
-                ": the server has too little memory free for it (fewer jobs at once, or a lower resolution)"
-            job.detail = str(e)
+            # stopped by the watchdog, or the worker's own MemoryError (a Simulate works around a shortage itself:
+            # peec.GATE, simulate.MemoryRelief; what still runs out is elsewhere): its traceback is kept with the job
+            # (it used to be dropped, and the message named "the thermal solve" whatever the job was)
+            job.state = "failed"
+            job.error = (f"{str(e).rstrip('.')}: the server had too little memory free for it (fewer jobs at once, "
+                         "or a lower resolution)")
+            job.detail = job.error + (f"\n\n{e.detail}" if e.detail else "")
+            log.warning("%s failed:\n%s", job.id, job.detail)
         except Exception as e:                      # noqa: BLE001 - any failure is the job's, reported to its owner
             # the first line for the lists; everything (the worker's stderr: its traceback) kept with the job (the
             # user: "if there is an error. it should be saved somewhere")

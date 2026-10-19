@@ -8,8 +8,27 @@ the RAM at 50 % and the job using about 20 GB (2026-10-14). Planning the paralle
 overcommitted; by the smaller figure, fewer solves run at once instead."""
 from __future__ import annotations
 
+import os
 import sys
 from typing import Optional
+
+# A process run under a memory watchdog (a compute server's job: thermal_proc._run_child) is told its limit (MB) in
+# this variable: what it may still use is that limit less what it holds, however much the machine has free.
+LIMIT_ENV = "GROUNDTRUTH_MEMORY_LIMIT_MB"
+
+
+def limit_room() -> Optional[int]:
+    """Bytes this process may still use under its watchdog's limit (LIMIT_ENV less its working set, which is what
+    the watchdog measures); None without a limit or psutil."""
+    text = os.environ.get(LIMIT_ENV, "").strip()
+    if not text:
+        return None
+    try:
+        import psutil
+        held = psutil.Process().memory_info().rss
+        return max(0, int(float(text) * 2 ** 20) - int(held))
+    except Exception:           # noqa: BLE001 - a malformed value, no psutil: no limit known
+        return None
 
 
 def commit_available() -> Optional[int]:
@@ -38,7 +57,8 @@ def commit_available() -> Optional[int]:
 
 def available_bytes() -> Optional[int]:
     """Memory available now (bytes): the physical memory available, on Windows at most the commit still available
-    (see the module); None when it can't be told (no psutil)."""
+    (see the module), and at most what the watchdog's limit leaves this process (limit_room); None when it can't be
+    told (no psutil)."""
     try:
         import psutil
     except ImportError:
@@ -47,5 +67,4 @@ def available_bytes() -> Optional[int]:
         phys = int(psutil.virtual_memory().available)
     except Exception:           # noqa: BLE001 - a sandbox without /proc, an odd platform: unknown
         return None
-    commit = commit_available()
-    return phys if commit is None else min(phys, commit)
+    return min(x for x in (phys, commit_available(), limit_room()) if x is not None)

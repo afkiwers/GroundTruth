@@ -45,6 +45,7 @@ import copy
 import math
 import queue
 import threading
+import weakref
 from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -721,6 +722,11 @@ class HostedLU:
         """Solve with the factorisation (from any thread)."""
         return self._lu.solve(rhs)
 
+    @property
+    def nnz(self) -> int:
+        """The factorisation's stored entries (L and U): its fill, measured (lu_bytes plans with it)."""
+        return int(self._lu.nnz)
+
     def __del__(self):
         """Hand the factorisation to its host thread to be freed there (see _LuHost)."""
         # The host must hold the last reference: a list does, which the host empties. (Handing it the object while
@@ -766,6 +772,119 @@ def hosted_splu(S, **kwargs) -> HostedLU:
     if isinstance(out, BaseException):
         raise out
     return HostedLU(out, host)
+
+
+# --------------------------------------------------------------------------- memory under pressure
+# A Simulate at 8x on the user's 62 GB compute server failed after 82 minutes, "out of memory" with 45 GB free (the
+# user, 2026-10-19: "It should not fail, it should recognise the shortage and proactive work around it to finish the
+# simulation!"). Windows refuses an allocation once the commit is used up, and SuperLU commits ~6.5x the fill it
+# touches, growing by doubling (ARCHITECTURE "Memory use of a Simulate"): one growth step of one large factorisation
+# asks for many GB at once. So before each factorisation the gate below compares what it will commit with what is
+# free, makes room, waits, or takes the least-fill pivots; what still runs out is handled by the caller's ladder
+# (simulate.MemoryRelief).
+FILL_PER_UNKNOWN = {"sheet": 70, "diag": 35}    # SuperLU fill per branch unknown, before a model's first
+                                                # factorisation is measured (kraft_flux_mini_2: 65 board-wide, 15-31
+                                                # route models at 1x, rounded up) [A38]
+LU_COMMIT = 6.5                                 # SuperLU commits ~6.5x its fill (ARCHITECTURE "Memory use") [A38]
+GATE_SHARE = 0.8                                # of the available memory a factorisation may plan to commit
+GATE_WAIT_S = 1.0                               # a waiting factorisation looks at the memory again this often
+_STACKS: "weakref.WeakSet[PlaneStack]" = weakref.WeakSet()     # every stack alive: their caches can be freed
+
+
+def lu_bytes(stack: "PlaneStack") -> int:
+    """About the memory one factorisation of this model commits: its fill as measured on its largest factorisation
+    so far (`lu_nnz`), else as estimated from its unknowns (FILL_PER_UNKNOWN; fill grows faster than the unknowns
+    on finer grids, so the estimate is low at high resolutions until the first one is measured), x 16 bytes x
+    LU_COMMIT [A38]."""
+    nnz = getattr(stack, "lu_nnz", 0) or FILL_PER_UNKNOWN.get(stack.precond_mode, 70) * stack.nb
+    return int(nnz * 16 * LU_COMMIT)
+
+
+def free_factorisations() -> int:
+    """Drop every live stack's cached factorisations (all models of this process): the memory goes back once no
+    solve still uses them. Results don't change: a freed factorisation is made again identically when needed
+    (PlaneStack.operator). How many were dropped."""
+    n = 0
+    for st in list(_STACKS):
+        with st._lock:
+            n += len(st._ops)
+            st._ops.clear()
+        gpu.release(st)
+    return n
+
+
+def low_memory_everywhere(stacks=None) -> int:
+    """From now on these stacks (every live one when None) factorise with diagonal pivots only (the least fill
+    SuperLU can do: the ordering's own; a preconditioner needs no more, GMRES corrects it): the second rung of
+    simulate.MemoryRelief. How many stacks were switched."""
+    n = 0
+    for st in list(_STACKS if stacks is None else stacks):
+        if not getattr(st, "lu_low_memory", False):
+            st.lu_low_memory = True
+            n += 1
+    return n
+
+
+class _MemoryGate:
+    """Admits the factorisations of the whole process one by one while memory is short (see the section above).
+
+    A factorisation states what it will commit (lu_bytes). It goes ahead when that, plus what the factorisations
+    already being made will commit, fits in GATE_SHARE of the available memory (core.sysmem.available_bytes: the
+    free commit on Windows, within the compute server's limit for the job). Otherwise: first every cached
+    factorisation of every model is freed (once per wait); then it waits for the ones being made to finish; with
+    none being made and still too little, it goes ahead with the least-fill pivots (`short`). It never waits for
+    memory nothing in this process will free."""
+
+    def __init__(self):
+        """Nothing being made."""
+        self.cond = threading.Condition()
+        self.held = 0           # bytes the factorisations being made will commit (as planned)
+        self.making = 0         # how many are being made
+        self.freed = 0          # cached factorisations freed to make room (the run notes it)
+        self.waits = 0          # factorisations that waited for others to finish
+
+    @contextmanager
+    def admit(self, need: int):
+        """Hold the gate while one factorisation of `need` bytes is made; yields True when it must take the
+        least-fill pivots (the memory is short even with nothing else being made)."""
+        from ..core.sysmem import available_bytes
+        freed = waited = False
+        short = False
+        while True:
+            avail = available_bytes()
+            with self.cond:
+                if avail is None or self.held + need <= GATE_SHARE * avail:
+                    break
+                if self.making and freed:
+                    # others are being made: their memory comes back when they finish (or GATE_WAIT_S passes)
+                    if not waited:
+                        self.waits += 1
+                        waited = True
+                    self.cond.wait(GATE_WAIT_S)
+                    continue
+                if freed:
+                    short = need > GATE_SHARE * avail      # alone and still too little: the least fill
+                    break
+            # not under the condition's lock: freeing takes each stack's own lock
+            n = free_factorisations()
+            with self.cond:
+                self.freed += n
+            freed = True
+            import gc
+            gc.collect()
+        with self.cond:
+            self.held += need
+            self.making += 1
+        try:
+            yield short
+        finally:
+            with self.cond:
+                self.held -= need
+                self.making -= 1
+                self.cond.notify_all()
+
+
+GATE = _MemoryGate()
 
 
 # --------------------------------------------------------------------------- the plane system
@@ -853,6 +972,7 @@ class PlaneStack:
         self._round = 0
         self._topology(list(branches or []))
         self._kernels()
+        _STACKS.add(self)                   # its cache can be freed when memory runs short (free_factorisations)
 
     # ------------------------------------------------------------------ topology
     def _topology(self, branches: list[Branch]):
@@ -1041,6 +1161,7 @@ class PlaneStack:
         new._plan = {}
         new._round = 0
         gpu.derived(new)            # its own incidence matrices on a GPU; the kernels stay shared
+        _STACKS.add(new)
         return new
 
     def map_state(self, x: Optional[np.ndarray], stack: "PlaneStack") -> Optional[np.ndarray]:
@@ -1346,24 +1467,33 @@ class PlaneStack:
             if getattr(self, "lu_too_large", None):         # this model failed even with diagonal pivots
                 raise SolverError(self.lu_too_large)
             # once a factorisation of this model overflowed SuperLU, the others take diagonal pivots at once
-            # (_factorise_diagonal): the usual attempt would only grow to the same limit again (minutes, ~22 GB)
-            thresh = 0.0 if getattr(self, "lu_fallbacks", 0) else LU_PIVOT_THRESHOLD
-            try:                    # made (and freed) in a host thread: see _LuHost
-                lu = hosted_splu(S, permc_spec="MMD_AT_PLUS_A", diag_pivot_thresh=thresh,
-                                 options={"SymmetricMode": True})
-            except RuntimeError as e:
-                # SuperLU reports a failed allocation as a RuntimeError: as a MemoryError the scheduler retries the
-                # solve on its own once the others have finished (simulate.run_parallel)
-                if "SUPERLU_MALLOC" in str(e):
-                    raise MemoryError(f"the sparse factorisation ran out of memory ({S.shape[0]} unknowns)") from e
-                raise
-            except SystemError as e:
-                if "invalid arguments" not in str(e):
+            # (_factorise_diagonal): the usual attempt would only grow to the same limit again (minutes, ~22 GB);
+            # so do all of them once memory ran short (low_memory_everywhere: the least fill)
+            low = bool(getattr(self, "lu_fallbacks", 0) or getattr(self, "lu_low_memory", False))
+            thresh = 0.0 if low else LU_PIVOT_THRESHOLD
+            # admitted by the memory gate: room made, or a wait for the others being made, or the least fill
+            with GATE.admit(lu_bytes(self)) as short:
+                if short and thresh:
+                    thresh = 0.0
+                    self.lu_memory_fallbacks = getattr(self, "lu_memory_fallbacks", 0) + 1
+                try:                    # made (and freed) in a host thread: see _LuHost
+                    lu = hosted_splu(S, permc_spec="MMD_AT_PLUS_A", diag_pivot_thresh=thresh,
+                                     options={"SymmetricMode": True})
+                except RuntimeError as e:
+                    # SuperLU reports a failed allocation as a RuntimeError: as a MemoryError the scheduler retries
+                    # the solve with more room (simulate.MemoryRelief)
+                    if "SUPERLU_MALLOC" in str(e):
+                        raise MemoryError(f"the sparse factorisation ran out of memory ({S.shape[0]} unknowns)") from e
                     raise
-                if thresh == 0.0:                           # diagonal pivots already: too large for SuperLU
-                    self.lu_too_large = too_large_text(S.shape[0], e)
-                    raise SolverError(self.lu_too_large) from e
-                lu = self._factorise_diagonal(S, e)
+                except SystemError as e:
+                    if "invalid arguments" not in str(e):
+                        raise
+                    if thresh == 0.0:                           # diagonal pivots already: too large for SuperLU
+                        self.lu_too_large = too_large_text(S.shape[0], e)
+                        raise SolverError(self.lu_too_large) from e
+                    lu = self._factorise_diagonal(S, e)
+            # its measured fill plans the next ones (lu_bytes): the estimate from the unknowns runs low on fine grids
+            self.lu_nnz = max(getattr(self, "lu_nnz", 0), lu.nnz)
             solve_S = lu.solve
         return _Operator(w, R_strip, z_tail, Dinv, solve_S, f_lu, ref=ref)
 
@@ -1380,6 +1510,8 @@ class PlaneStack:
             return hosted_splu(S, permc_spec="MMD_AT_PLUS_A", diag_pivot_thresh=0.0,
                                options={"SymmetricMode": True})
         except (SystemError, RuntimeError) as e:
+            if "SUPERLU_MALLOC" in str(e):          # short of memory now, not too large for good: the ladder's
+                raise MemoryError(f"the sparse factorisation ran out of memory ({S.shape[0]} unknowns)") from e
             self.lu_too_large = too_large_text(S.shape[0], e)
             raise SolverError(self.lu_too_large) from e
 

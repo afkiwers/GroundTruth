@@ -12,7 +12,8 @@ The kinds:
 - "suggest" (board, config): suggest_fixes(); the two simulations it keeps, without their models;
 - "thermal" (board, config, (heat, losses, notes)) and "capacity" (board, config, inputs): the thermal solve and the
   current-capacity search, with the inputs the plugin prepared (thermal_inputs / capacity_inputs, fast);
-- "sleep" (seconds,): only with GROUNDTRUTH_SERVER_TEST set, for the queue's tests.
+- "sleep" (seconds,): only with GROUNDTRUTH_SERVER_TEST set, for the queue's tests ("out of memory": a
+  MemoryError instead).
 
 A Simulate split over the cluster (remote/split.py) adds three kinds; JOB is the split job's own input as the
 server keeps it (the pickled (board, config, nets)), passed on unopened:
@@ -95,6 +96,8 @@ def run(kind: str, args: tuple, threads: str = "-", gpu: str = "-", progress=Non
         board, config, inputs = args
         return solve_capacity(board, config, inputs, progress)
     if kind == "sleep" and os.environ.get("GROUNDTRUTH_SERVER_TEST"):
+        if args[0] == "out of memory":          # the tests' worker that runs out of memory itself
+            raise MemoryError("the test worker ran out of memory")
         seconds = float(args[0])
         steps = max(1, int(seconds / 0.05))
         for k in range(steps):
