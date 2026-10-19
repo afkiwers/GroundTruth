@@ -305,10 +305,12 @@ class _Figures:
 
     def heat(self, what: str, board, rr, *args, size=(9.5, 5.5)) -> bytes:
         """A view's maps (draw_heatmap), with at most max_vias via markers and, if asked, the parts' outlines and
-        names; at the resolution its model has (heatmap_dpi: every cell at least 1.5 pixels, up to MAP_DPI_MAX)."""
+        names; at the resolution its model has (heatmap_dpi: every cell at least 1.5 pixels, up to MAP_DPI_MAX).
+        Without the maps' text boxes (shares, pin letters, switch names: the user found they did not help; the
+        tables under the maps list the vias' shares)."""
         rr = self.sharper.get(_view_key(rr), rr)            # a view sharpened in the plugin: its finer maps
         return self.png(what, draw_heatmap, board, rr, *args, size=size, dpi=heatmap_dpi(rr, size, DPI, MAP_DPI_MAX),
-                        max_vias=self.max_vias, outlines=self.outlines, names=self.names)
+                        max_vias=self.max_vias, outlines=self.outlines, names=self.names, labels=False)
 
 
 # --------------------------------------------------------------------------------------------- the page

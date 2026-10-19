@@ -235,6 +235,32 @@ def test_vias_shown_marks_the_busiest_and_keeps_the_parts():
     assert vias == [] and parts == [20.0]
 
 
+def test_the_reports_maps_have_no_labels():
+    """The user: "remove the labels from the report. they are actually not helping" (on a power stage's map the
+    shares, pin letters and switch names piled up over the switches). labels=False (the report) keeps the markers
+    and the pads' coloured outlines and drops every text box; the plugin's maps keep them."""
+    from groundtruth.report.plots import _carriers, _switch_pins
+    ts = [{"kind": "via", "name": "v", "layers": ["F.Cu", "B.Cu"], "x": 1.0, "y": 0.0, "fraction": 0.6},
+          {"kind": "part", "name": "C1", "layers": ["F.Cu"], "x": 20.0, "y": 0.0, "fraction": 0.4}]
+    pins = [{"ref": "Q1", "role": role, "layers": ["F.Cu"], "x": x, "y": 5.0, "w": 1.0, "h": 1.0}
+            for role, x in (("D", 0.0), ("S", 3.0))]
+    rr = NS(transfers=ts, switch_pins=pins)
+
+    def drawn(labels):
+        fig = Figure()
+        ax = fig.add_subplot(111)
+        _switch_pins(ax, rr, "F.Cu", labels)
+        _carriers(ax, NS(vias=[]), rr, "F.Cu", None, labels)
+        marks = [l for l in ax.get_lines() if l.get_marker() in ("^", "s")]
+        outlines = [l for l in ax.get_lines() if len(l.get_xdata()) == 5]
+        return [t.get_text() for t in ax.texts], marks, outlines, ax.get_legend_handles_labels()[1]
+    texts, marks, outlines, legend = drawn(True)
+    assert {"60 %", "40 %", "D", "S", "Q1"} <= set(texts) and legend == ["D = drain", "S = source"]
+    texts, marks2, outlines2, legend = drawn(False)
+    assert texts == [] and len(marks2) == len(marks) == 2 and len(outlines2) == len(outlines) > 0
+    assert legend == ["drain", "source"]
+
+
 def test_hovering_a_marker_says_what_it_is(route):
     """The user: "it would be good if there is a hover over message saying what the issue is when hovering over a
     circle". Over an issue's circle the plugin shows its severity, check and message; over a via's marker its
