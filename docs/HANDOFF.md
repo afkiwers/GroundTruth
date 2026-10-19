@@ -7,7 +7,7 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `job-version` (2026-10-19, from `main`, not merged):** the user: "add the server's plugin version to the
+- **Branch `job-version` (2026-10-19, from `main`, merged into `main` as 8cce357 at the user's "merge"):** the user: "add the server's plugin version to the
   table so users can see what plugin version was used for the sim", "add the plugin version to the report as well",
   "like the full one GroundTruth 0.1.41910 (9094c40, built 2026-10-19 12:05)". The server's job answers carry its
   build (`server.server_build`), kept as `server_version` in the job's entry: a **Version** column on the Server jobs
