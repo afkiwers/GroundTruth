@@ -1,11 +1,65 @@
 # GroundTruth handover
 
-## Current state (2026-10-19, after audit round 4)
+## Current state (2026-10-20, audit round 5 and its fixes merged)
 
-**Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
+**Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
+
+- **Branch `audit-5` (2026-10-19 / 20, from `main`, merged into `main` at the user's "update handover, then commit,
+  merge"):** the user's brief
+  "Second-Round Independent Physics and Engineering Validation" (pasted), with a track narrowed from 0.4 to 0.1 mm
+  followed through every calculation, then the user's "fix all of it" (and "keep going") for what the audit had left
+  open. The record is [PHYSICS_AUDIT.md](PHYSICS_AUDIT.md) (model-by-model audit, reference register, track-width
+  report, issue log ISSUE-11 to -24, benchmarks, the real board, final assessment); VALIDATION_AUDIT.md "Round 5"
+  summarises it.
+  - Baseline: `main` 68b85af from a separate worktree, 901 passed, 5 skipped (`out/audit5/baseline_full_suite.log`).
+  - Fixed (each with a test against an independent result): the PEEC grid's strip widths and node areas are measured
+    on the copper (ISSUE-11: a track's R' read 0.43-1.81 × ρ/(w·t) by width, angle and grid position, now within
+    1 %); the copper heat Thermal gets is the solved I²R (ISSUE-12: up to 2 × on angled tracks); the sustained density
+    counts only the net's own copper (ISSUE-13); the temperature map shows each cell's hottest point (ISSUE-14: a
+    0.1 mm track 15 % cool); copper pieces of one net that do not touch are never joined (ISSUE-15: a broken track was
+    solved as whole); the skin effect is the exact one-sided slab [Dowell 1966] (ISSUE-16: up to +58 % at 1-10 MHz);
+    plate capacitance through mixed dielectrics in series (ISSUE-17); White's Sutherland constants, IPC-2221's current
+    fit and Incropera's edition documented (ISSUE-18).
+  - Fixed at "fix all of it" (2026-10-20): Simulate reads the board again and reloads it when KiCad's copy changed
+    (ISSUE-19, `MainFrame._check_board`, `Board.fingerprint`; a run starts ~0.9 s later on kraft, no stall:
+    `out/gui_probe/audit5/`); Thermal's heat holds the via barrels, the hot loop's switching current and the
+    inductor's ripple (ISSUE-20, A43); a narrow band's change of width is taken in series along its strips for the
+    resistance (ISSUE-21: the 2 mm neck −2.9 % at 1x, was −9 %; `peec._series_factor`, `Grid.rx / ry`, the inductance
+    keeps `wx / wy`); a DC node's heat goes into its own copper (ISSUE-22: at fine quality an edge node's heat had made
+    a hot spot 36 % over a track, `peec._heat_points`, A44); after Thermal every DC path at its temperature
+    (ISSUE-23, `thermal.dc_at_temperature`, a note, and the CLI's JSON report now has `thermal` / `capacity`).
+    Documented, not changed: normal quality's mesh budget on long narrow hot tracks (ISSUE-24; refining only the hot
+    blocks read kraft's hottest parts 1.5-3 K cooler than fine, so the planner stays). REFERENCES: Dowell 1966,
+    Foley 1990, Kreyszig 2011 added; A2 / A3 / A10 / A27 revised; A39-A44 new; the three references nobody could open
+    (CISPR 25's average column and edition, IPC-2221's §6.2 text, Incropera's face-down coefficient) tried again and
+    recorded as unverified (A10's peak limits checked against TI SLLA569B).
+  - Thermal, validated: with the right heat, a long 0.075-0.4 mm track's temperature is within 2 % of an independent
+    2D cross-section (`tests/refsolvers.py`), its current capacity within 2.4 %. 0.4 → 0.1 mm at 1 A: R, drop, loss,
+    J × 4; the rise × 5.06 (heat × 4, the narrow track's spreading + 16 %, ρ(T) + 9 %); the capacity ÷ 2.1.
+  - New: tests/test_track_width.py (TW-1 to -15), tests/test_physics_audit.py (PA-1 to -4), tests/refsolvers.py, a
+    window test (`test_simulate_reads_a_board_changed_since_it_was_loaded`); tools/dev/track_width_check.py (the
+    sweep, `--src` for another tree), track_capacity_check.py, dc_thermal_summary.py (`--quality`, `--refine-ring`),
+    topology_diff.py. Outputs in `out/audit5/`.
+  - On kraft_flux_mini_2 (`Downloads\flux-2`, main against this branch, PHYSICS_AUDIT.md section 7): the same
+    pads joined (351, 0 differences); the stages' DC paths within −0.4 to −4.5 % (conv4's switch node +25 %: its R
+    is the loss's, with the inductor's 0.18 A p-p ripple on 0.1 A), a hot-loop path per stage (conv1 16 mW);
+    hottest copper 124.27 → 124.54 °C, copper heat at 20 °C 537 → 558 mW (now equal to the combined DC view's loss);
+    the paths at temperature +20 to +29 % copper resistance (conv1's output 5.63 → 6.04 mΩ at 84 °C, drop 56 → 60
+    mV). Emission margins within ±0.8 dB below 1 GHz; above it the 1x shifts (+1.5 to +8.9 dB) are the 1x grid's own
+    error: at 2x the two trees agree within 0.4-1.5 dB (`out/audit5/run_converge.sh`).
+  - Full suite on the branch: 960 passed, 5 skipped (two timing-sensitive tests failed while kraft ran beside the
+    suite and passed alone); the quality gates clean.
+  - Open from it (NEXT_STEPS "Open, technical"): normal quality's thermal mesh budget on long narrow hot tracks
+    (ISSUE-24: fine quality; a planner refining only the hot blocks was tried and not kept), a width step in copper
+    wider than 4 cells or at a junction (within ±d/2, A39), the references nobody could open (CISPR 25's average
+    column and edition, IPC-2221's §6.2 text, Incropera 7th edition's face-down coefficient). Not run here: the board
+    check against a live KiCad (the read it does is Reload board's). The plugin in KiCad is still the PCM one from
+    before this round (no release key on this machine: NEXT_STEPS item 1).
+  - To compare with the code before the round: `git worktree add <dir> 68b85af` and the tools' `--src <dir>/src`
+    (the session's worktree was in its scratchpad and is gone).
 
 - **Branch `fem-notes` (2026-10-19, from `main`, merged at the user's "commit and merge changes"):** the user asked
   for a FEM pathway beside PEEC (benefits, work, drawbacks, a switch between the two), then: "write this down under

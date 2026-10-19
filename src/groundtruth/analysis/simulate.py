@@ -496,15 +496,16 @@ class BoardModel:
             for na, nb in pairs:
                 st.branches.append(Branch(na, nb, z if n == 1 else (lambda f, z=z, n=n: n * z(f)), fp.reference,
                                           "part"))
-        # Plane-pair capacitance from the physical stackup (εr, insulation thickness, loss tangent)
+        # Plane-pair capacitance from the physical stackup (εr, insulation thickness, loss tangent): the dielectrics
+        # between two planes in series (Stackup.epsilon_series [Pozar 2012])
         if capacitance:
             stk = board.stackup
             for k in range(len(names)):
                 for l in range(k + 1, len(names)):
                     a, b = names[k], names[l]
                     t = stk.dielectric_between(a, b) * 1e-3
-                    st.pairs.append(PlanePair(k, l, EPS0 * stk.epsilon_between(a, b) / t,
-                                              stk.loss_tangent_between(a, b)))
+                    st.pairs.append(PlanePair(k, l, EPS0 * stk.epsilon_series(a, b) / t,
+                                              stk.loss_tangent_series(a, b)))
         return st
 
     def ideal_stack(self, route: Route, ref_layers: list[str], bbox, d) -> StackBuild:

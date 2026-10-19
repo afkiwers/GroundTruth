@@ -10,7 +10,7 @@ lumped branches (stitching vias, through-hole pads, decaps, 0R, ferrites), plus 
     Z·I - A·V = -jω·ψ        (KVL per branch; ψ = flux coupled from the known signal current)
     Aᵀ·I      = J            (KCL; +1 A injected at the receiver return node, -1 A at the driver's)
 
-Z = R_s(f) + jω·L_p for the strips (R_s with the skin depth [Ramo 1994] [A2]), where L_p holds all mutual
+Z = R_s(f) + jω·L_p for the strips (R_s with the skin depth [Ramo 1994] [Dowell 1966] [A2]), where L_p holds all mutual
 partial inductances between parallel strips on every pair of layers. On a uniform grid each layer pair's L_p is a
 convolution kernel that only depends on the grid offset and the layer distance Δz, so L_p·I is evaluated with FFTs
 and never formed. Plane-pair capacitance (C = ε0·εr·d²/t per cell, from the stackup, plus dielectric loss ωC·tanδ
@@ -61,8 +61,8 @@ from scipy.sparse.csgraph import connected_components
 from scipy.sparse.linalg import splu
 
 from . import gpu
-from .kernel import (GMD_FLAT, MU0, filament_mutual, leggauss, segment_mutual, segment_vector_potential, strip_kernel,
-                     strip_self, strip_self_numeric)
+from .kernel import (GMD_FLAT, MU0, filament_mutual, leggauss, segment_mutual, segment_vector_potential, skin_thickness,
+                     strip_kernel, strip_self, strip_self_numeric)
 
 SIGMA_CU = 5.8e7            # S/m, annealed copper at 20 °C [IEC 60028]
 VIA_PLATING = 25e-6         # m, a via barrel's plating [A3]
@@ -80,6 +80,13 @@ PRECOND_REUSE = 0.25        # reuse a factorisation as preconditioner within ±2
 BORROW_BUDGET = 1.5         # a borrowed preconditioner's GMRES budget: 1.5 x the iterations its source needed at
 BORROW_EXTRA_ITS = 15       # home, plus 15
 LU_PIVOT_THRESHOLD = 0.1    # SuperLU symmetric mode: take the diagonal pivot unless it is below 0.1 x the column's
+PIECE_TOL_MM = 0.005        # one net's copper within this of itself is one piece (touching fills; _pieces)
+STRIP_SAMPLES = 6           # lines along each strip where its copper's width is measured (_exact_copper, A39) ...
+BAND_STRIPS = 4             # ... for a band of at most this many side-by-side strips (a narrow conductor), with no
+                            # other strip of its net within 2 x ADOPT_FACES of it along the border (_series_factor)
+ADOPT_FACES = 3             # copper crossing a cell border where its net has no strip: to the nearest strip on that
+ADOPT_CELLS = 2             # border line this many cells along it; a cell's copper without a node: to the nearest node
+                            # this many cells away (_exact_copper)
 
 
 def too_large_text(unknowns: int, error) -> str:
@@ -160,6 +167,12 @@ class Grid:
     wy: Optional[np.ndarray] = None      # (nx, ny-1)
     ox: Optional[np.ndarray] = None      # (nx-1, ny) where that copper's centre lies across the strip: offset from
     oy: Optional[np.ndarray] = None      # the cell centre (+y for x strips, +x for y strips), a fraction of d
+    area: Optional[np.ndarray] = None    # (nx, ny) the node's own copper in its cell, a fraction of d² (exact, with
+                                         # the slivers of cells without a node of that net; None = not measured)
+    rx: Optional[np.ndarray] = None      # (nx-1, ny) the x strip's width for its resistance, a fraction of d: wx
+    ry: Optional[np.ndarray] = None      # with a change of width along the strip in series (_series_factor; None = wx)
+    hx: Optional[np.ndarray] = None      # (nx, ny) mm from the node to where its heat is: the nearest point of its
+    hy: Optional[np.ndarray] = None      # copper where the node lies outside it (a cell at the copper's edge), else 0
 
     def xy(self, i, j):
         """Board coordinates (mm) of node (i, j) (arrays work too)."""
@@ -194,21 +207,63 @@ class Grid:
         return int(ii[k]), int(jj[k])
 
     def copper_area(self) -> np.ndarray:
-        """Each node's share of its cell that carries current: the mean copper width (wx / wy, a fraction of d) of
-        the strips that touch it, 1 at a node of full strips (or of a grid without widths), 0 off copper. What a
-        density in the copper (Solution.node_field(copper=True)) is weighted by for a sum over the cells, so that a
-        strip's heat ρ·(I/φd)²/t·φd² is its R/φ·I² (the cell's area fill would not do: a via's antipad lowers it,
-        not the current-carrying width around it)."""
+        """Each node's copper as a share of its cell (a fraction of d²), 0 off copper: the measured area (`area`,
+        the node's own net in its cell plus the slivers next to it that have no node of their own) where the grid
+        has one, else the mean copper width (wx / wy) of the strips that touch it, 1 at a node of full strips (or
+        of a grid without widths). A density in the copper (Solution.node_field(copper=True)) is defined with this
+        area, so that ρ·|J|²·t·(area·d²) summed over the nodes is the strips' own Joule heat Σ R·I² (exactly, for
+        any pattern of currents), and |J| is the current over the copper's real cross-section."""
         out = self.node.astype(float)
         if self.wx is None or self.wy is None:
             return out
-        s, n = np.zeros(self.node.shape), np.zeros(self.node.shape)
-        for w, on, lo, hi in ((self.wx, self.xb, (slice(None, -1), slice(None)), (slice(1, None), slice(None))),
-                              (self.wy, self.yb, (slice(None), slice(None, -1)), (slice(None), slice(1, None)))):
-            for sl in (lo, hi):
-                s[sl] += np.where(on, w, 0.0)
-                n[sl] += on
-        return np.where(n > 0, s / np.maximum(n, 1), out)
+        # the strips touching each node: their widths summed and counted per direction, and whether the node has a
+        # strip on both sides in x (a run along x) or in y
+        sx, nxs, sy, nys = (np.zeros(self.node.shape) for _ in range(4))
+        sx[:-1, :] += np.where(self.xb, self.wx, 0.0)
+        sx[1:, :] += np.where(self.xb, self.wx, 0.0)
+        nxs[:-1, :] += self.xb
+        nxs[1:, :] += self.xb
+        sy[:, :-1] += np.where(self.yb, self.wy, 0.0)
+        sy[:, 1:] += np.where(self.yb, self.wy, 0.0)
+        nys[:, :-1] += self.yb
+        nys[:, 1:] += self.yb
+        n = nxs + nys
+        mean_width = np.where(n > 0, (sx + sy) / np.maximum(n, 1), out)
+        if self.area is None:
+            return mean_width
+        cached = self.__dict__.get("_copper_area")
+        if cached is not None:
+            return cached
+        # The measured copper, shared out over the nodes like their strips' widths: each node gets its strips' width
+        # times the ratio of measured area to strip width summed over its 3 x 3 neighbourhood of the same net. A track
+        # at an angle becomes a staircase whose corner cells hold a sliver of its copper while their strips carry all
+        # of its current: over the bare cell area such a node read 2-4 x the track's density. The local total is kept,
+        # and with it the density's mean; the heat is exact whatever area a node gets (Solution.node_field). The
+        # width is that of the strips along the node's run (x strips where it has one on both sides in x and not in
+        # y, and the other way round), else of all its strips: the strips across a wide track, from one cell row of
+        # it to the next, carry nothing in a straight run and must not count (they moved a 0.4 mm track's density
+        # between its rows by ±5 %). Unchanged where area = width: a straight run, a pour
+        x_run, y_run = nxs == 2, nys == 2
+        run_width = np.where(x_run & ~y_run, sx / np.maximum(nxs, 1),
+                             np.where(y_run & ~x_run, sy / np.maximum(nys, 1), mean_width))
+        area = np.where(self.node, self.area, 0.0)
+        width = np.where(self.node, run_width, 0.0)
+        lab = np.where(self.node, self.label if self.label is not None else 0, -1)
+        sum_a, sum_w = np.zeros(area.shape), np.zeros(area.shape)
+        nx, ny = area.shape
+        for di in (-1, 0, 1):
+            for dj in (-1, 0, 1):
+                src = (slice(max(di, 0), nx + min(di, 0)), slice(max(dj, 0), ny + min(dj, 0)))
+                dst = (slice(max(-di, 0), nx + min(-di, 0)), slice(max(-dj, 0), ny + min(-dj, 0)))
+                same = (lab[src] == lab[dst]) & (lab[dst] >= 0)
+                sum_a[dst] += np.where(same, area[src], 0.0)
+                sum_w[dst] += np.where(same, width[src], 0.0)
+        shared = np.where(sum_w > 0, width * sum_a / np.maximum(sum_w, 1e-12), 0.0)
+        # a node with no measured copper around it (a via ring or pad seeded into cells its copper only touches):
+        # the strips' width, as before
+        out = np.where(self.node, np.where(shared > 0, shared, mean_width), 0.0)
+        self.__dict__["_copper_area"] = out
+        return out
 
     def net_at(self, node: tuple[int, int]) -> str:
         """The net of a node's copper ("" for no copper, or a grid without net labels)."""
@@ -245,10 +300,22 @@ def build_grid(geom, bbox: tuple[float, float, float, float], d: float,
     ys = y0 + np.arange(ny) * d
     nets = list(geom.keys()) if isinstance(geom, dict) else [""]
     geoms = list(geom.values()) if isinstance(geom, dict) else [geom]
+    geom_list = list(geoms)                 # kept for the exact widths (the sub-grid branch clears `geoms`)
     fill = None
     fine = sub > 1
+    pieces: list = []                       # the fine path: [(net index, one connected piece of its copper)]
     if fine:
-        label, cross_x, cross_y, fill, off_x, off_y = _coarse_from_fine(geoms, x0, y0, d, nx, ny, sub)
+        # Each net's copper in its connected pieces (the polygons of its union): a cell keeps one piece, and only
+        # cells of the same piece are joined, so copper of one net that does not touch on this layer stays apart
+        # however narrow the gap (with the net alone, a track broken by a 0.15 mm gap was solved as if whole: the
+        # second piece's walk took the first one's last cell as its own; VALIDATION_AUDIT.md round 5, ISSUE-15)
+        for k, g in enumerate(geoms):
+            for p in _pieces(g):
+                pieces.append((k, p))
+        part, cross_x, cross_y, fill, off_x, off_y = _coarse_from_fine([p for _, p in pieces], x0, y0, d, nx, ny,
+                                                                       sub)
+        net_of = np.array([k for k, _ in pieces] + [-1], int)
+        label = net_of[part]                 # part -1 (no copper) maps to the trailing -1
         mids_x = np.where(cross_x > 0, label[:-1, :], -1)
         mids_y = np.where(cross_y > 0, label[:, :-1], -1)
         geoms = []
@@ -256,6 +323,7 @@ def build_grid(geom, bbox: tuple[float, float, float, float], d: float,
         label = -np.ones((nx, ny), int)
         mids_x = np.full((nx - 1, ny), -1)
         mids_y = np.full((nx, ny - 1), -1)
+        part = None
     for k, g in enumerate(geoms):
         if g is None or g.is_empty:
             continue
@@ -275,6 +343,21 @@ def build_grid(geom, bbox: tuple[float, float, float, float], d: float,
         mx[shapely.contains_xy(g, X[: mx.shape[0]] + d / 2, Y[: mx.shape[0]]) & (mx < 0)] = k
         my = mids_y[i0:i1, j0:min(j1, ny - 1)]
         my[shapely.contains_xy(g, X[:, : my.shape[1]], Y[:, : my.shape[1]] + d / 2) & (my < 0)] = k
+    if part is None:
+        part = label                            # without pieces: the net is the piece (the same array, as before)
+    piece_tree = shapely.STRtree([p for _, p in pieces]) if pieces else None
+
+    def piece_at(k: int, px: float, py: float) -> int:
+        """The piece of net k's copper that holds (px, py), or a new piece of its own when none does (a seed or
+        a track outside the copper geometry); the net itself without pieces."""
+        if piece_tree is None:
+            return k
+        for c in piece_tree.query(shapely.Point(px, py)):
+            if pieces[c][0] == k and pieces[c][1].covers(shapely.Point(px, py)):
+                return int(c)
+        pieces.append((k, None))
+        return len(pieces) - 1
+
     seeded = np.zeros((nx, ny), bool)
     for net, points in (seeds or {}).items():
         if net not in nets:
@@ -284,6 +367,7 @@ def build_grid(geom, bbox: tuple[float, float, float, float], d: float,
             i, j = int(round((px - x0) / d)), int(round((py - y0) / d))
             if 0 <= i < nx and 0 <= j < ny and label[i, j] < 0:
                 label[i, j] = k
+                part[i, j] = piece_at(k, px, py)
                 seeded[i, j] = True
     forced_x = np.zeros((nx - 1, ny))           # the widest forced track along each strip, mm (0 = none)
     forced_y = np.zeros((nx, ny - 1))
@@ -291,40 +375,352 @@ def build_grid(geom, bbox: tuple[float, float, float, float], d: float,
     for net, polylines in (lines or {}).items():
         if net not in nets:
             continue
-        bridges += _rasterise_lines(nets.index(net), polylines, x0, y0, d, label, seeded, forced_x, forced_y)
-    # A strip exists if both end nodes and its midpoint are the same net's copper (catches slots >= d/2).
-    # A seeded node (via ring / pad smaller than the grid) joins same-net neighbours without the midpoint test.
-    xb = (label[:-1, :] >= 0) & (label[:-1, :] == label[1:, :]) & (
+        k = nets.index(net)
+        owners = [piece_at(k, *_line_point(pts)) if pieces else None for pts, _ in polylines]
+        bridges += _rasterise_lines(k, polylines, x0, y0, d, label, seeded, forced_x, forced_y, part, owners)
+    # A strip exists if both end nodes and its midpoint are the same net's copper (catches slots >= d/2), of the
+    # same piece. A seeded node (via ring / pad smaller than the grid) joins its piece's neighbours without the
+    # midpoint test.
+    xb = (label[:-1, :] >= 0) & (label[:-1, :] == label[1:, :]) & (part[:-1, :] == part[1:, :]) & (
         (mids_x == label[:-1, :]) | seeded[:-1, :] | seeded[1:, :] | (forced_x > 0))
-    yb = (label[:, :-1] >= 0) & (label[:, :-1] == label[:, 1:]) & (
+    yb = (label[:, :-1] >= 0) & (label[:, :-1] == label[:, 1:]) & (part[:, :-1] == part[:, 1:]) & (
         (mids_y == label[:, :-1]) | seeded[:, :-1] | seeded[:, 1:] | (forced_y > 0))
-    wx = wy = ox = oy = None
+    wx = wy = ox = oy = area = rx = ry = hx = hy = None
     if fine:
-        wx, ox = _strip_widths(xb, cross_x, off_x, forced_x, d)
-        wy, oy = _strip_widths(yb, cross_y, off_y, forced_y, d)
-    return Grid(x0, y0, d, nx, ny, label >= 0, xb, yb, label, nets, fill, bridges, wx, wy, ox, oy)
+        # the strips' widths and the nodes' copper areas from the copper itself (exact), not from the sub-grid's
+        # samples: those quantise a width to whole samples (d/sub) and count a track twice where its forced row and
+        # a sampled neighbour row both carry it (_exact_copper)
+        ex_x, ex_y, area, kx, ky = _exact_copper(geom_list, label, xb, yb, x0, y0, d)
+        wx, ox = _strip_widths(xb, cross_x, off_x, forced_x, d, ex_x)
+        wy, oy = _strip_widths(yb, cross_y, off_y, forced_y, d, ex_y)
+        # the resistance takes a change of width along a strip in series (_series_factor); the inductance keeps the
+        # border's width (PlaneStack._widths): its kernels are for strips of one width, at most a pitch
+        rx, ry = wx * kx, wy * ky
+        hx, hy = _heat_points(geom_list, label, x0, y0, d)
+    return Grid(x0, y0, d, nx, ny, label >= 0, xb, yb, label, nets, fill, bridges, wx, wy, ox, oy, area, rx, ry,
+                hx, hy)
+
+
+def _heat_points(geoms: list, label: np.ndarray, x0: float, y0: float, d: float) -> tuple[np.ndarray, np.ndarray]:
+    """(hx, hy) (nx, ny), mm: from each node to the nearest point of its own net's copper where the node lies
+    outside that copper, 0 elsewhere. The sub-grid gives a cell at the copper's edge a node when one of its samples
+    is copper, so the node itself can be up to about d/4 off the copper; its Joule heat is made in the copper and
+    goes there (analysis/thermal.copper_heat), not onto the bare laminate beside it, where a thermal mesh finer than
+    the grid put it into resin (0.3 W/mK) and read a 0.4 mm track's edge 20 % hot [A44]. A hair past the edge
+    (1e-4 mm), so the point lies in the copper's cell, not on its border."""
+    nx, ny = label.shape
+    hx, hy = np.zeros((nx, ny)), np.zeros((nx, ny))
+    for k, g in enumerate(geoms):
+        if g is None or g.is_empty:
+            continue
+        ii, jj = np.nonzero(label == k)
+        if len(ii) == 0:
+            continue
+        px, py = x0 + ii * d, y0 + jj * d
+        shapely.prepare(g)
+        out = ~shapely.intersects_xy(g, px, py)            # outside, not on the border
+        if not out.any():
+            continue
+        ii, jj, px, py = ii[out], jj[out], px[out], py[out]
+        ends = shapely.get_coordinates(shapely.shortest_line(shapely.points(px, py), g))[1::2]
+        vx, vy = ends[:, 0] - px, ends[:, 1] - py
+        n = np.hypot(vx, vy)
+        step = np.where(n > 0, 1e-4 / np.maximum(n, 1e-300), 0.0)
+        hx[ii, jj] = vx * (1 + step)
+        hy[ii, jj] = vy * (1 + step)
+    return hx, hy
 
 
 def _strip_widths(exists: np.ndarray, cross: np.ndarray, offset: np.ndarray, forced: np.ndarray,
-                  d: float) -> tuple[np.ndarray, np.ndarray]:
+                  d: float, exact: Optional[np.ndarray] = None) -> tuple[np.ndarray, np.ndarray]:
     """Each strip's copper width as a fraction of the pitch d, and where its centre lies across the strip (an
-    offset from the cell centre, a fraction of d): the share of its cell border the sub-grid saw copper cross and
-    that copper's centre, at least a forced track's own width (centred where the sub-grid saw none); 1 and centred
-    where the strip has neither (a seeded via ring or pad joined to its neighbour, as before). Zero where there is
-    no strip.
+    offset from the cell centre, a fraction of d). The width is `exact` (_exact_copper: the length of the cell
+    border its net's copper covers, measured on the copper itself) where that is above zero; else the share of
+    its border the sub-grid saw copper cross, at least a forced track's own width (centred where the sub-grid saw
+    none); 1 and centred where the strip has neither (a seeded via ring or pad joined to its neighbour). Zero where
+    there is no strip.
 
     A strip used to be a full cell wide wherever it existed, so a neck narrower than the grid pitch conducted as
     if it were a pitch wide: on a 15 x 15 mm island joined to its plane by a 0.35 mm x 3 mm neck over a 0.2 mm
     cavity, the island's resonance moved 735-900 MHz as d went 0.1-1 mm, the neck's L being the grid's. With the
     strip's width, its resistance and partial self inductance are the neck's (PlaneStack._widths; SP-27 in
-    tests/test_validation_audit.py, docs/ARCHITECTURE.md "A strip is as wide as the copper it crosses")."""
+    tests/test_validation_audit.py, docs/ARCHITECTURE.md "A strip is as wide as the copper it crosses").
+
+    The sub-grid's width alone (2026-10-18 to -19) was whole samples of d/sub: a 0.1 mm track on the DC model's
+    0.235 mm cells (samples 0.1175 mm) read 0.1175 mm wide, and where its forced row and a sampled neighbour row
+    both carried it, 0.16 mm: its resistance and current density 15-37 % low, a 0.4 mm track's -12 to +17 %, and a
+    track at 30-45° 20-57 % too resistive, its strips as wide as the track rather than as the border it crosses
+    (w / cos θ). VALIDATION_AUDIT.md round 5, ISSUE-11."""
     w = np.where(forced > 0, np.maximum(cross, np.minimum(forced / d, 1.0)), cross)
     w = np.where(w > 0, np.minimum(w, 1.0), 1.0)
+    if exact is not None:
+        # a border is at most a pitch long, but a strip also carries the sliver of copper beside it that has no
+        # strip of its own (_adopt): a 0.4 mm track over 0.235 mm cells is 0.54 + 1 + 0.16 pitches, its middle strip
+        # 1.16 wide (capped at 1, the track lost 9 % of its width); 3 only bounds a pathological case
+        w = np.where(exact > 0, np.minimum(exact, 3.0), w)
     o = np.where(cross > 0, offset, 0.0)
     # copper of width w centred at o stays inside the cell: |o| <= (1 - w) / 2 (a track wider than what the
-    # sub-grid saw, centred on it)
-    lim = (1.0 - w) / 2
+    # sub-grid saw, centred on it); centred when it is a pitch wide or more
+    lim = np.maximum((1.0 - w) / 2, 0.0)
     return np.where(exists, w, 0.0), np.where(exists, np.clip(o, -lim, lim), 0.0)
+
+
+def _ring_edges(geom) -> tuple[np.ndarray, np.ndarray]:
+    """The edges of a (multi)polygon's rings, outlines and holes alike, as start and end points (mm), (n, 2) each,
+    each outline counter-clockwise and each hole clockwise (the copper on the left of every edge, for _cell_areas);
+    lines and points of a geometry collection are left out."""
+    parts = np.asarray(_polygons(geom), dtype=object)
+    if len(parts) == 0:
+        return np.zeros((0, 2)), np.zeros((0, 2))
+    if hasattr(shapely, "orient_polygons"):         # shapely 2.1
+        parts = shapely.orient_polygons(parts, exterior_cw=False)
+    else:
+        from shapely.geometry.polygon import orient
+        parts = np.asarray([orient(p, 1.0) for p in parts], dtype=object)
+    xy, idx = shapely.get_coordinates(shapely.get_rings(parts), return_index=True)
+    same = idx[1:] == idx[:-1]              # consecutive points of one ring (closed: its last point is its first)
+    return xy[:-1][same], xy[1:][same]
+
+
+def _line_cover(ua: np.ndarray, va: np.ndarray, ub: np.ndarray, vb: np.ndarray, u0: float, du: float,
+                n_lines: int, v0: float, d: float, n_cells: int) -> np.ndarray:
+    """(n_lines, n_cells): on each line u = u0 + m·du (m = 0 .. n_lines - 1), the length (mm) of each interval
+    [v0 + (c - ½)·d, v0 + (c + ½)·d] along it that lies inside the polygons with the edges (ua, va) → (ub, vb).
+
+    A scanline [Foley 1990]: an edge crosses the lines with u in [min(ua, ub), max(ua, ub)) (half open, so a vertex
+    on a line counts once and an edge along a line not at all), the crossings of each line sorted along it bound
+    the inside in pairs (even-odd: one net's copper is a valid (multi)polygon, its pieces and holes do not
+    overlap), and each inside span adds its exact overlap with every interval."""
+    out = np.zeros((n_lines, n_cells))
+    if len(ua) == 0 or n_lines <= 0 or n_cells <= 0:
+        return out
+    lo, hi = np.minimum(ua, ub), np.maximum(ua, ub)
+    m0 = np.clip(np.ceil((lo - u0) / du), 0, n_lines).astype(np.int64)
+    m1 = np.clip(np.ceil((hi - u0) / du), 0, n_lines).astype(np.int64)
+    sel = np.nonzero(m1 > m0)[0]
+    if len(sel) == 0:
+        return out
+    n = (m1 - m0)[sel]
+    e = np.repeat(sel, n)                                   # one entry per (edge, line) crossing
+    m = np.repeat(m0[sel], n) + (np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n))
+    u = u0 + m * du
+    v = va[e] + (u - ua[e]) * (vb[e] - va[e]) / (ub[e] - ua[e])
+    order = np.lexsort((v, m))
+    m, v = m[order], v[order]
+    count = np.bincount(m, minlength=n_lines)
+    rank = np.arange(len(m)) - np.searchsorted(m, m)        # position of each crossing along its line
+    start = np.nonzero((rank % 2 == 0) & (count[m] % 2 == 0))[0]    # a line with an odd count (degenerate): skipped
+    lines, a, b = m[start], v[start], v[start + 1]
+    vlo, top = v0 - d / 2, n_cells * d
+    a, b = np.clip(a - vlo, 0.0, top), np.clip(b - vlo, 0.0, top)
+    keep = b > a
+    lines, a, b = lines[keep], a[keep], b[keep]
+    ca = np.minimum((a / d).astype(np.int64), n_cells - 1)
+    cb = np.minimum((b / d).astype(np.int64), n_cells - 1)
+    flat = out.reshape(-1)
+    size = n_lines * n_cells
+    one = ca == cb                                          # a span inside one interval
+    flat += np.bincount(lines[one] * n_cells + ca[one], b[one] - a[one], size)
+    two = ~one                                              # partial first and last intervals, full ones between
+    l2, a2, b2, ca2, cb2 = lines[two], a[two], b[two], ca[two], cb[two]
+    flat += np.bincount(l2 * n_cells + ca2, (ca2 + 1) * d - a2, size)
+    flat += np.bincount(l2 * n_cells + cb2, b2 - cb2 * d, size)
+    full = np.zeros((n_lines, n_cells + 1))
+    full.reshape(-1)[:] += np.bincount(l2 * (n_cells + 1) + ca2 + 1, np.full(len(l2), d), n_lines * (n_cells + 1))
+    full.reshape(-1)[:] -= np.bincount(l2 * (n_cells + 1) + cb2, np.full(len(l2), d), n_lines * (n_cells + 1))
+    out += np.cumsum(full, axis=1)[:, :n_cells]
+    return out
+
+
+def _cell_areas(pa: np.ndarray, pb: np.ndarray, xl: float, yl: float, d: float, wi: int, wj: int,
+                right: np.ndarray) -> np.ndarray:
+    """(wi, wj): the area (mm²) of each cell [xl + i·d, xl + (i+1)·d] x [yl + j·d, yl + (j+1)·d] that lies inside
+    the polygons whose oriented edges are pa → pb (outlines counter-clockwise, holes clockwise: _ring_edges), with
+    `right` the covered length (mm) of each cell's right border (_line_cover on x = xl + (i+1)·d).
+
+    Green's theorem [Kreyszig 2011]: a region's area is ∮ x dy around it. A cell's copper is bounded by the
+    polygons' edges inside the cell and by the parts of the cell's own border inside the copper: the edges are cut
+    at every grid line they cross and each piece adds (x̄ - x_left)·Δy to its cell; along the cell's border, x -
+    x_left is d on the right side (traversed upwards where it is copper: d times its covered length) and 0 on the
+    left, and the top and bottom have dy = 0. Exact for straight edges (an arc is a polygon here already)."""
+    out = np.zeros((wi, wj))
+    if len(pa):
+        xa, ya, xb, yb = pa[:, 0], pa[:, 1], pb[:, 0], pb[:, 1]
+        # the parameters t along each edge where it crosses a vertical or a horizontal grid line, plus its ends
+        ts, es = [np.zeros(len(xa)), np.ones(len(xa))], [np.arange(len(xa))] * 2
+        for a, b, origin, n in ((xa, xb, xl, wi + 1), (ya, yb, yl, wj + 1)):
+            lo, hi = np.minimum(a, b), np.maximum(a, b)
+            m0 = np.clip(np.ceil((lo - origin) / d), 0, n).astype(np.int64)
+            m1 = np.clip(np.ceil((hi - origin) / d), 0, n).astype(np.int64)
+            sel = np.nonzero(m1 > m0)[0]
+            cnt = (m1 - m0)[sel]
+            e = np.repeat(sel, cnt)
+            m = np.repeat(m0[sel], cnt) + (np.arange(int(cnt.sum())) - np.repeat(np.cumsum(cnt) - cnt, cnt))
+            ts.append((origin + m * d - a[e]) / (b[e] - a[e]))
+            es.append(e)
+        t, e = np.concatenate(ts), np.concatenate(es)
+        order = np.lexsort((t, e))
+        t, e = t[order], e[order]
+        same = e[1:] == e[:-1]                       # consecutive parameters of one edge bound a piece
+        e, t0, t1 = e[:-1][same], t[:-1][same], t[1:][same]
+        x0p, y0p = xa[e] + t0 * (xb[e] - xa[e]), ya[e] + t0 * (yb[e] - ya[e])
+        x1p, y1p = xa[e] + t1 * (xb[e] - xa[e]), ya[e] + t1 * (yb[e] - ya[e])
+        i = np.floor(((x0p + x1p) / 2 - xl) / d).astype(np.int64)
+        j = np.floor(((y0p + y1p) / 2 - yl) / d).astype(np.int64)
+        ok = (i >= 0) & (i < wi) & (j >= 0) & (j < wj)
+        left = xl + i * d
+        contrib = ((x0p + x1p) / 2 - left) * (y1p - y0p)
+        out.reshape(-1)[:] += np.bincount(i[ok] * wj + j[ok], contrib[ok], wi * wj)
+    return out + d * right
+
+
+def _adopt(cov: np.ndarray, has: np.ndarray, steps, reach: int = 1) -> np.ndarray:
+    """`cov` where `has` (a strip or node of the net exists), plus each value where none exists (`orphan` copper)
+    moved to the nearest that has one along the index offsets `steps`, up to `reach` steps away (of two at the same
+    distance, the one with more copper of its own). Orphans with none within reach are dropped (copper the model
+    has no node or strip of its net near)."""
+    own = np.where(has, cov, 0.0)
+    orphan = np.where(has, 0.0, cov)
+    out = own.copy()
+    ni, nj = cov.shape
+    for k in range(1, reach + 1):
+        if not np.any(orphan > 0):
+            break
+        best = np.full(cov.shape, -1.0)
+        pick = np.full(cov.shape, -1)
+        for s, (di, dj) in enumerate(steps):
+            di, dj = di * k, dj * k
+            # the cell k steps away along (di, dj) of each cell, as arrays aligned with the cell
+            nb_has, nb_cov = np.zeros(cov.shape, bool), np.zeros(cov.shape)
+            src = (slice(max(di, 0), ni + min(di, 0)), slice(max(dj, 0), nj + min(dj, 0)))
+            dst = (slice(max(-di, 0), ni + min(-di, 0)), slice(max(-dj, 0), nj + min(-dj, 0)))
+            nb_has[dst], nb_cov[dst] = has[src], own[src]
+            better = (orphan > 0) & nb_has & (nb_cov > best)
+            best = np.where(better, nb_cov, best)
+            pick = np.where(better, s, pick)
+        for s, (di, dj) in enumerate(steps):
+            di, dj = di * k, dj * k
+            moved = np.where(pick == s, orphan, 0.0)
+            src = (slice(max(-di, 0), ni + min(-di, 0)), slice(max(-dj, 0), nj + min(-dj, 0)))
+            dst = (slice(max(di, 0), ni + min(di, 0)), slice(max(dj, 0), nj + min(dj, 0)))
+            out[dst] += moved[src]
+        orphan = np.where(pick >= 0, 0.0, orphan)
+    return out
+
+
+def _series_factor(face: np.ndarray, samples: list, has: np.ndarray, axis: int) -> np.ndarray:
+    """Per strip, how much a band of strips' conductance changes when its copper's width is taken all along the
+    strips' length instead of at the border they cross (_exact_copper): the harmonic mean of the band's total width
+    at the sample lines over its total at the border. A band is a run of side-by-side strips (consecutive rows of
+    x strips, `axis` 1; columns of y strips, `axis` 0) in one column of strips: together they carry what crosses
+    there. A track at any angle has the same total all along (w / cos θ) and keeps its factor 1; at a step from W₁
+    to W₂ the band conducts as the two lengths in series, d₁/W₁ + d₂/W₂. A band whose copper vanishes at a sample
+    line keeps 1 (its strip stays as the border makes it: the topology decided it conducts).
+
+    Only a narrow conductor on its own is one band in series [A39]: at most BAND_STRIPS strips side by side, and no
+    other strip of its net within 2 x ADOPT_FACES of it along the border (else the copper at a sample line can be
+    the other run's). Every other band keeps 1, as all bands did before: the strips across a track (a run as long
+    as the track; a sample line just past its edge finds only the pads at its ends, and took those strips to 0.24 of
+    their width, a 0.4 mm track's density +5 %, a neck island's resonance +2 %), a pour (whose step the 1D series
+    model would put on the whole column, also on the lanes that go straight on), a junction with a pad or a branch
+    (a staircase step next to a pad read 0.28)."""
+    h = has if axis == 1 else has.T
+    if not h.any():
+        return np.ones(has.shape)
+    f_ = face if axis == 1 else face.T
+    rows = [s if axis == 1 else s.T for s in samples]
+    n0, n1 = h.shape
+    start = h & ~np.concatenate([np.zeros((n0, 1), bool), h[:, :-1]], axis=1)
+    run = np.cumsum(start, axis=1) - 1                  # the run number along each column (where a strip is)
+    r_i, c_i = np.nonzero(h)                            # the strips, column by column, in order along each
+    key = r_i * n1 + run[r_i, c_i]
+    nk = n0 * n1
+    total = np.bincount(key, f_[h], nk)
+    size = np.bincount(key, minlength=nk)
+    # the lanes without a strip between each run and the run before / after it in the same column (none: far)
+    far = n1 + 2 * ADOPT_FACES + 2
+    step = np.where(np.r_[True, r_i[1:] != r_i[:-1]], far, np.r_[far, c_i[1:] - c_i[:-1]])
+    first = step != 1                                   # the first strip of each run
+    gap_before = np.full(nk, far)
+    gap_before[key[first]] = step[first] - 1
+    gap_after = np.where(np.r_[size[1:] > 0, False], np.r_[gap_before[1:], far], far)   # the next run's, same column
+    alone = (size <= BAND_STRIPS) & (gap_before > 2 * ADOPT_FACES) & (gap_after > 2 * ADOPT_FACES)
+    inverse, ok = np.zeros(nk), np.ones(nk, bool)
+    for s in rows:
+        t = np.bincount(key, s[h], nk)
+        ok &= t > 0
+        inverse += 1.0 / np.maximum(t, 1e-300)
+    harmonic = len(rows) / np.maximum(inverse, 1e-300)
+    factor = np.where(alone & ok & (total > 0), harmonic / np.maximum(total, 1e-300), 1.0)
+    out = np.ones(h.shape)
+    out[h] = factor[key]
+    return out if axis == 1 else out.T
+
+
+def _exact_copper(geoms: list, label: np.ndarray, xb: np.ndarray, yb: np.ndarray, x0: float, y0: float,
+                  d: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """The strips' copper widths and the nodes' copper areas measured on the copper itself, as fractions of d and
+    d²: (ex_x (nx-1, ny), ex_y (nx, ny-1), area (nx, ny)); zero where a strip or node has none of its net's copper;
+    and each strip's series factor for its resistance (kx, ky; 1 where none: _series_factor).
+
+    A strip's width is the length of the cell border between its two nodes (x = x_i + d/2 across the cell's height,
+    or y = y_j + d/2) that its net's copper covers (_line_cover on that border): the face of a finite-volume
+    conductance σ·t·w/d [Patankar 1980], which also gives a track at an angle θ its own resistance (it crosses a
+    border w / cos θ long, and the staircase of strips it becomes is cos θ as long per strip: [A39]). A node's area
+    is its cell's copper of its net, exactly (_cell_areas, Green's theorem on the copper's edges cut by the cell).
+
+    Copper crossing a border where its net has no strip (the sliver of a track in the next cell row, which kept no
+    node: the sub-grid saw too little of it there) is added to the nearest strip of its net on the same border line,
+    up to ADOPT_FACES cells along it, and a cell's copper of a net with no node there to the nearest node of that net,
+    up to ADOPT_CELLS cells away (_adopt): a track straddling two cell rows keeps its whole width and area in the row
+    that carries it, and a track at an angle, which crosses a row border over w / sin θ (0.3 mm for 0.15 mm at 30°),
+    keeps it in the one step of its staircase there, which the track's walk can put a cell or two from where the
+    copper crosses (with one cell's reach, that track read 11 % too resistive)."""
+    nx, ny = label.shape
+    ex_x, ex_y, area = np.zeros((nx - 1, ny)), np.zeros((nx, ny - 1)), np.zeros((nx, ny))
+    kx, ky = np.ones((nx - 1, ny)), np.ones((nx, ny - 1))
+    for k, g in enumerate(geoms):
+        if g is None or g.is_empty:
+            continue
+        pa, pb = _ring_edges(g)
+        if len(pa) == 0:
+            continue
+        # the window of cells around this net's copper, with a margin for the slivers' neighbours
+        gx0, gy0, gx1, gy1 = g.bounds
+        i0, i1 = max(int(math.floor((gx0 - x0) / d)) - 2, 0), min(int(math.ceil((gx1 - x0) / d)) + 3, nx)
+        j0, j1 = max(int(math.floor((gy0 - y0) / d)) - 2, 0), min(int(math.ceil((gy1 - y0) / d)) + 3, ny)
+        wi, wj = i1 - i0, j1 - j0
+        if wi < 2 or wj < 2:
+            continue
+        xa, ya, xe, ye = pa[:, 0], pa[:, 1], pb[:, 0], pb[:, 1]
+        # lines x = x_i - d/2 (the borders between the window's columns: line m is cell i0 + m's left border and cell
+        # i0 + m - 1's right one), the covered length of each cell row on them
+        cv = _line_cover(xa, ya, xe, ye, x0 + (i0 - 0.5) * d, d, wi + 1, y0 + j0 * d, d, wj)
+        # lines y = y_j + d/2 (the borders between the window's rows), the covered length of each cell column
+        ch = _line_cover(ya, xa, ye, xe, y0 + (j0 + 0.5) * d, d, wj - 1, x0 + i0 * d, d, wi).T
+        own = label[i0:i1, j0:j1] == k
+        has_x = xb[i0:i1 - 1, j0:j1] & own[:-1, :]
+        has_y = yb[i0:i1, j0:j1 - 1] & own[:, :-1]
+        face_x = _adopt(cv[1:wi, :] / d, has_x, ((0, 1), (0, -1)), ADOPT_FACES)
+        face_y = _adopt(ch / d, has_y, ((1, 0), (-1, 0)), ADOPT_FACES)
+        ex_x[i0:i1 - 1, j0:j1] += face_x
+        ex_y[i0:i1, j0:j1 - 1] += face_y
+        # the width all along each strip, not only at its border: STRIP_SAMPLES lines across every strip's length
+        # (x_i + (q + ½)·d/Q), the copper there adopted as at the border; a narrow band's series factor
+        # (_series_factor) places a change of width where it is, to d/(2Q), not anywhere within ±d/2 [A39]
+        q_n = STRIP_SAMPLES
+        sx = (_line_cover(xa, ya, xe, ye, x0 + (i0 + 0.5 / q_n) * d, d / q_n, (wi - 1) * q_n, y0 + j0 * d, d, wj)
+              / d).reshape(wi - 1, q_n, wj)
+        sy = (_line_cover(ya, xa, ye, xe, y0 + (j0 + 0.5 / q_n) * d, d / q_n, (wj - 1) * q_n, x0 + i0 * d, d, wi)
+              / d).reshape(wj - 1, q_n, wi)
+        along_x = [_adopt(sx[:, q, :], has_x, ((0, 1), (0, -1)), ADOPT_FACES) for q in range(q_n)]
+        along_y = [_adopt(sy[:, q, :].T, has_y, ((1, 0), (-1, 0)), ADOPT_FACES) for q in range(q_n)]
+        win_x, win_y = kx[i0:i1 - 1, j0:j1], ky[i0:i1, j0:j1 - 1]     # views: this net's strips only
+        win_x[has_x] = _series_factor(face_x, along_x, has_x, 1)[has_x]
+        win_y[has_y] = _series_factor(face_y, along_y, has_y, 0)[has_y]
+        cell = _cell_areas(pa, pb, x0 + (i0 - 0.5) * d, y0 + (j0 - 0.5) * d, d, wi, wj, cv[1:wi + 1, :]) / (d * d)
+        area[i0:i1, j0:j1] += _adopt(np.clip(cell, 0.0, 1.0), own, ((1, 0), (-1, 0), (0, 1), (0, -1)), ADOPT_CELLS)
+    return ex_x, ex_y, area, kx, ky
 
 
 def _coarse_from_fine(geoms, x0: float, y0: float, d: float, nx: int, ny: int, s: int):
@@ -405,8 +801,50 @@ def _coarse_from_fine(geoms, x0: float, y0: float, d: float, nx: int, ny: int, s
     return label.reshape(nx, ny), cross_x, cross_y, fill.reshape(nx, ny), off_x, off_y
 
 
+def _pieces(geom, tol: float = PIECE_TOL_MM) -> list:
+    """The connected pieces of one net's copper: its polygons, grouped where they touch or lie within `tol` mm of
+    each other (as one MultiPolygon). A union keeps two zone fills that only touch (at a point, or along an edge the
+    fills' rounding leaves a hair apart) as two polygons: kraft_flux_mini_2's +VDC on In1.Cu is two such fills, 0.0000
+    mm apart, which KiCad and the copper join, and taking each polygon for a piece cut the LM5008's supply off its
+    input (its conducted transfer 1e4 x low). Real gaps are tens of µm at the least (a fab's clearance)."""
+    polys = _polygons(geom)
+    if len(polys) <= 1:
+        return polys
+    tree = shapely.STRtree(polys)
+    try:
+        left, right = tree.query(polys, predicate="dwithin", distance=tol)
+    except Exception:       # noqa: BLE001 - a GEOS without dwithin: the polygons grown by half the tolerance
+        left, right = tree.query([shapely.buffer(p, tol / 2) for p in polys], predicate="intersects")
+    n = len(polys)
+    _, group = connected_components(sp.coo_matrix((np.ones(len(left)), (left, right)), shape=(n, n)), directed=False)
+    out = []
+    for g in range(int(group.max()) + 1):
+        members = [polys[i] for i in np.nonzero(group == g)[0]]
+        out.append(members[0] if len(members) == 1 else shapely.MultiPolygon(members))
+    return out
+
+
+def _polygons(geom) -> list:
+    """The polygons of a geometry (the parts of a union), lines and points left out."""
+    if geom is None or geom.is_empty:
+        return []
+    parts = np.asarray([geom], dtype=object)
+    for _ in range(4):                      # multi-part geometries and collections, nested a few levels at most
+        parts = shapely.get_parts(parts)
+        if not np.any(np.isin(shapely.get_type_id(parts), (4, 5, 6, 7))):
+            break
+    return [p for p in parts if shapely.get_type_id(p) == 3 and not p.is_empty]
+
+
+def _line_point(pts) -> tuple[float, float]:
+    """A point on a track's centreline (the middle of its first segment): which copper piece the track is part of."""
+    (ax, ay), (bx, by) = pts[0], pts[1] if len(pts) > 1 else pts[0]
+    return (ax + bx) / 2, (ay + by) / 2
+
+
 def _rasterise_lines(k: int, polylines, x0: float, y0: float, d: float, label: np.ndarray, seeded: np.ndarray,
-                     forced_x: np.ndarray, forced_y: np.ndarray) -> list:
+                     forced_x: np.ndarray, forced_y: np.ndarray, part: Optional[np.ndarray] = None,
+                     owners: Optional[list] = None) -> list:
     """Walk each centreline (polyline, width mm) through the grid (4-connected) and claim its nodes and strips
     for net k (forced_x / forced_y get the widest claiming track's width, mm).
 
@@ -419,21 +857,27 @@ def _rasterise_lines(k: int, polylines, x0: float, y0: float, d: float, label: n
     resonance at ~1.24 GHz, the board's worst SPI_SCK margin) and was joined on the 0.43 mm grid; on the 0.86 mm
     grid its own cells were the column beside the one the walk took. A gap that is left (all four cells
     foreign) is joined by a bridge: returned as (i0, j0, i1, j1, length along the track mm, width mm), for a
-    lumped branch (analysis.simulate adds them, peec.track_impedance)."""
+    lumped branch (analysis.simulate adds them, peec.track_impedance).
+
+    With `part` (build_grid's pieces: which connected piece of its net's copper each cell holds) and `owners` (the
+    piece of each polyline), a cell is the track's own only when it holds the track's piece: a cell of another piece
+    of net k (copper of the same net that the track does not touch) is foreign, so the walk neither joins nor
+    claims it."""
     nx, ny = label.shape
     bridges = []
+    pid = None                                  # the piece of the polyline being walked (None: the net is enough)
 
     def inside(c) -> bool:
         """Cell c is on the grid."""
         return 0 <= c[0] < nx and 0 <= c[1] < ny
 
     def own(c) -> bool:
-        """Cell c is already net k's copper."""
-        return inside(c) and label[c] == k
+        """Cell c is already this track's copper: net k's, and of its piece."""
+        return inside(c) and label[c] == k and (part is None or pid is None or part[c] == pid)
 
     def free(c) -> bool:
-        """Cell c may be claimed for net k (no copper, or k's own)."""
-        return inside(c) and label[c] in (-1, k)
+        """Cell c may be claimed for this track (no copper, or its own)."""
+        return inside(c) and (label[c] == -1 or own(c))
 
     def path(a, b) -> list:
         """4-connected cells from a (exclusive) to b (inclusive): x first or y first, the freer one."""
@@ -444,7 +888,8 @@ def _rasterise_lines(k: int, polylines, x0: float, y0: float, d: float, label: n
         y_first = ys + [(c[0], b[1]) for c in xs]
         return min((x_first, y_first), key=lambda p: sum(not free(c) for c in p))
 
-    for pts, width in polylines:
+    for n_line, (pts, width) in enumerate(polylines):
+        pid = owners[n_line] if owners is not None else None
         cells: list[tuple[int, int, float]] = []          # (i, j, distance along the centreline mm)
         s0 = 0.0
         for (ax, ay), (bx, by) in zip(pts, pts[1:]):
@@ -470,8 +915,10 @@ def _rasterise_lines(k: int, polylines, x0: float, y0: float, d: float, label: n
                 continue
             if label[i, j] < 0:
                 label[i, j] = k
+                if part is not None and pid is not None:
+                    part[i, j] = pid
                 seeded[i, j] = True
-            if label[i, j] != k:
+            if not own((i, j)):
                 prev = None
                 continue
             if prev is not None:
@@ -552,12 +999,9 @@ def track_impedance(length_m: float, width_m: float, thickness_m: float = 35e-6,
 
     def z(f: float) -> complex:
         """The bridge's impedance at f: R with the copper's effective thickness for the skin depth, + jwL."""
-        t = thickness_m
-        if f > 0:
-            # skin depth delta = 1 / sqrt(pi f mu0 sigma) [Ramo 1994]; the current flows in an effective thickness
-            # delta (1 - e^(-t/delta)) [A2]: t at low frequencies, delta once delta << t
-            delta = 1 / math.sqrt(math.pi * f * MU0 * sigma)
-            t = delta * (1 - math.exp(-thickness_m / delta))
+        # the copper's thickness for its resistance at f: t at DC, the skin depth's once δ ≪ t (kernel.skin_thickness:
+        # the exact one-sided slab [Dowell 1966] [A2])
+        t = skin_thickness(thickness_m, f, sigma)
         return complex(length_m / (sigma * width_m * t), 2 * math.pi * f * L)
     return z
 
@@ -578,6 +1022,8 @@ class Solution:
     state: Optional[np.ndarray] = None      # unused now: see state_for (results pickled before may carry it)
     W_x: Optional[np.ndarray] = None        # (N, nx-1, ny) the strips' copper width / d (the stack's, shared by its
     W_y: Optional[np.ndarray] = None        # solutions; None: every strip full width)
+    A_cu: Optional[np.ndarray] = None       # (N, nx, ny) the nodes' copper area / d² (the stack's; None: solutions
+                                            # pickled before 2026-10-19, whose densities are the strips' mean)
 
     def state_for(self, stack: "PlaneStack") -> np.ndarray:
         """The solver's unknown vector [branch currents; node potentials] of this solution on `stack`, the stack
@@ -598,11 +1044,21 @@ class Solution:
         touch it in each direction. The current per cell width (what a cut across the cells adds up), or with
         copper=True per width of the copper itself: a strip narrower than the pitch (PlaneStack._widths) carries
         its current in φd, not d (a density: weighted by Grid.copper_area in a sum over the cells, the heat
-        ρ·K²/t·φd² of a strip is its R/φ·I²)."""
+        ρ·K²/t·φd² of a strip is its R/φ·I²).
+
+        With copper=True the vector's direction is that mean, and its length is set by the strips' heat: |K|² =
+        Σ ½·|I_s|²/φ_s over the strips touching the node, over its copper area A (Grid.copper_area) and d², so that
+        ρ·|K|²/t·A·d² is exactly the node's half of every touching strip's R·|I|² [Tellegen 1952] and |K|/t the
+        current density in the copper's real cross-section. The mean alone is right in a straight run but not where
+        the current turns: on a track at 45° (a staircase of x and y strips, each φ = w·√2/d) the nodes read √2 × the
+        density with twice the strips' heat, and at a junction where current enters and splits the mean cancels
+        while every strip carries current (VALIDATION_AUDIT.md round 5, ISSUE-12)."""
         d = d_mm * 1e-3
         Ix, Iy = self.I_x[k], self.I_y[k]
+        wx = wy = None
         if copper and self.W_x is not None:
-            Ix, Iy = Ix / self.W_x[k], Iy / self.W_y[k]
+            wx, wy = self.W_x[k], self.W_y[k]
+            Ix, Iy = Ix / wx, Iy / wy
         nx, ny = self.V.shape[1:]
         kx = np.zeros((nx, ny), complex)
         ky = np.zeros((nx, ny), complex)
@@ -616,7 +1072,26 @@ class Solution:
         ky[:, 1:] += Iy
         cy[:, :-1] += Iy != 0
         cy[:, 1:] += Iy != 0
-        return kx / np.maximum(cx, 1) / d, ky / np.maximum(cy, 1) / d
+        kx, ky = kx / np.maximum(cx, 1) / d, ky / np.maximum(cy, 1) / d
+        if not copper or self.A_cu is None:
+            return kx, ky
+        # the node's share of its strips' heat, per ρ/t: Σ ½ |I|² / φ (|I/φ|² · φ: current per copper width, squared,
+        # times that width), over its area
+        hx = 0.5 * np.abs(self.I_x[k]) ** 2 / (wx if wx is not None else 1.0)
+        hy = 0.5 * np.abs(self.I_y[k]) ** 2 / (wy if wy is not None else 1.0)
+        q = np.zeros((nx, ny))
+        q[:-1, :] += hx
+        q[1:, :] += hx
+        q[:, :-1] += hy
+        q[:, 1:] += hy
+        a = self.A_cu[k].astype(float)
+        mag = np.sqrt(np.where(a > 0, q / np.maximum(a, 1e-12), 0.0)) / d
+        vec = np.sqrt(np.abs(kx) ** 2 + np.abs(ky) ** 2)
+        # scale the mean's direction to that length; where the mean cancels (current fed in at the node and leaving
+        # in opposite directions) the length alone, along x
+        s = np.where(vec > 1e-9 * mag, mag / np.maximum(vec, 1e-300), 0.0)
+        alone = (vec <= 1e-9 * mag) & (mag > 0)
+        return np.where(alone, mag, kx * s), np.where(alone, 0.0, ky * s)
 
     def sheet_current(self, k: int, d_mm: float, copper: bool = False) -> np.ndarray:
         """|K| at the nodes of layer k, in A/m per A of signal current (copper: see node_field)."""
@@ -1028,15 +1503,17 @@ class PlaneStack:
 
     def _widths(self):
         """Strips narrower than the pitch (the grids' wx / wy, ox / oy; full where a grid has none):
-        `strip_width` (ns), each strip's copper width as a fraction of the pitch (and per layer as `W_x` / `W_y`,
-        None when every strip is full: the solutions' densities in the copper); `dL` (H per strip, None when
+        `strip_width` (ns), each strip's copper width as a fraction of the pitch at the border it crosses (for the
+        inductance); `r_width` (ns), the width its resistance and heat take, the border's with a change of width
+        along the strip in series (Grid.rx / ry [A39]; per layer as `W_x` / `W_y`, None when every strip is
+        full: the solutions' densities in the copper); `dL` (H per strip, None when
         every strip is full), the partial self inductance a narrower strip adds to the full square strip's in the
         kernels, L(d, φd) − L(d, d) of a flat strip of the layer's copper thickness (_narrow_self); `M_near`
         (sparse ns x ns, None when every strip is full), the change in mutual inductance between side-by-side
         neighbours where one of them is narrower: the kernels have them a full pitch apart, a full pitch wide,
         while their copper is narrower and its centres nearer (a neck straddling two cell rows is two partial
         strips touching: at a pitch apart they acted as a conductor wider than the neck, its L 16 % low). The
-        resistance is the sheet resistance / φ (_impedances)."""
+        resistance is the sheet resistance / r_width (_impedances)."""
         def gather(attr, idx, shape, default):
             """One orientation's per-strip values of the grids' `attr` (`default` where a grid has none)."""
             if len(idx) == 0:
@@ -1050,14 +1527,26 @@ class PlaneStack:
         w = np.concatenate([gather("wx", self.xa, sx, 1.0), gather("wy", self.ya, sy, 1.0)])
         ok = w > 0                          # a strip added to a grid after it was built: full width, centred
         self.strip_width = np.where(ok, w, 1.0)
+        # the width a strip's resistance and heat take: its border's, with a change of width along the strip in
+        # series where the grid has one (Grid.rx / ry, _series_factor [A39]); the inductance keeps the border's
+        rw = np.concatenate([gather("rx", self.xa, sx, 0.0), gather("ry", self.ya, sy, 0.0)])
+        self.r_width = np.where(ok & (rw > 0), rw, self.strip_width)
+        self.r_uniform = not np.any(self.r_width != 1.0)        # every strip a square's R (the preconditioner)
         off = np.where(ok, np.concatenate([gather("ox", self.xa, sx, 0.0), gather("oy", self.ya, sy, 0.0)]), 0.0)
+        # each node's copper area (Grid.copper_area, a fraction of d²): what a density in the copper is defined
+        # over (Solution.node_field(copper=True)), shared by the stack's solutions
+        self.A_cu = np.stack([l.grid.copper_area() for l in self.layers]).astype(np.float32)
         self.dL = self.M_near = self.W_x = self.W_y = None
+        if not np.any(self.strip_width != 1.0) and not np.any(self.r_width != 1.0):
+            return
+        self.W_x, self.W_y = np.ones((self.N, *sx)), np.ones((self.N, *sy))     # per layer (Solution.node_field)
+        self.W_x[tuple(self.xa.T)] = self.r_width[: self.nxb]
+        self.W_y[tuple(self.ya.T)] = self.r_width[self.nxb:]
+        # the inductance corrections are for strips narrower than the pitch; one a little wider (a strip that took
+        # in its neighbour's sliver, _strip_widths) keeps the full strip's kernels
         narrow = self.strip_width < 1.0
         if not np.any(narrow):
             return
-        self.W_x, self.W_y = np.ones((self.N, *sx)), np.ones((self.N, *sy))     # per layer (Solution.node_field)
-        self.W_x[tuple(self.xa.T)] = self.strip_width[: self.nxb]
-        self.W_y[tuple(self.ya.T)] = self.strip_width[self.nxb:]
         d = self.d
         t = np.array([l.thickness for l in self.layers])[np.concatenate([self.xa[:, 0], self.ya[:, 0]])]
         dL = np.zeros(self.ns)
@@ -1303,21 +1792,19 @@ class PlaneStack:
 
     # ------------------------------------------------------------------ operators
     def surface_resistance(self, f: float, t: float) -> float:
-        """Sheet resistance (ohm per square) of copper t thick at f: 1/(sigma t) at DC, the skin depth's [Ramo 1994]
-        effective thickness delta (1 - e^(-t/delta)) above [A2] (as track_impedance). A square strip's R is its sheet
-        resistance."""
-        if f <= 0:
-            return 1 / (self.sigma * t)
-        delta = 1 / math.sqrt(math.pi * f * MU0 * self.sigma)
-        return 1 / (self.sigma * delta * (1 - math.exp(-t / delta)))
+        """Sheet resistance (ohm per square) of copper t thick at f: 1/(sigma t) at DC, above it the thickness the
+        skin depth leaves it [Ramo 1994] (kernel.skin_thickness, the exact one-sided slab [Dowell 1966] [A2]; as
+        track_impedance). A square strip's R is its sheet resistance."""
+        return 1 / (self.sigma * skin_thickness(t, f, self.sigma))
 
     def _impedances(self, f: float):
         """(w, each strip's resistance, the impedances of the other unknowns: capacitances, then branches) at f.
         The strips' inductance is not here: it is the L_p product (Lp_matvec)."""
         w = 2 * math.pi * f
         rs = np.array([self.surface_resistance(f, l.thickness) for l in self.layers])
-        # a square strip's R is the sheet resistance; one φ of the pitch wide, sheet resistance / φ
-        R_strip = (np.concatenate([rs[self.xa[:, 0]], rs[self.ya[:, 0]]]) / self.strip_width if self.ns
+        # a square strip's R is the sheet resistance; one φ of the pitch wide, sheet resistance / φ (φ with a change
+        # of width along the strip in series: _widths)
+        R_strip = (np.concatenate([rs[self.xa[:, 0]], rs[self.ya[:, 0]]]) / self.r_width if self.ns
                    else np.zeros(0))
         if self.ncap:   # Y = jωC(1 - j·tanδ): susceptance plus dielectric-loss conductance [Pozar 2012]
             C, tand = self.cap[:, 4], self.cap[:, 5]
@@ -1529,13 +2016,14 @@ class PlaneStack:
         for strips, layers, orient in self.blocks:
             B = (self.B_x if orient == "x" else self.B_y)[np.ix_(layers, layers)]
             m = len(layers)
-            if self.dL is None:                 # every strip full width: every position alike, one inverse
-                R = np.array([R_strip[strips[0, k]] for k in range(m)])
+            if self.dL is None and getattr(self, "r_uniform", True):   # every strip full width: every position
+                R = np.array([R_strip[strips[0, k]] for k in range(m)])          # alike, one inverse
                 Zi = np.linalg.inv(np.diag(R).astype(complex) + 1j * w * B)
                 Zi = np.broadcast_to(Zi.ravel(), (len(strips), m * m)).ravel()
-            else:               # strips narrower than the pitch: each position its own R and self inductance
+            else:               # strips not a pitch wide: each position its own R and self inductance
                 Z = np.broadcast_to(1j * w * B, (len(strips), m, m)).copy()
-                Z[:, np.arange(m), np.arange(m)] += R_strip[strips] + 1j * w * self.dL[strips]
+                Z[:, np.arange(m), np.arange(m)] += R_strip[strips] + (
+                    0.0 if self.dL is None else 1j * w * self.dL[strips])
                 Zi = np.linalg.inv(Z).ravel()
             rows.append(np.repeat(strips, m, axis=1).ravel())
             cols.append(np.tile(strips, (1, m)).ravel())
@@ -1801,7 +2289,7 @@ class RouteExcitation:
         # copies: views of Ib would keep the whole unknown vector x alive (Ib is a view of it). Not x itself either:
         # Solution.state_for rebuilds it from these when the fix search wants a warm start
         return Solution(f, I_x, I_y, Vg, Ib[st.ns + st.ncap:].copy(), Z, st.moment(self.trace, Ib), its,
-                        Ib[st.ns: st.ns + st.ncap].copy(), W_x=st.W_x, W_y=st.W_y)
+                        Ib[st.ns: st.ns + st.ncap].copy(), W_x=st.W_x, W_y=st.W_y, A_cu=getattr(st, "A_cu", None))
 
 
 def MultiPlaneProblem(layers: list[PlaneLayer], trace: list[TraceSegment], inject_driver: tuple[int, int, int],
@@ -2039,11 +2527,7 @@ def _trace_resistance(trace: list[TraceSegment], f: float, sigma: float, trace_t
         L = np.linalg.norm(s.b - s.a)
         if L == 0 or abs(s.b[2] - s.a[2]) > 0:
             continue
-        if f > 0:
-            delta = 1 / math.sqrt(math.pi * f * MU0 * sigma)
-            teff = delta * (1 - math.exp(-trace_t / delta))
-        else:
-            teff = trace_t
+        teff = skin_thickness(trace_t, f, sigma)
         R += s.i * s.i * L / (sigma * s.width * teff)
     return R
 

@@ -1,10 +1,19 @@
 # Next steps
 
-What is left after the validation audit's round 4 (2026-10-19), and how to pick each item up. For a Claude session:
+What is left after the validation audit's rounds 4 (2026-10-19) and 5 (2026-10-20), and how to pick each item up.
+For a Claude session:
 read [../CLAUDE.md](../CLAUDE.md) (environment of this machine, rules, commands) and the top of
 [HANDOFF.md](HANDOFF.md) first; this file says what to do next. The plan this file held before (the move to the
 bigger machine and audit items 1-5, then 6-7) is in git history (`git log -p docs/NEXT_STEPS.md`); all of it is
 done, with the evidence in [VALIDATION_AUDIT.md](VALIDATION_AUDIT.md) "Round 4".
+
+## Done (2026-10-20): audit round 5
+
+The physics audit with a track narrowed from 0.4 to 0.1 mm followed through every calculation, and every fix it led
+to (ISSUE-11 to -23), merged into `main` from branch `audit-5` at the user's "update handover, then commit, merge".
+The record is [PHYSICS_AUDIT.md](PHYSICS_AUDIT.md), the summary VALIDATION_AUDIT.md "Round 5", the session's entry
+the top of [HANDOFF.md](HANDOFF.md). Full suite on the branch: 960 passed, 5 skipped. What it left open is under
+"Open, technical" (item 6).
 
 ## Done (2026-10-18 / 19)
 
@@ -55,6 +64,15 @@ All merged into `main`; the full suite on `main` after the last of them (cebe708
    think it's worth right now but might be in the future"). The findings (toolchains on Windows, a 3D eddy-current
    spike with NGSolve against PEEC), the options and a phased plan with a PEEC / FEM / Both switch are in
    [FEM_OPTION.md](FEM_OPTION.md); `tools/dev/fem_spike.py` reruns the spike.
+6. **Left by audit round 5, documented** (PHYSICS_AUDIT.md sections 5 and 8): normal thermal quality's mesh budget
+   on long narrow hot tracks (ISSUE-24: part of a 100 mm, 0.05-0.1 mm track kept 0.15 mm cells and read 5-12 % cool
+   there while the note estimated 2 K; fine quality resolves it; refining only the hot blocks covered the track but
+   read kraft's hottest parts 1.5-3 K cooler than fine, so it was not kept; a planner that refines a track's band
+   without its eight neighbours but keeps them around pads would be the next try, checked with
+   `tools/dev/dc_thermal_summary.py --quality fine` against normal on kraft); a width step in copper wider than 4
+   cells or at a junction (within ±d/2, A39: `tools/dev/neck_check.py` for a neck); the references nobody could
+   open (CISPR 25's average column and edition, IPC-2221's §6.2 text, Incropera 7th edition's face-down coefficient);
+   the plugin's board check before a run not yet tried against a live KiCad (`tools/dev/live_kicad.py`).
 
 ## Before committing anything
 

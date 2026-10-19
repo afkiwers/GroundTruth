@@ -349,7 +349,7 @@ def _run(args, simulate: bool) -> int:
         target = out_dir / OUTPUT_NAMES[fmt]
         if fmt == "json":
             text = formats.to_json(args.board, issues, routes, {"mode": mode, "version": __version__}, converters,
-                                   bridges, dc_loads, pdn, si)
+                                   bridges, dc_loads, pdn, si, thermal, capacity)
         elif fmt == "junit":
             text = formats.to_junit(args.board, issues, analysed, checks, args.fail_on, analysed_conv)
         elif fmt == "gitlab-codequality":
@@ -395,7 +395,7 @@ def _keep_run(args, board, sc, cfg, issues, routes, converters, bridges, thermal
         run = history.record(
             board_bytes, sc.dumps(),
             formats.to_json(args.board, issues, routes, {"mode": mode, "version": __version__}, converters, bridges,
-                            list(dc_loads)),
+                            list(dc_loads), thermal=thermal, capacity=capacity),
             run_meta(args.board, source, by="cli", resolution=cfg.analysis.resolution, what_if=args.what_if,
                      edits=edit_texts(edits), only=args.nets or [], seconds=seconds, solver=solver,
                      cell_mm=cell_mm_of([r.grid.d for r in list(routes) + list(converters)

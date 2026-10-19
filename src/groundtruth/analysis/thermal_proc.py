@@ -69,17 +69,19 @@ def _python() -> str:
 def run_in_process(board, config, converters, progress: Optional[Progress] = None, cancel=None,
                    poll_s: float = 0.1, limits: Optional[tuple[float, float]] = None, server=None):
     """run_thermal's result (ThermalResult, issues), solved in a child process, or with `server` (a
-    remote.client.Remote) on the compute server; the inputs are prepared here either way (fast)."""
-    from .thermal import NO_STAGES, _empty, thermal_inputs
+    remote.client.Remote) on the compute server; the inputs are prepared here either way (fast), and so are the DC
+    paths at the solved temperatures (with_dc_at_temperature: the stages' maps stay here)."""
+    from .thermal import NO_STAGES, _empty, thermal_inputs, with_dc_at_temperature
     inputs = thermal_inputs(board, config, converters, progress)
     if inputs is None:
         return _empty(config, NO_STAGES), []
     if server is not None:
-        return server.run("thermal", (board, config, inputs), progress)
+        res, issues = server.run("thermal", (board, config, inputs), progress)
+        return with_dc_at_temperature(res, board, converters), issues
     (res, issues), peak = _run_child(("solve", board, config, inputs), progress, cancel, poll_s, limits)
     if peak:
         res.mesh["memory_mb"] = round(peak)
-    return res, issues
+    return with_dc_at_temperature(res, board, converters), issues
 
 
 def capacity_in_process(board, config, converters, progress: Optional[Progress] = None, cancel=None,
