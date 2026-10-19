@@ -206,6 +206,20 @@ pins); `radiation` (signal paths and converters); the component models (all thre
 | ISSUE-9 | Converter (MIL-461): the LISN's 1 kΩ across its port left out (0.4 dB high) | Low | Fixed (round 2), verified |
 | ISSUE-10 | Converter: the spread receiver's tuning search missed mid-band peaks (0.5-0.7 dB optimistic) | Medium | Fixed (round 2), verified |
 | ISSUE-3 | Converter (boost) without V_out: pulse amplitude I_out, ground split 1 − d | Low | Fixed, verified |
+| ISSUE-11 | PEEC grid: strip widths from the sub-grid's samples (R and J of narrow and angled tracks −58 to +81 %) | High | Fixed (round 5), verified |
+| ISSUE-12 | Copper heat for Thermal not the solved I²R (up to 2 × on angled tracks) | High | Fixed (round 5), verified |
+| ISSUE-13 | Sustained density diluted by another net's copper in its window (a third low) | Medium | Fixed (round 5), verified |
+| ISSUE-14 | Temperature map: cell means, a narrow track 15 % cool | Medium | Fixed (round 5), verified |
+| ISSUE-15 | A gap narrower than a cell bridged (a broken track solved as whole) | Medium | Fixed (round 5), verified |
+| ISSUE-16 | Skin effect: δ(1 − e^(−t/δ)) up to 58 % too resistive at 1-10 MHz | Medium-Low | Fixed (round 5), verified |
+| ISSUE-17 | Plate capacitance through mixed dielectrics: mean εr instead of series | Low | Fixed (round 5), verified |
+| ISSUE-18 | References: White's constants, IPC-2221's current fit, Incropera's edition | Low | Corrected / documented (round 5) |
+| ISSUE-19 | Plugin: Simulate analyses the board as last read (an edit in KiCad needs Reload board) | Medium | Fixed (round 5, 2026-10-20): read again and compared before every run, verified |
+| ISSUE-20 | Thermal's heat without the via barrels, the hot loop's switching current, the inductor's ripple | Medium | Fixed (round 5), verified |
+| ISSUE-21 | A change of width placed anywhere within ±d/2 (a 2 mm neck −9 % at 1x) | Medium-Low | Fixed for narrow bands (round 5: −2.9 %), verified; wider bands documented (A39) |
+| ISSUE-22 | An edge node's heat in the resin beside its copper (a hot spot 36 % over the track at fine quality) | Medium | Fixed (round 5), verified |
+| ISSUE-23 | DC drops and resistances only at 20 °C | Low | Added (round 5): every DC path at its temperature after Thermal |
+| ISSUE-24 | Thermal mesh budget on a long narrow track (part of it 5-12 % cool at normal; the note's estimate low) | Medium-Low | Documented (fine quality resolves it); planner kept (kraft's hottest parts) |
 
 ### ISSUE-1: a boost's losses took the high side's conduction time for the switch duty
 - **Pathway:** `ConverterSpec.pulse()` gives the duty as the high side's conduction time, V_in/V_out for a
@@ -559,6 +573,29 @@ the last digit or two.
   conv1 + conv2 (detection proposes "U303 phases", 0° / 180°): conducted worst −38.6 dB together, −39.6 in phase,
   −38.8 / −27.9 alone (conv1's D = 0.51 fundamental dominates; conv2's D = 0.095 adds little); radiated −21.6 dB
   together at 161 MHz, −25.4 in phase, −19.8 / −21.0 alone (`out/interleave/`).
+
+## Round 5 (2026-10-19 to -20, branch `audit-5`)
+
+A second, deeper round on the physics, the assumptions and the references, with a track narrowed from 0.4 to 0.1 mm
+followed through every calculation. The full record (the model-by-model audit, the reference register, the track-
+width report, the issue log ISSUE-11 to -24 with evidence, the benchmarks, the real board, the final assessment) is
+[PHYSICS_AUDIT.md](PHYSICS_AUDIT.md); the tests are tests/test_track_width.py (TW-1 to TW-15) and
+tests/test_physics_audit.py (PA-1 to PA-4), against independent closed forms, shapely's geometry and two reference
+solvers written for the round (tests/refsolvers.py). In short:
+- The PEEC grid's strips now carry the copper's exact width across their cell border, and its nodes the exact copper
+  area, with a density whose heat is the strips' I²R (ISSUE-11, -12): a track's R' within 1 % of ρ/(w·t) for
+  0.05-0.4 mm at any angle and grid position (before: 0.43 to 1.81 ×), the thermal heat equal to the solved loss
+  (before: up to 2 ×). A narrow band's change of width is taken in series along its strips (ISSUE-21: a 2 mm neck
+  −2.9 % at 1x, was −9 %); in copper wider than 4 cells a step stays within ±d/2 (A39).
+- The sustained density counts only the net's own copper (ISSUE-13); the temperature map shows each cell's hottest
+  point (ISSUE-14); a gap is never bridged (ISSUE-15); the skin effect is the exact one-sided slab's (ISSUE-16); plate
+  capacitance takes the dielectrics in series (ISSUE-17); three references corrected (ISSUE-18).
+- The thermal solve, given the right heat, matches an independent 2D cross-section within 2 % for 0.1-0.4 mm tracks.
+  Its heat now holds the via barrels, the hot loop's switching current and the inductor's ripple (ISSUE-20), each in
+  its own copper, not beside it (ISSUE-22: fine quality had shown hot spots 36 % over a track); after Thermal every DC
+  path is also given at its temperature (ISSUE-23).
+- The plugin's Simulate reads the board again first and reloads it when KiCad's copy changed (ISSUE-19).
+- Documented, not changed: the thermal mesh's budget on long narrow tracks (ISSUE-24: fine quality).
 
 ## Remaining risks and unverified items
 - SP-19: above 1 GHz a board-wide resonance's worst margin moves about ±2 dB between the 4x, 8x and 16x grids on

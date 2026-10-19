@@ -41,6 +41,7 @@ Z_FIRST = 0.5  # first dielectric sub-slab next to copper, as a fraction of the 
 Z_GROWTH = 2.0
 
 K_REF = 0.5  # W/mK, conductance scale that turns misplaced heat into a temperature error estimate
+REFINE_RING = 1  # blocks around the worst one refined with it (plan_refinement)
 W, E, S, N = 0, 1, 2, 3
 DIRS = {W: (0, -1), E: (0, 1), S: (-1, 0), N: (1, 0)}  # (di, dj); row i runs along y
 
@@ -264,7 +265,8 @@ def plan_refinement(grid0: Grid, samples: HeatSamples, tol_k: float, dx_min: flo
         e, l, b = heapq.heappop(heap)
         if b not in leaves.get(l, ()):
             continue
-        group = [b] + [(b[0] + di, b[1] + dj) for di in (-1, 0, 1) for dj in (-1, 0, 1) if di or dj]
+        r = REFINE_RING
+        group = [b] + [(b[0] + di, b[1] + dj) for di in range(-r, r + 1) for dj in range(-r, r + 1) if di or dj]
         group = [g for g in group if g in leaves.get(l, ())]
         if spent + cost[l] * len(group) > budget:
             info["limited"] = True
@@ -498,13 +500,20 @@ class Mesh:
         return self.locate(np.array([p.x]), np.array([p.y]))
 
     # ---- output ----------------------------------------------------------------------------
-    def to_level0(self, vals: np.ndarray) -> np.ndarray:
-        """Area-weighted mean of per-column values on the level-0 grid (NaN off the board)."""
+    def to_level0(self, vals: np.ndarray, how: str = "mean") -> np.ndarray:
+        """Per-column values on the level-0 grid (NaN off the board): the area-weighted mean of the columns in each
+        level-0 cell, or with how="max" their largest value (a temperature map of a copper layer: a track narrower
+        than the level-0 cell is hotter than the cell's mean, which mixes in the laminate beside it)."""
         g0 = self.grid0
         sh = self.col_level.astype(np.int64)    # a level-l cell lies in level-0 cell (I >> l, J >> l)
         I0, J0 = self.col_I >> sh, self.col_J >> sh
         ok = (I0 < g0.ny) & (J0 < g0.nx)
         flat = I0[ok] * g0.nx + J0[ok]
+        if how == "max":
+            out = np.full(g0.nx * g0.ny, -np.inf)
+            np.maximum.at(out, flat, vals[ok])
+            out[~np.isfinite(out)] = np.nan
+            return out.reshape(g0.ny, g0.nx).astype(np.float32)
         a = self.col_area[ok]
         wsum = np.bincount(flat, weights=a, minlength=g0.nx * g0.ny)
         vsum = np.bincount(flat, weights=a * vals[ok], minlength=g0.nx * g0.ny)

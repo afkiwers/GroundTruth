@@ -1424,7 +1424,9 @@ def test_CV28_the_switch_node_s_loss_and_densities_are_its_two_states_rms(tmp_pa
     """CV-28 (ISSUE-7): the switch node carries I from the high side's pads for D and from the low side's for 1 - D.
     Its copper loss is D·P_hs + (1 - D)·P_ls of the two states solved apart (the mean pattern alone read 6-17 % low
     on this buck), its density map the RMS √(D·J_hs² + (1-D)·J_ls²) of those two solves, and the thermal heat
-    counts the difference on top of the mean current's."""
+    counts the difference on top of the mean current's. Since round 5 the current itself carries the inductor's
+    triangular ripple ΔI = V_in·D(1−D)/(L·f_sw) (L1, 4.7 µH), zero-mean in each state: both scale with
+    I² + ΔI²/12 [Erickson 2001] [A43]."""
     from boardgen import discrete_buck_board
     from conftest import make
     from test_power import run
@@ -1454,10 +1456,12 @@ def test_CV28_the_switch_node_s_loss_and_densities_are_its_two_states_rms(tmp_pa
         return s["r_mohm"] * 1e-3, m
     (r_h, m_h), (r_l, m_l) = state(spec.high_side, lambda e: e.b), state(spec.low_side, lambda e: e.a)
     i = spec.i_out
-    assert sw["rms"] and sw["loss_w"] == pytest.approx((D * r_h + (1 - D) * r_l) * i * i, rel=2e-3)
+    di = 12.0 * D * (1 - D) / (4.7e-6 * 300e3)            # the inductor's ripple, A p-p
+    i2 = i * i + di * di / 12.0                             # the current's mean square
+    assert sw["rms"] and sw["loss_w"] == pytest.approx((D * r_h + (1 - D) * r_l) * i2, rel=2e-3)
     rms = r.dc_maps[sw["name"]]
     for layer in m_h:
-        ref = np.sqrt(D * m_h[layer] ** 2 + (1 - D) * m_l[layer] ** 2) * i
+        ref = np.sqrt(D * m_h[layer] ** 2 + (1 - D) * m_l[layer] ** 2) * math.sqrt(i2)
         assert np.allclose(rms[layer], ref, rtol=2e-3, atol=1e-3 * float(ref.max() or 1.0)), layer
     # the heat over the node's copper: the mean flow's ρ·J² plus the variance = Σ ρ·J_rms², i.e. the path's loss
     # (the stage's other paths add theirs on top)

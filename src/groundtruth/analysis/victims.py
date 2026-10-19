@@ -352,5 +352,5 @@ def facing_capacitance(board: Board, copper, net: str, aggressor: str) -> float:
                     overlap = overlap.difference(shield)
             if not overlap.is_empty:
                 h = stk.dielectric_between(layer, other) * 1e-3
-                total += EPS0 * stk.epsilon_between(layer, other) * overlap.area * 1e-6 / h
+                total += EPS0 * stk.epsilon_series(layer, other) * overlap.area * 1e-6 / h   # plates: in series
     return total

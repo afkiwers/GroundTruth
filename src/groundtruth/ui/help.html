@@ -379,10 +379,18 @@ board (pours, tracks and vias, as for a power stage's DC paths) and shows:</p>
   return pins are given, on the ground side (back to the source's return pin), and the total;</li>
 <li>the <b>current density</b> with its flow (a view of its own on the Heatmap tab), the hottest narrow spot and the
   busiest vias against IPC-2221, and the copper's loss; these are checked like a power stage's DC paths
-  (current_density, via_overload), and a load above the rail's <b>Max drop</b> is an issue (dc_drop);</li>
+  (current_density, via_overload), and a load above the rail's <b>Max drop</b> is an issue (dc_drop). The checked
+  density is the one sustained over 1 mm of the rail's own copper (another net's pour beside a track does not
+  dilute it); its limits are rules of thumb, and what a density does to the copper's temperature is Thermal's;</li>
 <li><b>Thermal</b> heats the board with it, and <b>Current capacity</b> finds the current at which the hottest copper
   or part reaches the limit, all the rail's loads scaled together.</li>
 </ul>
+<p>Each load draws its current whatever the drop (a current sink), and the source pin is the reference (an ideal
+source). So narrowing a track to a quarter of its width gives that track four times the resistance, drop, loss and
+current density at the same current. The drops are for copper at 20 °C: about 0.4 % more per kelvin the board runs
+warmer; after <b>Thermal</b>, its notes (and the JSON report's <code>dc_at_temperature</code>) give each DC path's
+resistance, drop and loss at the temperature the solve found along it. Copper of the rail's net that does not touch (a track broken by a gap) is not joined, however narrow the
+gap: the rail is then reported as not connected.</p>
 <p><b>Fill from net…</b> is the quick way: pick the rail's net (e.g. VDD) and its ground (GND); GroundTruth lists every part with a pin on the rail, with that part's own ground pin, and you pick the part feeding it (the connector with the fewest pins is preselected) and the parts drawing from it (the connectors are preselected), then a current per load. The form is filled in; check it, change a line's current if a load draws more, and press <b>Add</b>.</p>
 <p><b>Typing pins</b>: the Source pin, Source return and Loads fields list the board's pins while you type, each with
 its net and part (<b>Ctrl+Space</b>, or Down in a one-line field, lists them on an empty field); Up/Down choose, Enter or
@@ -848,6 +856,17 @@ background; <b>Cancel</b> stops them. The solve is steady state: a load that las
 heats less than shown.</p>
 <p>Thermal adds a temperature view to the Heatmap tab's <b>Route</b> list (replacing an earlier one), its issues
 join the Issues tab, and the status line gives the hottest copper and its layer and the power in copper and parts.
+The map shows each of its cells at the hottest point the solve found in it, so a track narrower than a map cell
+shows its own temperature. The copper's heat is exactly the DC paths' I²·R, its resistivity following the
+temperature, in the copper itself (also where a grid cell at the copper's edge has its point just outside it); a
+converter adds its inductor's ripple, the switching current its input capacitors send around the hot loop, and the
+heat in every via barrel the current passes. One convection coefficient per face, from the face's mean temperature
+(near a hot spot the real one is a little higher, so the estimate is on the warm side). The DC tables stay at
+20 °C; Thermal's notes give each DC path at its own temperature (its copper's resistance, drop and loss).
+A long, narrow, hot track can use up the normal quality's mesh budget part-way along it (a note says so): the rest
+of it reads a few per cent cool there, and a track narrower than the finest cell (0.05 mm on normal) a few per cent
+cool too; Thermal <b>Quality</b> fine resolves both.</p>
+<p>
 Current capacity adds one view per stage or bridge at its capacity (replacing earlier capacity views), and the
 status line lists each one's capacity and what limits it.</p>
 
@@ -864,8 +883,11 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   never simulated shows the levels without sizes until its first Simulate. Memory and time grow about as much as the nodes: 2× to 4× on a
   laptop, 8× and up on a machine with lots of memory. Short of memory, Simulate works around it and finishes (see
   <a href="#speed">Speed, memory and the GPU</a>). The standard grid is converged for the numbers (margins, inductances) up to about 1 GHz; a finer one
-  mainly sharpens the maps. Copper narrower than a cell keeps its own width on any grid (sampled at 0.15 mm):
-  a thin neck between two pours has its own resistance, inductance and current density, not a whole cell's.
+  mainly sharpens the maps. Copper keeps its own width on any grid, measured on the copper itself: a 0.1 mm track
+  has its own resistance and current density on 0.25 mm cells, at any angle, and a thin neck between two pours its
+  own resistance, inductance and current density, not a whole cell's. Where a track's width changes abruptly, its
+  resistance takes the change where it is (a 2 mm neck in a 0.4 mm track within 3 % at 1×, well under 1 % at 4×);
+  in copper more than 4 cells wide (a pour, a wide track) the change sits within half a cell of where it is.
   Above about 600 MHz the board-wide model's plane resonances can
   move with the grid, by several per cent in frequency and several dB in height (on one 6-layer board the largest
   sat 8 % low at 1×, where 2× and 4× agreed): when a net's worst emission comes from one, its notes say so and name
@@ -1324,7 +1346,10 @@ smaller but dense, which a regular grid lets it apply with FFTs.</p>
   (≤ 0.15 mm), so thin webs between via antipads stay connected and a slot still cuts. Tracks narrower than a cell
   are followed along their centre line and kept joined; where another net's pour takes a cell, the track crosses it
   as a lumped branch with the track's own resistance and inductance. Nets are never joined, even when their
-  clearance is smaller than a cell.</li>
+  clearance is smaller than a cell, and neither are two pieces of one net's copper that do not touch on the layer.
+  Each strip conducts with exactly the width of copper that crosses its cell border (a track at an angle crosses
+  it w / cos θ long, which keeps its resistance), and each node's current density is taken over its cell's own
+  copper, so that the heat it gives Thermal is exactly the strips' I²·R.</li>
 <li><b>The unknowns:</b>
   <ul>
   <li>the currents in the x and y strips between cells on every layer;</li>
@@ -1335,10 +1360,11 @@ smaller but dense, which a regular grid lets it apply with FFTs.</p>
   known signal or switch current), and Kirchhoff's current law at each node.</li>
 <li><b>The partial elements:</b>
   <ul>
-  <li>a strip has R(f), including skin effect and the copper thickness from the stackup, plus jωL;</li>
+  <li>a strip has R(f), including skin effect (the exact result for a copper slab with the field on one face, as
+    over its return plane) and the copper thickness from the stackup, plus jωL;</li>
   <li>every strip couples magnetically to every other strip on every layer (mutual partial inductance);</li>
   <li>two layers with copper and none in between form a parallel-plate capacitance ε₀·εᵣ·area/t, scaled by the
-    cell's copper fraction and with dielectric loss (tan δ);</li>
+    cell's copper fraction and with dielectric loss (tan δ), the dielectrics between them in series;</li>
   <li>a via is its barrel resistance plus partial self-inductance; a through-hole pin (a connector's) is a solid conductor joined to every layer all around its barrel, so its current enters the copper around the whole ring, not at one point;</li>
   <li>a part is its model's Z(f) plus 0.3 nH mounting inductance, spread over its pads.</li>
   </ul>

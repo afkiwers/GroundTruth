@@ -26,9 +26,9 @@ import numpy as np
 from ..config.settings import DcLoadSpec
 from ..core.issues import Issue, resolve_severity
 from ..solver.peec import RouteExcitation, SolverError
-from .power import (DC_F, SUSTAINED_MM, ConverterResult, _area_shares, _side, dc_board_build, dc_summary,
-                    dc_vector_maps)
-from .simulate import BoardModel, ModelRun
+from .power import (DC_F, SUSTAINED_MM, ConverterResult, _area_shares, _side, dc_board_build, dc_board_of,
+                    dc_summary, dc_vector_maps)
+from .simulate import BoardModel, ModelRun, StackBuild
 
 
 @dataclass
@@ -211,7 +211,9 @@ def _potential(sol, nodes: list) -> float:
 
 def finish_dc_load(model: BoardModel, setup: DcLoadSetup):
     """The solved rail's result: its DC path (dc_summary), maps, vectors and branch currents, each load's drops,
-    its own heatmap fields, and its issues."""
+    its own heatmap fields, and its issues. Each load draws its set current whatever the drop, the source pin is
+    the reference, and the copper is at 20 °C [A42]: at a fixed current a track's drop, loss and density scale with
+    1 / its width (tests/test_track_width.py)."""
     res, spec, run = setup.res, setup.spec, setup.fine
     config = model.config
     sol = run.ok().get(DC_F) if run is not None else None
@@ -225,6 +227,9 @@ def finish_dc_load(model: BoardModel, setup: DcLoadSetup):
     res.dc_grids = {name: dict(zip(run.build.names, run.build.grids))}
     res.dc_vectors = {name: dc_vector_maps(run.build, sol, total)}
     res.dc_branch = {name: (run.build, np.asarray(sol.I_branch).real * total)}
+    if isinstance(run.build, StackBuild):       # the vias' currents, kept for Thermal's via heat [A43]
+        db = dc_board_of(run.build)
+        res.dc_via = {name: (db, db.via_currents(np.asarray(sol.I_branch).real * total))}
     # each load's voltage: potentials are per A of the rail (sol.V), so x total; supply side and return side
     v_src = _potential(sol, setup.feeds[spec.source]) * total
     v_ret = _potential(sol, setup.feeds[spec.source_return]) * total if spec.source_return else None

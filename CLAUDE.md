@@ -150,6 +150,15 @@ build_package.cmd [--committed]                   # the user's console/double-cl
 .venv/Scripts/python tools/dev/pin_check.py BOARD SETTINGS --part J101 --values "fill:75, contact:0.5m" [--only STAGE ...]
                                                   # a part's through-hole pin values (analysis/pins.py): Simulate
                                                   # without/with them, its heat, DC paths, densities near it
+.venv/Scripts/python tools/dev/track_width_check.py [--widths 0.4,0.1 --angles 0,30,45 --offsets 0,0.03,0.06]
+            [--thermal] [--src DIR] [--json OUT]   # tracks' R', drop, J, heat (and temperature) against closed forms
+                                                  # and an independent cross-section (audit round 5; --src: main's tree)
+.venv/Scripts/python tools/dev/track_capacity_check.py   # a 0.4 / 0.1 mm track's current capacity against the cross-section
+.venv/Scripts/python tools/dev/neck_check.py [--necks 2,5,20] [--resolutions 1,2,4,16]   # a neck's added R against
+                                                  # an independent sheet solve per resolution (the width step, A39)
+.venv/Scripts/python tools/dev/dc_thermal_summary.py BOARD SETTINGS [--src DIR] [--json OUT] [--quality fine]
+            [--refine-ring N] [--no-thermal]   # every stage's DC paths and Thermal's figures, to compare two trees
+.venv/Scripts/python tools/dev/topology_diff.py BOARD SETTINGS --src DIR   # pads joined by one tree's DC model only
 .venv/Scripts/python tools/dev/current_where.py BOARD STAGES.pickle X0 Y0 X1 Y1
                                                   # which views/layers/nets carry current inside a box
 .venv/Scripts/python -u tools/dev/profile_sim.py BOARD SETTINGS --only SW1 [--suggest] [--threads 1] [--out F.prof]

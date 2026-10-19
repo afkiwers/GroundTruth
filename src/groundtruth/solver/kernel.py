@@ -19,6 +19,30 @@ MU0 = 4e-7 * np.pi
 GMD_FLAT = 0.2235            # geometric mean distance of a thin flat strip, as a fraction of its width [Grover 1946]
 
 
+def skin_thickness(t, f, sigma):
+    """The thickness (m) a foil t m thick of conductivity sigma conducts in at frequency f, as far as its
+    resistance goes: R_ac = R_dc·F, t_eff = t / F, with F = Δ (sinh 2Δ + sin 2Δ) / (cosh 2Δ - cos 2Δ), Δ = t/δ,
+    δ = 1/√(π f μ0 σ) [Ramo 1994]: the exact AC resistance of a conducting slab with the magnetic field on one face
+    only [Dowell 1966] (m = 1), as a strip has over its return plane and the plane under it (their currents crowd
+    onto the faces that look at each other) [A2]. t at DC, 1 + 4Δ⁴/45 for a thin foil, δ once δ ≪ t. Arrays
+    broadcast.
+
+    Before 2026-10-19 t_eff = δ(1 - e^(-t/δ)) (the integral of an exponential decay through the thickness): the
+    same limits, but 28 % too resistive where δ = 2t (1 MHz in 35 µm copper), 58 % where δ = t (3.6 MHz) and
+    34 % at 10 MHz, against this exact one-sided result (VALIDATION_AUDIT.md round 5, ISSUE-16)."""
+    t = np.asarray(t, float)
+    f = np.asarray(f, float)
+    with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+        delta = 1.0 / np.sqrt(np.pi * np.maximum(f, 1e-300) * MU0 * sigma)
+        x = np.where(f > 0, t / delta, 0.0)
+        y = np.minimum(2 * x, 60.0)                     # e^60: the ratio below is 1 to double precision beyond
+        exact = x * (np.sinh(y) + np.sin(y)) / (np.cosh(y) - np.cos(y))
+        # the series for a thin foil (Dowell's low-frequency form, m = 1): the formula above cancels badly there
+        factor = np.where(x < 0.1, 1.0 + 4.0 * x ** 4 / 45.0, exact)
+    out = t / factor
+    return float(out) if out.ndim == 0 else out
+
+
 @lru_cache(maxsize=None)
 def leggauss(n: int) -> tuple[np.ndarray, np.ndarray]:
     """Gauss-Legendre nodes and weights [Abramowitz 1964, §25.4] (cached: numpy solves an eigenvalue problem on
