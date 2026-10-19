@@ -7,6 +7,13 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `job-version` (2026-10-19, from `main`, not merged):** the user: "add the server's plugin version to the
+  table so users can see what plugin version was used for the sim", "add the plugin version to the report as well",
+  "like the full one GroundTruth 0.1.41910 (9094c40, built 2026-10-19 12:05)". The server's job answers carry its
+  build (`server.server_build`), kept as `server_version` in the job's entry: a **Version** column on the Server jobs
+  tab (and in the details; "–" for older jobs and servers). `gpu.Run.summary()` records the build that solved
+  (`solver["build"]`, kept through `split.merge_parts`), so the report's cover shows **Version** in full (the server's
+  build for a server run) and the footer the build that wrote the page; the history's run meta has it too.
 - **Branch `open-items` (2026-10-19, from `main`, merged into `main` as ec36b1f at the user's "merge and push"):** the user: "finish those -> Open technical items"
   (NEXT_STEPS rows 9-13; VALIDATION_AUDIT round 4 "Open items after round 4" and "SP-19 at 16x").
   - 16x (493 303 nodes, 1-1.5 GHz, ~3 h): the band's worst margin +14.1 / +17.6 / +15.8 dB at 4x / 8x / 16x, so the

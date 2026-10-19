@@ -7,6 +7,7 @@ from shapely.geometry import box
 
 from boardgen import layer_change_board
 from conftest import make
+from groundtruth import build_version
 from groundtruth.analysis.simulate import simulate
 from groundtruth.analysis.suggest import suggest_fixes
 from groundtruth.cli import EXIT_CONFIG, main
@@ -51,7 +52,8 @@ def test_simulate_on_the_device_matches_the_cpu(tmp_path, torch_cpu):
     cfg.analysis.gpu = "on"
     dev = simulate(board, cfg)
     assert cpu.solver["device"] == "CPU" and dev.solver == {"device": "cpu (PyTorch)", "gpu_fallbacks": 0,
-                                                            "gpu_error": "", "gpu_note": ""}
+                                                            "gpu_error": "", "gpu_note": "",
+                                                            "build": build_version()}
     a, b = cpu.routes[0], dev.routes[0]
     assert [s["f"] for s in a.cavity_solves] == [s["f"] for s in b.cavity_solves]
     assert b.worst["margin_db"] == pytest.approx(a.worst["margin_db"], abs=1e-3)
