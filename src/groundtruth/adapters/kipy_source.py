@@ -163,6 +163,10 @@ class _KipyReader:
             """The dielectric between the previous copper layer and this one: its sub-layers' total thickness
             and thickness-weighted epsilon_r (those KiCad sent materials for); missing materials noted."""
             t = sum(x[1] for x in pending)
+            if not t > 0:                   # layers in contact: not physical, said (as the file reader, ISSUE-30)
+                self.warnings.append(f"the stackup gives {pending[0][0]} no thickness: the capacitance and coupling "
+                                     "between the copper layers around it are not physical (set it in Board Setup > "
+                                     "Physical Stackup)")
             known = [x for x in pending if x[2] is not None]
             if len(known) < len(pending):
                 unknown.append(len(diel))
@@ -175,7 +179,11 @@ class _KipyReader:
                 if copper and pending:
                     close_gap()
                 pending = []
-                t_cu = _mm(layer.thickness) or 0.035
+                t_cu = _mm(layer.thickness)
+                if not t_cu > 0:        # as the file reader: one value everywhere, and said (ISSUE-30)
+                    self.warnings.append(f"the stackup gives {self.layer_name(layer.layer)} no copper thickness: taken "
+                                         "as 35 µm (set it in Board Setup > Physical Stackup)")
+                    t_cu = 0.035
                 copper.append(CopperLayer(self.layer_name(layer.layer), len(copper), z + t_cu / 2, t_cu))
                 z += t_cu
             elif layer.type == board_pb2.BoardStackupLayerType.BSLT_DIELECTRIC and copper:

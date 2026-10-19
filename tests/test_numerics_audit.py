@@ -288,3 +288,68 @@ def test_NA7_a_bend_converges_onto_the_sheet_solve(tmp_path):
     ref = (v[0] - v[1]) * 1e3
     e1, e4 = rows[1.0]["r_mohm"] / ref - 1, rows[4.0]["r_mohm"] / ref - 1
     assert abs(e1) < 0.01 and abs(e4) < abs(e1)
+
+
+# --------------------------------------------------------------------------- the inductance kernel's near field
+def _tape_reference(length, wa, wb, a, lat, dz):
+    """The tapes' mutual inductance by scipy's adaptive quadrature of the same one-dimensional integral (an
+    independent integration of kernel.filament_mutual, which is exact for filaments [Grover 1946])."""
+    from scipy.integrate import quad
+    from groundtruth.solver.kernel import filament_mutual
+
+    def f(v):
+        """The pairs' weight times the filament mutual at difference v."""
+        w = max(0.0, min(wa / 2, v + wb / 2) - max(-wa / 2, v - wb / 2))
+        return w * float(filament_mutual(length, np.array(a), np.array(math.hypot(lat + v, dz))))
+
+    h, k = (wa + wb) / 2, abs(wa - wb) / 2
+    pts = sorted({-h, -k, k, h} | ({-lat} if -h < -lat < h else set()))
+    return sum(quad(f, p, q, limit=400, epsabs=0, epsrel=1e-12)[0]
+               for p, q in zip(pts[:-1], pts[1:]) if q > p) / (wa * wb)
+
+
+@pytest.mark.parametrize("case", [(1, 1, 0, 0, 0), (1, 1, 1, 0, 0), (1, 1, 0, 1, 0), (1, 1, 0, 0, 0.05),
+                                  (1, 1, 1, 1, 0.02), (0.3, 1, 0, 0.6, 0), (0.1, 0.7, 2, 0.4, 0.001)])
+def test_ISSUE28_tape_mutual_is_the_exact_integral(case):
+    """ISSUE-28 (1): kernel.tape_mutual (the strips' near-field mutual and self inductance) against an adaptive
+    quadrature of the same integral to 1e-9. The strip's self term was 24 sub-strips with the GMD on the diagonal:
+    0.86 % low for a square strip (it converges as 1/n)."""
+    from groundtruth.solver.kernel import strip_self_numeric, tape_mutual
+    d = 0.5e-3
+    wa, wb, a, lat, dz = (v * d for v in case)
+    assert tape_mutual(d, wa, wb, a, lat, dz) == pytest.approx(_tape_reference(d, wa, wb, a, lat, dz), rel=1e-9)
+    assert strip_self_numeric(d, d) == pytest.approx(_tape_reference(d, d, d, 0, 0, 0), rel=1e-9)
+
+
+@pytest.mark.parametrize("ratio, tol", [(2.0, 0.006), (10.0, 0.002), (20.0, 0.002)])
+def test_ISSUE28_a_plane_pairs_sheet_inductance_is_mu0_dz_however_thin_the_dielectric(ratio, tol):
+    """ISSUE-28 (2): two planes dz apart with opposite uniform currents have μ0·dz of loop inductance per square
+    [Pozar 2012]: in the kernels, 2·Σ(K(0) − K(dz)) over the plane. That is the small difference of two large sums,
+    so the near field's error is magnified about d/dz times: with 8 x 8 Gauss points across the strips it read 3.9 %
+    and 20 % low at d/dz = 10 and 20 (a cavity's resonance 2 and 10 % high; kraft_flux_mini_2's board-wide model has
+    d/dz = 6.4 at 1x; 1.2 % low at d/dz = 2). Now within 0.2 % at 10 and 20, 0.5 % at 2: the rest is the finite
+    41 x 41 plane, whose missing outside grows with dz."""
+    from groundtruth.solver.kernel import MU0, strip_kernel
+    d = 0.5e-3
+    dz = d / ratio
+    n = 41
+    sheet = 2 * (strip_kernel(n, n, d, 0.0) - strip_kernel(n, n, d, dz)).sum()
+    assert sheet == pytest.approx(MU0 * dz, rel=tol)
+
+
+# --------------------------------------------------------------------------- degenerate inputs
+def test_ISSUE30_a_stackup_without_copper_or_dielectric_thickness_is_said_and_consistent(tmp_path):
+    """ISSUE-30: a stackup with 0 µm of copper on a layer was read as 0 (no warning): the PEEC models took 35 µm for
+    it (simulate's fallback), Thermal's copper heat ρJ²·t·A the 0, so the two disagreed and nothing said so; a
+    dielectric of 0 mm was read without a word (the layers 1 µm apart in the models). Now the reader takes the
+    default 35 µm for the copper with a board warning, and warns about the dielectric."""
+    from groundtruth.adapters.file_source import load_board
+    g = BoardGen(layers=2, size=(46.0, 20.0), cu_thickness=0.0)
+    b = load_board(g.write(tmp_path / "cu0.kicad_pcb"))
+    assert all(c.thickness == pytest.approx(0.035) for c in b.stackup.copper)
+    assert any("F.Cu" in w and "35 µm" in w for w in b.warnings)
+    g = BoardGen(layers=2, size=(46.0, 20.0), dielectrics=[0.0])
+    b = load_board(g.write(tmp_path / "d0.kicad_pcb"))
+    assert any("no thickness" in w and "not physical" in w for w in b.warnings)
+    g = BoardGen(layers=2, size=(46.0, 20.0))
+    assert not load_board(g.write(tmp_path / "ok.kicad_pcb")).warnings
