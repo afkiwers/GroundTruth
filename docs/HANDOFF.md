@@ -7,8 +7,8 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `audit-5` (2026-10-19 / 20, from `main`, merged into `main` at the user's "update handover, then commit,
-  merge"):** the user's brief
+- **Branch `audit-5` (2026-10-19 / 20, from `main`, merged into `main` as 5fee321 at the user's "update handover,
+  then commit, merge"):** the user's brief
   "Second-Round Independent Physics and Engineering Validation" (pasted), with a track narrowed from 0.4 to 0.1 mm
   followed through every calculation, then the user's "fix all of it" (and "keep going") for what the audit had left
   open. The record is [PHYSICS_AUDIT.md](PHYSICS_AUDIT.md) (model-by-model audit, reference register, track-width
