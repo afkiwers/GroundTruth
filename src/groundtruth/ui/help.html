@@ -862,8 +862,8 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   <i>4× (0.11 × 0.11 mm)</i>: the coarsest model's, from the last Simulate of this board (also one kept in its
   history, so the sizes are there when the board is opened again); smaller model regions get finer cells. A board
   never simulated shows the levels without sizes until its first Simulate. Memory and time grow about as much as the nodes: 2× to 4× on a
-  laptop, 8× and up on a machine with lots of memory. A solve that runs out of memory is retried on its own, then
-  reported. The standard grid is converged for the numbers (margins, inductances) up to about 1 GHz; a finer one
+  laptop, 8× and up on a machine with lots of memory. Short of memory, Simulate works around it and finishes (see
+  <a href="#speed">Speed, memory and the GPU</a>). The standard grid is converged for the numbers (margins, inductances) up to about 1 GHz; a finer one
   mainly sharpens the maps. Copper narrower than a cell keeps its own width on any grid (sampled at 0.15 mm):
   a thin neck between two pours has its own resistance, inductance and current density, not a whole cell's.
   Above about 600 MHz the board-wide model's plane resonances can
@@ -1078,7 +1078,12 @@ on, off). In the plugin, <a href="#prefs">Preferences</a> sets the resolution an
 <li>Large models need memory: each bridge model on an 8-layer board can take a few GB while it is factorised.
   When the models of all nets and stages would not fit in the free memory at once, Simulate solves them in groups,
   one after the other (the board-wide model last); the results are the same, it may take a little longer.
-  When memory runs out anyway, those solves are repeated one at a time after the others. If it still does not fit, close
+  Simulate does not stop when memory runs short: before each large factorisation it checks what it will need
+  against what is free (on a compute server, within the job's limit) and frees the factorisations it has kept,
+  waits for the others being made, or makes a leaner one (the least fill: more iterations, the same results).
+  A solve that runs out anyway is repeated on its own with everything freed, then with the leaner factorisation;
+  only if even that fails is that one frequency left unsolved (a note, and a <i>band_unsolved</i> warning naming
+  what it misses), and the rest of the run finishes. The run's notes say what it had to do. To avoid it: close
   other programs, choose fewer <b>Solver threads</b> or a lower <b>Resolution</b> (above 1×) in Preferences, or lower
   <code>analysis.max_nodes</code>.</li>
 <li>With PyTorch installed in the plugin's environment on a machine with an NVIDIA GPU (CUDA) or an AMD Radeon
