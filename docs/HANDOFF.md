@@ -7,7 +7,7 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `memory-ladder` (2026-10-19, from `main`, not merged):** an 8x Simulate of CE2264 on DELL-7920-PC failed
+- **Branch `memory-ladder` (2026-10-19, from `main`, merged into `main` as 3171856 at the user's "Merge"):** an 8x Simulate of CE2264 on DELL-7920-PC failed
   after 82 min at a board-wide solve ("buck Avionics and Battery Charging/SW1", 243k nodes, solve 130 of 151), peak
   21.8 GB, 45 GB free, reported as "the thermal solve ran out of memory". The user: "this keeps happening! It should
   not fail, it should recognise the shortage and proactive work around it to finish the simulation!" The worker's
