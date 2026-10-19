@@ -122,7 +122,7 @@ pins); `radiation` (signal paths and converters); the component models (all thre
 | SP-16 | Plane-pair capacitance, cavity resonance f10 | ε0εrA/t; c/(2a√εr) | exact / 3 % | Covered (test_capacitance) |
 | SP-17 | Shunt loops on a board (50 Ω shunt vs load_ohms), op-amp board path | equivalent circuits | 0.1-0.4 dB | Covered (test_path) |
 | SP-18 | Signal-path Bode: RC pole, op-amp pole | 1/(2π(R_drv+R)C), GBW/gain | 1 % | Covered (test_transfer) |
-| SP-19 | Board-wide resonance heights above 1 GHz | grid convergence (1x / 2x / 4x / 8x) | – | Improved (round 3: strips as wide as their copper, SP-27); round 4: 8x run, 4x vs 8x 0.8 dB rms at 0.5-1 GHz (converged), 2.9 dB rms at 1-1.5 GHz; the grid note points at 4x below 1 GHz and 8x above. Limitation (~3 dB above 1 GHz) |
+| SP-19 | Board-wide resonance heights above 1 GHz | grid convergence (1x / 2x / 4x / 8x) | – | Improved (round 3: strips as wide as their copper, SP-27); round 4: 8x run, 4x vs 8x 0.8 dB rms at 0.5-1 GHz (converged), 2.9 dB rms at 1-1.5 GHz; 16x: the band's worst margin ±2 dB from 4x on (+14.1 / +17.6 / +15.8 dB at 4x / 8x / 16x); the grid note asks for 4x and gives ±2 dB above 1 GHz. Limitation (±2 dB above 1 GHz) |
 | SP-20 | Route finding through series parts, `route_missing` | – | – | Covered (test_path, test_checks) |
 | SP-21 | Tier 1 gap_crossing: a slot's length, below min_gap_mm none | constructed geometry | 0.01 mm | Verified (round 2, 3 cases) |
 | SP-22 | Tier 1 split between two nets named; reference_net over the other net | constructed geometry | 0.05 mm | Verified (round 2) |
@@ -403,8 +403,8 @@ The user: "continue with fixing the other issues as well a continue your audit",
   | | Old | New | After rounds 3 and 4 (2026-10-18 evening) |
   |---|---|---|---|
   | Line Z0, outer / inner | 52.7 / 54.5 Ω | 44.8 / 38.6 Ω | field-solved cut: 43.1-43.8 / 35.6-41.7 Ω |
-  | Worst margin SPI_SCK / SPI_MISO / SPI_MOSI | +15.3 / +18.8 / +18.8 dB | +13.9 / +18.1 / +17.8 dB | +11.4 / +14.8 / +15.4 dB; with lossy path lines (round 4) +11.8 / +15.2 / +15.8 dB |
-  | Other nets' worst margins | – | within −0.7 to +0.6 dB of old | SW_CLK +32.8 → +40.5 dB; Net-(U301--) +45.7 → +22.1 and ADC_I_RAIL_1 +34.2 → +21.4 dB, a lossless line at a resonance: with the lines' loss (round 4) +33.5, ADC_I_RAIL_2 +35.4; the rest within −1.5 to +2.1 dB |
+  | Worst margin SPI_SCK / SPI_MISO / SPI_MOSI | +15.3 / +18.8 / +18.8 dB | +13.9 / +18.1 / +17.8 dB | +11.4 / +14.8 / +15.4 dB; with lossy path lines (round 4) +11.7 / +15.1 / +15.7 dB |
+  | Other nets' worst margins | – | within −0.7 to +0.6 dB of old | SW_CLK +32.8 → +40.5 dB; Net-(U301--) +45.7 → +22.1 and ADC_I_RAIL_1 +34.2 → +21.4 dB, a lossless line at a resonance: with the lines' loss (round 4) +30.1, ADC_I_RAIL_2 +33.6; the rest within −1.5 to +2.1 dB |
   | conv1 switch-node copper loss, sustained density | 19.5 mW, 28.5 A/mm² | 27.7 mW, 35.9 A/mm² | 29.7 mW, 37.4 A/mm² |
   | conv2 switch-node copper loss | 17.6 mW | 20.3 mW | 21.5 mW |
   | Hot-loop L, radiated and conducted margins, other DC paths | – | unchanged | hot loops +6 % (conv1 1.48 → 1.57 nH), margins within 0.2 dB, control loops unchanged |
@@ -511,6 +511,18 @@ the last digit or two.
   (`test_SP26_a_stretch_without_a_cut_at_its_middle_takes_one_further_along`; it fails on the old code).
   Net-(U1001-VIB) reads 60.6 Ω against the closed form's 38.6 (In1.Cu): a cut that sees its real neighbourhood,
   not a fallback.
+- **Open items after round 4 (the user: "finish those").** Interleaving: CE101 combined per group (each stage's
+  harmonics in the limit's range times its complex CE101 transfer; the limit at the stages' input current together),
+  tested end to end on a 2 kHz pair (180°: the fundamental cancels, 2·f_sw +6.02 dB) and on two boosts (their
+  ripple, the same). GPU: a model larger than 80 % of the device's free memory is solved on the CPU before any
+  upload (`DeviceTooSmall`; test: a forced tiny device, the CPU's results). Path loss: the plane from Johnson's
+  spread (above). README: the safety figures (38 errors / 13 warnings, C601 over its rating, the switch nodes at
+  95.5 / 95.9 V of 100 V) and the PDN grids (0.86 vs 0.59 mm within 1-5 % at 100 MHz, margins within 0.4 dB) from the
+  current board.
+- **SP-19 at 16x.** SPI_SCK's board-wide model at 16x (493 303 nodes, 1-1.5 GHz, `spi_sck_widths_16x.json`): 8x
+  vs 16x 2.3 dB rms point by point; the largest mode 78 / 62 / 57 mm² at 4x / 8x / 16x; the band's worst margin
+  +14.1 / +17.6 / +15.8 dB. The worst margin settles to ±2 dB from 4x on and 8x does not narrow it, so the grid note
+  now asks for 4x everywhere and gives that ±2 dB above 1 GHz (it asked for 8x there after the 8x run).
 - **Copper narrower than the 0.15 mm sampling.** `tools/dev/neck_converge.py`, the 0.35 mm neck on seven grids
   (1.0 to 0.1 mm, `out/neck/`): at Simulate's sampling (0.15 mm, at most 6 × 6 per cell) 763 / 758 / 736 / 762 /
   716 / 768 / 743 MHz, ±3.5 %; at 0.075 mm and up to 12 × 12, 763 / 783 / 775 / 763 / 807 / 768 / 743 MHz, ±4.1 %.
@@ -522,7 +534,9 @@ the last digit or two.
   cascade. Verified: a matched 100 mm microstrip's end voltage against e^(-αl) with Pozar's α at 0.3 / 1 / 3 GHz
   within 0.5 %, an open quarter-wave stub's input against Z0·tanh(αl) within 0.5 % (tests/test_path.py). On refboard:
   ADC_I_RAIL_1 +21.4 → +33.5 dB (C304 carries 1.0 × the input current, not 4.5 ×), ADC_I_RAIL_2 +30.1 → +35.4,
-  the SPI nets +0.4 dB, the converters and the issue counts unchanged (`out/path_loss/full/`). Net-(U301--) stays at
+  the SPI nets +0.4 dB, the converters and the issue counts unchanged (`out/path_loss/full/`). With the return
+  plane's loss from Johnson's spread instead of "as much as the strip" (A36 revised, `plane_resistance`, the closed
+  form within 0.1 % of the integrated spread): +30.1, +33.6, +0.3 dB (`out/path_loss/johnson/`). Net-(U301--) stays at
   +22.1 dB: its worst is a board-wide plane resonance at 1590 MHz, not the path (the grid note applies).
 - **What the analog nets' numbers mean.** Net-(U301--), /CPU/ADC_I_RAIL_1 and _2 ran on detection's generic
   10 MHz / 2 ns (`class: Signal`, unreviewed): a current-sense signal of a few kHz behind a TLV6001 (0.5 V/µs) has
@@ -547,8 +561,8 @@ the last digit or two.
   together at 161 MHz, −25.4 in phase, −19.8 / −21.0 alone (`out/interleave/`).
 
 ## Remaining risks and unverified items
-- SP-19: board-wide resonance heights above 1 GHz still move by ~3 dB rms between the 4x and 8x grids on refboard
-  (converged within 0.8 dB below 1 GHz); the grid note says so and names the grid to check at (round 4).
+- SP-19: above 1 GHz a board-wide resonance's worst margin moves about ±2 dB between the 4x, 8x and 16x grids on
+  refboard (converged within 0.8 dB below 1 GHz); the grid note asks for 4x and says so (round 4).
 - ISSUE-5: where no cut can be made at any of the places tried (three tracks, three places each), the closed forms
   remain: very asymmetric inner layers up to ~10 % high, no solder mask. None of refboard's 14 paths does (round 4).
 - A resonance set by copper narrower than the grid pitch scatters by about ±4 % from grid to grid (the 0.35 mm neck
@@ -557,10 +571,13 @@ the last digit or two.
   CE101 reads the CE102 band's solves (the LISN as specified, REFERENCES A34).
 - The emission estimate's model limits are unchanged: quasi-static, differential mode only, no cables; it ranks
   layouts, it is not a compliance prediction.
-- The signal path's lines carry their copper and dielectric loss since round 4 (the plane's loss taken as the
-  strip's, A36); before, a line resonance beside a shunt had an unbounded Q.
-- Published refboard numbers: refreshed in round 4 (the table under Round 2; the README's loop and Sharper-map figures). README figures from
-  other settings or tools (the safety counts, the PDN grids) were not re-taken.
+- The signal path's lines carry their copper and dielectric loss since round 4, the return plane's from Johnson's
+  spread of a thin strip over an infinite plane (A36): the strip's edge crowding is left out (a few per cent more
+  loss on a thin foil).
+- Published refboard numbers: refreshed in round 4 (the table under Round 2; the README's loop, Sharper-map, safety
+  and PDN figures).
+- The GPU path has run only on a 4 GB laptop GPU, which `gpu: auto` declines (0.3-0.8x the CPU); a big GPU's
+  speed-up and the memory guard on a real large model are untested.
 
 ## Final run
 - **Round 3, full suite** (`out/audit_validation/full_round3.log`, 76 min, the machine also running neck sweeps):

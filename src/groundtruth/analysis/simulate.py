@@ -82,7 +82,8 @@ SHUNT_MIN_SHARE = 0.01      # a shunt part on a signal path gets a loop of its o
 GRID_SENSITIVE_F = 600e6    # a worst emission above this from a board-wide plane resonance (rise >= GRID_SENSITIVE_RISE
 GRID_SENSITIVE_RISE_DB = 6.0  # dB over the low-frequency loop moment) within GRID_SENSITIVE_DB of the warning level
 GRID_SENSITIVE_DB = 10.0    # gets a note: such peaks moved several dB between grids (grid_sensitive_note)
-GRID_CHECK_8X_F = 1e9       # the note asks for 4x below this and 8x above it (4x and 8x agree below)
+GRID_CHECK_F = 1e9          # above this, a peak's height stays uncertain by about GRID_ABOVE_DB from 4x on
+GRID_ABOVE_DB = 2.0         # (refboard's worst margin at 1-1.5 GHz: 4x / 8x / 16x +14.1 / +17.6 / +15.8 dB)
 RASTER_MM = 0.15            # copper is sampled at this pitch or finer, so thin webs between antipads conduct
 F_REF_MIN = 1e6             # loop L, the ideal reference and the board-wide offset at max(f0, this): inductive regime
 LINE_CUT_TRACKS = 3         # _line_of tries the cut on this many of a stretch's longest tracks before the closed forms
@@ -876,8 +877,9 @@ def _line_loss(board: Board, segments: list, ref_layer: str) -> dict:
         return {}
     er = sum(st.epsilon_between(layer, n) for n in neigh) / len(neigh)
     tan_d = sum(st.loss_tangent_between(layer, n) for n in neigh) / len(neigh)
+    hs = tuple(st.dielectric_between(layer, n) * 1e-3 for n in neigh[:2])
     return {"width_m": float(np.median(widths)) * 1e-3, "thickness_m": cu.thickness * 1e-3, "er": er,
-            "tan_d": tan_d}
+            "tan_d": tan_d, "planes_h_m": hs}
 
 
 def find_shunts(model: "BoardModel", route: Route) -> list[dict]:
@@ -945,7 +947,8 @@ def path_elements(board: Board, config: Config, route: Route, ref_layer: str,
             rows.append({"kind": "line", "length_mm": length, "z0": z0, "eeff": eeff,
                          "nets": sorted({s.net for s in stretch if s.net}),
                          **({"width_mm": loss["width_m"] * 1e3, "thickness_mm": loss["thickness_m"] * 1e3,
-                             "er": loss["er"], "tan_d": loss["tan_d"]} if loss else {})})
+                             "er": loss["er"], "tan_d": loss["tan_d"],
+                             "planes_h_mm": [h * 1e3 for h in loss["planes_h_m"]]} if loss else {})})
             stretch.clear()
     for i, seg in enumerate(route.segments):
         if seg.kind != "part":
@@ -1636,25 +1639,27 @@ def grid_sensitive_note(worst: dict, m_worst: float, m_low: float, warn_db: floa
     the next; ARCHITECTURE "Board-wide resonances above 1 GHz"). The threshold was 1 GHz; since the strips carry
     their copper's width (2026-10-18) the 1x grid places refboard's largest mode (F.Cu/In1) at 940 MHz, where 2x and 4x
     have it at 1020, and the grids disagree from ~620 MHz up (they agree within 0.5 dB at 540-580 MHz), so 600 MHz.
-    Where to check (the 8x run, 2026-10-18): 4x and 8x agree within 0.8 dB rms at 0.5-1 GHz, so below GRID_CHECK_8X_F
-    the note asks for 4x and none is given from 4x on; above it they still differ by 2.9 dB rms (one mode a few per
-    cent apart in frequency, the same copper on both grids), so 8x, and from 8x on the note gives that uncertainty."""
+    Where to check (the 8x and 16x runs, 2026-10-18 / 19): 4x and 8x agree within 0.8 dB rms at 0.5-1 GHz, so the
+    note asks for 4x and none is given from 4x on below GRID_CHECK_F. Above it the grids keep differing point by point
+    (4x/8x 2.9, 8x/16x 2.3 dB rms: sharp resonances a few per cent apart in frequency), but the band's worst margin
+    moves about ±2 dB around its value from 4x on, 8x no closer to 16x than 4x is (+14.1 / +17.6 / +15.8 dB): so 4x
+    there too, and from 4x on the note gives that uncertainty (GRID_ABOVE_DB)."""
     if worst is None or worst.get("margin_db") is None or worst["f"] < GRID_SENSITIVE_F or m_low <= 0 or m_worst <= 0:
         return None
     rise = 20 * math.log10(m_worst / m_low)
     if rise < GRID_SENSITIVE_RISE_DB or worst["margin_db"] > warn_db + GRID_SENSITIVE_DB:
         return None
-    target = 4.0 if worst["f"] < GRID_CHECK_8X_F else 8.0
+    target = 4.0
     head = (f"the worst emission ({worst['f'] / 1e6:.4g} MHz, margin {worst['margin_db']:+.1f} dB) comes from a "
             f"plane resonance above {GRID_SENSITIVE_F / 1e6:g} MHz ({rise:+.0f} dB over the loop's low-frequency "
             f"value)")
     if resolution < target:
         return (f"{head}: on a coarse grid such a peak can sit several per cent off in frequency and several dB off "
                 f"in height. Check it at {target:g}x resolution (Preferences, or --resolution)")
-    if worst["f"] < GRID_CHECK_8X_F:
+    if worst["f"] < GRID_CHECK_F:
         return None
-    return (f"{head}: above {GRID_CHECK_8X_F / 1e9:g} GHz such peaks still moved by about 3 dB between the 4x and "
-            f"8x grids, so read its height to within a few dB")
+    return (f"{head}: above {GRID_CHECK_F / 1e9:g} GHz such a peak's height moved by about ±{GRID_ABOVE_DB:g} dB "
+            f"between the 4x, 8x and 16x grids on a test board, so read its margin to within that")
 
 
 def unsolved_band(run: ModelRun, f_limit: float) -> Optional[dict]:

@@ -441,8 +441,13 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
     vs 8x: 0.8 dB rms (1.6 max) at 0.5-1 GHz, 2.9 dB rms (5.1 max) at 1-1.5 GHz. 4x is converged below 1 GHz. The
     F.Cu/In1 mode stays at 1020 MHz (62 mm² at 8x). 4x's 1260-1300 MHz peak is the +3V3 F.Cu pour against the In1
     +3V3 plane near (120-123, 123) mm, excited on both grids through the same vias and C1104, only weaker at 8x:
-    one mode a few per cent apart in frequency, not a missing connection. So `grid_sensitive_note` asks for 4x
-    below `GRID_CHECK_8X_F` (1 GHz) and 8x above, and from 8x on says the height is good to a few dB.
+    one mode a few per cent apart in frequency, not a missing connection.
+  - **16x (2026-10-19, `out/converge/spi_sck_widths_16x.json`, 493 303 nodes, 1-1.5 GHz, ~3 h on 2 threads).** 8x vs
+    16x 2.3 dB rms point by point (4x vs 8x 2.9): sharp resonances a few per cent apart keep the per-frequency
+    comparison from settling. What a margin reads converges better: the largest mode (F.Cu/In1, 1020 MHz) 78 / 62 /
+    57 mm² at 4x / 8x / 16x, and the band's worst margin +14.1 / +17.6 / +15.8 dB, ±2 dB around its value from 4x
+    on, 8x no closer to 16x than 4x. So `grid_sensitive_note` asks for 4x in both bands and, above `GRID_CHECK_F`
+    (1 GHz), says the margin is good to about ±2 dB (`GRID_ABOVE_DB`); 8x costs twice 4x for no better answer.
     The 8x run first stalled: a 400 MB Krylov basis allowed a GMRES restart of ~26 at ~1 M unknowns, too short near
     the resonances; `peec.GMRES_RESTART_MIN` = 100 (a plugin Simulate at 8x builds this same model), with
     `simulate.solve_bytes` counting the longer basis.
@@ -539,8 +544,9 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   copper's and the dielectric's loss since 2026-10-19 (`PathLine.alpha`: R' from the skin depth for the strip and
   as much again for its plane [A36], G' = ωC'·tan δ with the microstrip filling factor, γ = α + jβ in the cascade;
   lossless, a quarter-wave stretch beside a capacitor's ESL resonated with an unbounded Q: refboard's ADC_I_RAIL_1
-  moved 13 dB for a 7 % Z0 change, C304 carrying 4.5 × the input current; with the loss 1.0 ×, the margin +33.5 dB,
-  the SPI nets +0.4 dB) (its
+  moved 13 dB for a 7 % Z0 change, C304 carrying 4.5 × the input current; with the loss about 1 ×, the margin +30.1 dB,
+  the SPI nets +0.3 dB; the plane's share from Johnson's spread, `plane_resistance`, since the next day: it read
+  +33.5 dB with the plane taken as lossy as the strip) (its
   own Z0 and εeff, `simulate._line_of`: since 2026-10-18 the 2D field solver's cut of the board across the
   stretch's longest track, at its middle (`line_cache`: analysis/si.SectionCache, the one Run checks' impedance
   checks use: every net's copper in the cut, the stackup's dielectrics and solder mask, equal cuts solved once),
@@ -1543,7 +1549,10 @@ thermal need nothing: each switch node's variance stays in its own copper (VALID
   receivers (`conducted_table`, `emission_table`, its spread). The same sum in phase is kept for comparison. The
   group's dict goes on each member (`ConverterResult.interleave`, in the JSON summary); the records are released.
   Not combined (a note): stages at different f_sw or spread; conducted only when every member has an estimate
-  against the same standard; CE101 stays per stage. Issues `power:<group>:interleave:conducted|emi`; the stages'
+  against the same standard; CE101 likewise (each stage's harmonics in the limit's range times its complex CE101
+  transfer, `bridge._ce101_complex_transfer`; the limit at the stages' input current together, since CE101-1 relaxes
+  with it). Tested end to end on bucks, boosts (the ripple triangle) and a 2 kHz pair's CE101. Issues
+  `power:<group>:interleave:conducted|emi|ce101`; the stages'
   own issues stay (each alone).
 - **Assumption** [A35]: each stage's transfer and moment from its own model, added by superposition.
 - **Validation** (`tests/test_interleave.py`): the phasors against the DFT of sampled trapezoids (three duties and

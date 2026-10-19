@@ -386,11 +386,20 @@ class TorchMath:
     """PlaneStack.solve's matrix work on the device (peec._HostMath is the numpy twin)."""
 
     def __init__(self, run: Run, stack):
-        """The device math for solves on `stack` in `run` (the stack's device copies made on first use)."""
+        """The device math for solves on `stack` in `run` (the stack's device copies made on first use). Raises
+        DeviceTooSmall before uploading a model the device's free memory cannot hold (PlaneStack.solve then does the
+        solve on the CPU and the run counts it): a 4 GB card did not run out, Windows paged it (> 2 h for a refboard
+        Simulate that took 18 min on the CPU)."""
         self.run = run
         dev = run.device
         self.t, self.d, self.st = dev.torch, dev.device, stack
         self.vec = TorchVectors(dev)
+        if str(dev.device) not in stack.__dict__.get("_gpu", {}):
+            free = _free_bytes(dev)
+            need = device_bytes(stack)
+            if free is not None and need > DEVICE_MEMORY_SHARE * free:
+                raise DeviceTooSmall(f"the model needs ~{need / 1e9:.2g} GB on the {dev.name}, {free / 1e9:.2g} GB "
+                                     "free")
         self.data = _stack_data(dev, stack)
 
     def dev(self, v: np.ndarray):
@@ -470,6 +479,37 @@ class TorchMath:
         s = r2 - self._spmv(self.data["ArT"], self._dinv(o, r1))
         y = self.dev(op.solve_S(self.host(s)))          # the factorisation's solves stay on the CPU
         return self.t.cat([self._dinv(o, r1 + self._spmv(self.data["Ar"], y)), y])
+
+
+class DeviceTooSmall(RuntimeError):
+    """The device's free memory cannot hold the model (device_bytes): the solve goes to the CPU."""
+
+
+DEVICE_MEMORY_SHARE = 0.8   # a model uses at most this share of the device's free memory
+
+
+def _free_bytes(dev: Device) -> Optional[int]:
+    """The device's free memory (bytes), None where it is not known (a CPU device, an older PyTorch)."""
+    if dev.device.type != "cuda":
+        return None
+    try:
+        return int(dev.torch.cuda.mem_get_info(dev.device)[0])
+    except Exception:       # noqa: BLE001 - not known: no check
+        return None
+
+
+def device_bytes(stack) -> int:
+    """About what solves on `stack` put on a device (bytes): the kernel spectra of both strip orientations (N x N
+    real values per padded pixel), the FFT work arrays (three complex N-layer grids), the incidence matrices (CSR,
+    and their transposes), the Krylov basis at its longest (peec.gmres_restart) and a few more vectors."""
+    from .peec import gmres_restart
+    pix = sum(int(np.prod(P)) for P, n in ((stack.Px, stack.nxb), (stack.Py, stack.ns - stack.nxb)) if n > 0)
+    n = stack.nb + stack.n_nodes
+    kernels = stack.N * stack.N * pix * 8
+    ffts = 3 * stack.N * pix * 16
+    incidence = 2 * (stack.Ar.nnz * 16 + (stack.Ar.shape[0] + stack.Ar.shape[1]) * 8)
+    basis = (gmres_restart(n) + 1) * n * 16
+    return int(kernels + ffts + incidence + basis + 20 * n * 16)
 
 
 def _csr(t, device, A):

@@ -514,3 +514,20 @@ def test_an_open_quarter_wave_stub_is_z0_tanh_alpha_l_not_a_short():
     assert z_in > 0.5                                     # a real loss: half an ohm and more, not 0
     r = path_currents([f], [1.0], [line], PathSource(1.0), PathLoad(1e-18))
     assert abs(r.i_in[0]) == pytest.approx(1.0 / (1.0 + z_in), rel=0.005)
+
+
+@pytest.mark.parametrize("w_over_h", [0.05, 0.5, 2.0, 20.0, 200.0])
+def test_the_return_plane_s_resistance_is_johnsons_spread_in_closed_form(w_over_h):
+    """A36: a return plane's current spreads under the strip as 1/(1 + (x/h)²) [Johnson 1993]; plane_resistance's
+    closed form of ∫J² equals the numerical integral of that spread within 0.1 %, from a thin strip (→ 1/(2πh)) to a
+    wide one (towards 1/w, Pozar's wide-strip plane, slowly)."""
+    from groundtruth.emi.path import plane_resistance
+    h = 0.2e-3
+    w = w_over_h * h
+    x = np.linspace(-400 * h - w, 400 * h + w, 800_001)
+    j = (np.arctan((x + w / 2) / h) - np.arctan((x - w / 2) / h)) / (math.pi * w)
+    assert plane_resistance(w, h) == pytest.approx(float(np.trapezoid(j * j, x)), rel=1e-3)
+    if w_over_h <= 0.05:
+        assert plane_resistance(w, h) == pytest.approx(1 / (2 * math.pi * h), rel=0.01)
+    if w_over_h >= 200:                       # the approach is slow, a (h/a)·ln(a/h) term: 96 % at w = 200 h
+        assert plane_resistance(w, h) == pytest.approx(1 / w, rel=0.05)
