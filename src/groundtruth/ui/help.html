@@ -276,7 +276,8 @@ DCR</b> and <b>Diode V_f (V)</b> are the losses of the thermal solve.</p>
   <i>in phase</i> for comparison, and each stage's own margin. A group below the EMI margin has its own issue
   (<i>interleave group …</i>); the stages' own issues stay, they are what each stage would do alone. The group needs
   its stages at one switching frequency and the same spread spectrum (else it is not combined, a note says why);
-  CE101 stays each stage's own. DC and thermal results need nothing: each switch node's current stays in its own
+  MIL-STD-461 CE101 is combined the same way for stages switching within its range (the limit at their input
+  current together). DC and thermal results need nothing: each switch node's current stays in its own
   copper.</li>
 <li><b>DC paths on the whole board, and all stages together.</b> Every stage's DC power paths (switch node,
   input, output, ground return) are solved on one copper model of the whole board, so nothing is cut off at the

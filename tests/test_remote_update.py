@@ -440,8 +440,10 @@ def test_a_server_with_two_networks_is_found_at_the_address_that_answers(monkeyp
     from groundtruth.remote.cluster import Cluster, subnet_broadcasts
     from groundtruth.ui import server_updates as su
     # beacons: the chosen address's subnet broadcast (or each own address's)
-    c = Cluster(KEY, 8765, "x", lambda: {}, address="192.168.0.6")
-    assert ("192.168.0.255", c.beacon_port) in c.targets() and ("255.255.255.255", c.beacon_port) in c.targets()
+    # (a documentation address, RFC 5737: never one of the test machine's own, whose real netmask would decide the
+    # broadcast. The user's PC is 192.168.0.6 itself, on a /30 since 2026-10-19: broadcast 192.168.0.7, correctly)
+    c = Cluster(KEY, 8765, "x", lambda: {}, address="192.0.2.6")
+    assert ("192.0.2.255", c.beacon_port) in c.targets() and ("255.255.255.255", c.beacon_port) in c.targets()
     assert subnet_broadcasts(["10.1.2.3", "bad"]) and all(b.endswith(".255") for b in subnet_broadcasts(["10.1.2.3"]))
     # the server announces the chosen address alone, its status lists it first
     srv = ComputeServer(KEY, "127.0.0.1", 0, data_dir=tmp_path / "jobs", home=tmp_path, address="192.168.0.6")

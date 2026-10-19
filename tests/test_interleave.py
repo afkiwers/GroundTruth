@@ -155,3 +155,56 @@ def test_detection_groups_the_stages_one_controller_switches(tmp_path):
     assert {d.spec.name: (d.spec.interleave, d.spec.phase_deg) for d in found} == \
         {"a": ("U8 phases", 0.0), "b": ("U8 phases", 180.0)}
     assert "datasheet" in found[0].reasons[-1]
+
+
+def test_a_slow_pair_180_degrees_apart_cancels_its_ce101_fundamental(tmp_path):
+    """CE101 (MIL-STD-461, aircraft) of two identical stages switching at 2 kHz, 180° apart: the input lead's
+    current at f_sw cancels and at 2·f_sw reads the stage's own + 6.02 dB (each 2 kHz harmonic alone in the probe's
+    100 Hz bandwidth); the group says so in its text and keeps each stage's own margin beside it."""
+    from groundtruth.analysis.interleave import interleave_text
+    stages = [ConverterSpec(**{**SPEC.__dict__, "name": name, "f_sw": 2e3, "input_connector": ["J1.1", "J1.2"],
+                               "interleave": "slow", "phase_deg": ph}) for name, ph in (("A", 0.0), ("B", 180.0))]
+    board, sc, _ = make_conv(tmp_path, hot_loop_board(20.0, caps=(("C1", "470u", "end", 0.0),), connector=True), "ce",
+                             stages, conducted="mil461", ce101="aircraft")
+    res = simulate(board, sc.config)
+    a = res.converters[0]
+    g = a.interleave
+    assert a.ce101 and g["ce101"] and g["ce101_limit"].startswith("MIL-STD-461G CE101")
+    own1, own2 = _at(a.ce101, 2e3, "i_dbua"), _at(a.ce101, 4e3, "i_dbua")
+    assert own1 is not None and own2 is not None
+    got1 = _at(g["ce101"], 2e3, "i_dbua")
+    assert got1 is None or got1 < own1 - 60
+    assert _at(g["ce101"], 4e3, "i_dbua") == pytest.approx(own2 + 20 * math.log10(2), abs=0.01)
+    assert g["ce101_in_phase_worst"]["margin_db"] < g["ce101_worst"]["margin_db"]
+    assert any(t.startswith("CE101 margin together") for t in interleave_text(g))
+
+
+def test_a_boost_pair_180_degrees_apart_cancels_its_ripple_fundamental(tmp_path):
+    """Two identical boosts (tests/boardgen.boost_board, 5 V to 12 V at 300 kHz) 180° apart: their conducted estimate
+    is the inductor's ripple triangle (ripple_phase), so at f_sw the input's reading cancels and at 2·f_sw it is the
+    stage's own + 6.02 dB; in phase the radiated worst is + 6.02 dB."""
+    from boardgen import boost_board
+    from conftest import make
+    from dataclasses import replace
+    from groundtruth.analysis.detect import detect_converters
+    board, sc, _ = make(tmp_path, boost_board(), "boost", nets=())
+    base = detect_converters(board, sc.config)[0].spec
+    base.f_sw, base.v_in, base.v_out, base.i_out = 300e3, 5.0, 12.0, 0.5
+    got = {}
+    for label, ph in (("apart", 180.0), ("together", 0.0)):
+        stages = [replace(base, name=n, interleave="b", phase_deg=p) for n, p in (("A", 0.0), ("B", ph))]
+        (tmp_path / label).mkdir()
+        b2, sc2, _ = make_conv(tmp_path / label, boost_board(), "boost", stages)
+        res = simulate(b2, sc2.config)
+        assert all(not r.error for r in res.converters), [r.error for r in res.converters]
+        got[label] = res.converters[0]
+    a = got["apart"]
+    assert a.topology == "boost" and a.ripple
+    g = a.interleave
+    f = 300e3
+    own1, own2 = _at(a.conducted, f, "v_dbuv"), _at(a.conducted, 2 * f, "v_dbuv")
+    got1 = _at(g["conducted"], f, "v_dbuv")
+    assert got1 is None or got1 < own1 - 60
+    assert _at(g["conducted"], 2 * f, "v_dbuv") == pytest.approx(own2 + 20 * math.log10(2), abs=0.01)
+    gi = got["together"].interleave
+    assert gi["worst"]["e_dbuv"] == pytest.approx(got["together"].worst["e_dbuv"] + 20 * math.log10(2), abs=0.05)

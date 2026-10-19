@@ -144,3 +144,26 @@ def test_one_process_at_a_time_on_a_gpu(monkeypatch):
         assert not held.acquire(wait=False)              # this run holds it
     assert held.acquire(wait=False)                      # released at the end of the run
     held.release()
+
+
+def test_a_model_the_device_cannot_hold_is_solved_on_the_cpu(tmp_path, torch_cpu, monkeypatch):
+    """A device whose free memory is too small for the model (device_bytes against DEVICE_MEMORY_SHARE of it):
+    every solve is done on the CPU before anything is uploaded, the run counts them and says why, and the results are
+    the CPU's. The estimate covers what a solve does upload (the kernels and incidence matrices)."""
+    board, sc, _ = make(tmp_path, layer_change_board(None), "small", solve_points=3, max_solves=4)
+    cfg = sc.config
+    cfg.analysis.gpu = "off"
+    cpu = simulate(board, cfg)
+    monkeypatch.setattr(gpu, "_free_bytes", lambda dev: 1000)
+    cfg.analysis.gpu = "on"
+    dev = simulate(board, cfg)
+    assert dev.solver["gpu_fallbacks"] > 0 and "DeviceTooSmall" in dev.solver["gpu_error"]
+    assert "needs" in dev.solver["gpu_error"]
+    assert dev.routes[0].worst["margin_db"] == pytest.approx(cpu.routes[0].worst["margin_db"], abs=1e-9)
+    monkeypatch.setattr(gpu, "_free_bytes", lambda dev: None)
+    g = build_grid(box(0, 0, 12, 9), (0, 0, 12, 9), 0.5)
+    st = PlaneStack([PlaneLayer(f"L{k}", z, g) for k, z in enumerate((0.0, 0.2e-3, 0.7e-3))])
+    with gpu.use("on") as run:
+        data = gpu.TorchMath(run, st).data
+    uploaded = sum(o.K.numel() * 8 + (o.into.numel() + o.outof.numel()) * 8 for o in data["orients"])
+    assert gpu.device_bytes(st) > uploaded
