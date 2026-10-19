@@ -108,14 +108,13 @@ def test_the_plane_crossing_obeys_kcl_and_the_tank_law(cavity_sim):
 def test_a_worst_emission_from_a_plane_resonance_above_600_mhz_gets_a_grid_note():
     """Board-wide resonances above 600 MHz changed by several dB between grids on refboard (they agreed
     within 0.5 dB at 540-580 MHz): a worst emission from one, near the warning level, says so and names the
-    resolution where the grids agreed: 4x below 1 GHz (4x and 8x within 0.8 dB rms), 8x above (still ~3 dB apart,
-    which the note says from 8x on)."""
+    resolution where the grids agreed: 4x (below 1 GHz 4x and 8x within 0.8 dB rms; above it the worst margin moves
+    ±2 dB from 4x on, 8x and 16x no closer, which the note says from 4x on)."""
     from groundtruth.analysis.simulate import grid_sensitive_note
     worst = {"f": 1.22e9, "margin_db": 4.1}
     note = grid_sensitive_note(worst, m_worst=183e-6, m_low=19.7e-6, warn_db=6.0)
-    assert note and "1220 MHz" in note and "+19 dB" in note and "8x resolution" in note
-    assert "8x resolution" in grid_sensitive_note(worst, 183e-6, 19.7e-6, 6.0, resolution=4)
-    assert "about 3 dB" in grid_sensitive_note(worst, 183e-6, 19.7e-6, 6.0, resolution=8)
+    assert note and "1220 MHz" in note and "+19 dB" in note and "4x resolution" in note
+    assert "±2 dB" in grid_sensitive_note(worst, 183e-6, 19.7e-6, 6.0, resolution=4)
     below = {"f": 0.94e9, "margin_db": 4.1}
     assert "4x resolution" in grid_sensitive_note(below, 183e-6, 19.7e-6, 6.0, resolution=2)
     assert grid_sensitive_note(below, 183e-6, 19.7e-6, 6.0, resolution=4) is None
