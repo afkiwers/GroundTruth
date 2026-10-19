@@ -389,3 +389,71 @@ def test_ISSUE25_a_bridge_whose_leg_did_not_solve_says_its_rms_currents_lack_it(
     assert any("not solved" in n for n in br.notes)
     _, _, notes = thermal_inputs(board, cfg, [br])
     assert any(br.rms_missing[0] in n and "heat" in n for n in notes)
+
+
+# --------------------------------------------------------------------------- generated cases
+def _random_tracks(n: int, seed: int = 20261020) -> list[tuple]:
+    """n straight tracks (width mm, angle °, length mm, offset mm) drawn from a fixed seed: widths 0.05-1 mm
+    log-uniform, any angle from 0 to 90°, 15-35 mm long, anywhere within a cell."""
+    rng = np.random.default_rng(seed)
+    return [(float(np.exp(rng.uniform(math.log(0.05), math.log(1.0)))), float(rng.uniform(0.0, 90.0)),
+             float(rng.uniform(15.0, 35.0)), float(rng.uniform(0.0, 0.25))) for _ in range(n)]
+
+
+@pytest.mark.parametrize("case", _random_tracks(8), ids=lambda c: f"w{c[0]:.3f}_a{c[1]:.0f}")
+def test_NA8_generated_tracks_keep_the_resistance_of_their_cross_section(tmp_path, case):
+    """NA-8: straight tracks with a width, angle, length and position on the grid drawn at random (fixed seed): the
+    resistance per length from two lengths 20 mm apart (the pads cancel) against 1/(σ·w·t) [IEC 60028] at 1x: within
+    1.5 % for a track at least a cell wide, 4 % for a narrower one. Round 5's TW-1 / TW-3 checked 0.05-0.4 mm at 0°,
+    30° and 45° (within 1 %); these cases found the rest (ISSUE-31): a track narrower than a cell reads +1 to +2.5 %
+    within ~10° of an axis and up to ±3.6 % at some angles and positions (57-60°), the finite-volume error of copper
+    crossing a cell row over several cells; it converges (6°: +2.2 / +2.0 / +0.7 % at 1x / 2x / 4x;
+    tools/dev/angle_scan.py)."""
+    w, angle, length, off = case
+    a = math.radians(angle)
+    drops = []
+    for L in (length, length + 20.0):
+        x0, y0 = 6.0 + off, 6.0 + off * 0.7
+        x1, y1 = x0 + L * math.cos(a), y0 + L * math.sin(a)
+        g = BoardGen(layers=2, size=(x1 + 8.0, y1 + 8.0))
+        for ref, at in (("U1", (x0, y0)), ("U2", (x1, y1))):
+            g.footprint(ref, "IC", "Package_SO:Fake_IC", at, [{"number": 1, "at": (0, 0), "net": "PWR",
+                                                               "size": (1.0, 1.0)}])
+        g.track((x0, y0), (x1, y1), "PWR", "F.Cu", width=w)
+        b, sc, _ = make(tmp_path, g, f"r{int(L * 10)}", nets=())
+        sc.set_dc_loads([DcLoadSpec("rail", "U1.1", [DcLoad("U2.1", 1.0, "")], "")])
+        sc.save()
+        r = simulate(b, SettingsFile.load(sc.path).config).dc_loads[0]
+        assert not r.error, r.error
+        drops.append(r.loads[0]["supply_mv"] * 1e-3)
+    r_per_m = (drops[1] - drops[0]) / 0.020
+    tol = 0.015 if w >= 0.25 else 0.04                  # the 1x DC grid's cell here: 0.25 mm
+    assert r_per_m == pytest.approx(1 / (SIGMA_CU * w * 1e-3 * T_CU), rel=tol), case
+
+
+# --------------------------------------------------------------------------- the worst emission is a solved value
+def test_ISSUE32_the_worst_emission_is_solved_even_when_the_budget_is_spent(tmp_path):
+    """ISSUE-32: with plane capacitance the reported worst harmonic gets a solve of its own unless one lies within
+    ±5 % (ARCHITECTURE "Frequency planning"), so the worst case is not an interpolation across a resonance. But
+    next_frequencies returned at once when analysis.max_solves was spent, before that rule: kraft_flux_mini_2's
+    SPI_SCK at 1x reported +13.2 dB at 1220 MHz, interpolated between solves at 1020 and 1580 MHz, where solving
+    every harmonic gives +7.9 dB (a resonance between them). Now the worst's own solve may go up to WORST_EXTRA past
+    the budget (kraft: one more, +7.85 dB at 1220 MHz), and a worst still interpolated gets a note, as do gaps the
+    budget left unresolved near the limit. Here a budget of 3 solves on the cavity test board: the worst lies within
+    ±5 % of a solve of the board-wide model (or is noted); on the old code it was interpolated between 150 MHz and
+    3.15 GHz."""
+    from boardgen import layer_change_board
+    from groundtruth.analysis import simulate as sim
+    from groundtruth.config.settings import NetSpec
+    extra, near_log = getattr(sim, "WORST_EXTRA", 3), sim.WORST_SOLVED_LOG
+    board, sc, _ = make(tmp_path, layer_change_board(None), "cavw", nets=(NetSpec("SIG", "U1.1", ["U2.1"], 50e6, 1e-9),),
+                        capacitance=True, solve_points=3, max_solves=3, cavity_max_nodes=12000)
+    rr = simulate(board, sc.config).routes[0]
+    assert not rr.error, rr.error
+    solved = [s["f"] for s in rr.cavity_solves]
+    assert len(solved) <= 3 + extra
+    f = rr.worst["f"]
+    near = min(abs(math.log(f / x)) for x in solved) <= near_log
+    assert near or any("is interpolated" in n for n in rr.notes), (f, solved)
+    # the budget ended with gaps near the limit still uncertain: said, with where they are
+    assert any("solve budget" in n and "not resolved" in n for n in rr.notes)

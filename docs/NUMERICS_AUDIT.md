@@ -166,14 +166,16 @@ independent 320 A/mm²; the sustained value 210 / 207 / 207 / 207.
 | Case | What could go wrong | Result |
 |---|---|---|
 | A 0.1 mm neck 0.1 / 0.25 / 0.5 / 1 mm long in a 0.4 mm track | a feature shorter than a cell | the absolute error stays under 0.36 square at 1x and falls with the grid (−0.08 square at 4x); relative to the neck's own small resistance −6 to −22 % at 1x for 0.5-1 mm. Shorter necks are not necks: the 0.4 mm track's round ends overlap (0.0016 / 0.036 mΩ added) |
-| 0.02 / 0.03 mm tracks | narrower than a sample | R' exact to 0.1 % |
+| 0.02 / 0.03 mm tracks | narrower than a sample | R' exact to 0.1 % (along an axis) |
+| 0.1 / 0.15 mm tracks at every 3° from 0 to 90°, two positions (`angle_scan.py`); 8 generated tracks (NA-8) | copper narrower than a cell crossing rows at any angle | rms 0.8 / 1.0 %; **+1 to +2.5 % within ~10° of an axis** (both positions) and **−2.8 to +3.6 % at 57-60°** (one position); converging: 6° +2.2 / +2.0 / +0.7 %, 60° −2.8 / −0.8 / −0.1 % at 1x / 2x / 4x; 0.4 mm within 0.3 % (ISSUE-31) |
 | V bends at 20°, 45°, 90° | acute staircases | 90°: −0.70 → −0.14 % (exact reference); 20° and 45°: within the equipotential reference's own ±2 % |
 | Parallel 0.4 / 0.1 mm branches | current sharing | R −0.8 → −0.4 %, the share within 2 % |
-| Ring, tee | loops, junctions | tee within 0.8 % of the fed reference |
+| A tee, 0.5 A to each arm | a junction | within 0.8 % of the fed reference |
+| A 0.3 mm ring, the pads opposite | a loop of oblique copper | 12.31 / 12.18 / 12.22 mΩ at 1x / 2x / 4x against the fed reference's 12.52 / 12.39 at h = 0.02 / 0.01 (itself still moving 1 % there): within its uncertainty |
 | Another net's track 0.05 / 0.1 mm beside a 0.2 mm track | copper of two nets in one cell | the drop identical to the track alone (0.0) |
 | A gap of 0.003 / 0.006 / 0.02 mm | connectivity flipping on a small edit | joined at 3 µm (`PIECE_TOL_MM` = 5 µm, touching fills: by design), "not connected" from 6 µm |
 | A 2 mm L at 10 A | a re-entrant corner | the node peak diverged with the grid (ISSUE-27); the windowed peak converges |
-| A 3 mm wide track stepping to 0.1 mm | a step in a band wider than 4 cells | within ±d/2 (A39, round 5) |
+| A 3 mm wide track stepping to 0.1 mm | a step in a band wider than 4 cells | what the 0.1 mm part adds: −0.29 / −0.42 / −0.03 % of the fed reference (67.58 mΩ) at 1x / 2x / 4x; 0.2-0.8 square against the equipotential one (A39's ±d/2) |
 
 ## 6. Metamorphic and property tests
 
@@ -234,6 +236,7 @@ independent 320 A/mm²; the sustained value 210 / 207 / 207 / 207.
 | ISSUE-28 | Kernel near field and self term inaccurate when layers are closer than ~d/5 | Medium | Fixed, tested |
 | ISSUE-29 | Plugin: results of an earlier board / settings shown and heated as current | Medium | Fixed, tested |
 | ISSUE-30 | Zero copper / dielectric thickness accepted silently and inconsistently | Low | Fixed, tested |
+| ISSUE-31 | A track narrower than a cell: R' +1 to +3.6 % at shallow and some other angles at 1x | Low-Medium | Documented (converges with the grid); round 5's "any angle" corrected |
 
 **ISSUE-25.** *Reproduce:* kraft conv1 at GMRES 1e-11: the input path's 10 Hz solve did not converge; the report
 then had four DC paths, input copper 0.229 instead of 0.301 W, losses 3.11 instead of 3.36 W, efficiency 98.9 instead
@@ -264,6 +267,15 @@ model: 6.4 at 1x); a route's loop inductance +0.03 to +0.11 % by pitch (Wheeler:
 
 **ISSUE-30.** Section 8. *Test:* `test_ISSUE30_…`.
 
+**ISSUE-31.** Found by the generated cases (NA-8: 2 of 8 random tracks failed 1.5 %), mapped with
+`tools/dev/angle_scan.py` (`out/audit6/angle_scan.txt`). *Root cause:* a track narrower than a cell that crosses a
+row border at a shallow angle shares its copper between two rows of strips over several cells; each strip's width
+is exact (round 5), but the two-point flux between partly covered cells puts the current's path a fraction of a cell
+off, a first-order finite-volume error for copper not aligned with the grid. It falls with the grid. Round 5 had
+checked 0°, 30° and 45° (all within 1 %), and its summary said "any angle": corrected in PHYSICS_AUDIT.md and
+VALIDATION_AUDIT.md. *Not fixed:* a cure is a different face model for oblique sub-cell copper; at 2x the worst seen
+is 2.2 %, at 4x 0.8 %. *Test:* NA-8 (1.5 % at least a cell wide, 4 % below).
+
 ## 10. The real board
 
 kraft_flux_mini_2 (`flux-2`, read only; settings `out/kraft_refresh/kraft_all.groundtruth.yaml`, scratch copies),
@@ -289,6 +301,8 @@ KRAFT_TBD
 - A cavity's resonance is good to about ±2 % from the model (A46) plus the grid's ±4 % for narrow copper (round 4).
 - A neck shorter than about two cells reads up to ~20 % of its own resistance low at 1x (≤ 0.36 square); 4x for such
   features.
+- A track narrower than a cell at a shallow angle (within ~10° of an axis) reads +1 to +2.5 % resistive at 1x, up to
+  ±3.6 % at some other angles and positions (ISSUE-31); 2x / 4x reduce it to ≤ 2.2 / 0.8 %.
 - The peak density at a corner reads ~10 % low at 1x (the cell is the window); the sustained value is unaffected.
 - The equipotential sheet reference is not accurate enough (±2 %) to arbitrate narrow oblique copper; the rotated
   fed reference covers 90° bends only.
@@ -301,7 +315,7 @@ KRAFT_TBD
 
 ## 13. Tests and checks
 
-New: tests/test_numerics_audit.py (ISSUE-25 to -30, NA-1 to NA-7: 31 tests), one window test in test_gui.py;
-refsolvers' fed sheet solve and windowed density.
+New: tests/test_numerics_audit.py (ISSUE-25 to -30, NA-1 to NA-8: 39 tests), one window test in test_gui.py;
+refsolvers' fed sheet solve and windowed density; tools/dev/angle_scan.py.
 
 FULLSUITE_TBD

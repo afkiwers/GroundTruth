@@ -619,8 +619,12 @@ from KiCad.) A finding you accept can be waived with <b>Waive selected…</b>
 detours, plane resonances, emission margins, hot-loop overshoot, conducted emission, current density, via
 overload, victim coupling and temperatures. <b>band_unsolved</b> says that a solve did not converge: above the
 last solved frequency the emission is only held at its value there, so a resonance in that band would be missed;
-Simulate again at another resolution (<a href="#prefs">Preferences</a>). A connector's or other part's soldered
-pin is not checked as a via: the pin carries the current between the layers.</p>
+Simulate again at another resolution (<a href="#prefs">Preferences</a>). The worst emission is always a solved
+frequency, not one read between solves (if it cannot be, a note says so); when the solve budget
+(<code>analysis.max_solves</code>) ends before every gap near the limit is resolved, a note names where a resonance
+could still hide: raise the budget there. A <b>dc_unsolved</b> warning names a DC path (or a motor bridge's leg)
+whose solve failed: the stage's loss, input current and Thermal's heat leave it out. A connector's or other part's
+soldered pin is not checked as a via: the pin carries the current between the layers.</p>
 <ul>
 <li>The columns: <b>#</b>, <b>Severity</b>, <b>Check</b> (the kind of issue), <b>Net</b>, <b>Location</b> (x, y in
   mm), <b>Layer</b> and <b>Message</b>. Rows are coloured by severity; a waived issue is greyed, reads "(waived)"

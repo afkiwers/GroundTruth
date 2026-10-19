@@ -584,7 +584,8 @@ tests/test_physics_audit.py (PA-1 to PA-4), against independent closed forms, sh
 solvers written for the round (tests/refsolvers.py). In short:
 - The PEEC grid's strips now carry the copper's exact width across their cell border, and its nodes the exact copper
   area, with a density whose heat is the strips' I²R (ISSUE-11, -12): a track's R' within 1 % of ρ/(w·t) for
-  0.05-0.4 mm at any angle and grid position (before: 0.43 to 1.81 ×), the thermal heat equal to the solved loss
+  0.05-0.4 mm at 0°, 30° and 45° and any grid position (before: 0.43 to 1.81 ×; round 6 found narrower-than-a-cell
+  tracks +1 to +3.6 % at shallow and some other angles, ISSUE-31), the thermal heat equal to the solved loss
   (before: up to 2 ×). A narrow band's change of width is taken in series along its strips (ISSUE-21: a 2 mm neck
   −2.9 % at 1x, was −9 %); in copper wider than 4 cells a step stays within ±d/2 (A39).
 - The sustained density counts only the net's own copper (ISSUE-13); the temperature map shows each cell's hottest
