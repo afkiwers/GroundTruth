@@ -90,6 +90,10 @@ class SPDSolver:
         self.ml = None
         self.rate = None  # CG iterations per decade of residual reduction with a fresh hierarchy
         self.last_iters = 0
+        # the last solve's outcome, for the caller to report (an unconverged or broken-down CG returns its best x,
+        # which a coupled iteration would otherwise take as settled: VALIDATION_AUDIT.md round 6, ISSUE-26)
+        self.last_converged = True
+        self.last_residual = 0.0      # ‖b - A x‖ / ‖b‖ of the returned x
 
     def _build(self, A, progress):
         """Build the multigrid hierarchy for A (the expensive setup; the rate is measured again afterwards)."""
@@ -111,6 +115,7 @@ class SPDSolver:
         """Solve A x = b (A symmetric positive definite) to a relative residual `tol`, starting from x0 (the
         previous iteration's solution: a warm start). Small systems are solved directly (sparse LU)."""
         n = A.shape[0]
+        self.last_converged, self.last_residual = True, 0.0
         if n == 0:
             return np.zeros(0)
         progress.check()
@@ -150,11 +155,13 @@ class SPDSolver:
         # a few times the fresh rate, then rebuild and carry on from where CG got to.
         cap = maxiter if fresh else min(maxiter, int(3 * self.rate * decades) + 30)
         x, info, iters, got = run_cg(x0, cap)
-        if info > 0 and not fresh:
+        if info != 0 and not fresh:
             progress.log(f"{self.label}: multigrid out of date after {iters} iterations; rebuilding")
             self._build(A, progress)
             fresh = True
-            x, info, it2, got = run_cg(x, maxiter - iters)
+            # the new hierarchy gets the whole budget of its own: `maxiter - iters` was 0 when the old one had used
+            # it all (cap = maxiter for a slow rate), and pyamg refuses 0 iterations (a ValueError ended the solve)
+            x, info, it2, got = run_cg(x, maxiter)
             iters += it2
             iters_fresh = it2
         else:
@@ -162,9 +169,14 @@ class SPDSolver:
         if fresh and got > 0.5:
             self.rate = iters_fresh / got
         self.last_iters = iters
+        self.last_residual = float(np.linalg.norm(b - A @ x)) / b_norm
+        self.last_converged = info == 0
         if info > 0:
             progress.log(f"{self.label}: CG stopped after {iters} iterations "
-                         f"(residual {res[-1] / b_norm if res else float('nan'):.1e})")
+                         f"(residual {self.last_residual:.1e})")
+        elif info < 0:          # pyamg's breakdown: the matrix or the preconditioner not positive definite
+            progress.log(f"{self.label}: CG broke down after {iters} iterations "
+                         f"(residual {self.last_residual:.1e})")
         progress.log(f"{self.label}: {n:,} unknowns, {iters} CG iterations, {time.perf_counter() - t_start:.2f} s")
         return x
 

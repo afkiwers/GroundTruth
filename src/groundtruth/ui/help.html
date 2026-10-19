@@ -381,7 +381,10 @@ board (pours, tracks and vias, as for a power stage's DC paths) and shows:</p>
   busiest vias against IPC-2221, and the copper's loss; these are checked like a power stage's DC paths
   (current_density, via_overload), and a load above the rail's <b>Max drop</b> is an issue (dc_drop). The checked
   density is the one sustained over 1 mm of the rail's own copper (another net's pour beside a track does not
-  dilute it); its limits are rules of thumb, and what a density does to the copper's temperature is Thermal's;</li>
+  dilute it); its limits are rules of thumb, and what a density does to the copper's temperature is Thermal's.
+  The <b>peak</b> shown beside it is the density over a quarter millimetre of copper (or one cell, where the cell
+  is larger): at an inside corner the density has no finite value at a point, so a single cell's figure would grow
+  on every finer grid; over 0.25 mm it settles (a coarse grid reads it up to about 10 % low);</li>
 <li><b>Thermal</b> heats the board with it, and <b>Current capacity</b> finds the current at which the hottest copper
   or part reaches the limit, all the rail's loads scaled together.</li>
 </ul>

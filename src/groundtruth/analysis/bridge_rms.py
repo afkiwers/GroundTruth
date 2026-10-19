@@ -26,7 +26,7 @@ import numpy as np
 from ..emi.pwm_lines import line_spectrum
 from ..solver.peec import RouteExcitation, SolverError
 from .power import (DC_F, POWER_MARGINS_MM, _area_shares, _region_build, _side, input_path, path_parts, rail_caps,
-                    sustained)
+                    peak_density, sustained)
 from .simulate import ModelRun
 
 BANDS = 3                       # PWM harmonics with a field of their own (the leg's solves at n·f_pwm)
@@ -243,9 +243,10 @@ class RmsBasis:
                               * g.d * g.d)
             if not dens.size or dens.max() <= 0:
                 continue
-            i, j = np.unravel_index(int(np.argmax(dens)), dens.shape)
-            if dens[i, j] > best[0]:
-                best = (float(dens[i, j]), layer, tuple(float(x) for x in g.xy(i, j)))
+            pk = peak_density(dens, g.node, g.d, g)          # over PEAK_MM: converges with the grid [A45]
+            i, j = np.unravel_index(int(np.argmax(pk)), pk.shape)
+            if pk[i, j] > best[0]:
+                best = (float(pk[i, j]), layer, tuple(float(x) for x in g.xy(i, j)))
             sus = sustained(dens, g.node, g.d, g)
             i, j = np.unravel_index(int(np.argmax(sus)), sus.shape)
             if sus[i, j] > best_s[0]:
