@@ -353,3 +353,39 @@ def test_ISSUE30_a_stackup_without_copper_or_dielectric_thickness_is_said_and_co
     assert any("no thickness" in w and "not physical" in w for w in b.warnings)
     g = BoardGen(layers=2, size=(46.0, 20.0))
     assert not load_board(g.write(tmp_path / "ok.kicad_pcb")).warnings
+
+
+def test_ISSUE25_a_bridge_whose_leg_did_not_solve_says_its_rms_currents_lack_it(tmp_path, monkeypatch):
+    """ISSUE-25 for motor bridges: the RMS currents (maps, via loads, the heat) are built from each leg's
+    battery-to-motor DC solve and its PWM-band solves; one that failed was dropped without a word unless all failed.
+    Now RmsBasis lists it (rms_missing), a dc_unsolved warning and Thermal's notes name it. Forced here by removing
+    the first leg's high-side DC solution, as a SolverError leaves it."""
+    from boardgen import bridge_board
+    from groundtruth.analysis import bridge_rms
+    from groundtruth.analysis.detect import detect_bridges
+    from groundtruth.analysis.thermal import thermal_inputs
+    from groundtruth.config.settings import MotorSpec
+    board, sc, _ = make(tmp_path, bridge_board(), "brfail", nets=(), max_nodes=20000)
+    (d,) = detect_bridges(board, sc.config)
+    b = d.spec
+    b.v_bus, b.f_pwm, b.i_phase, b.speed_rpm, b.c_oss = 48.0, 40e3, 30.0, 3000.0, 1e-9
+    b.motor = MotorSpec("star", 0.05, 50e-6, 5.0, 7)
+    sc.add_detected_bridges([b], d.models)
+    sc.save()
+    cfg = SettingsFile.load(sc.path).config
+    real = bridge_rms.RmsBasis.__init__
+
+    def failing(self, model, bs, legs, column):
+        """RmsBasis after the first leg's high-side battery-to-motor solve failed."""
+        src, k, run = bs.rms_runs[0]
+        run.sols[power.DC_F] = None
+        real(self, model, bs, legs, column)
+
+    monkeypatch.setattr(bridge_rms.RmsBasis, "__init__", failing)
+    res = simulate(board, cfg)
+    (br,) = res.bridges
+    assert len(br.rms_missing) == 1 and "battery-to-motor" in br.rms_missing[0]
+    assert any(i.check == "dc_unsolved" and i.net == br.net for i in res.issues)
+    assert any("not solved" in n for n in br.notes)
+    _, _, notes = thermal_inputs(board, cfg, [br])
+    assert any(br.rms_missing[0] in n and "heat" in n for n in notes)

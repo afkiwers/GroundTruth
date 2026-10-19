@@ -7,6 +7,13 @@ read [../CLAUDE.md](../CLAUDE.md) (environment of this machine, rules, commands)
 bigger machine and audit items 1-5, then 6-7) is in git history (`git log -p docs/NEXT_STEPS.md`); all of it is
 done, with the evidence in [VALIDATION_AUDIT.md](VALIDATION_AUDIT.md) "Round 4".
 
+## Done (2026-10-20): audit round 6
+
+The numerical audit (stopping tests, convergence against independent references, adversarial copper, metamorphic
+properties, stale state, failure handling) and its fixes (ISSUE-25 to -30), on branch `audit-6`. The record is
+[NUMERICS_AUDIT.md](NUMERICS_AUDIT.md), the summary VALIDATION_AUDIT.md "Round 6". What it left open is under "Open,
+technical" (item 7).
+
 ## Done (2026-10-20): audit round 5
 
 The physics audit with a track narrowed from 0.4 to 0.1 mm followed through every calculation, and every fix it led
@@ -73,6 +80,13 @@ All merged into `main`; the full suite on `main` after the last of them (cebe708
    cells or at a junction (within ±d/2, A39: `tools/dev/neck_check.py` for a neck); the references nobody could
    open (CISPR 25's average column and edition, IPC-2221's §6.2 text, Incropera 7th edition's face-down coefficient);
    the plugin's board check before a run not yet tried against a live KiCad (`tools/dev/live_kicad.py`).
+
+7. **Left by audit round 6** (NUMERICS_AUDIT.md section 12): a neck shorter than about two cells reads up to ~20 %
+   of its own resistance low at 1x (≤ 0.36 square; 4x resolves it); the peak density ~10 % low at 1x (the cell is
+   the 0.25 mm window); the plane pairs have no fringing capacitance (A46, a cavity ~+1.5 % high); GMRES's one norm
+   over volts and amperes measured harmless on kraft (`tools/dev/tol_check.py` checks another board); the board's
+   part index and plane cache keyed by list identity (safe today); the GPU path and a live KiCad not exercised in
+   round 6.
 
 ## Before committing anything
 

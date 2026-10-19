@@ -958,7 +958,8 @@ class Branch:
 
 @dataclass
 class PlanePair:
-    """Capacitance between two facing plane layers (indices into the layer list, upper < lower)."""
+    """Capacitance between two facing plane layers (indices into the layer list, upper < lower): the parallel-plate
+    value per cell, without the fringing field at the copper's edges, beside complete partial inductances [A46]."""
     upper: int
     lower: int
     c_per_area: float         # ε0·εr / t   (F/m²)
