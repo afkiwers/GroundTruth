@@ -77,6 +77,8 @@ REFINE_DB = 3.0             # solve between two harmonics whose loop moments dif
 REFINE_OCTAVE_DB = 3.0      # ...or (with plane capacitance) that are far apart: an octave counts as 3 dB
 REFINE_MARGIN_DB = 20.0     # ...unless the emission there stays this far below the warning level
 WORST_SOLVED_LOG = 0.05     # the worst harmonic gets its own solve unless one lies within ±5 %
+WORST_EXTRA = 3             # ... even past analysis.max_solves, at most this many more (VALIDATION_AUDIT.md round 6,
+                            # ISSUE-32: with the budget spent, the reported worst was an interpolation)
 SHUNT_MIN_SHARE = 0.01      # a shunt part on a signal path gets a loop of its own when it carries this share of the
                             # path's current at any harmonic (find_shunts, prepare_route)
 GRID_SENSITIVE_F = 600e6    # a worst emission above this from a board-wide plane resonance (rise >= GRID_SENSITIVE_RISE
@@ -1424,9 +1426,14 @@ def next_frequencies(setup: RouteSetup, run: ModelRun, max_solves: int, config: 
     log-midpoint harmonic; gaps that stay more than REFINE_MARGIN_DB below the warning level are left alone
     (resolving a resonance far below the limit changes nothing). Once no gap qualifies, the harmonic with the
     worst estimated margin gets a solve of its own (with plane capacitance), so the reported worst case is not
-    an interpolation across a possible resonance. k > 1 lets parallel workers refine several gaps at once."""
+    an interpolation across a possible resonance. k > 1 lets parallel workers refine several gaps at once.
+
+    The gaps share the budget max_solves; the worst harmonic's own solve does not stop at it, up to WORST_EXTRA
+    more. It did: with the budget spent the function returned before that rule, and the reported worst could be an
+    interpolation across a resonance (refboard's SPI_SCK at 1x: +13.2 dB at 1220 MHz from the solves at
+    1020 and 1580 MHz, where solving every harmonic gives +7.9 dB: ISSUE-32). finish_route says when it still is."""
     k = min(k, max_solves - len(run.sols))
-    if k <= 0:
+    if k <= 0 and len(run.sols) >= max_solves + WORST_EXTRA:
         return []
     fs, ms = band_moments(setup) if run is setup.spectrum_run else (sorted(run.ok()), None)
     if ms is None:
@@ -1441,7 +1448,7 @@ def next_frequencies(setup: RouteSetup, run: ModelRun, max_solves: int, config: 
     tried = np.round(np.array(sorted(run.sols)), 3)
     solvable = (H_all <= F_SOLVE_MAX) & ~np.isin(np.round(H_all, 3), tried)
     gaps = []
-    for g in range(len(fs) - 1):
+    for g in range(len(fs) - 1 if k > 0 else 0):        # the gaps only within the budget
         fa, fb = fs[g], fs[g + 1]
         lo, hi = np.searchsorted(H_all, fa * 1.0001), np.searchsorted(H_all, fb * 0.9999)
         inside = np.arange(lo, hi)[solvable[lo:hi]]
@@ -1463,7 +1470,7 @@ def next_frequencies(setup: RouteSetup, run: ModelRun, max_solves: int, config: 
     # A failed solve leaves the band between it and the solved frequency below it to interpolation, or above the
     # last solved one to a held value: close in on it from below first
     nearest: dict[float, float] = {}                 # solved frequency -> the first failure above it
-    for ff in sorted(f for f, s in run.sols.items() if s is None):
+    for ff in sorted(f for f, s in run.sols.items() if s is None and k > 0):
         fa = max((f for f in fs if f < ff), default=None)
         if fa is not None:
             nearest.setdefault(fa, ff)
@@ -1593,6 +1600,12 @@ def finish_route(model: BoardModel, setup: RouteSetup) -> RouteResult:
                                        a.resolution)
             if note:
                 res.notes.append(note)
+            note = interpolated_worst_note(res.worst, fs, rules.emi_margin_db)
+            if note:
+                res.notes.append(note)
+            note = unresolved_gaps_note(setup, config)
+            if note:
+                res.notes.append(note)
 
     # Maps and transfers from the fine model at the solved frequency nearest the worst harmonic. With the
     # board-wide model on, the fine model is only solved at f0: it is inductive, so its current pattern
@@ -1629,6 +1642,38 @@ def finish_route(model: BoardModel, setup: RouteSetup) -> RouteResult:
     _route_issues(setup, rules, a)
     res.seconds = time.time() - setup.t_start
     return res
+
+
+def interpolated_worst_note(worst: dict, fs: list, warn_db: float) -> Optional[str]:
+    """A note when the worst emission is not a solved value: no solve of the board-wide model within ±WORST_SOLVED_LOG
+    of it (the budget and its WORST_EXTRA solves spent), so its moment is interpolated between the solves around it
+    and a resonance between them is not excluded (ISSUE-32). Only near the warning level (as REFINE_MARGIN_DB)."""
+    f = worst["f"]
+    if worst["margin_db"] > warn_db + REFINE_MARGIN_DB or not fs:
+        return None
+    if min(abs(math.log(f / x)) for x in fs) <= WORST_SOLVED_LOG:
+        return None
+    lo = max((x for x in fs if x < f), default=None)
+    hi = min((x for x in fs if x > f), default=None)
+    where = (f"between the solves at {lo / 1e6:.4g} and {hi / 1e6:.4g} MHz" if lo and hi else "beyond the last solve")
+    return (f"the worst emission ({f / 1e6:.4g} MHz, margin {worst['margin_db']:+.1f} dB) is interpolated {where}: a "
+            "resonance there would be missed; raise analysis.max_solves to solve the band more finely")
+
+
+def unresolved_gaps_note(setup: RouteSetup, config: Config) -> Optional[str]:
+    """A note when the solve budget (analysis.max_solves) ended the board-wide model's refinement while gaps near the
+    limit were still uncertain (next_frequencies would split them with more solves): between their ends the moment
+    is interpolated, and a resonance there would be missed (ISSUE-32). None when the refinement ended by itself."""
+    run, n = setup.spectrum_run, config.analysis.max_solves
+    if run is None or run is not setup.cavity or len(run.sols) < n:
+        return None
+    left = [f for f in next_frequencies(setup, run, len(run.sols) + 10 ** 6, config, 10 ** 6)]
+    if not left:
+        return None
+    where = ", ".join(f"{f / 1e6:.4g}" for f in sorted(left)[:4]) + (" …" if len(left) > 4 else "")
+    return (f"the solve budget (analysis.max_solves: {n}) ended with {len(left)} gap(s) near the limit not resolved "
+            f"(around {where} MHz): the moment there is interpolated and a resonance would be missed; raise "
+            "analysis.max_solves to solve them")
 
 
 def grid_sensitive_note(worst: dict, m_worst: float, m_low: float, warn_db: float, resolution: float = 1.0
