@@ -2137,6 +2137,29 @@ a History tab with a comparison (and the CLI).
   at once) failed with ~5 GB free next to the user's other programs. SuperLU reports its own failed allocation
   as a `RuntimeError` ("SUPERLU_MALLOC …"); the factorisation in `solver/peec.py` re-raises it as `MemoryError`,
   so it is retried alone like any other.
+- **Working around a shortage** (branch `memory-ladder`, 2026-10-19). An 8x Simulate on the user's 62 GB server
+  failed after 82 min at a board-wide solve (243k nodes, solve 130 of 151) with 45 GB free; "retried alone" had
+  kept the model's cached factorisations, and the server reported it as "the thermal solve ran out of memory". The
+  user: "It should not fail, it should recognise the shortage and proactive work around it to finish the
+  simulation!" Now [A38]:
+  - **Proactive: the memory gate** (`peec.GATE`, around every SuperLU factorisation). A factorisation states what
+    it will commit (`peec.lu_bytes`: the model's largest measured fill, `lu_nnz`, else the per-unknown estimate,
+    x 16 B x LU_COMMIT) and goes ahead when that plus the factorisations being made fits in 80 % of
+    `sysmem.available_bytes()`. Otherwise every live model's cached factorisations are freed (`free_factorisations`,
+    remade identically later), then it waits for the ones being made, and alone and still short it takes diagonal
+    pivots only (the least fill, `lu_memory_fallbacks`). Fill grows faster than the unknowns on fine grids, so the
+    measured fill also re-plans the threads each round (`solve_setups.plan`, against the memory free when the
+    solves began, not the memory this run's own caches hold).
+  - **Reactive: the ladder** (`simulate.MemoryRelief`, in `run_parallel`): a solve still out of memory runs again
+    alone with every cache freed, then with the run's models on the least fill, then its frequency is left unsolved
+    with a note (the `band_unsolved` warning names what it misses); a round with shortages halves the threads
+    for the rounds after it. In finishing, the last rung gives that route or stage an error and the others finish.
+  - **On the compute server** the worker is told its watchdog limit (`sysmem.LIMIT_ENV`), so the gate plans within
+    it; a worker's own MemoryError is "the job ran out of memory" with its traceback in the job's details
+    (`thermal_proc._run_child(what=...)`, `ThermalMemoryError.detail`).
+  - The run's notes say what it did (`memory_notes`). Tests: `tests/test_memory_relief.py` (the gate's admit, wait
+    and least fill; the ladder; a Simulate whose usual factorisations all run out finishes with the same margins
+    within 0.05 dB; one that can make none still returns; the server's message and traceback).
 - **Theme** (`ui/theme.py`, after PCB Thermal): `init_app` runs right after the wx.App is created, before the
   first window (wxWidgets 3.3's `SetAppearance` refuses later): System follows Windows, Light / Dark force it;
   the choice is the `theme` key of `ui.json`, set in Preferences (since the top bar's theme selector went), and

@@ -2035,15 +2035,15 @@ def refine_width(config: Config, threads: int, runs: int) -> int:
     return max(1, min(ALL_CORES_K, threads // max(1, runs)))
 
 
-FILL_PER_UNKNOWN = {"sheet": 70, "diag": 35}    # SuperLU fill per branch unknown (refboard: 65 board-wide,
-                                                #  15-31 route models), rounded up
-LU_COMMIT = 6.5                                 # SuperLU commits ~6.5x its fill (ARCHITECTURE "Memory use")
+FILL_PER_UNKNOWN = peec.FILL_PER_UNKNOWN       # SuperLU fill per branch unknown until measured [A38]
+LU_COMMIT = peec.LU_COMMIT                      # SuperLU commits ~6.5x its fill (ARCHITECTURE "Memory use") [A38]
 MEMORY_SHARE = 0.8                              # of the available memory the parallel solves may plan with
 
 
 def factor_bytes(stack: PlaneStack) -> int:
-    """About the memory one factorisation of this model takes: its fill, as SuperLU commits it."""
-    return int(FILL_PER_UNKNOWN.get(stack.precond_mode, 70) * stack.nb * 16 * LU_COMMIT)
+    """About the memory one factorisation of this model takes: its fill, as SuperLU commits it (measured once the
+    model has one: peec.lu_bytes)."""
+    return peec.lu_bytes(stack)
 
 
 def solve_bytes(stack: PlaneStack) -> int:
@@ -2120,12 +2120,86 @@ def memory_threads(threads: int, stacks: list, available: Optional[int]) -> int:
     return max(1, min(threads, int(MEMORY_SHARE * available // max(need, 1))))
 
 
-def run_parallel(tasks: list, work: Callable, threads: int) -> list:
+class MemoryRelief:
+    """What a run does when a solve runs out of memory (peec's memory gate keeps most from it; see "memory under
+    pressure" there), and what it did, for the run's notes. The ladder, one solve at a time once the others are
+    done (run_parallel):
+
+    1. again alone, with every cached factorisation of every model freed first (they are made again, identically,
+       when needed);
+    2. again, with the run's models (`stacks`; every live one when not given) factorising with diagonal pivots
+       only from now on (the least fill; GMRES corrects the weaker preconditioner: the results stand, the solves
+       take more iterations) [A38];
+    3. `on_short(task, error)`: Simulate leaves that frequency unsolved, with a note (as when GMRES does not
+       converge: the band_unsolved warning names what it misses); without it the MemoryError is raised.
+
+    `shorts` counts the solves that ran out beside others; solve_setups halves its threads for the rounds after."""
+
+    def __init__(self, on_short: Optional[Callable] = None, stacks: Optional[list] = None):
+        """No shortage yet; `on_short(task, error)` is the last rung, `stacks` the models rung 2 switches (see the
+        class)."""
+        self.on_short, self.stacks = on_short, stacks
+        self.shorts = 0         # solves that ran out of memory beside others (retried alone)
+        self.freed = 0          # cached factorisations freed by the ladder
+        self.low = False        # rung 2 taken: every model factorises with the least fill
+        self.unsolved = 0       # solves given up (rung 3)
+        self._lock = threading.Lock()
+
+    def step(self, rung: int):
+        """Make room before the solve's next try: rung 0 frees the cached factorisations, rung 1 also switches every
+        model to the least fill."""
+        n = peec.free_factorisations()
+        if rung >= 1:
+            peec.low_memory_everywhere(self.stacks)
+            self.low = True
+        gc.collect()
+        with self._lock:
+            self.freed += n
+
+    def give_up(self, task, error: MemoryError):
+        """The last rung: on_short's answer, or the MemoryError with advice (no on_short)."""
+        if self.on_short is None:
+            raise MemoryError("not enough memory for this model, even solved on its own with every cached "
+                              "factorisation freed and the least-fill factorisation: close other programs, or lower "
+                              "analysis.max_nodes in the settings") from error
+        with self._lock:
+            self.unsolved += 1
+        return self.on_short(task, error)
+
+
+def memory_notes(relief: MemoryRelief, stacks, gate0: tuple = (0, 0)) -> list[str]:
+    """What the run did because memory was short, for its notes (none when it never was): the memory gate's waits
+    and freed caches (since `gate0`, its counters before the run: the gate serves the whole process), the
+    least-fill factorisations, the solves retried alone, the frequencies given up."""
+    out = []
+    freed = peec.GATE.freed - gate0[0] + relief.freed
+    waits = peec.GATE.waits - gate0[1]
+    low = sum(getattr(x, "lu_memory_fallbacks", 0) for x in stacks)
+    if freed or waits or low or relief.shorts or relief.low:
+        what = [f"{freed} cached factorisation(s) freed early" if freed else "",
+                f"{waits} factorisation(s) waited for others to finish" if waits else "",
+                f"{relief.shorts} solve(s) retried on their own" if relief.shorts else "",
+                f"{low} factorisation(s) made with diagonal pivots only (the least fill)" if low else "",
+                "every later factorisation made with the least fill" if relief.low else ""]
+        out.append("memory was short during the solves, so the run worked around it: " + "; ".join(w for w in what if w)
+                   + ". The results stand (a freed factorisation is made again identically; a least-fill one only "
+                     "costs GMRES iterations), the run took longer")
+    if relief.unsolved:
+        out.append(f"{relief.unsolved} frequency solve(s) could not be done even so and were left unsolved (each "
+                   "model's notes name them; a band_unsolved warning says what that misses): a lower resolution, "
+                   "fewer jobs at once on the compute server or more free memory solves them")
+    return out
+
+
+def run_parallel(tasks: list, work: Callable, threads: int, relief: Optional[MemoryRelief] = None) -> list:
     """work(task) for every task, in a thread pool when threads > 1. The FFTs inside share the cores (each
     worker gets cpu_count / threads of them). An exception in any task (e.g. Cancelled from a progress
-    callback) cancels the tasks not started yet and is raised once the running ones have finished."""
+    callback) cancels the tasks not started yet and is raised once the running ones have finished. A task out of
+    memory goes through `relief`'s ladder once the others are done (MemoryRelief; a default one without
+    on_short)."""
+    relief = relief if relief is not None else MemoryRelief()
     if threads <= 1 or len(tasks) <= 1:
-        return [_alone(work, t) for t in tasks]
+        return [_alone(work, t, relief) for t in tasks]
     n = min(threads, len(tasks))
     share = max(1, (os.cpu_count() or 2) // n)
     short = object()
@@ -2149,19 +2223,25 @@ def run_parallel(tasks: list, work: Callable, threads: int) -> list:
     # with ~5 GB free beside the user's other programs): those solves again, one at a time.
     for k, r in enumerate(out):
         if r is short:
+            relief.shorts += 1
             gc.collect()
-            out[k] = _alone(work, tasks[k])
+            out[k] = _alone(work, tasks[k], relief)
     return out
 
 
-def _alone(work: Callable, task):
-    """Run one task by itself; out of memory even then is a MemoryError with advice for the user."""
+def _alone(work: Callable, task, relief: MemoryRelief):
+    """Run one task by itself; out of memory, the relief's ladder (MemoryRelief): freed caches, then the least
+    fill, then its last rung."""
+    for rung in range(2):
+        try:
+            return work(task)
+        except MemoryError:
+            relief.step(rung)
     try:
         return work(task)
     except MemoryError as e:
         gc.collect()
-        raise MemoryError("not enough memory for this model, even solved on its own: close other programs, or "
-                          "lower analysis.max_nodes in the settings") from e
+        return relief.give_up(task, e)
 
 
 def solve_cost(run: ModelRun) -> float:
@@ -2170,7 +2250,8 @@ def solve_cost(run: ModelRun) -> float:
     return max(run.exc.stack.nb / 1e5, 0.05)
 
 
-def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0, free_done: bool = False):
+def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0, free_done: bool = False,
+                 relief: Optional[MemoryRelief] = None):
     """Solve every route (and power stage): the planned frequencies first, then refinement rounds. Each round's
     solves are independent (different frequencies, routes and models) and run in parallel; within a model, a
     factorisation serves every route at that frequency (and, as a preconditioner, its neighbours).
@@ -2186,15 +2267,49 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
     needed (PlaneStack.operator). With it, when the factorisations kept at once would not fit in the available
     memory, the models are solved in groups, one after the other (solve_groups; the same numbers).
 
+    Out of memory: `relief` (MemoryRelief; one is made without it) takes a solve that ran out through its ladder,
+    and its last rung leaves that frequency unsolved with a note: the run always finishes. After a round in which
+    solves ran out beside others, the rounds after it run on half the threads; with threads "auto" each round's
+    threads are also planned again from the models' measured fill (memory_threads, peec.lu_bytes).
+
     Returns the number of groups."""
+    from ..core.sysmem import available_bytes
     max_solves = max(config.analysis.max_solves, 1)
     threads = solver_threads(config)
     runs = [(s, s.fine) for s in setups] + [(s, s.cavity) for s in setups if s.cavity is not None]
     runs += [(s, r) for s in setups for r in getattr(s, "extra_runs", ())]
     t = getattr(config.analysis, "threads", "auto")
-    if not (isinstance(t, (int, float)) and t >= 1):       # "auto" (a number is the user's choice)
-        from ..core.sysmem import available_bytes
-        threads = memory_threads(threads, [r.exc.stack for _, r in runs], available_bytes())
+    auto = not (isinstance(t, (int, float)) and t >= 1)    # "auto" (a number is the user's choice)
+    avail0 = available_bytes()          # before this run's own factorisations take any of it
+    if auto:
+        threads = memory_threads(threads, [r.exc.stack for _, r in runs], avail0)
+
+    def unsolved(task, error: MemoryError):
+        """The relief's last rung: the frequency is left unsolved, with a note (as a SolverError in solve_at)."""
+        s, r, f = task
+        r.sols[f] = None
+        kind = "board-wide" if r is s.cavity else getattr(s, "model_label", "route")
+        s.res.notes.append(f"{f / 1e6:.4g} MHz on the {kind} model ({r.build.nodes} nodes): not solved, not enough "
+                           f"memory even on its own with the least-fill factorisation ({error}); a lower "
+                           "resolution, fewer jobs at once on the server or more free memory solves it")
+    relief = relief if relief is not None else MemoryRelief()
+    if relief.on_short is None:
+        relief.on_short = unsolved
+    if relief.stacks is None:           # rung 2 switches this run's models (and their bases) only
+        relief.stacks = list({id(x): x for _, r in runs for x in _stacks_of(r)}.values())
+    seen = [relief.shorts]
+
+    def plan(threads: int) -> int:
+        """The threads for the next round: halved after solves ran out beside others, and (auto) planned again with
+        the models' measured fill against the memory free when the solves began (not the memory free now, which
+        this run's own cached factorisations lower): fewer only when the first estimate was too low. Never more
+        than before: results don't depend on it."""
+        if relief.shorts > seen[0]:
+            seen[0] = relief.shorts
+            threads = max(1, threads // 2)
+        if auto and threads > 1:
+            threads = memory_threads(threads, [r.exc.stack for _, r in runs], avail0)
+        return threads
     # "Use all cores": several frequencies per refining run and round, the budget raised as much (refine_width)
     width = refine_width(config, threads, sum(1 for s, r in runs if r is s.spectrum_run or
                                               any(r is x for x in getattr(s, "extra_runs", ()))))
@@ -2249,13 +2364,13 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
     # in groups only when freeing between them lowers the peak and the factorisations kept would not fit otherwise
     groups = [runs]
     if free_done:
-        from ..core.sysmem import available_bytes
         groups = solve_groups(runs, threads, available_bytes())
     hooked: set[int] = set()
     for group in groups:
         next_round()
         first = [(s, r, f) for s, r in group for f in r.planned if f not in r.sols]
-        run_parallel(sorted(first, key=lambda t: t[2]), run, threads)
+        threads = plan(threads)
+        run_parallel(sorted(first, key=lambda t: t[2]), run, threads, relief)
         for s in setups:        # its own model's planned solves are done (they come first: solve_groups)
             hook = getattr(s, "planned_solved", None)
             if hook is not None and id(s) not in hooked and any(r is s.fine for _, r in group):
@@ -2276,7 +2391,8 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
             if not wanted:
                 break
             next_round()
-            run_parallel(sorted(wanted, key=lambda t: t[2]), run, threads)
+            threads = plan(threads)
+            run_parallel(sorted(wanted, key=lambda t: t[2]), run, threads, relief)
             pending = list({id(r): (s, r) for s, r, _ in wanted}.values())
             free(pending)
         if len(groups) > 1:
@@ -2505,7 +2621,10 @@ def _simulate(board: Board, config: Config, nets: Optional[list[str]], progress:
     everything = setups + csetups + dsetups + psetups
     # finishing: the ideal reference (a route-model solve), emissions, the power stages' DC paths and maps
     finish_cost = sum(solve_cost(s.fine) * (1.0 if isinstance(s, ConverterSetup) else 1.5) for s in everything)
-    result.groups = solve_setups(everything, config, ph, rest=finish_cost, free_done=not keep_factorisations)
+    relief = MemoryRelief()
+    gate0 = (peec.GATE.freed, peec.GATE.waits)
+    result.groups = solve_setups(everything, config, ph, rest=finish_cost, free_done=not keep_factorisations,
+                                 relief=relief)
     # factorisations past SuperLU's size limit, made with diagonal pivots instead (peec._factorise_diagonal)
     runs_all = [r for s in everything for r in [s.fine, getattr(s, "cavity", None), *getattr(s, "extra_runs", ())]
                 if r is not None and getattr(r, "exc", None) is not None]
@@ -2516,6 +2635,7 @@ def _simulate(board: Board, config: Config, nets: Optional[list[str]], progress:
                             "(SuperLU, ~2.1 billion entries) and were factorised with diagonal pivots only (the "
                             "least fill): the results stand, their solves took more iterations; a lower resolution "
                             "avoids it")
+    result.notes += memory_notes(relief, stacks.values(), gate0)
     if not keep_factorisations:
         # finishing needs none of them (it solves only new models: a route's ideal reference): freed before it,
         # not after. On refboard (7 nets and stages) 41 were alive at the peak, ~2.6 GB of fill, each
@@ -2540,7 +2660,15 @@ def _simulate(board: Board, config: Config, nets: Optional[list[str]], progress:
                 finish_pdn(model, s)
             else:
                 finish_route(model, s)
-    run_parallel(setups + csetups + dsetups + psetups, finish, solver_threads(config))
+    def unfinished(s, error: MemoryError):
+        """The relief's last rung in finishing: this route, stage, DC load or rail keeps an error, the others finish
+        (the run is not lost for one of them)."""
+        s.res.error = (f"not enough memory to finish it (its ideal reference and emission), even on its own with every "
+                       f"cached factorisation freed and the least fill ({error}): a lower resolution, fewer jobs at "
+                       "once on the compute server or more free memory finishes it")
+    # rung 2 here switches every live model: finishing makes models of its own (a route's ideal reference, a stage's
+    # DC paths), and this run's are the ones that matter now
+    run_parallel(setups + csetups + dsetups + psetups, finish, solver_threads(config), MemoryRelief(on_short=unfinished))
     for s in psetups:
         issues.extend(s.issues)
     if bsetups:

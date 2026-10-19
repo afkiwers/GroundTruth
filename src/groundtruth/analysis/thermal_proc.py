@@ -38,7 +38,13 @@ class ThermalCancelled(Exception):
 
 
 class ThermalMemoryError(MemoryError):
-    """The watchdog stopped the solve: it needed more memory than this computer can spare."""
+    """The watchdog stopped the solve, or the child ran out of memory itself: it needed more memory than this
+    computer can spare. `detail`: the child's error output (its traceback) when it ended itself."""
+    detail = ""
+
+
+THERMAL = "the thermal solve"           # what _run_child runs unless told otherwise (its messages name it)
+THERMAL_ADVICE = "use thermal.quality: draft (or normal instead of fine), or close other programs"
 
 
 def memory_limits() -> Optional[tuple[float, float]]:
@@ -97,7 +103,7 @@ def capacity_in_process(board, config, converters, progress: Optional[Progress] 
 
 def _run_child(job, progress, cancel, poll_s, limits, module: str = "groundtruth.analysis.thermal_proc",
                args: tuple = (), env_extra: Optional[dict] = None, raw: bool = False,
-               stats: Optional[dict] = None):
+               stats: Optional[dict] = None, what: str = THERMAL):
     """Run `job` in the child; (its result, the child's peak memory in MB or 0). `stats`, when given, is kept up to
     date with the child's memory at every watchdog check (rss_mb, commit_mb, peak_mb: the compute server reports
     them to the plugin).
@@ -105,7 +111,11 @@ def _run_child(job, progress, cancel, poll_s, limits, module: str = "groundtruth
     The compute server (remote/server.py) runs its jobs the same way: `module` is the child's entry (called as
     `python -m module IN OUT *args`), `job` the already pickled input (bytes are written as they are),
     `env_extra` more environment variables (a GPU's number), and `raw` returns the result file's bytes unread
-    (the server only passes them on)."""
+    (the server only passes them on). `what` names the work in the errors ("the job": a Simulate on the server
+    that ran out of memory was reported as "the thermal solve ran out of memory", 2026-10-19).
+
+    The child is told its memory limit (core.sysmem.LIMIT_ENV): the solver's memory gate plans within it, so the
+    watchdog never has to stop a job that could have made do with less."""
     # The inputs and the result go through pickle files in a new private temporary folder (mkdtemp: readable
     # by this user only). Unpickling runs code from the file, so these must never be files someone else could
     # have written: they are only ever this folder's, written by this process and its child.
@@ -119,11 +129,14 @@ def _run_child(job, progress, cancel, poll_s, limits, module: str = "groundtruth
             else:
                 pickle.dump(job, f, protocol=pickle.HIGHEST_PROTOCOL)
         import groundtruth
+        from ..core.sysmem import LIMIT_ENV
         # the child imports groundtruth from the same place as this process (the plugin's folder is not on the
         # child's default path)
         env = dict(os.environ, PYTHONPATH=os.pathsep.join(
             [str(Path(groundtruth.__file__).resolve().parents[1])] + [p for p in [os.environ.get("PYTHONPATH")] if p]),
             PYTHONIOENCODING="utf-8", **(env_extra or {}))
+        if limits is not None:
+            env[LIMIT_ENV] = f"{limits[0]:.0f}"         # the watchdog's limit, MB (sysmem.available_bytes)
         flags = (CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS) if sys.platform == "win32" else 0
         proc = subprocess.Popen([_python(), "-m", module, str(inp), str(out), *map(str, args)],
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, creationflags=flags,
@@ -140,7 +153,7 @@ def _run_child(job, progress, cancel, poll_s, limits, module: str = "groundtruth
                    threading.Thread(target=read, args=(proc.stderr, errs), daemon=True)]
         for r in readers:
             r.start()
-        watch = _Watchdog(proc.pid, limits, stats)
+        watch = _Watchdog(proc.pid, limits, stats, what)
         try:
             while proc.poll() is None:
                 if cancel is not None and cancel.is_set():
@@ -162,9 +175,11 @@ def _run_child(job, progress, cancel, poll_s, limits, module: str = "groundtruth
         if proc.returncode != 0 or not out.exists():
             tail = err.strip().splitlines()[-1:] or ["no message"]
             if "MemoryError" in tail[0]:
-                raise ThermalMemoryError("the thermal solve ran out of memory: use thermal.quality: draft, or close "
-                                         "other programs")
-            raise RuntimeError(f"the thermal solve failed (exit code {proc.returncode}): {tail[0]}\n\n{err[-3000:]}")
+                e = ThermalMemoryError(f"{what} ran out of memory" + (f": {THERMAL_ADVICE}" if what == THERMAL else
+                                                                     f" ({tail[0]})"))
+                e.detail = err[-3000:]          # the traceback: where it ran out (the server keeps it with the job)
+                raise e
+            raise RuntimeError(f"{what} failed (exit code {proc.returncode}): {tail[0]}\n\n{err[-3000:]}")
         if raw:
             return out.read_bytes(), watch.peak_mb
         with open(out, "rb") as f:
@@ -185,10 +200,11 @@ class _Watchdog:
     """The child's memory, checked every MEMORY_CHECK_S: over its limit, or the computer almost out while the
     child holds a large share, stops the solve (ThermalMemoryError; the caller kills the process)."""
 
-    def __init__(self, pid: int, limits: Optional[tuple[float, float]], stats: Optional[dict] = None):
+    def __init__(self, pid: int, limits: Optional[tuple[float, float]], stats: Optional[dict] = None,
+                 what: str = THERMAL):
         """Watch process `pid` with `limits` (memory_limits; None: no watchdog, e.g. without psutil); `stats` gets
-        each measurement (see _run_child)."""
-        self.limits, self.stats = limits, stats
+        each measurement (see _run_child); `what` names the work in its messages."""
+        self.limits, self.stats, self.what = limits, stats, what
         self.peak_mb = 0.0
         self._last = 0.0
         self._proc = None
@@ -219,15 +235,15 @@ class _Watchdog:
         if self.stats is not None:
             self.stats.update(rss_mb=rss, commit_mb=commit, peak_mb=self.peak_mb)
         limit, keep_free = self.limits
+        advice = f" ({THERMAL_ADVICE})" if self.what == THERMAL else ""
         if rss > limit:
             raise ThermalMemoryError(
-                f"the thermal solve was stopped: it used {rss / 1024:.1f} GB, over its limit of {limit / 1024:.1f} GB "
-                f"({MEMORY_SHARE * 100:.0f} % of this computer's memory). Use thermal.quality: draft (or normal "
-                f"instead of fine).")
+                f"{self.what} was stopped: it used {rss / 1024:.1f} GB, over its limit of {limit / 1024:.1f} GB"
+                f"{advice}")
         if free < keep_free and rss > keep_free:
             raise ThermalMemoryError(
-                f"the thermal solve was stopped: only {free / 1024:.1f} GB of memory were left free (the solve held "
-                f"{rss / 1024:.1f} GB). Close other programs, or use thermal.quality: draft.")
+                f"{self.what} was stopped: only {free / 1024:.1f} GB of memory were left free (it held "
+                f"{rss / 1024:.1f} GB){advice}")
 
 
 def main(argv=None) -> int:
