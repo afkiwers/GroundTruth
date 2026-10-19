@@ -7,7 +7,7 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `open-items` (2026-10-19, from `main`, not merged):** the user: "finish those -> Open technical items"
+- **Branch `open-items` (2026-10-19, from `main`, merged into `main` as ec36b1f at the user's "merge and push"):** the user: "finish those -> Open technical items"
   (NEXT_STEPS rows 9-13; VALIDATION_AUDIT round 4 "Open items after round 4" and "SP-19 at 16x").
   - 16x (493 303 nodes, 1-1.5 GHz, ~3 h): the band's worst margin +14.1 / +17.6 / +15.8 dB at 4x / 8x / 16x, so the
     grid note now asks for 4x everywhere and gives ±2 dB above 1 GHz (`GRID_CHECK_F`, `GRID_ABOVE_DB`).
