@@ -401,6 +401,7 @@ class HeatmapPanel(wx.Panel):
         self.tiles = wx.Panel(self)             # KPI tiles (ui/kpi.py), rebuilt per view
         self.tiles.SetSizer(wx.WrapSizer(wx.HORIZONTAL))
         self.metrics = wx.StaticText(self, label="Run the simulation to see the return current.")
+        self.stale = ""             # why the views shown are out of date (MainFrame._stale_reason), or ""
         self.metrics.SetName("muted")
         self._top = top
         self.build_steps = [self._build_maps, self._build_plots]
@@ -649,6 +650,25 @@ class HeatmapPanel(wx.Panel):
             self.choice.SetSelection(0)
         self._route_changed()
 
+    def _summary(self, rr) -> str:
+        """The summary line of view rr, led by a warning while the views are out of date (set_stale)."""
+        from ..analysis.sharper import describe
+        from .kpi import notes
+        text = "   ·   ".join(t for t in (describe(rr), notes(rr)) if t)
+        if self.stale:
+            text = f"OUT OF DATE ({self.stale} since this Simulate: Simulate again)   ·   " + text
+        return text
+
+    def set_stale(self, why: str):
+        """Mark the views as out of date (why: "the board changed", ...) or current (""): the summary line says
+        so at once, without drawing the maps again."""
+        if why == self.stale:
+            return
+        self.stale = why
+        rr = self.current()
+        if rr is not None:
+            self.metrics.SetLabel(self._summary(rr))
+
     def replace_view(self, k: int, view):
         """Put a recomputed view (a sharper map) in place of view k, and show it if it is the one selected."""
         if 0 <= k < len(self.routes):
@@ -704,10 +724,8 @@ class HeatmapPanel(wx.Panel):
         scale = "log" if self.log_scale.GetValue() else "linear"
         view, max_vias, outlines, names = self._view, self.max_vias(), self.outlines, self.names
         if not maps_only:
-            from ..analysis.sharper import describe
-            from .kpi import notes
             self._show_tiles(rr)
-            text = "   ·   ".join(t for t in (describe(rr), notes(rr)) if t)
+            text = self._summary(rr)
             if text != self.metrics.GetLabel():
                 self.metrics.SetLabel(text)
             want = self.section_shown(rr)

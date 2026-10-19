@@ -59,6 +59,11 @@ immediately). The board itself is never changed, except when you place suggested
 (<b>Analyse return paths</b>); opened on a board file, it can analyse but not show or draw anything in KiCad.
 Hover over <b>Thermal</b>, <b>Export report…</b>, <b>with what-if edits</b>, <b>Preferences…</b> or <b>Help</b> for
 what it does.</p>
+<p>The results shown are always of the board and settings they were computed on. When the board was read again and
+differs (Reload board, or a Simulate that found it changed in KiCad), or a setting the results depend on was
+changed, the Heatmap tab's summary line starts with <b>OUT OF DATE</b> and says which; Simulate again for the
+current design. The <b>thermal</b> settings (ambient, convection, limits) are not among them: Thermal reads them
+when it runs.</p>
 
 <p><b>Starting GroundTruth.</b> In KiCad's PCB editor the plugin has three actions:</p>
 <ul>
@@ -842,7 +847,8 @@ the fix search are not kept.</p>
 <hr><a name="thermal"></a><h3>Thermal and Current capacity</h3>
 <p><b>Thermal</b> (top bar, after Simulate) solves the copper and part temperatures with the heat of every
 converter, every motor bridge and every <a href="#dcloads">DC load</a> from the last Simulate (a DC load's current
-capacity scales all its loads together):</p>
+capacity scales all its loads together). It reads the board first: if the board or the settings changed since that
+Simulate, it says so and asks for a Simulate instead of heating the design as it was:</p>
 <ul>
 <li>copper: a converter's DC paths, a bridge's RMS currents (Joule heat, resistivity following the
   temperature);</li>

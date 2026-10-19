@@ -102,6 +102,19 @@ def simulate_on(server: Optional[tuple[str, str]], board, cfg, progress, nets=No
     return Remote(*server).run("simulate", (board, cfg, nets), progress, watch=watch)
 
 
+def settings_key(cfg) -> Optional[str]:
+    """The settings as far as a Simulate's results depend on them, as text to compare: everything but the drawing,
+    report and thermal sections (Thermal reads its own section when it runs), the waivers (applied to the issues
+    shown), the what-if edits and this computer's choices (resolution, threads, GPU). Two runs' keys differ when the
+    settings changed in a way that changes the results (VALIDATION_AUDIT.md round 6, ISSUE-29). None for None."""
+    if cfg is None:
+        return None
+    from dataclasses import replace
+    a = replace(cfg.analysis, resolution=1.0, threads="auto", gpu="auto", all_cores=False)
+    return repr(replace(cfg, analysis=a, drawing=None, report=None, thermal=None, waivers=[], modifications=[],
+                        base_dir=""))
+
+
 def result_views(res) -> list:
     """The views a Simulate's result adds after its routes: every power stage, each DC path's view (the stages'
     currents together first), each bridge with its legs, RMS currents and sweep, and each DC rail with loads (a
@@ -455,6 +468,7 @@ class MainFrame(wx.Frame):
         self._cancel = threading.Event()
         self._last_sim = None       # (board, config, SimulationResult) of the last plain Simulate run
         self._views_from = None     # (board, config) the heatmap views were computed with (Sharper map)
+        self._views_src = None      # (board fingerprint, settings_key) the views came from: _stale_reason
         self.board_path: Optional[str] = None
         self._board_copy: tuple[Optional[bytes], str] = (None, "")   # the board's text as loaded, for the history
         self._board_fp: Optional[str] = None    # Board.fingerprint() of self.board when it was read (run's check)
@@ -1145,6 +1159,7 @@ class MainFrame(wx.Frame):
                 wx.MessageBox("Some zones are not filled. Refill all zones now?", "groundtruth", wx.YES_NO) == wx.YES):
             self.on_refill()                # reloads the board, and detects then if the settings are still new
             return                          # (a run waiting for this reload continues after that one)
+        self._show_stale()                  # results of the board as it was before this read are marked
         then, self._after_load = self._after_load, None
         if new or not (settings.config.nets or settings.config.converters or settings.config.bridges
                        or settings.config.dc_loads or settings.config.pdn):
@@ -1216,6 +1231,7 @@ class MainFrame(wx.Frame):
             self.nets.refresh_chains()
         self.dirty = True
         self.on_save()
+        self._show_stale()
 
     def on_export(self):
         """Top bar "Export report…": the results shown (the last Run checks or Simulate, the thermal and capacity
@@ -1511,6 +1527,7 @@ class MainFrame(wx.Frame):
             return
         keep = self._history_inputs(edits) if simulate else None
         server = self._server(local) if simulate else None
+        src = (self._board_fp, settings_key(self.settings.config))     # what the views will be of (_stale_reason)
 
         def work(progress):
             """(worker) Apply the what-if edits, then simulate (here or on the compute server): drop the
@@ -1547,7 +1564,7 @@ class MainFrame(wx.Frame):
             if isinstance(r, HandedOver):
                 self._handed_over(r)
             else:
-                self._done(*r, what_if=what_if)
+                self._done(*r, what_if=what_if, src=src)
         self._start(("handing the Simulate to the compute server" if server is not None else
                      "simulating" if simulate else "checking") + (" with what-if edits…" if what_if else "…"), work,
                     done, what="run the analysis", solver=simulate and server is None,
@@ -1584,16 +1601,42 @@ class MainFrame(wx.Frame):
         self._start("checking the board for changes…", work, done, what="check the board for changes",
                     cancellable=False, kicad=session.live)
 
-    def _done(self, board, issues, routes, sim, cfg=None, solver=None, kept=None, si=None, what_if: bool = False):
+    def _stale_reason(self) -> str:
+        """Why the results shown are not the current design's ("the board changed", "the settings changed", both),
+        or "" when they are (or nothing is shown, or where they came from is unknown). The views keep the board and
+        settings they were computed on, which Thermal, Current capacity and the report work from: after Reload board
+        or a settings edit they were shown, and Thermal ran on them, as if current (ISSUE-29)."""
+        if not self.routes or self._views_src is None:
+            return ""
+        fp, key = self._views_src
+        why = []
+        if fp is not None and self._board_fp is not None and fp != self._board_fp:
+            why.append("the board changed")
+        if key is not None and self.settings is not None and key != settings_key(self.settings.config):
+            why.append("the settings changed")
+        return " and ".join(why)
+
+    def _show_stale(self):
+        """Mark the Heatmap's summary line (and say in the status bar) when the results shown are out of date."""
+        why = self._stale_reason()
+        self.heatmap.set_stale(why)
+        if why:
+            self.SetStatusText(f"the results shown are from an earlier Simulate: {why} since; Simulate again for "
+                               "the current design")
+
+    def _done(self, board, issues, routes, sim, cfg=None, solver=None, kept=None, si=None, what_if: bool = False,
+              src: Optional[tuple] = None):
         """Show a run: the issues, the signal-integrity figures on their tab (si), and for a Simulate the Heatmap tab
         with its views, the fix advisor's design changes, and the run selected on the History tab (its report page
-        written in the background)."""
+        written in the background). src: (board fingerprint, settings_key) the run was of (_stale_reason)."""
         if sim is not None:
             self._last_sim = sim
         if routes:
             self._settle_timer.Start(SETTLE_POLL_MS)    # the replaced results' garbage, once the user is idle
             self._shown_at = time.time()
             self._views_from = (board, cfg)     # what the heatmap views were computed with (what-if: the edits)
+            self._views_src = src
+            self.heatmap.set_stale("")
             self._solver = solver
         self.issues = issues
         if routes:
@@ -1852,10 +1895,22 @@ class MainFrame(wx.Frame):
             self.SetStatusText(f"{what} needs the power stages' DC paths, a DC load or a motor bridge's RMS currents: "
                                "run Simulate with at least one power stage, DC load or bridge first")
             return None
+        why = self._stale_reason()
+        if why:
+            # its heat would be the DC paths of the board and settings as simulated, not as they are now (ISSUE-29)
+            self.heatmap.set_stale(why)
+            wx.MessageBox(f"{what} works from the last Simulate's DC paths and losses, but {why} since that "
+                          f"Simulate: its temperatures would be those of the design as it was. Run Simulate again, "
+                          f"then {what}.", "GroundTruth", wx.ICON_INFORMATION)
+            return None
+        from dataclasses import replace
         from .prefs_dialog import FROM_FILE, defaults
+        # the thermal section as the settings have it now (ambient, convection, limits: edited after the Simulate,
+        # they were ignored), the DC paths and losses as simulated (unchanged: _stale_reason above)
+        if self.settings is not None:
+            cfg = replace(cfg, thermal=self.settings.config.thermal)
         quality = defaults(theme.prefs())["thermal_quality"]
         if quality != FROM_FILE:
-            from dataclasses import replace
             cfg = replace(cfg, thermal=replace(cfg.thermal, quality=quality))
         return stages, board, cfg
 
@@ -1869,12 +1924,16 @@ class MainFrame(wx.Frame):
         self.heatmap._route_changed()
         self.notebook.SetSelection(self.notebook.FindPage(self.heatmap))
 
-    def on_thermal(self, local: bool = False):
+    def on_thermal(self, local: bool = False, fresh: bool = False):
         """Top bar, "Thermal": the power stages of the views shown (the last Simulate) heat the board through
         their DC paths and losses (analysis/thermal.py), as a cancellable job (solved on the compute server when
         Preferences say so, unless `local`); the result is a heatmap view of its own (replacing an earlier one)
-        and its issues join the list."""
+        and its issues join the list. First (unless `fresh`) the board is read again (_check_board): a design
+        changed since the Simulate is refused with a word (_thermal_inputs), not heated as it was."""
         if self._refuse_if_busy():
+            return
+        if not fresh and self._board_fp is not None and self._views_src is not None:
+            self._check_board(lambda: self.on_thermal(local, fresh=True))
             return
         got = self._thermal_inputs("Thermal")
         if got is None:
@@ -1915,13 +1974,16 @@ class MainFrame(wx.Frame):
         self._start("thermal: building the model…", work, done, what="solve the temperatures", solver=True,
                     local=(lambda: self.on_thermal(local=True)) if server is not None else None)
 
-    def on_capacity(self, local: bool = False):
+    def on_capacity(self, local: bool = False, fresh: bool = False):
         """Heatmap tab, "Current capacity": per power stage of the last Simulate, the load current that brings
         the hottest copper or part junction to thermal.capacity_c (default max_c), the other stages at their
         operating points (analysis/thermal.solve_capacity), in the thermal process (or on the compute server when
         Preferences say so, unless `local`); one view per stage at its capacity (replacing earlier capacity
-        views)."""
+        views). The board is read again first, as for Thermal."""
         if self._refuse_if_busy():
+            return
+        if not fresh and self._board_fp is not None and self._views_src is not None:
+            self._check_board(lambda: self.on_capacity(local, fresh=True))
             return
         got = self._thermal_inputs("Current capacity")
         if got is None:
@@ -2097,6 +2159,7 @@ class MainFrame(wx.Frame):
         board, cfg = self.board, self._sim_config()
         last = self._last_sim
         server = self._server(local)
+        src = (self._board_fp, settings_key(self.settings.config))
         # the last Simulate run is the baseline if neither the board, the settings nor the resolution changed since
         baseline = last[2] if last is not None and last[0] is board and last[1] is cfg and server is None else None
 
@@ -2115,12 +2178,13 @@ class MainFrame(wx.Frame):
 
         self._start("handing the fix search to the compute server…" if server is not None else
                     "searching for fixes" + (" (from the last simulation)…" if baseline else "…"), work,
-                    lambda r: self._handed_over(r) if isinstance(r, HandedOver) else self._suggest_done(*r),
+                    lambda r: self._handed_over(r) if isinstance(r, HandedOver) else self._suggest_done(*r, src=src),
                     what="search for fixes", solver=server is None,
                     local=(lambda: self.on_suggest(local=True)) if server is not None else None)
 
-    def _suggest_done(self, board, res):
-        """Show the suggestions, and the search's baseline simulation as the current results."""
+    def _suggest_done(self, board, res, src: Optional[tuple] = None):
+        """Show the suggestions, and the search's baseline simulation as the current results (src: the board
+        fingerprint and settings_key it was of)."""
         self._shown_at = time.time()
         self.fixes.show(res)
         # the search starts with a full simulation of the real board: show it like a Simulate run
@@ -2129,6 +2193,8 @@ class MainFrame(wx.Frame):
         self.notebook.SetSelection(self.notebook.FindPage(self.fixes))
         if self.routes:
             self._views_from = (board, self._sim_config())
+            self._views_src = src
+            self.heatmap.set_stale("")
             self.heatmap.set_rules(self.settings.config.rules if self.settings else None)
             self.heatmap.show(board, self.routes, self.issues)
         self.SetStatusText(f"{len(res.suggestions)} suggestion(s), {len(res.selected)} selected"
@@ -2250,8 +2316,9 @@ class MainFrame(wx.Frame):
             inputs, res = jobs.load(jid)
             res.solver = {**(getattr(res, "solver", None) or {}), "server": f" · on the compute server "
                                                                           f"{meta['server']}"}
+            src = (inputs["board"].fingerprint(), settings_key(inputs["cfg"]))    # what it is of (_stale_reason)
             if kind == "suggest":
-                return "suggest", inputs["board"], res
+                return "suggest", inputs["board"], res, src
             keep = inputs.get("keep")
             if isinstance(keep, dict):
                 from ..report.history import history_for
@@ -2260,16 +2327,17 @@ class MainFrame(wx.Frame):
                             t0=time.monotonic() - float(meta.get("run_s") or 0.0))
             kept = keep_run(keep, res, inputs["cfg"], progress) if isinstance(keep, dict) else keep
             return ("simulate", inputs["board"], res.issues, res.routes + result_views(res), None, inputs["cfg"],
-                    res.solver, kept, inputs.get("what_if", False), getattr(getattr(res, "checks", None), "si", None))
+                    res.solver, kept, inputs.get("what_if", False), getattr(getattr(res, "checks", None), "si", None),
+                    src)
 
         def done(r):
             """Show it; the job becomes a past job (its files deleted, its line kept in Past jobs)."""
             jobs.finish(jid, "shown", message="results shown")
             self._refresh_jobs()
             if r[0] == "suggest":
-                self._suggest_done(r[1], r[2])
+                self._suggest_done(r[1], r[2], src=r[3])
             else:
-                self._done(*r[1:8], si=r[9], what_if=r[8])
+                self._done(*r[1:8], si=r[9], what_if=r[8], src=r[10])
         self._start(f"showing the result of job {jid}…", work, done, what="show the compute server's result")
 
     def on_cancel_job(self, jid: str):
