@@ -80,9 +80,11 @@ class Run:
             pass
 
     def summary(self) -> dict:
-        """Where the solves ran, as plain data for the result and the reports (see describe)."""
+        """Where the solves ran, as plain data for the result and the reports (see describe), and the GroundTruth
+        build that ran them (a compute server's own on a server: the report names the version that made it)."""
+        from .. import build_version
         return {"device": self.label, "gpu_fallbacks": self.fallbacks, "gpu_error": self.error,
-                "gpu_note": self.note}
+                "gpu_note": self.note, "build": build_version()}
 
 
 _probed: dict = {}
