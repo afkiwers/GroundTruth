@@ -141,6 +141,7 @@ class Remote:
             raise ServerUnavailable(f"the compute server at {self.host} refused the job: {_error(data)}")
         got = json.loads(data)
         self.server_name = got.get("host") or self.host     # the server computer's name, for the Server jobs tab
+        self.server_version = got.get("version") or ""      # its build ("" from a server before 2026-10-19)
         return got["id"], int(got.get("position") or 0)
 
     def run(self, kind: str, args: tuple, progress: Optional[Callable[[str, float], None]] = None,
@@ -150,7 +151,7 @@ class Remote:
         client should not cancel the job unless the user cancels it"); the plugin's Cancel raises in `progress` and
         the job is cancelled on the server (when it can be reached).
 
-        `watch(event, job id, info)`: told "submitted" ({position, host}), every "state" (the server's job info) and
+        `watch(event, job id, info)`: told "submitted" ({position, host, version}), every "state" (the server's job info) and
         the "end" ({state: done | failed | cancelled, error}): the plugin lists the waited-for jobs on its Server jobs
         tab with it (the user: a Thermal on the server was not listed there). A failing watch never stops the job."""
         watch = watch or self.watch
@@ -163,7 +164,8 @@ class Remote:
                 except Exception:                   # noqa: BLE001 - the list is a convenience, the job matters
                     pass
         jid, ahead = self.submit(kind, args)
-        tell("submitted", jid, {"position": ahead, "host": getattr(self, "server_name", self.host)})
+        tell("submitted", jid, {"position": ahead, "host": getattr(self, "server_name", self.host),
+                                "version": getattr(self, "server_version", "")})
         end = {"state": "cancelled", "error": "cancelled here"}
         try:
             while True:

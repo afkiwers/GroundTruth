@@ -137,7 +137,7 @@ class LocalJobs:
 
 def state_fields(info: dict) -> dict:
     """A job's entry fields from the server's job info (GET /v1/jobs/ID): state, progress, times, error, memory,
-    the computer it runs on."""
+    the computer it runs on and its build."""
     fields = {"unreachable_since": None, "state": info["state"], "fraction": info.get("fraction", 0.0),
               "message": info.get("message", ""), "position": info.get("position"),
               "error": info.get("error", ""), "detail": info.get("detail", ""), "note": info.get("note", ""),
@@ -148,6 +148,8 @@ def state_fields(info: dict) -> dict:
                                           "server_total_mb", "server_commit_free_mb")}}
     if info.get("host"):
         fields["server_name"] = info["host"]        # the computer it runs on (several big machines)
+    if info.get("version"):
+        fields["server_version"] = info["version"]  # the GroundTruth build there: which version made the result
     return fields
 
 
@@ -167,7 +169,8 @@ def watcher(jobs: LocalJobs, base: dict, on_change: Callable[[dict], None]) -> C
         """Keep the job's entry (see watcher)."""
         if event == "submitted":
             meta = jobs.add({**base, "id": jid, "attached": True, "state": "queued", "position": info.get("position"),
-                             "server_name": info.get("host") or base.get("server", "")}, None)
+                             "server_name": info.get("host") or base.get("server", ""),
+                             "server_version": info.get("version") or ""}, None)
         elif event == "state":
             meta = jobs.update(jid, **state_fields(info))
         else:

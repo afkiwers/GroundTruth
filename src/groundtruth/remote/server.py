@@ -65,6 +65,16 @@ DEFAULTS = {"port": protocol.DEFAULT_PORT, "workers": 1, "threads": "-", "gpu": 
             # several network cards, the one the others reach it at (install --address)
             "address": ""}
 log = logging.getLogger("groundtruth.server")
+_BUILD: list = []
+
+
+def server_build() -> str:
+    """This server's build text (groundtruth.build_version(): "GroundTruth 0.1.41452 (57602a8, built ...)"), read
+    once: every job answer carries it, and a remote update restarts the server with the new one."""
+    if not _BUILD:
+        from .. import build_version
+        _BUILD.append(build_version())
+    return _BUILD[0]
 
 
 class _HTTPServer(ThreadingHTTPServer):
@@ -179,6 +189,8 @@ class Job:
         return {"id": self.id, "kind": self.kind, "client": self.client, "state": self.state,
                 "position": position, "fraction": self.fraction, "message": self.message, "error": self.error,
                 "detail": self.detail, "note": self.note, "started_at": self.started, "host": socket.gethostname(),
+                # the build it runs on, for the plugin's Server jobs tab (which version made a result)
+                "version": server_build(),
                 "queued_at": self.queued, "finished_at": self.finished,
                 "queued_s": round((self.started or now) - self.queued, 1),
                 "run_s": round((self.finished or now) - self.started, 1) if self.started else 0.0,
@@ -674,7 +686,8 @@ class ComputeServer:
                 h._json(400, {"error": "the job's body is not a compressed pickle"}, nonce)
                 return
             jid, ahead = self.submit(kind, q.get("client", "?")[:80], payload)
-            h._json(201, {"id": jid, "position": ahead, "host": socket.gethostname()}, nonce)
+            h._json(201, {"id": jid, "position": ahead, "host": socket.gethostname(), "version": server_build()},
+                    nonce)
             return
         if method == "POST" and parts == ["update"]:
             status, answer = self._take_update(body, q.get("sig", ""))

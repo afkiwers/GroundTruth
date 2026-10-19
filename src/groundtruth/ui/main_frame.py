@@ -2112,7 +2112,8 @@ class MainFrame(wx.Frame):
                                      "resolution": float(inputs["cfg"].analysis.resolution),
                                      "board_path": str(self.board_path or ""), "board_name": name,
                                      "session": self._session_token, "position": ahead,
-                                     "server_name": getattr(remote, "server_name", remote.host)}, inputs)
+                                     "server_name": getattr(remote, "server_name", remote.host),
+                                     "server_version": getattr(remote, "server_version", "")}, inputs)
         return HandedOver(meta, remote.host)
 
     def _board_name(self, board) -> str:

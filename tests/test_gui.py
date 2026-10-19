@@ -2235,7 +2235,7 @@ def test_a_thermal_on_the_server_is_listed_on_the_server_jobs_tab(app, frame, tm
                                                          "run_s": 12.0, "host": "BIG"})])
     p = frame.server_jobs
     assert [m["id"] for m in p.current] == ["t1"] and p.current[0]["server"] == "10.0.0.9:8765"
-    assert p.list.GetItemText(0, 3) == "Thermal" and p.list.GetItemText(0, 1) == "BIG"
+    assert p.list.GetItemText(0, 4) == "Thermal" and p.list.GetItemText(0, 1) == "BIG"
     run_steps(app, frame, [lambda: watch("end", "t1", {"state": "done"})])
     assert not p.current and [m["state"] for m in p.past] == ["shown"]
 
@@ -2266,16 +2266,20 @@ def test_the_server_jobs_tab_lists_current_and_past_jobs_with_their_details(app,
     now = time.time()
     jobs = [{"id": "a1", "server": "10.0.0.5", "server_name": "BIG-1", "kind": "simulate", "label": "Simulate",
              "board_name": "b.kicad_pcb", "state": "running", "fraction": 0.4, "run_s": 125.0, "polled": now,
-             "submitted": now - 300, "resolution": 2.0},
+             "submitted": now - 300, "resolution": 2.0,
+             "server_version": "GroundTruth 0.1.41452 (57602a8, built 2026-10-19 12:00)"},
             {"id": "b2", "server": "10.0.0.6", "server_name": "BIG-2", "kind": "suggest", "label": "Suggest fixes",
              "board_name": "b.kicad_pcb", "state": "failed", "error": "the job failed (exit code 1): ValueError",
              "detail": "RuntimeError: the job failed\n\nTraceback (most recent call last):\n  ...\nValueError: x",
              "run_s": 61.0, "submitted": now - 900}]
     p.refresh(jobs)
     assert [m["id"] for m in p.current] == ["a1"] and [m["id"] for m in p.past] == ["b2"]
-    assert p.list.GetItemText(0, 1) == "BIG-1" and p.list.GetItemText(0, 6) == "2:05"
-    assert p.list.GetItemText(0, 4) == "2×" and p.past_list.GetItemText(0, 4) == "–"   # b2: kept before it was recorded
-    assert p.past_list.GetItemText(0, 7) == "" and p.list.GetItemText(0, 7) == ""      # no readings yet
+    assert p.list.GetItemText(0, 1) == "BIG-1" and p.list.GetItemText(0, 7) == "2:05"
+    # the server's build in full; b2 was kept before it was recorded
+    assert p.list.GetItemText(0, 2) == "GroundTruth 0.1.41452 (57602a8, built 2026-10-19 12:00)"
+    assert p.past_list.GetItemText(0, 2) == "–"
+    assert p.list.GetItemText(0, 5) == "2×" and p.past_list.GetItemText(0, 5) == "–"   # b2: kept before it was recorded
+    assert p.past_list.GetItemText(0, 8) == "" and p.list.GetItemText(0, 8) == ""      # no readings yet
     assert clock_text(3725) == "1:02:05" and elapsed(jobs[0], now + 10) == pytest.approx(135.0)
     p.past_list.Select(0)
     wx.Yield()
@@ -2286,6 +2290,7 @@ def test_the_server_jobs_tab_lists_current_and_past_jobs_with_their_details(app,
     wx.Yield()
     assert [m["id"] for m in p.selected()] == ["a1"] and p.buttons["cancel"].IsEnabled()
     assert "Resolution: 2×" in p.detail.GetValue()
+    assert "Version on the server: GroundTruth 0.1.41452 (57602a8, built 2026-10-19 12:00)" in p.detail.GetValue()
 
 
 
