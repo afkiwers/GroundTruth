@@ -187,7 +187,8 @@ CARRIER = "#39e75f"         # vias and parts that carry the current between laye
 MIN_LABEL = 0.05            # their share of the current is written next to them from this share on
 
 
-def _carriers(ax, board: Board, rr: RouteResult, lname: str, max_vias: Optional[int] = None) -> list[dict]:
+def _carriers(ax, board: Board, rr: RouteResult, lname: str, max_vias: Optional[int] = None,
+              labels: bool = True) -> list[dict]:
     """The vias (▲) and parts (■) that carry this layer's current to another layer or net (RouteResult.transfers),
     with their share of it ("63 %"). The user, after all 338 vias of a board were drawn: "Only the ones that carry
     current should be drawn. However, the current symbol is a bit small and hard to see": so a larger symbol with a
@@ -196,7 +197,7 @@ def _carriers(ax, board: Board, rr: RouteResult, lname: str, max_vias: Optional[
     over the whole pair and comes from the board-wide model at another frequency (a square labelled "1286 %" at
     its weighted centre said nothing about where it flows); the tiles and the transfer list give it.
     max_vias: mark at most that many vias, the view's busiest (the user's "Vias shown"; 0: "Via markers"
-    unticked); None: every one."""
+    unticked); None: every one. labels False: the markers without their shares (the report)."""
     shown = rr.transfers
     if max_vias is not None:
         busiest = sorted((t for t in shown if t.get("kind") == "via"), key=lambda t: -t["fraction"])[:max_vias]
@@ -229,7 +230,7 @@ def _carriers(ax, board: Board, rr: RouteResult, lname: str, max_vias: Optional[
         ax.plot([t["x"] for t in group], [t["y"] for t in group], linestyle="none", marker=marker, ms=9,
                 mfc=CARRIER, mec="#000000", mew=1.0, zorder=4)
         for t in group:
-            if t["fraction"] >= MIN_LABEL:
+            if labels and t["fraction"] >= MIN_LABEL:
                 ax.annotate(f"{t['fraction'] * 100:.0f} %", (t["x"], t["y"]), textcoords="offset points",
                             xytext=(7, 5), fontsize=FS_MARK, color="#ffffff", fontweight="bold", zorder=5,
                             bbox={"boxstyle": "round,pad=0.15", "fc": "#101018", "ec": CARRIER, "lw": 0.6, "alpha": 0.8})
@@ -255,10 +256,11 @@ def _pad_outline(p: dict) -> tuple[list, list]:
     return [q[0] for q in pts], [q[1] for q in pts]
 
 
-def _switch_pins(ax, rr, lname: str) -> None:
+def _switch_pins(ax, rr, lname: str, labels: bool = True) -> None:
     """The switches' drain and source (a diode's cathode and anode, an IC's VIN / SW / GND) on a power stage's
-    map: the pads outlined on their own layer (with a dark halo so they read on any colour), a role letter at
-    each group's centre and the part's name above it on every layer (where the switch sits over an inner plane)."""
+    map: the pads outlined on their own layer (with a dark halo so they read on any colour), and with `labels` a
+    role letter at each group's centre and the part's name above it on every layer (where the switch sits over an
+    inner plane). Without them the outlines' colours and the legend tell the roles (the report)."""
     pins = getattr(rr, "switch_pins", None) or []
     if not pins:
         return
@@ -274,13 +276,18 @@ def _switch_pins(ax, rr, lname: str) -> None:
             xs, ys = _pad_outline(p)
             ax.plot(xs, ys, color="#000000", lw=2.2, alpha=0.6, solid_capstyle="round")
             ax.plot(xs, ys, color=colour, lw=1.1)
-        cx = sum(p["x"] for p in ps) / len(ps)
-        cy = sum(p["y"] for p in ps) / len(ps)
-        ax.text(cx, cy, role, color=colour, fontsize=FS_MARK, fontweight="bold", ha="center", va="center",
-                bbox={"boxstyle": "round,pad=0.15", "fc": "#101018", "ec": colour, "lw": 0.7, "alpha": 0.8}, zorder=6)
+        if labels:
+            cx = sum(p["x"] for p in ps) / len(ps)
+            cy = sum(p["y"] for p in ps) / len(ps)
+            ax.text(cx, cy, role, color=colour, fontsize=FS_MARK, fontweight="bold", ha="center", va="center",
+                    bbox={"boxstyle": "round,pad=0.15", "fc": "#101018", "ec": colour, "lw": 0.7, "alpha": 0.8},
+                    zorder=6)
         if role not in seen_roles:
-            ax.plot([], [], color=colour, lw=1.2, label=f"{role} = {word}")
+            # the legend names the colour's role: with labels "S = source", without them the colour is the key
+            ax.plot([], [], color=colour, lw=1.2, label=f"{role} = {word}" if labels else word)
             seen_roles.add(role)
+    if not labels:
+        return
     for ref in dict.fromkeys(p["ref"] for p in pins):    # the part's name just above its pads
         ps = [p for p in pins if p["ref"] == ref]
         top = min(p["y"] - max(p["w"], p["h"]) / 2 for p in ps)
@@ -537,7 +544,7 @@ def _what(rr) -> str:
 def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[list[Issue]] = None,
                  layer: Optional[str] = None, vmin_frac: float = 1e-3, vectors: bool = True,
                  scale: str = "log", view: Optional[tuple] = None, max_vias: Optional[int] = None,
-                 outlines: bool = False, names: bool = False) -> None:
+                 outlines: bool = False, names: bool = False, labels: bool = True) -> None:
     """Return-current density on one plane layer, or side by side on the layers that carry it. With `vectors`,
     arrows show which way the current flows (at its dominant phase) and where it concentrates.
 
@@ -551,6 +558,10 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
 
     max_vias: mark at most that many of the vias carrying the current, the busiest (None: all of them).
     outlines, names: the parts' outlines and their references over the maps (_part_outlines).
+    labels: the text boxes on the maps, the carrying vias' shares ("63 %") and a power stage's pin letters and
+    switch names; the report leaves them out (the user, 2026-10-19: "remove the labels from the report. they are
+    actually not helping": on a stage's map they piled up over the switches), the plugin keeps them (False: the
+    markers, pad outlines and arrows only).
 
     A motor bridge's view (kind "bridge") has no map: its drive's currents are drawn instead (draw_bridge)."""
     if rr.kind == "bridge":
@@ -601,8 +612,8 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
         _route(ax, board, rr)
         if outlines or names:
             _part_outlines(ax, board, view if view is not None else g.extent, outlines, names)
-        _switch_pins(ax, rr, lname)
-        carried = _carriers(ax, board, rr, lname, max_vias)
+        _switch_pins(ax, rr, lname, labels)
+        carried = _carriers(ax, board, rr, lname, max_vias, labels)
         mine = view_issues(rr, issues or [])
         for sev, colour in SEV_COLOURS.items():
             pts = [i.location for i in mine if i.severity == sev]
