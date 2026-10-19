@@ -51,6 +51,10 @@ All merged into `main`; the full suite on `main` after the last of them (cebe708
    ±2 dB (SP-19); a resonance set by copper narrower than the pitch scatters about ±4 % from grid to grid (how the
    grid falls on the geometry: a finer copper sampling did not reduce it); the strip's own edge crowding is left
    out of the line loss (A36); the emission estimate is quasi-static and differential-mode (no cables).
+5. **A FEM solver beside PEEC, for later:** investigated 2026-10-19 and not planned for now (the user: "I don't
+   think it's worth right now but might be in the future"). The findings (toolchains on Windows, a 3D eddy-current
+   spike with NGSolve against PEEC), the options and a phased plan with a PEEC / FEM / Both switch are in
+   [FEM_OPTION.md](FEM_OPTION.md); `tools/dev/fem_spike.py` reruns the spike.
 
 ## Before committing anything
 

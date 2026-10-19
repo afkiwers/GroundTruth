@@ -197,6 +197,8 @@ python tools/dev/gpu_check.py BOARD SETTINGS --only SPI_SCK   # on the GPU machi
 .venv/Scripts/python tools/make_demo.py           # plugin/demo/: the demo project shipped in the plugin folder (the
                                                   # layer-change test board, zones filled by kicad-cli); checked in
 .venv/Scripts/python tools/make_icons.py [--preview X]   # plugin/icons/groundtruth-*.png (toolbar icons)
+%TEMP%\femvenv\Scripts\python tools/dev/fem_spike.py 1e6 1.0 pardiso   # the FEM spike (docs/FEM_OPTION.md): NGSolve
+                                                  # in a venv of its own (setup in its docstring), never this one
 .venv/Scripts/python tools/dev/fix_combo_probe.py BOARD SETTINGS SUGGESTIONS.json NET   # selected fixes alone vs
                                                   # together (low-rank prediction) vs the report's verification
 .venv/Scripts/python tools/dev/gap_probe.py BOARD SETTINGS SUGGESTIONS.json NET [F1,F2,...]   # does the baseline peak

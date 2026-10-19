@@ -7,6 +7,12 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `fem-notes` (2026-10-19, from `main`, merged at the user's "commit and merge changes"):** the user asked
+  for a FEM pathway beside PEEC (benefits, work, drawbacks, a switch between the two), then: "write this down under
+  docs as potential FEM option ... I don't think it's worth right now but might be in the future". The findings and
+  a plan are in [FEM_OPTION.md](FEM_OPTION.md) (NEXT_STEPS item 5); the spike is `tools/dev/fem_spike.py` (NGSolve in
+  a venv of its own, never the project's). Nothing in `src/` changed. Open from it: LICENSE says GPLv3, `pyproject.toml`
+  MIT (the user: use the license that benefits the functionality most; FEM_OPTION.md recommends GPL-3.0-or-later).
 - **Branch `memory-ladder` (2026-10-19, from `main`, merged into `main` as 3171856 at the user's "Merge"):** an 8x Simulate of CE2264 on DELL-7920-PC failed
   after 82 min at a board-wide solve ("buck Avionics and Battery Charging/SW1", 243k nodes, solve 130 of 151), peak
   21.8 GB, 45 GB free, reported as "the thermal solve ran out of memory". The user: "this keeps happening! It should
