@@ -78,6 +78,10 @@ def test_simulate_with_margin_gate(tmp_path):
     assert list(out.glob("heatmap_*.png")) and list(out.glob("section_*.png"))
     (page,) = out.glob("view3d_*.html")                 # the 3D page, linked from the report
     assert f"href='{page.name}'" in html
+    from groundtruth import build_version
+    # the cover names the build that solved it in full, as the help's title does
+    assert f"<dt>Version</dt><dd>GroundTruth {build_version()}</dd>".replace("GroundTruth GroundTruth",
+                                                                                "GroundTruth") in html
     assert run("simulate", path, "-q", "--fail-on", "error", "--max-dbuv-margin", "60") == 1
 
 

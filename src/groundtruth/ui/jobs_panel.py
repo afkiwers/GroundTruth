@@ -3,7 +3,8 @@
 Two lists, newest first: **Current jobs** (queued with the jobs ahead, running with how far, the result here: Show
 results) and **Past jobs** (shown, failed, cancelled, no longer on the server), kept until removed (the user:
 "a past jobs view that shows the finished job regardless of success or error and if error a detailed error
-message"). Each line names the server computer it ran on ("We have several big machines") and its elapsed time
+message"). Each line names the server computer it ran on ("We have several big machines"), the GroundTruth build
+there (which version made the result) and its elapsed time
 (waiting or running, counted up every second; the run time once it ended). The box below shows everything about
 the selected job, a failure's message in full (the worker's traceback), with Copy details. The lists are the
 tracker's job.json files, read on refresh (a few small files)."""
@@ -18,10 +19,17 @@ from ..remote.client import memory_text
 from ..remote.jobs import PAST
 from . import theme
 
-COLUMNS = [("Handed over", 125), ("Server", 120), ("Board", 160), ("What", 100), ("Resolution", 70), ("State", 170),
-           ("Elapsed", 80), ("Memory", 170), ("Details", 330)]
-ELAPSED = 6                     # the column the timer refreshes
+COLUMNS = [("Handed over", 125), ("Server", 120), ("Version", 290), ("Board", 160), ("What", 100),
+           ("Resolution", 70), ("State", 170), ("Elapsed", 80), ("Memory", 170), ("Details", 330)]
+ELAPSED = 7                     # the column the timer refreshes
 KINDS = {"simulate": "Simulate", "suggest": "Suggest fixes"}
+
+
+def version_text(m: dict) -> str:
+    """The GroundTruth build on the server that ran the job, in full as the help shows it ("GroundTruth 0.1.41910
+    (9094c40, built 2026-10-19 12:05)"; the user: "so users can see what plugin version was used for the sim");
+    '–' for a job kept before it was recorded, or from a server too old to tell."""
+    return (m.get("server_version") or "").strip() or "–"
 
 
 def resolution_text(m: dict) -> str:
@@ -76,6 +84,7 @@ def details(m: dict) -> str:
         return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t)) if t else "–"
     lines = [f"Job {m.get('id')}: {m.get('label') or KINDS.get(m.get('kind'), m.get('kind'))}",
              f"Server: {m.get('server_name') or '?'} ({m.get('server')})",
+             f"Version on the server: {version_text(m)}",
              f"Board: {m.get('board_name')} ({m.get('board_path') or '?'})",
              f"Resolution: {resolution_text(m)}",
              f"State: {state_text(m)}" + ("   (the window waits for it: its results go straight there; the "
@@ -231,7 +240,8 @@ class ServerJobsPanel(wx.Panel):
                 lst.DeleteAllItems()
                 for k, m in enumerate(rows):
                     lst.InsertItem(k, time.strftime("%Y-%m-%d %H:%M", time.localtime(m.get("submitted", 0))))
-                    for col, text in enumerate((m.get("server_name") or m.get("server", ""), m.get("board_name", ""),
+                    for col, text in enumerate((m.get("server_name") or m.get("server", ""), version_text(m),
+                                                m.get("board_name", ""),
                                                 (m.get("label") if m.get("attached") else None)
                                                 or KINDS.get(m.get("kind"), m.get("kind", "")), resolution_text(m),
                                                 state_text(m),

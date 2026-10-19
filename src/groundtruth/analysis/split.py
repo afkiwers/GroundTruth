@@ -161,6 +161,10 @@ def merge_parts(config: Config, nets: Optional[list], parts: list[SimulationResu
                      "gpu_fallbacks": sum(int((p.solver or {}).get("gpu_fallbacks") or 0) for p in parts),
                      "gpu_error": next(((p.solver or {}).get("gpu_error") for p in parts
                                         if (p.solver or {}).get("gpu_error")), "")}
+    # the build the parts ran on (a cluster's servers all run the same code: protocol.code_id)
+    build = next(((p.solver or {}).get("build") for p in parts if (p.solver or {}).get("build")), "")
+    if build:
+        result.solver["build"] = build
     issues = list(main.checks.issues) + [i for p in parts for i in p.part.get("issues", [])]
     route_issues = [i for p in parts for i in p.part.get("route_issues", [])]
     stage_issues = [i for p in parts for i in p.part.get("stage_issues", [])]

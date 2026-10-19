@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 from conftest import make, microstrip_board
+from groundtruth import build_version
 from groundtruth.analysis.simulate import simulate
 from groundtruth.remote import protocol
 from groundtruth.remote.client import Remote, RemoteError, ServerUnavailable, parse_address
@@ -443,6 +444,7 @@ def test_a_job_the_window_waits_for_is_listed_too(server, tmp_path):
     assert states[0] == "queued" and "running" in states and states[-1] == "shown"
     m = jobs.all()[0]
     assert m["attached"] and m["label"] == "Thermal" and m["server_name"] and m["run_s"] > 0
+    assert m["server_version"] == build_version()           # the server's build, for the Version column
     assert not (tmp_path / "jobs" / m["id"] / "input.pickle").exists()        # a past job keeps only its entry
     with pytest.raises(RemoteError):
         remote(server).run("sleep", ("not a number",), watch=watcher(jobs, base, seen.append))
