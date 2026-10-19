@@ -156,7 +156,16 @@ class RmsBasis:
         fast part per PWM harmonic band from the legs' conducted-band solves near n x f_pwm. Fields are stored as
         current density (A/mm^2 per A: the sheet current over the copper thickness)."""
         self.model, self.f_pwm, self.notes = model, bs.spec.f_pwm, []
+        # what failed to solve and is therefore missing from the maps, vias and heat (said, not left out silently:
+        # VALIDATION_AUDIT.md round 6, ISSUE-25): a leg's battery-to-motor DC path, a leg's PWM band
+        self.missing: list[str] = []
         runs = [(src, column(bs.legs[k]), run) for src, k, run in bs.rms_runs if run.ok().get(DC_F) is not None]
+        failed = [f"the {src} battery-to-motor path of {bs.legs[k].spec.name}" for src, k, run in bs.rms_runs
+                  if run.ok().get(DC_F) is None]
+        if runs and failed:
+            self.missing += failed
+            self.notes.append(f"RMS currents: {', '.join(failed)} not solved: its current is missing from the maps, "
+                              "the vias and the heat")
         self.slow = None                 # (build, source indices into G, {layer: [(Jx, Jy)]}, branch currents)
         if runs:
             st = runs[0][2].build
@@ -169,13 +178,22 @@ class RmsBasis:
             self.notes.append("RMS currents: no battery-to-motor path solved; only the switching currents are shown")
         self.fast = {}                   # band n: (build, columns, {layer: [(Fx, Fy)]}, branch currents)
         for n in range(1, BANDS + 1):
-            got, st = [], None
+            got, st, lost = [], None, []
             for s in legs:
                 sols = s.cond.ok()
                 f = _nearest(list(sols), n * self.f_pwm)
                 if f is not None and abs(math.log(f / (n * self.f_pwm))) <= 0.05:
                     got.append((column(s), sols[f]))
                     st = s.cond.build
+                else:
+                    # planned near the band but its solve failed: missing, not merely never asked for
+                    tried = _nearest([g for g, v in s.cond.sols.items() if v is None], n * self.f_pwm)
+                    if tried is not None and abs(math.log(tried / (n * self.f_pwm))) <= 0.05:
+                        lost.append(s.spec.name)
+            if lost:
+                self.missing += [f"PWM band {n} of {name}" for name in lost]
+                self.notes.append(f"RMS currents: PWM band {n} of {', '.join(lost)} not solved: its switching current "
+                                  "is missing from the maps, the vias and the heat")
             if got:
                 fields = {layer: [tuple(x * 1e-6 / st.t[k] for x in sol.node_field(k, st.d, True))
                                   for _, sol in got]

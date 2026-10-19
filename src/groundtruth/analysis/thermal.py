@@ -555,6 +555,8 @@ def thermal_inputs(board: Board, config: Config, converters, progress: Optional[
     # the temperatures as the whole stage's (VALIDATION_AUDIT.md round 6, ISSUE-25)
     notes = list(notes) + [f"{s.net}: DC {name} was not solved: its copper heat is not in these temperatures"
                            for s in stages for name in (getattr(s, "dc_unsolved", None) or [])]
+    notes += [f"{b.net}: {name} was not solved: its heat is not in these temperatures"
+              for b in bridges for name in (getattr(b, "rms_missing", None) or [])]
     return copper_heat(board, stages, bridges), _merged(losses, *(b.losses for b in bridges)), notes
 
 
