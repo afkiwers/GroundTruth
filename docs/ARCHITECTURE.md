@@ -163,7 +163,9 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
   0.25 / 0.125 / 0.0625 mm cells). The ▲ markers add a pin's joints per layer pair (`transfers`).
   - KVL per branch: `Z·I − A·V = −jω·ψ`
   - KCL: `Aᵀ·I = J` (+1 A at the receiver return node, −1 A at the driver's)
-- Strip impedance: `R_s(f)` (skin effect, per-layer copper thickness) plus `jω·L_p`. The mutual partial
+- Strip impedance: `R_s(f)` (skin effect, per-layer copper thickness: `kernel.skin_thickness`, the exact AC
+  resistance of a slab with its field on one face [Dowell 1966], REFERENCES A2; until 2026-10-19 δ(1 − e^(−t/δ)),
+  up to 58 % too resistive at 1-10 MHz in 35 µm copper, ISSUE-16) plus `jω·L_p`. The mutual partial
   inductance between parallel strips depends only on the grid offset and Δz, so each layer pair is a
   **convolution kernel** (`kernel.strip_kernel`). Gauss quadrature is used for near neighbours, filaments
   far away, and sub-strip numeric integration for the self term (the GMD formula is 5 % low for square strips).
@@ -385,10 +387,52 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   `RASTER_MM` stays 0.15 mm and the cap 6 × 6.
   Current densities follow (`Solution.node_field(copper=True)`): the DC paths' A/mm² maps, peaks and sustained
   values, the thermal heat and the motor bridges' RMS maps take a strip's current over its own width. Before,
-  a 0.35 mm neck on a 1 mm grid read about a third of its density. Sums over the cells weight each node by the
-  mean width of its strips (`Grid.copper_area`), so the heat map adds up to the solver's R/φ·I². The cell
-  area fill would not do: an antipad lowers it, not the width that carries the current. The cross-section and
-  the EMI current maps keep the current per cell width (what a cut across the cells adds up).
+  a 0.35 mm neck on a 1 mm grid read about a third of its density. The cross-section and the EMI current maps keep
+  the current per cell width (what a cut across the cells adds up).
+- **Widths and areas measured on the copper** (2026-10-19, audit round 5, VALIDATION_AUDIT.md ISSUE-11 to -15,
+  REFERENCES A39). The sub-grid's widths above were whole samples: a 0.1 mm track on the DC model's 0.235 mm cells
+  (samples 0.1175 mm) read 0.1175 mm wide, 0.16 mm where its forced row and a sampled neighbour row both carried
+  it, a 0.4 mm track −12 to +17 % by where it lay; a track at 30-45° was 20-57 % too resistive (its staircase's
+  strips as wide as the track, not as the border they cross, w/cos θ); and the nodes' heat ρ·J²·t·(mean strip
+  width) was up to 2 × the solver's I²R on angled tracks. Now (`peec._exact_copper`):
+  - every strip's width is the exact length of its cell border that its net's copper covers (`_line_cover`, a
+    scanline on the border line [Foley 1990]); copper crossing a border where its net has no strip (a sliver in a
+    row without a node) goes to the nearest strip of its net on that line, up to `ADOPT_FACES` = 3 cells along it
+    (`_adopt`; a 30° track's step can sit two cells from where its copper crosses the row border);
+  - every node's area is its cell's copper of its net, exact by Green's theorem (`_cell_areas`: the copper's edges
+    cut at the grid lines, ∮x dy, plus the covered right border), with the slivers of cells without a node of that
+    net moved to the nearest node (`ADOPT_CELLS` = 2); `Grid.copper_area` shares it out over each node's 3 × 3
+    neighbourhood of the same net like the widths of the strips along its run (a staircase's corner cell holds a
+    sliver of the copper while its strips carry all of the current);
+  - `Solution.node_field(copper=True)` keeps the mean's direction and sets the length so that ρ·|J|²·t·A is the
+    node's half of its strips' I²R, exactly, whatever the pattern (a junction where the mean cancels included);
+  - cells join only within one connected piece of a net's copper (`build_grid`'s pieces, the polygons of the net's
+    union; the track walk's own/free tests by piece): a track broken by a 0.15 mm gap was solved as connected.
+  Results (tests/test_track_width.py, `tools/dev/track_width_check.py`): R' within 1 % of 1/(σwt) for 0.05-0.4 mm
+  at 0°, 30° and 45° wherever the track lies; the thermal heat equals the solved loss within 0.5 % (0.1 %
+  measured); borders and areas equal shapely's to 1e-9.
+- **A change of width along a strip, in series** (2026-10-20, ISSUE-21, A39). With its border's width over its
+  whole length (a two-point flux) an abrupt width change sat within ±d/2 of where it is, up to (d/2)·(1/w₁ − 1/w₂)
+  squares per step: a 2 mm, 0.1 mm neck in a 0.4 mm track −9.1 / −4.8 / −0.3 % at 1x / 2x / 4x. `_exact_copper`
+  now also measures the copper at `STRIP_SAMPLES` = 6 lines along every strip (adopted like the border's), and
+  `_series_factor` gives each band of side-by-side strips (a run along the border line, which together carry what
+  crosses there) the harmonic mean of its totals at those lines over its total at the border: the band as its
+  lengths in series, the step placed to d/12, a track at any angle unchanged (its total is w/cos θ all along). Only
+  for a narrow band alone on its line (at most `BAND_STRIPS` = 4 strips, no other strip of its net within
+  2 × `ADOPT_FACES`): the strips across a track form a band as long as the track, whose lines past its edge find only
+  the pads (taken in series they read a quarter of their width: a straight track's density +5 %); a pour's step
+  put on its whole column would also slow the lanes that go straight on; at a junction the line's copper can be the
+  other run's. The factor goes into `Grid.rx / ry`, the width for the resistance and the heat (`PlaneStack.r_width`,
+  `W_x / W_y`); the inductance keeps the border's `wx / wy` (its kernels have no strip wider than a pitch: when it
+  took the factor, a neck straddling two rows moved its island's resonance 2.2 %, SP-27). The neck now errs by a
+  fixed ≤ 0.19 square per end at every resolution (−2.9 / −2.6 / −0.7 / −1.5 % for 2 mm at 1x / 2x / 4x / 16x; 20
+  mm −0.25 % at 1x). The refboard DC model builds in 4.6 s instead of 3.2 (main).
+- **A node's heat in its own copper** (2026-10-20, ISSUE-22, A44). The sub-grid gives a cell at the copper's edge a
+  node when one of its samples is copper, so the node's point can be up to about d/4 outside the copper.
+  `_heat_points` stores, per node outside its net's copper, the offset to the nearest point of that copper (a hair
+  inside: 1e-4 mm), `Grid.hx / hy`; `thermal._layer_currents` puts the node's heat there. Before, a thermal mesh
+  finer than the DC grid got that heat in a resin-only cell beside the track: at fine quality a 0.4 mm track at 3 A
+  showed hot spots 36 % (20 K) above itself (TW-14).
 - **Tracks of plane nets stay joined on every grid** (`_rasterise_lines`). Their centrelines are walked
   through the grid and their cells and strips forced, so escapes narrower than the grid conduct. The walk takes
   the nearest of the four cells around each point that already holds the track's net (else the nearest free
@@ -875,8 +919,10 @@ for a boost; duty = the high-side conduction time). The inductor current is cont
   - R = Re(Σ aₙVₙ) for 1 A. The density is |K|·I/t per layer, with t from the stackup:
     `BoardModel.t_phys` → `StackBuild.t` → `PlaneLayer.thickness`, which until session 3 was always 35 µm. The
     via density is I/(π·drill·25 µm).
-  - "Sustained" averages the density over the copper within a 1 mm window (`sustained`, `uniform_filter`
-    restricted to copper cells).
+  - "Sustained" is the density's RMS over the copper area of the node's own net within a 1 mm window, √(Σ J²·A /
+    Σ A) (`sustained`, `uniform_filter` per net, REFERENCES A40): its heat is the window's. Until 2026-10-19 the
+    plain mean over all copper cells, so another net's pour within the window counted as copper at 0 A/mm² (a 0.1
+    mm track 0.2 mm beside a GND pour read a third low, ISSUE-13).
   - The `current_density` issue fires when the sustained density or a via's plating density exceeds
     `rules.current_density_warning` (50) or `current_density_error` (100) A/mm².
   - `dc_view` makes a copy of the result whose heatmap is a DC density map; the plugin and the HTML list these
@@ -2092,13 +2138,24 @@ a History tab with a comparison (and the CLI).
   `thermal_proc.py`). `thermal/adapter.py` (`to_thermal_board`) maps GroundTruth's Board to PCB Thermal's
   (checked: identical areas, stack, counts and solved temperatures against PCB Thermal's own parser). `copper_heat` resamples every power
   stage's DC-path current vectors (`dc_vectors`, A/mm²) onto one grid per layer (the finest path pitch) and adds
-  them as vectors (paths share copper), heat ρ|J|²t·A per sample; `part_losses` from the operating point and the
+  them as vectors (paths share copper), heat ρ|J|²t·A per sample (A = `Grid.copper_area`: one path's heat is its
+  I²R exactly since round 5; paths that share copper add as vectors node by node, exact where they flow alike);
+  the temperature maps show each level-0 cell's hottest refined cell (`Mesh.to_level0(how="max")`: a 0.1 mm track
+  on 0.3 mm cells read 15 % cool as the cell's mean, ISSUE-14; t_max and the issues always took the refined
+  cells), and a long 0.1 / 0.4 mm track's temperature matches an independent 2D cross-section within 2 % where the
+  adaptive mesh resolves it (tests/test_track_width.py TW-10, `tests/refsolvers.py`); `part_losses` from the operating point and the
   DC paths' series parts (switching on the hard-switched transistor, `main` = a buck's high side or a boost's low
   side; `_synchronous`: a FET rectifier or an integrated stage → one hard edge ½·V·I·t·f and Q_oss·V·f, a diode →
   two edges and ½·Q_oss·V·f; C_oss·V² stands in for Q_oss·V without `q_oss`; session 6, after the user's EPC2306
   datasheet: C_OSS 482 pF vs Q_OSS 38 nC at 50 V); `solve_thermal` plans PCB Thermal's adaptive mesh from those samples, builds its
-  Mesh/ThermalModel, puts the samples on the copper nodes (`mesh.locate`), and iterates with copper resistivity
-  following the node temperature (currents prescribed: first order). Validation (tests/test_thermal.py): a
+  Mesh/ThermalModel, puts the samples on the copper nodes (`mesh.locate`, at each node's own copper: `Grid.hx / hy`),
+  and iterates with copper resistivity following the node temperature (currents prescribed: first order). Since
+  2026-10-19 the heat also holds the switch node's inductor ripple, the hot loop's switching current and every via
+  barrel segment's R·(I² + variance) (A43, ISSUE-20). After the solve, `with_dc_at_temperature` (where the stages'
+  maps are: `run_thermal`, and `thermal_proc.run_in_process` for the plugin's child process or a compute server)
+  gives every DC path its R, drop and loss at the solved temperature, R₂₀ times the mean of 1 + α(T − 20) over the
+  path's own heat read from the result's maps (`ThermalResult.dc_hot`, a note, the JSON report's
+  `dc_at_temperature`; ISSUE-23). Validation (tests/test_thermal.py): a
   50 × 4 mm strip at 5 A: 0.1539 W = analytic I²R; peak rise 9.09 K vs 8.94 K from PCB Thermal's own electrical
   model (1.7 %); energy balance. Plugin: the "Thermal" job solves in a child process
   (`analysis/thermal_proc.py`: `python -m groundtruth.analysis.thermal_proc IN OUT`, pickled inputs and result,

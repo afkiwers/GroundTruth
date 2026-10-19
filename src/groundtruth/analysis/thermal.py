@@ -74,6 +74,7 @@ class ThermalResult(RouteResult):
     capacity: dict = field(default_factory=dict)
     heat_unit: str = "°C"
     heat_scale: str = "linear"
+    dc_hot: list = field(default_factory=list)            # the DC paths at these temperatures (dc_at_temperature)
 
     def summary(self) -> dict:
         """The result as plain data for the JSON report (the 20 hottest parts; no temperature maps)."""
@@ -81,7 +82,8 @@ class ThermalResult(RouteResult):
                 "hotspot": list(self.hotspot), "ambient_c": self.ambient_c, "power_w": self.power_w,
                 "copper_w": self.copper_w, "parts_w": self.parts_w, "heat_out": self.heat_out,
                 "parts": self.parts[:20], "losses": self.losses, "mesh": self.mesh, "notes": self.notes,
-                "capacity": self.capacity, "error": self.error}
+                "capacity": self.capacity, "dc_at_temperature": getattr(self, "dc_hot", []),   # (older pickles: none)
+                "error": self.error}
 
     def label(self) -> str:
         """The view's name in the Heatmap list and the reports."""
@@ -133,7 +135,8 @@ def _layer_currents(board: Board, converters, bridges=()) -> dict:
     {layer: (X, Y, d, t, {stage: (JX, JY)}, {bridge: J²})}. The densities are in the copper (a strip narrower than
     the pitch carries its current in its own width, Solution.node_field), so t (mm) is per sample: the copper
     thickness x the share of the sample's cell that carries current (Grid.copper_area), and ρ·J²·t·d² is the
-    sample's heat."""
+    sample's heat. (X, Y) is where that heat is: the node, or the nearest point of its copper where the node lies
+    outside it (Grid.hx / hy [A44])."""
     per_layer: dict[str, list] = {}
     for c in converters:
         for name, layers in (getattr(c, "dc_vectors", None) or {}).items():
@@ -165,6 +168,8 @@ def _layer_currents(board: Board, converters, bridges=()) -> dict:
         per_stage: dict[str, tuple] = {}
         per_rms: dict[str, np.ndarray] = {}
         area = np.zeros((nx, ny))               # the samples' current-carrying share (the largest of the grids')
+        PX, PY = X.copy(), Y.copy()             # where each sample's heat is (its node, or its copper beside it)
+        moved = np.zeros((nx, ny), bool)
         for stage, g, jx, jy in items:
             i = np.rint((X - g.x0) / g.d).astype(np.int64)
             j = np.rint((Y - g.y0) / g.d).astype(np.int64)
@@ -172,6 +177,12 @@ def _layer_currents(board: Board, converters, bridges=()) -> dict:
             ii, jj = np.where(inside, i, 0), np.where(inside, j, 0)
             on = inside & g.node[ii, jj]
             area = np.maximum(area, np.where(on, g.copper_area()[ii, jj], 0.0))
+            if getattr(g, "hx", None) is not None:
+                hx, hy = g.hx[ii, jj], g.hy[ii, jj]
+                m = on & ~moved & ((hx != 0) | (hy != 0))
+                PX = np.where(m, g.x0 + ii * g.d + hx, PX)
+                PY = np.where(m, g.y0 + jj * g.d + hy, PY)
+                moved |= m
             if jy is None:                    # a bridge's RMS density
                 R = per_rms.setdefault(stage, np.zeros((nx, ny)))
                 R += np.where(on, np.nan_to_num(jx[ii, jj]) ** 2, 0.0)
@@ -180,7 +191,7 @@ def _layer_currents(board: Board, converters, bridges=()) -> dict:
             JX += np.where(on, np.nan_to_num(jx[ii, jj]), 0.0)
             JY += np.where(on, np.nan_to_num(jy[ii, jj]), 0.0)
         t = board.stackup.layer(layer).thickness if board.stackup.layer(layer) else 0.035
-        out[layer] = (X, Y, d, t * area, per_stage, per_rms)
+        out[layer] = (PX, PY, d, t * area, per_stage, per_rms)
     return out
 
 
@@ -190,9 +201,74 @@ def _rho_mm() -> float:
     return COPPER.resistivity_20c * 1e3                      # Ω·mm
 
 
+def _via_segments(stages, bridges=()) -> list[dict]:
+    """Every via barrel segment that carries current [A43]: [{"x", "y", "a", "b" (its two layers), "r" (Ω), "i":
+    {stage: signed A}, "sq": {stage: A²}}]. The stages' DC paths' currents at the vias (dc_via: the paths of all
+    stages on the one whole-board model, signed, so they add or cancel as combine_dc adds them), their switching
+    variances (dc_ripple_via: the switch node's and the hot loop's, in quadrature) and the motor bridges' mean
+    squares (rms["via_heat"])."""
+    segs: dict = {}
+
+    def seg(key, x, y, a, b, r) -> dict:
+        """The record of one segment, made at its first use."""
+        return segs.setdefault(key, {"x": float(x), "y": float(y), "a": a, "b": b, "r": float(r), "i": {}, "sq": {}})
+
+    for c in stages:
+        for attr, signed in (("dc_via", True), ("dc_ripple_via", False)):
+            for _, (db, cur) in (getattr(c, attr, None) or {}).items():
+                ends = getattr(db, "via_ends", None) or []
+                if len(ends) != len(db.vias):          # a model sent by an older compute server: no ends
+                    continue
+                cur = np.asarray(cur, float)
+                for k in np.nonzero(np.abs(cur) > 1e-9)[0]:
+                    _, _, _, x, y = db.vias[k]
+                    s = seg((db.fingerprint, int(k)), x, y, *ends[k])
+                    if signed:
+                        s["i"][c.net] = s["i"].get(c.net, 0.0) + float(cur[k])
+                    else:
+                        s["sq"][c.net] = s["sq"].get(c.net, 0.0) + float(cur[k]) ** 2
+    for b in bridges:
+        for x, y, la, lb, r, ms in (getattr(b, "rms", None) or {}).get("via_heat", ()):
+            s = seg(("bridge", b.net, round(x, 4), round(y, 4), la, lb), x, y, la, lb, r)
+            s["sq"][b.net] = s["sq"].get(b.net, 0.0) + float(ms)
+    return list(segs.values())
+
+
+def _via_rows(segments: list[dict], value) -> dict:
+    """{layer: array}: value(segment) at each of the segment's two layers, in the segments' order (the same order
+    for every value, so positions, heat and its capacity terms line up)."""
+    rows: dict = {}
+    for s in segments:
+        v = value(s)
+        for layer in (s["a"], s["b"]):
+            rows.setdefault(layer, []).append(v)
+    return {layer: np.asarray(v, dtype=float) for layer, v in rows.items()}
+
+
+def _via_power(s: dict) -> float:
+    """A via segment's Joule heat at the stages' operating points (W): R·((Σ signed currents)² + Σ variances)."""
+    return s["r"] * (sum(s["i"].values()) ** 2 + sum(s["sq"].values()))
+
+
+def _with_vias(heat: dict, segments: list[dict]) -> dict:
+    """`heat` ({layer: (x, y, side, P)}) with each via segment's heat (_via_power) added half at each of its two
+    layers, at the via (a layer with no copper heat gets 0.3 mm samples)."""
+    xs, ys = _via_rows(segments, lambda s: s["x"]), _via_rows(segments, lambda s: s["y"])
+    ps = _via_rows(segments, lambda s: _via_power(s) / 2.0)
+    out = dict(heat)
+    for layer, p in ps.items():
+        if layer in out:
+            X, Y, d, P = out[layer]
+            out[layer] = (np.concatenate([X, xs[layer]]), np.concatenate([Y, ys[layer]]), d, np.concatenate([P, p]))
+        else:
+            out[layer] = (xs[layer], ys[layer], 0.3, p)
+    return out
+
+
 def copper_heat(board: Board, converters, bridges=()) -> dict:
     """Per copper layer: (x, y, side, P at 20 °C) of the DC paths' Joule heat, the paths' current vectors added
-    on one grid per layer (the finest of the paths' grids on that layer), and the motor bridges' RMS heat."""
+    on one grid per layer (the finest of the paths' grids on that layer), and the motor bridges' RMS heat; and the
+    via barrels' I²R, half at each end of every segment (_via_segments; before 2026-10-19 left out [A43])."""
     rho = _rho_mm()
     out = {}
     for layer, (X, Y, d, t, per_stage, per_rms) in _layer_currents(board, converters, bridges).items():
@@ -203,7 +279,7 @@ def copper_heat(board: Board, converters, bridges=()) -> dict:
         p = rho * (JX ** 2 + JY ** 2 + sum(per_rms.values(), np.zeros_like(X))) * t * d * d     # W per sample
         keep = p > 0
         out[layer] = (X[keep], Y[keep], d, p[keep])
-    return out
+    return _with_vias(out, _via_segments(converters, bridges))
 
 
 def _is_diode(ref: str) -> bool:
@@ -379,11 +455,90 @@ def _fit(ss, ps) -> tuple[float, float, float]:
 # ------------------------------------------------------------------------------------------- the solve
 def run_thermal(board: Board, config: Config, converters, progress: Optional[Progress] = None,
                 cancel=None) -> tuple[ThermalResult, list[Issue]]:
-    """The thermal solve of these power-stage results (ConverterResults from simulate, their DC paths solved)."""
+    """The thermal solve of these power-stage results (ConverterResults from simulate, their DC paths solved), with
+    the DC paths at the solved temperatures (with_dc_at_temperature)."""
     inputs = thermal_inputs(board, config, converters, progress)
     if inputs is None:
         return _empty(config, NO_STAGES), []
-    return solve_thermal(board, config, *inputs, progress, cancel)
+    res, issues = solve_thermal(board, config, *inputs, progress, cancel)
+    return with_dc_at_temperature(res, board, converters), issues
+
+
+def dc_at_temperature(th: ThermalResult, board: Board, converters) -> list[dict]:
+    """The power stages' and DC loads' DC paths at the solved temperatures, which the DC tables leave at 20 °C
+    [A42]: each path's copper (strips and vias) R₂₀ times the mean of 1 + α(T − 20 °C) [IEC 60028] over the path's
+    own Joule heat, sample by sample, its series parts as they were; the drop and the loss with that R. First order:
+    the currents keep their 20 °C pattern (a hotter stretch would push a little current elsewhere, so R rises a
+    little less). T is the result's map at each sample (each level-0 cell its hottest copper [A41]: a little high
+    where the cell also holds hotter copper). [{"stage", "path", "factor", "t_mean_c", "r20_mohm", "r_mohm",
+    "drop20_mv", "drop_mv", "loss20_w", "loss_w"}]: "drop" None for the hot loop's switching current (no mean)."""
+    from ..thermal.materials import COPPER
+    if th.error or not th.sheet_current:
+        return []
+    rho = _rho_mm()
+    rows = []
+    for c in _stages(converters):
+        vectors = getattr(c, "dc_vectors", None) or {}
+        ripple = getattr(c, "dc_ripple_sq", None) or {}
+        grids = getattr(c, "dc_grids", None) or {}
+        for path in getattr(c, "dc", None) or []:
+            name = path.get("name")
+            heat = heat_t = 0.0                  # Σ the path's heat, Σ heat × its copper's temperature
+            for layer, g in grids.get(name, {}).items():
+                if layer not in th.sheet_current:
+                    continue
+                sl = board.stackup.layer(layer)
+                t_cu = sl.thickness if sl else 0.035
+                sq = np.zeros(g.node.shape)
+                if name in vectors and layer in vectors[name]:
+                    jx, jy = vectors[name][layer]
+                    sq = sq + np.nan_to_num(np.asarray(jx, float)) ** 2 + np.nan_to_num(np.asarray(jy, float)) ** 2
+                if name in ripple and layer in ripple[name]:
+                    sq = sq + np.nan_to_num(np.asarray(ripple[name][layer], float))
+                ii, jj = np.nonzero(g.node & (sq > 0))
+                if len(ii) == 0:
+                    continue
+                p = sq[ii, jj] * g.copper_area()[ii, jj] * t_cu * g.d * g.d     # the sample's heat / ρ
+                x, y = g.x0 + ii * g.d, g.y0 + jj * g.d
+                if getattr(g, "hx", None) is not None:
+                    x, y = x + g.hx[ii, jj], y + g.hy[ii, jj]
+                tg, tm = th.layer_grids[layer], th.sheet_current[layer]
+                ti = np.clip(np.rint((x - tg.x0) / tg.d).astype(np.int64), 0, tm.shape[0] - 1)
+                tj = np.clip(np.rint((y - tg.y0) / tg.d).astype(np.int64), 0, tm.shape[1] - 1)
+                t = tm[ti, tj].astype(float)
+                ok = np.isfinite(t)
+                heat += float(p[ok].sum()) * rho
+                heat_t += float((p[ok] * t[ok]).sum()) * rho
+            if heat <= 0 or not path.get("r_mohm"):
+                continue
+            t_mean = heat_t / heat
+            f = 1.0 + COPPER.alpha * (t_mean - 20.0)        # ρ(T) is linear: the heat-weighted mean of 1 + αΔT
+            r20 = float(path["r_mohm"])
+            r_cu = float(path.get("r_copper_mohm", r20))
+            r = r20 + r_cu * (f - 1.0)
+            ac = bool(path.get("ac"))
+            rows.append({"stage": c.net, "path": name, "factor": f, "t_mean_c": t_mean,
+                         "r20_mohm": r20, "r_mohm": r,
+                         "drop20_mv": None if ac else path.get("drop_mv"),
+                         "drop_mv": None if ac or path.get("drop_mv") is None else path["drop_mv"] * r / r20,
+                         "loss20_w": path.get("loss_w"), "loss_w": (path.get("loss_w") or 0.0) * r / r20})
+    return rows
+
+
+def with_dc_at_temperature(th: ThermalResult, board: Board, converters) -> ThermalResult:
+    """`th` with its DC paths at temperature (dc_at_temperature) and a note on them, the paths whose loss grows
+    most first (the busiest: their drop changes most too)."""
+    th.dc_hot = dc_at_temperature(th, board, converters)
+    if th.dc_hot:
+        top = sorted(th.dc_hot, key=lambda r: -((r["loss_w"] or 0.0) - (r["loss20_w"] or 0.0)))
+        lo, hi = min(r["factor"] for r in top), max(r["factor"] for r in top)
+        each = "; ".join(f"{r['stage']} {r['path']}: {r['r20_mohm']:.3g} → {r['r_mohm']:.3g} mΩ"
+                         + (f", drop {r['drop20_mv']:.3g} → {r['drop_mv']:.3g} mV" if r["drop_mv"] is not None else "")
+                         for r in top[:4])
+        th.notes.append(f"the DC paths at these temperatures (their tables are at 20 °C): copper "
+                        f"{(lo - 1) * 100:+.0f} to {(hi - 1) * 100:+.0f} % resistance; " + each
+                        + (f"; {len(top) - 4} more in the report" if len(top) > 4 else ""))
+    return th
 
 
 def thermal_inputs(board: Board, config: Config, converters, progress: Optional[Progress] = None
@@ -592,7 +747,10 @@ def _result(board: Board, config: Config, m: _Model, sol: _Solution, losses: lis
     g0 = mesh.grid0
     res.layer_grids, res.sheet_current = {}, {}
     for k, layer in enumerate(tb.copper_layers):
-        mm = mesh.to_level0(Tcu[k]).T.astype(np.float32)                 # (nx, ny)
+        # each level-0 cell shows its hottest refined cell [A41]: the copper's own temperature where a track is narrower
+        # than the cell (its mean read a 0.1 mm track on 0.3 mm cells 15 % cool, while t_max and the issues, from
+        # the refined cells, were right; VALIDATION_AUDIT.md round 5, ISSUE-14)
+        mm = mesh.to_level0(Tcu[k], how="max").T.astype(np.float32)      # (nx, ny)
         node = np.isfinite(mm)
         gg = GtGrid(g0.x0 + g0.dx / 2, g0.y0 + g0.dx / 2, g0.dx, g0.nx, g0.ny, node,
                     node[:-1, :] & node[1:, :], node[:, :-1] & node[:, 1:])
@@ -736,6 +894,22 @@ def capacity_inputs(board: Board, config: Config, converters) -> dict:
             rx, ry = JX - jx, JY - jy
             terms[g][layer] = ((k * (jx ** 2 + jy ** 2 + own))[keep], (2 * k * (jx * rx + jy * ry))[keep],
                                (k * (rx ** 2 + ry ** 2 + R - own))[keep])
+    # the via barrels' heat [A43], appended to every layer's samples in _with_vias' order: per group R·(s·I_g +
+    # I_rest)² + R·(s²·var_g + var_rest), the group's own currents and variances scaling with s
+    segs = _via_segments(stages, bridges)
+    heat = _with_vias(heat, segs)
+    for g, members in groups.items():
+        def split(s, members=members) -> tuple:
+            """(a, b, c) of the segment's heat as a quadratic in the group's scale."""
+            ig = sum(v for n, v in s["i"].items() if n in members)
+            ir = sum(v for n, v in s["i"].items() if n not in members)
+            vg = sum(v for n, v in s["sq"].items() if n in members)
+            vr = sum(v for n, v in s["sq"].items() if n not in members)
+            return s["r"] * (ig * ig + vg), 2 * s["r"] * ig * ir, s["r"] * (ir * ir + vr)
+        cols = [_via_rows(segs, lambda s, i=i: split(s)[i] / 2.0) for i in range(3)]
+        for layer in cols[0]:
+            old = terms[g].get(layer, (np.zeros(0), np.zeros(0), np.zeros(0)))
+            terms[g][layer] = tuple(np.concatenate([old[i], cols[i][layer]]) for i in range(3))
     losses, loss_notes = part_losses(board, config, stages)
     losses = _merged(losses, *(b.losses for b in bridges))
     fixed = {b.net: {r["ref"]: (0.0, 0.0, r["power_w"]) for r in b.losses} for b in bridges}

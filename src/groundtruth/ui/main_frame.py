@@ -457,6 +457,8 @@ class MainFrame(wx.Frame):
         self._views_from = None     # (board, config) the heatmap views were computed with (Sharper map)
         self.board_path: Optional[str] = None
         self._board_copy: tuple[Optional[bytes], str] = (None, "")   # the board's text as loaded, for the history
+        self._board_fp: Optional[str] = None    # Board.fingerprint() of self.board when it was read (run's check)
+        self._after_load: Optional[Callable] = None     # what a reload started by run() continues with
 
         # top bar of drawn buttons (theme.Button: KiCad's native ones look dated), Preferences and Help on the right
         self.topbar = top = wx.Panel(self)
@@ -989,6 +991,8 @@ class MainFrame(wx.Frame):
         took = self._clock.elapsed()
         self._clock.stop()
         self._enable(True)
+        if cancelled or error is not None:
+            self._after_load = None         # a run waiting for a reload (_check_board) does not follow a failed one
         if cancelled:
             self.gauge.SetValue(0)
             self.SetStatusText(f"cancelled: {what}")
@@ -1059,8 +1063,10 @@ class MainFrame(wx.Frame):
         keep = self._history_on()
 
         def work(progress):
-            """(worker) The board, its path, (settings, new, dirty) or the settings' errors, the board copy."""
+            """(worker) The board, its path, (settings, new, dirty) or the settings' errors, the board copy, the
+            board's fingerprint."""
             board, path = session.load()
+            fp = board.fingerprint()        # ~0.1 s on refboard: what run() compares before analysing
             # modules the tabs' load() uses, imported here and not on the GUI thread (analysis.pdn took 59 ms there)
             from ..analysis import pdn, si, transfer  # noqa: F401
             from . import pin_complete  # noqa: F401           (the Power integrity tab's load: 50 ms more)
@@ -1069,20 +1075,22 @@ class MainFrame(wx.Frame):
                 _planes(board)              # (~160 ms on refboard the first time, then cached)
             copy = session.board_copy(path) if keep and path else (None, "")
             if not path:
-                return board, path, None, None, copy
+                return board, path, None, None, copy, fp
             try:                            # here, not in the GUI thread: parsing the YAML takes ~0.5 s
-                return board, path, _open_settings(board, path), None, copy
+                return board, path, _open_settings(board, path), None, copy, fp
             except ConfigError as e:
-                return board, path, None, e.messages, copy
-        self._start("reading the board…", work, self._loaded, what="read the board", cancellable=False,
-                    kicad=self.session.live)
+                return board, path, None, e.messages, copy, fp
+        if not self._start("reading the board…", work, self._loaded, what="read the board", cancellable=False,
+                           kicad=self.session.live):
+            self._after_load = None
 
     def _loaded(self, result):
         """The board was read: open its history and the KiCad-button inbox, fill the tabs, offer to refill
         unfilled zones, and detect nets and stages when the settings list nothing yet."""
-        board, path, opened, errors, self._board_copy = result
+        board, path, opened, errors, self._board_copy, fp = result
         startup.mark(f"board read ({len(board.footprints)} parts)", last=True)
         if not path:
+            self._after_load = None
             self.history.set_history(None, "The board is not saved yet: its history goes next to it.")
             wx.MessageBox("Save the board first, so the settings can be stored next to it.", "groundtruth", wx.ICON_WARNING)
             return
@@ -1091,8 +1099,10 @@ class MainFrame(wx.Frame):
             self.board_path = path
             self.history.set_history(history_for(path))
         if errors:
+            self._after_load = None
             wx.MessageBox("Invalid settings file:\n" + "\n".join(errors), "groundtruth", wx.ICON_ERROR)
             return
+        self._board_fp = fp
         settings, new, self.dirty = opened
         self.board, self.settings = board, settings
         if self._inbox is None:
@@ -1134,12 +1144,15 @@ class MainFrame(wx.Frame):
         if (self.board.unfilled_zones() and self.session.live and
                 wx.MessageBox("Some zones are not filled. Refill all zones now?", "groundtruth", wx.YES_NO) == wx.YES):
             self.on_refill()                # reloads the board, and detects then if the settings are still new
-            return
+            return                          # (a run waiting for this reload continues after that one)
+        then, self._after_load = self._after_load, None
         if new or not (settings.config.nets or settings.config.converters or settings.config.bridges
                        or settings.config.dc_loads or settings.config.pdn):
             self._auto_detect()
         elif "bridges" not in settings.doc:     # a settings file from before the Bridges tab: look for bridges once
             self._auto_detect(bridges_only=True)
+        elif then is not None:              # run() found the board changed and read it again: now the run itself
+            then()
 
     def _auto_detect(self, bridges_only: bool = False):
         """Nothing to analyse yet (a new settings file, or one listing neither nets nor power stages): suggest the
@@ -1474,11 +1487,19 @@ class MainFrame(wx.Frame):
         from .prefs_dialog import compute_server
         return None if local else compute_server(theme.prefs())
 
-    def run(self, simulate: bool, local: bool = False):
+    def run(self, simulate: bool, local: bool = False, fresh: bool = False):
         """Run checks (simulate=False: the rule checks only, fast) or Simulate (the field solves of every enabled
         net, power stage and bridge), optionally on a copy of the board with the what-if edits, as a job; on the
-        compute server when Preferences say so (the rule checks always here), unless `local`."""
+        compute server when Preferences say so (the rule checks always here), unless `local`.
+
+        First (unless `fresh`) a short job reads the board again and compares its fingerprint with the one it had
+        when the window read it (_check_board): a track narrowed in KiCad since would otherwise be analysed at its
+        old width (VALIDATION_AUDIT.md round 5, ISSUE-19). Changed: the board is read again as Reload board does
+        (settings, tabs), and the run follows. Unchanged, or KiCad too busy to answer: the run goes on at once."""
         if not self._ready(simulate):
+            return
+        if not fresh and self._board_fp is not None:
+            self._check_board(lambda: self.run(simulate, local, fresh=True))
             return
         board, cfg = self.board, self.settings.config
         if simulate:
@@ -1531,6 +1552,37 @@ class MainFrame(wx.Frame):
                      "simulating" if simulate else "checking") + (" with what-if edits…" if what_if else "…"), work,
                     done, what="run the analysis", solver=simulate and server is None,
                     local=(lambda: self.run(simulate, local=True)) if server is not None else None)
+
+    def _check_board(self, then: Callable):
+        """Before a run: read the board again (a short job: KiCad's board with its unsaved edits, or the file) and
+        compare its fingerprint with the window's. The same: then(). Changed: read it again as Reload board does,
+        and then() once its tabs are filled (_after_load). Not readable now (KiCad busy, the file gone): then() on the
+        board as read, saying so."""
+        session, fp = self.session, self._board_fp
+
+        def work(progress):
+            """(worker) ("same" | "changed" | "unknown", why)."""
+            try:
+                board, _ = session.load()
+            except Exception as e:      # noqa: BLE001 - KiCad busy or closed, the file unreadable: analyse what we have
+                return "unknown", f"{type(e).__name__}: {e}"
+            return ("same" if board.fingerprint() == fp else "changed"), ""
+
+        def done(result):
+            """Go on with the run, or read the board again first."""
+            state, why = result
+            if state == "changed":
+                self._after_load = then
+                self.on_reload()
+                if self._after_load is then:        # the reload started: say why the run waits
+                    self.SetStatusText("the board changed since it was read: reading it again, then the run")
+                return
+            then()
+            if state == "unknown":
+                self.SetStatusText(self.GetStatusBar().GetStatusText(0) + " · could not check the board for changes "
+                                   f"({why}): analysing it as read")
+        self._start("checking the board for changes…", work, done, what="check the board for changes",
+                    cancellable=False, kicad=session.live)
 
     def _done(self, board, issues, routes, sim, cfg=None, solver=None, kept=None, si=None, what_if: bool = False):
         """Show a run: the issues, the signal-integrity figures on their tab (si), and for a Simulate the Heatmap tab

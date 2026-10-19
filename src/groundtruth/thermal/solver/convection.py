@@ -14,10 +14,12 @@ MIN_DT = 0.5  # K, keeps natural-convection coefficients finite near ambient
 
 def air(t_film_c: float):
     """Dry air at 1 atm: (k, nu, Pr, beta)."""
-    # viscosity from Sutherland's law [Sutherland 1893] (air's constants [White 2006]), density from the ideal gas
-    # law, conductivity as a power law in T [A28]; beta = 1/T (ideal gas)
+    # viscosity from Sutherland's law [Sutherland 1893] with White's constants for air, μ0 = 1.716e-5 Pa·s at 273 K and
+    # S = 111 K [White 2006] (before 2026-10-19: 273.15 K and 110.4 K, the U.S. Standard Atmosphere's form of it,
+    # 0.05 % apart at 300 K, cited to White), density from the ideal gas law, conductivity as a power law in T
+    # [A28]; beta = 1/T (ideal gas)
     T = t_film_c + 273.15
-    mu = 1.716e-5 * (T / 273.15) ** 1.5 * (273.15 + 110.4) / (T + 110.4)  # Sutherland
+    mu = 1.716e-5 * (T / 273.0) ** 1.5 * (273.0 + 111.0) / (T + 111.0)  # Sutherland
     rho = 101325.0 / (287.05 * T)
     k = 0.0241 * (T / 273.15) ** 0.81
     cp = 1006.0
@@ -76,7 +78,9 @@ def h_radiation(t_c, t_surr_c, eps):
 
 def board_h(env, side: str, t_surf: float, t_air: float, length: float, width: float,
             natural_only: bool = False) -> float:
-    """Convection coefficient for one face of a board. length/width in m."""
+    """Convection coefficient for one face of a board. length/width in m. One h per face, from the face's mean
+    temperature t_surf (the correlations are for isothermal plates [Incropera 2011]; a hot spot has a higher local h)
+    [A41]."""
     if env.convection == "fixed" and not natural_only:
         return env.h_top if side == "top" else env.h_bottom
     dT = t_surf - t_air

@@ -76,6 +76,31 @@ class Stackup:
         # weighted mean used here is the simpler approximation, close for the similar materials of one board
         return sum(d.epsilon_r * d.thickness for d in layers) / total
 
+    def epsilon_series(self, a: str, b: str) -> float:
+        """εr of the dielectrics between two copper layers as one parallel-plate capacitor: the field crosses them in
+        series (D the same in each), so 1/εr = Σ (t_i / t) / εr_i [Pozar 2012]. For the plane pairs' and the plates'
+        capacitance; the thickness-weighted mean (epsilon_between) reads it high by about the spread of the εr_i
+        squared over their mean (0.1 % for FR-4's prepreg and core, 1.4 % for a 3.48 / 4.4 hybrid)."""
+        la, lb = self.layer(a), self.layer(b)
+        lo, hi = sorted((la.index, lb.index))
+        layers = self.dielectrics[lo:hi]
+        total = sum(d.thickness for d in layers)
+        if total <= 0:
+            return 4.5              # no stackup data: FR-4's usual value
+        return total / sum(d.thickness / d.epsilon_r for d in layers)
+
+    def loss_tangent_series(self, a: str, b: str) -> float:
+        """tan δ of the dielectrics between two copper layers as one parallel-plate capacitor: each one's weighted by
+        its share of the field's energy, t_i / εr_i (the series capacitors' loss to first order in tan δ
+        [Pozar 2012])."""
+        la, lb = self.layer(a), self.layer(b)
+        lo, hi = sorted((la.index, lb.index))
+        layers = self.dielectrics[lo:hi]
+        weight = sum(d.thickness / d.epsilon_r for d in layers)
+        if weight <= 0:
+            return 0.02             # FR-4's usual value
+        return sum(d.loss_tangent * d.thickness / d.epsilon_r for d in layers) / weight
+
     def loss_tangent_between(self, a: str, b: str) -> float:
         """Thickness-weighted dielectric loss tangent between two copper layers."""
         la, lb = self.layer(a), self.layer(b)
@@ -281,6 +306,61 @@ class Board:
         ref, number = pin.rsplit(".", 1)
         fp = self.footprint(ref)
         return fp.pad(number) if fp else None
+
+    def fingerprint(self) -> str:
+        """A digest of everything the analyses read from the board: the stackup, the nets, every track, via, pad and
+        zone fill with its geometry, the parts with their fields, the outline (coordinates to 1 nm). Two reads of an
+        unchanged board give the same digest whatever the order the reader lists the items in; a track's width
+        changed by a micrometre gives another. Not in it: where the board came from, the file's line numbers, the
+        reader's warnings. The plugin compares it before a Simulate with the board's when it was read, so an edit in
+        KiCad since is read again before it is analysed (VALIDATION_AUDIT.md round 5, ISSUE-19)."""
+        import hashlib
+
+        import numpy as np
+
+        def r(v) -> float:
+            """A coordinate or size to 1 nm (mm)."""
+            return round(float(v), 6)
+
+        def poly(p) -> Optional[str]:
+            """A polygon (outline, holes) as the digest of its points in nm (numpy: a zone fill has tens of thousands
+            of points, and this runs beside the window's thread)."""
+            if not p:
+                return None
+            d = hashlib.sha256()
+            for points in (p[0], *p[1]):
+                d.update(np.rint(np.asarray(points, dtype=float).reshape(-1, 2) * 1e6).astype(np.int64).tobytes())
+                d.update(b"|")
+            return d.hexdigest()
+
+        def point(p) -> Optional[tuple]:
+            """A point, rounded."""
+            return (r(p[0]), r(p[1])) if p is not None else None
+
+        st = self.stackup
+        parts = [repr(("stackup", [(c.name, c.index, r(c.z), r(c.thickness)) for c in st.copper],
+                       [(d.name, r(d.thickness), r(d.epsilon_r), r(d.loss_tangent)) for d in st.dielectrics],
+                       r(st.board_thickness),
+                       [(m.name, r(m.thickness), r(m.epsilon_r)) if m else None for m in (st.mask_top, st.mask_bottom)])),
+                 repr(("nets", sorted(self.nets)))]
+        items = [repr(("t", point(t.start), point(t.end), r(t.width), t.layer, t.net, point(t.mid))) for t in self.tracks]
+        items += [repr(("v", point(v.position), r(v.size), r(v.drill), list(v.layers), v.net, v.via_type))
+                  for v in self.vias]
+        for fp in self.footprints:
+            pads = sorted(repr((p.number, point(p.position), r(p.angle), point(p.size), p.shape, list(p.layers), p.net,
+                                p.pad_type, r(p.drill), poly(p.polygon), r(p.roundrect_ratio), p.pin_type,
+                                p.pin_function)) for p in fp.pads)
+            items.append(repr(("f", fp.reference, fp.value, fp.lib_id, point(fp.position), r(fp.angle), fp.layer, fp.dnp,
+                               fp.exclude_from_sim, sorted(fp.fields.items()), fp.sheet, pads)))
+        items += [repr(("z", z.net, list(z.layers), z.is_rule_area, z.name,
+                        sorted((layer, [poly(p) for p in polys]) for layer, polys in z.filled.items()), poly(z.outline)))
+                  for z in self.zones]
+        items += [repr(("o", poly(o))) for o in self.outline]
+        h = hashlib.sha256()
+        for s in parts + sorted(items):
+            h.update(s.encode("utf-8"))
+            h.update(b"\n")
+        return h.hexdigest()
 
     def unfilled_zones(self) -> list[Zone]:
         """Copper zones of a net that have never been filled (the model would miss their copper: the checks and
