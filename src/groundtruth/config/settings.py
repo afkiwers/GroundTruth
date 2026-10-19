@@ -412,7 +412,7 @@ class RuleSettings:
     resonance_db: float = 10.0            # flag a plane resonance raising the loop moment this much over f0
     overshoot_warning: float = 0.25       # converter switch-node overshoot L·di/dt as a fraction of v_in
     overshoot_error: float = 0.5
-    current_density_warning: float = 50.0  # A/mm², converter DC paths: copper (1 mm average) and via plating
+    current_density_warning: float = 50.0  # A/mm², converter DC paths: copper (1 mm average) and via plating [A40]
     current_density_error: float = 100.0
     via_load_warning: float = 100.0         # % of a via's IPC-2221 capacity (10 K rise)
     via_load_error: float = 150.0           # about a 25 K rise

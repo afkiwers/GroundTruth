@@ -61,9 +61,12 @@ def failing(issues: list[Issue], fail_on: str) -> list[Issue]:
 
 
 def to_json(board_path: str, issues: list[Issue], routes: list = (), meta: Optional[dict] = None,
-            converters: list = (), bridges: list = (), dc_loads: list = (), pdn: list = (), si=None) -> str:
+            converters: list = (), bridges: list = (), dc_loads: list = (), pdn: list = (), si=None,
+            thermal=None, capacity: list = ()) -> str:
     """The JSON report: the board, the run's metadata, issue counts per severity, every issue, and every route's,
-    power stage's, bridge's and DC load's summary (no maps); si: the signal-integrity figures (analysis/si.py)."""
+    power stage's, bridge's and DC load's summary (no maps); si: the signal-integrity figures (analysis/si.py);
+    thermal / capacity: the thermal solve's and the current-capacity views' summaries (ThermalResult.summary: the
+    hottest copper, the parts, the heat balance, the DC paths at temperature), when they ran."""
     data = {
         "tool": "groundtruth",
         "board": board_path,
@@ -76,6 +79,8 @@ def to_json(board_path: str, issues: list[Issue], routes: list = (), meta: Optio
         "dc_loads": [d.summary() for d in dc_loads],
         "pdn": [d.summary() for d in pdn],
         "si": si.summary() if si is not None else None,
+        "thermal": thermal.summary() if thermal is not None else None,
+        "capacity": [c.summary() for c in capacity or ()],
     }
     return json.dumps(data, indent=2, default=_jsonable, ensure_ascii=False)
 

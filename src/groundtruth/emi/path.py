@@ -54,18 +54,17 @@ class PathLine:
     def alpha(self, f: np.ndarray) -> np.ndarray:
         """The attenuation (Np/m) at f: α = R'/(2 Z0) + G' Z0 / 2, the low-loss line [Pozar 2012].
 
-        Conductor: the strip's R' = 1/(σ·w·t_eff), t_eff = δ(1 - e^(-t/δ)) [A2], and each return plane's from the
-        current it carries spread under the strip as 1/(1 + (x/h)²) [Johnson 1993] (plane_resistance; a stripline's
-        two planes share it inversely to their heights [A36]); without the heights, the plane as much as the strip
-        (Pozar's wide-strip α_c = R_s/(Z0·W)). Dielectric: G' = ωC'·tan δ
+        Conductor: the strip's R' = 1/(σ·w·t_eff), t_eff the one-sided slab's [Dowell 1966] [A2], and each return
+        plane's from the current it carries spread under the strip as 1/(1 + (x/h)²) [Johnson 1993]
+        (plane_resistance; a stripline's two planes share it inversely to their heights [A36]); without the heights,
+        the plane as much as the strip (Pozar's wide-strip α_c = R_s/(Z0·W)). Dielectric: G' = ωC'·tan δ
         with C' = √εeff/(c·Z0), the loss tangent weighted by the field's share in the dielectric, the filling
         factor εr(εeff - 1)/(εeff(εr - 1)) (1 for a stripline, εeff = εr) [Pozar 2012]."""
         f = np.asarray(f, float)
         if self.width_m is None or self.width_m <= 0:
             return np.zeros(len(f))
-        mu0 = 4e-7 * math.pi
-        delta = 1.0 / np.sqrt(np.pi * np.maximum(f, 1.0) * mu0 * self.sigma)
-        teff = delta * (1.0 - np.exp(-self.thickness_m / delta))
+        from ..solver.kernel import skin_thickness
+        teff = skin_thickness(self.thickness_m, np.maximum(f, 1.0), self.sigma)
         r_sheet = 1.0 / (self.sigma * teff)                  # ohm per square
         hs = [h for h in self.planes_h_m if h > 0]
         if hs:

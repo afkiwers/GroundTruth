@@ -26,7 +26,7 @@ from .geometry import via_span
 from .mesh import DIRS, MAX_DIELECTRIC_SLAB_MM, Mesh, Slab, dielectric_split  # noqa: F401 (re-exported)
 from .stack import Layer
 
-K_RESIN = 0.3  # W/mK, resin/soldermask between copper features
+K_RESIN = 0.3  # W/mK, resin/soldermask between copper features [A41]
 
 
 class ThermalModel:
@@ -398,7 +398,7 @@ class ThermalModel:
         t_air = self.t_air if encl else env.ambient_c
         h_top = C.board_h(env, "top", t_top, t_air, self.length, self.width, natural_only=encl)
         h_bot = C.board_h(env, "bottom", t_bot, t_air, self.length, self.width, natural_only=encl)
-        h_edge = 0.5 * (h_top + h_bot)                  # the board edge: the two faces' mean
+        h_edge = 0.5 * (h_top + h_bot)                  # the board edge: the two faces' mean [A41]
         Gc = np.zeros(self.n)
         Gr = np.zeros(self.n)
         Gc[self.top] += h_top * A

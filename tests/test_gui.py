@@ -117,6 +117,51 @@ def test_jobs_run_off_the_gui_thread(app, frame):
     assert longest_busy_gap(ticks) < 0.5, f"GUI thread stalled {longest_busy_gap(ticks):.2f}s during a job"
 
 
+def test_simulate_reads_a_board_changed_since_it_was_loaded(app, tmp_path, monkeypatch):
+    """ISSUE-19 (VALIDATION_AUDIT.md round 5): the window simulates the board as it is now, not as it was read. A
+    1 A DC load through a 40 mm, 0.4 mm track is simulated; the board file is then saved with the track at 0.1 mm
+    (as KiCad would, the window not told); the next Simulate finds the board changed (Board.fingerprint), reads it
+    again with its settings and simulates the narrow track: the supply drop grows about 4 times (the pads' share
+    stays). Before: the old track's drop again, until Reload board."""
+    from boardgen import BoardGen
+    from groundtruth.config.settings import DcLoad, DcLoadSpec
+    from groundtruth.ui import main_frame
+    monkeypatch.setattr(wx, "MessageBox", lambda *a, **k: wx.YES)
+
+    def board(width):
+        """Two 1 x 1 mm PWR pads joined by a 40 mm PWR track `width` wide, each part with a GND pad (the settings'
+        reference net), 2 layers."""
+        g = BoardGen(layers=2, size=(56.0, 20.0))
+        for ref, x in (("U1", 6.0), ("U2", 46.0)):
+            g.footprint(ref, "IC", "Package_SO:Fake_IC", (x, 10.0),
+                        [{"number": 1, "at": (0, 0), "net": "PWR", "size": (1.0, 1.0)},
+                         {"number": 2, "at": (0, 3.0), "net": "GND", "size": (1.0, 1.0)}])
+        g.track((6.0, 10.0), (46.0, 10.0), "PWR", "F.Cu", width=width)
+        return g
+
+    _, sc, path = make(tmp_path, board(0.4), "fresh", nets=())
+    sc.set_dc_loads([DcLoadSpec("rail", "U1.1", [DcLoad("U2.1", 1.0, "")], "")])
+    sc.save()
+    f = main_frame.MainFrame(main_frame.Session(file_path=str(path)))
+    f.Show()
+    drops, statuses = [], []
+
+    def drop():
+        """The rail's supply drop (mV) from the last Simulate's views."""
+        rail = next(r for r in f.routes if getattr(r, "kind", "") == "dcload")
+        drops.append(rail.loads[0]["supply_mv"])
+
+    try:
+        run_steps(app, f, [lambda: f.run(True) and None, drop,
+                           lambda: board(0.1).write(path) and None,       # saved in KiCad meanwhile
+                           lambda: f.run(True) and None, drop,
+                           lambda: statuses.append(f.GetStatusBar().GetStatusText(0))])
+        assert {t.width for t in f.board.tracks} == {0.1}, "the window still holds the old board"
+        assert drops[1] / drops[0] == pytest.approx(4.0, rel=0.05), drops
+    finally:
+        close_window(f)
+
+
 def test_cancel_stops_a_running_simulation(app, frame):
     f = frame
     status = []

@@ -191,6 +191,7 @@ class RmsBasis:
         plating = self.model.config.analysis.via_plating_um
         out = {"maps": {}, "grids": {}, "vias": [], "parts": []}
         sq, grids, via_sq = {}, {}, {}
+        seg_sq: dict = {}               # every via segment's mean square, per model: its heat for Thermal [A43]
         if self.slow is not None:
             st, idx, fields, I = self.slow
             g = G[np.ix_(idx, idx)]
@@ -204,6 +205,7 @@ class RmsBasis:
             for bi, br in enumerate(st.plane.branches):
                 if br.kind == "via":
                     via_sq[br.name] = max(via_sq.get(br.name, (0.0, None))[0], branch_sq[bi]), (br, st)
+                    seg_sq[(id(st), bi)] = (seg_sq.get((id(st), bi), (0.0,))[0] + float(branch_sq[bi]), br, st)
                 elif br.kind == "part" and branch_sq[bi] > 1e-12:     # a series part carrying current (caps: open)
                     acc = part_rms.setdefault(br.name, [0.0, 0.0])
                     acc[0] += math.sqrt(branch_sq[bi])               # in phase, side by side: the RMS values add
@@ -226,6 +228,7 @@ class RmsBasis:
                 if br.kind == "via":
                     old, where = via_sq.get(br.name, (0.0, (br, st)))
                     via_sq[br.name] = old + branch_sq[bi], where
+                    seg_sq[(id(st), bi)] = (seg_sq.get((id(st), bi), (0.0,))[0] + float(branch_sq[bi]), br, st)
         rho = COPPER.resistivity_20c * 1e3                                 # Ω·mm
         best, best_s = (0.0, "", (0.0, 0.0)), (0.0, "", (0.0, 0.0))
         copper_w = 0.0
@@ -243,7 +246,7 @@ class RmsBasis:
             i, j = np.unravel_index(int(np.argmax(dens)), dens.shape)
             if dens[i, j] > best[0]:
                 best = (float(dens[i, j]), layer, tuple(float(x) for x in g.xy(i, j)))
-            sus = sustained(dens, g.node, g.d)
+            sus = sustained(dens, g.node, g.d, g)
             i, j = np.unravel_index(int(np.argmax(sus)), sus.shape)
             if sus[i, j] > best_s[0]:
                 best_s = (float(sus[i, j]), layer, tuple(float(x) for x in g.xy(i, j)))
@@ -258,6 +261,12 @@ class RmsBasis:
                          "x": x, "y": y, "capacity_a": cap, "load_pct": 100.0 * a / cap if cap > 0 else None})
         top = max((v["current_a"] for v in vias), default=0.0)
         out["vias"] = sorted((v for v in vias if v["current_a"] >= 0.01 * top), key=lambda v: -v["current_a"])
+        # (x, y, layer a, layer b, R ohm, mean square A²) of every via segment that carries current: Thermal puts its
+        # I²R into the copper at both ends (the slow and the fast parts on their own models: mean squares add)
+        out["via_heat"] = [(*st.xy(br.a), st.names[br.a[0]], st.names[br.b[0]], float(complex(br.z(DC_F)).real), ms)
+                           for ms, br, st in seg_sq.values() if ms > 1e-12 and not br.name.startswith("pad ")]
+        # the copper's loss counts the barrels too (on the test bridge 16 % of it: large currents through few vias)
+        copper_w += sum(r * ms for *_, r, ms in out["via_heat"])
         out["parts"].sort(key=lambda p: -p["rms_a"])
         out.update(peak_a_mm2=best[0], peak_layer=best[1], peak_at=best[2], sustained_a_mm2=best_s[0],
                    sustained_layer=best_s[1], sustained_at=best_s[2], copper_w=copper_w)

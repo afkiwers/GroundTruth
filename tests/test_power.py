@@ -754,6 +754,12 @@ def test_the_stages_dc_currents_add_up_on_one_board_model(tmp_path):
         # (two stages switching independently: twice one stage's variance; VALIDATION_AUDIT.md ISSUE-7)
         var = sum(one.dc_ripple_sq[n][layer] for n in one.dc_ripple_sq)
         assert np.allclose(m, np.sqrt((2 * np.hypot(jx, jy)) ** 2 + 2 * var), rtol=1e-4, atol=1e-6)
+    # the combined copper loss and the heat Thermal gets from the two stages (each from its own code: the summed maps
+    # over each node's copper area with the vias' R·I², and the stages' vectors, variances and via segments) are the
+    # same total (round 5: the combined loss had taken whole cells and no barrels)
+    from groundtruth.analysis.thermal import copper_heat
+    heat = sum(float(p.sum()) for *_, p in copper_heat(board, [one, two]).values())
+    assert path["loss_w"] == pytest.approx(heat, rel=0.005)
     single = {v["name"]: v["current_a"] for p in one.dc for v in p["vias"]}
     busiest = path["vias"][0]
     assert busiest["current_a"] <= 2 * sum(single.values())                 # bounded by the paths' sum
