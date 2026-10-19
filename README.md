@@ -937,8 +937,10 @@ HTML report and the plugin's **Power integrity** tab (Find rails lists the rails
 shows each rail's curves and what holds it at each frequency). An IC whose pads the model's grid cannot join to the
 rail's copper (pads smaller than a cell) is left out with a note: raise the resolution. Each IC's pins are also solved
 on a fine model of their own surroundings (the inductance at small pads and vias), added to its board-wide curve: on
-kraft_flux_mini_2 the 0.86 mm and 0.59 mm board-wide grids then agree within 1-20 % at 100 MHz (margins within
-~1.5 dB).
+kraft_flux_mini_2 (+3V3, a 0.3 A step, source U505; 2026-10-19, `tools/dev/pdn_check.py --budgets 40000,80000`) the
+0.86 mm and 0.59 mm board-wide grids then agree within 1-5 % at 100 MHz (margins within 0.4 dB; U1102 0.62 Ω against
+the 0.55 Ω target); U203 and U305 join only at 0.59 mm (their pads do not reach the rail's copper on the coarser
+grid, which a note says).
 
 ## Voltage-aware safety checks
 

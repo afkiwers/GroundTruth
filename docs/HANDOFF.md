@@ -7,6 +7,19 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `open-items` (2026-10-19, from `main`, not merged):** the user: "finish those -> Open technical items"
+  (NEXT_STEPS rows 9-13; VALIDATION_AUDIT round 4 "Open items after round 4" and "SP-19 at 16x").
+  - 16x (493 303 nodes, 1-1.5 GHz, ~3 h): the band's worst margin +14.1 / +17.6 / +15.8 dB at 4x / 8x / 16x, so the
+    grid note now asks for 4x everywhere and gives ±2 dB above 1 GHz (`GRID_CHECK_F`, `GRID_ABOVE_DB`).
+  - Interleaving: CE101 combined per group; end-to-end tests on a 2 kHz pair's CE101 and on two boosts.
+  - GPU: `DeviceTooSmall` before uploading a model larger than 80 % of the free device memory.
+  - A36: the return plane's loss from Johnson's current spread (`emi/path.plane_resistance`, closed form within
+    0.1 % of the integral): kraft ADC_I_RAIL_1 +30.1, ADC_I_RAIL_2 +33.6, the SPI nets +0.3 dB over lossless.
+  - README: the safety figures and the PDN grid comparison from the current board.
+  - CLAUDE.md: the remote is `origin` (the rule not to push without asking stays).
+  - Full suite (`out/full_suite_open_items.log`, 29 min): 892 passed, 5 skipped, 1 failed: test_remote_update's
+    two-networks test assumed 192.168.0.6 is not one of the test PC's addresses; it is the user's (on a /30 since
+    today, so its broadcast is .7, correctly). The test now uses a documentation address (192.0.2.6): 12 passed.
 - **Branch `analog-defaults` (2026-10-19, from `main`, merged into `main` as 33d43ad at the user's "Yes"):** the user asked how useful the MHz-GHz
   results are for a signal of a few kHz (Net-(U301--)): not at all; it ran on detection's generic 10 MHz / 2 ns.
   The user: "use that information otherwise keep 10MHz". `detect._amplifier_signal` [A37]: a net with no class from
@@ -16,7 +29,8 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
 - **Branch `path-loss-gpu` (2026-10-19, from `main`, merged into `main` as 2a93735 at the user's "Yes"):** the user: "Fix those" (NEXT_STEPS items 6 and 7;
   VALIDATION_AUDIT Round 4 has the evidence).
   - Item 6: the signal path's lines are lossy (`emi/path.PathLine.alpha`, `simulate._line_loss`, REFERENCES A36):
-    kraft's ADC_I_RAIL_1 +21.4 → +33.5 dB, ADC_I_RAIL_2 +35.4, the SPI nets +0.4 dB; the converters and the
+    kraft's ADC_I_RAIL_1 +21.4 → +33.5 dB, ADC_I_RAIL_2 +35.4, the SPI nets +0.4 dB (with the plane's loss from
+    Johnson's spread, branch `open-items`: +30.1, +33.6, +0.3 dB); the converters and the
     issue counts unchanged. Net-(U301--) stays +22.1 dB (a plane resonance at 1590 MHz, not its path).
   - Item 7: `gpu: auto` times the solver's convolution on the GPU against the CPU and uses it only from 1.5x (the
     RTX 3050 here: 0.3-0.8x, so auto keeps to the CPU and says why); one process at a time holds a GPU, the lock

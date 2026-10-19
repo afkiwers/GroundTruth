@@ -18,6 +18,11 @@ done, with the evidence in [VALIDATION_AUDIT.md](VALIDATION_AUDIT.md) "Round 4".
 | 6 | Lossless signal-path lines | copper and dielectric loss in `emi/path.py` [A36] | ARCHITECTURE "signal path" |
 | 7 | The GPU path on a small GPU | `gpu: auto` times the GPU against the CPU (from 1.5x), one process per GPU | ARCHITECTURE "GPU backend" |
 | 8 | Analog nets on 10 MHz / 2 ns | detection takes a driving op-amp's slew rate / bandwidth [A37] | ARCHITECTURE "suggest_net" |
+| 9 | Resonance heights above 1 GHz: 16x | the worst margin settles to ±2 dB from 4x on, 8x no closer: the grid note asks for 4x and gives ±2 dB above 1 GHz | ARCHITECTURE "Board-wide resonances above 1 GHz" |
+| 10 | Interleaving: CE101, boosts | CE101 combined per group; end-to-end tests on a 2 kHz pair and on two boosts | ARCHITECTURE "Interleaved stages" |
+| 11 | GPU memory | a model larger than 80 % of the device's free memory is solved on the CPU before upload | ARCHITECTURE "GPU backend" |
+| 12 | A36: the plane's loss | from Johnson's current spread in closed form (`plane_resistance`), not "as the strip" | REFERENCES A36 |
+| 13 | README figures | safety counts and PDN grids re-taken on the current board | README |
 
 All merged into `main`; the full suite on `main` after the last of them (cebe708, GPU visible, `out/full_suite_final.log`):
 **885 passed, 5 skipped, 0 failed** in 29 min.
@@ -36,27 +41,16 @@ All merged into `main`; the full suite on `main` after the last of them (cebe708
    them or set the real signal (a few kHz, µs edges). The ADC paths start at the ZXCT1107s (U302, U304), modelled
    `open`: give them `Gain` and `Bandwidth` fields to make them amplifier stages, and check that their pins are
    recognised (`components.models.amplifier_pins`: else `amp_in` / `amp_out` GT labels, as on U301).
-3. **No remote.** Nothing is pushed anywhere; the repo exists only here.
 
 ## Open, technical
 
-4. **Resonance heights above 1 GHz** differ by ~3 dB rms between 4x and 8x (SPI_SCK, kraft). 16x has about 4x the
-   nodes of 8x (256 152), likely more than 32 GB with the solves; a bigger machine could try it:
-   `tools/dev/cavity_converge.py BOARD out/audit/kraft.groundtruth.yaml --only /CPU/SPI_SCK --resolutions 16
-   --band 500e6,1500e6 --threads 4 --gmres-mb 2500 --json out/converge/spi_sck_widths_16x.json`, then
-   `tools/dev/converge_compare.py` with the 1x-8x JSONs.
-5. **Interleaving:** CE101 stays each stage's own (no combined CE101 rows); the boost ripple's phase is tested
-   against the triangle's DFT but never end to end on a boost board (`tests/boardgen.py` has no two-boost board yet).
-6. **GPU:** the speed check (`gpu._speedup`, 6 × 384² FFTs) guards against a slow GPU, not against a fast one
-   too small for the model (WDDM pages silently instead of running out of memory). A check of the model's device
-   bytes against `torch.cuda.mem_get_info` before the upload would. Nothing has run on the big-GPU target machines
-   yet: there, `tools/check_gpu.py` and `tools/dev/gpu_contention.py --procs 2` first.
-7. **A36** takes the return plane's loss equal to the strip's (Pozar's wide-strip estimate): slightly too much
-   loss for narrow strips over wide planes. A field-solved R' from the cut (`si.SectionCache`) would replace it.
-8. **README figures not re-taken** in round 4: the voltage-aware safety counts ("16 errors, 27 warnings") and the
-   PDN grid comparison (0.86 vs 0.59 mm) come from other tools and settings.
-9. **The neck scatter** (±4 % on a resonance set by copper narrower than the pitch) is how the grid falls on the
-   geometry; nothing planned.
+3. **Untestable here:** the GPU path on a big GPU (its speed-up, the memory guard on a large model). On a target
+   machine: `python tools/check_gpu.py`, `tools/dev/gpu_contention.py --procs 2`, `tools/dev/gpu_check.py BOARD
+   SETTINGS --only SPI_SCK`.
+4. **Model limits, documented, nothing planned:** a board-wide resonance's margin above 1 GHz is good to about
+   ±2 dB (SP-19); a resonance set by copper narrower than the pitch scatters about ±4 % from grid to grid (how the
+   grid falls on the geometry: a finer copper sampling did not reduce it); the strip's own edge crowding is left
+   out of the line loss (A36); the emission estimate is quasi-static and differential-mode (no cables).
 
 ## Before committing anything
 

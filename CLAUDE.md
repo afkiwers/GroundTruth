@@ -295,6 +295,6 @@ in `tools/dev/`, never only in the scratchpad.
   That is how the rasterisation topology bug was found (see HANDOFF).
 - Git: the user asked for a repo. `main` holds the reviewed state; unmerged branches are listed in HANDOFF (all earlier feature
   branches were merged and deleted on 2026-10-05). Start new work on a new feature branch from `main`. Commit messages end with the `Co-Authored-By` trailer the session provides. Don't push
-  (no remote configured) and don't merge to `main` without asking.
+  (the remote is `origin`, github.com/afkiwers/GroundTruth) and don't merge to `main` without asking.
 - The user steers per milestone: finish a milestone, show results on their real boards, then ask before
   starting the next. Don't assume old tool versions (they're on KiCad 10 and want 10+ only).
