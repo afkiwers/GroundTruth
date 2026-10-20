@@ -1,13 +1,13 @@
 # GroundTruth handover
 
-## Current state (2026-10-20, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-20, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `issues-filter` (2026-10-20, from `main` ef78116, not merged):** three of the user's asks.
+- **Branch `issues-filter` (2026-10-20, from `main` ef78116, merged into `main` at the user's "commit, merge"):** three of the user's asks.
   - "add a filter to enable/hide entries based on what Checks are selected": the Issues tab's **Checks…**
     (`IssuesPanel.choose_checks`, remembered in ui.json `issues_hidden`); rows keep their number in the whole list;
     Draw markers on board leaves hidden checks out (`kipy_sink.draw_issues(hidden=)`). Found on the way: markers were
