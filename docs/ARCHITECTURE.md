@@ -552,8 +552,8 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
     lies within ±5 %. The reported worst case is therefore a solved value, not an interpolation across a
     possible resonance. Since 2026-10-20 (round 6, ISSUE-32) also when `max_solves` is spent, up to `WORST_EXTRA`
     (3) more: the budget check returned first, and refboard's SPI_SCK at 1x reported +13.2 dB at 1220 MHz,
-    interpolated between solves at 1020 and 1580 MHz, where every harmonic solved gives +7.9 dB (now +7.85 dB with
-    one more solve). A worst still interpolated gets a note (`interpolated_worst_note`), and so does a budget that
+    interpolated between solves at 1020 and 1580 MHz, where every harmonic solved gives +8.4 dB (now +7.85 dB with
+    one more solve, equal to the sweep with round 6's kernel). A worst still interpolated gets a note (`interpolated_worst_note`), and so does a budget that
     ended with gaps near the limit unresolved (`unresolved_gaps_note`, naming them).
 - `solve_setups` runs each shared model frequency by frequency over all routes, so one factorisation serves
   every route at that frequency.

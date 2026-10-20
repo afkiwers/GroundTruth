@@ -1553,7 +1553,7 @@ class PlaneStack:
         dL = np.zeros(self.ns)
         keys, inv = np.unique(np.round(np.column_stack([self.strip_width[narrow], t[narrow]]), 12), axis=0,
                               return_inverse=True)
-        dL[narrow] = np.array([_narrow_self(d, phi, tk) for phi, tk in keys])[np.ravel(inv)]
+        dL[narrow] = _narrow_self(d, keys[:, 0], keys[:, 1])[np.ravel(inv)]
         self.dL = dL
         # side-by-side neighbours: x strips at row j and j + 1, y strips at column i and i + 1, the same layer, up
         # to NEAR_AXIAL strips apart along their length (a long neck's two rows couple all along it)
@@ -2563,16 +2563,20 @@ def _kernel_pair(nx: int, ny: int, d: float, dz: float) -> tuple:
     return hit
 
 
-def _narrow_self(d: float, phi: float, t: float) -> float:
+def _narrow_self(d: float, phi, t):
     """The partial self inductance (H) a strip d long and φd wide adds to the kernels' full square strip: the
     numeric flat-strip integral the kernels' self term is (kernel.strip_self_numeric, zero thickness), and the
     copper thickness t's change to it from the GMD formula (kernel.strip_self), as a difference to the full
     strip's (the GMD formula alone was 1.5 % off the integral: two touching half-pitch strips read 1.5 % above
-    the one strip they make). The GMD formula is [Grover 1946]; the split of a strip's partials [A4]."""
+    the one strip they make). The GMD formula is [Grover 1946]; the split of a strip's partials [A4]. phi and t may
+    be arrays (one per narrow strip: all in one numpy pass, see kernel.strip_self_numeric)."""
+    phi, t = np.asarray(phi, float), np.asarray(t, float)
+
     def thick(w):
-        """What thickness t lowers a strip w wide by (GMD formula)."""
-        return strip_self(d, w) - strip_self(d, w, t)
-    return strip_self_numeric(d, phi * d) - strip_self_numeric(d, d) - thick(phi * d) + thick(d)
+        """What thickness t lowers a strip w wide by (GMD formula, strip_self = the filament mutual at the GMD)."""
+        return filament_mutual(d, 0.0, GMD_FLAT * w) - filament_mutual(d, 0.0, GMD_FLAT * (w + t))
+    out = strip_self_numeric(d, phi * d) - strip_self_numeric(d, d) - thick(phi * d) + thick(d)
+    return float(out) if np.ndim(out) == 0 else out
 
 
 NEAR_AXIAL = 2      # PlaneStack._widths: side-by-side partial strips corrected up to this many strips along [A4]

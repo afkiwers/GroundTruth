@@ -76,14 +76,35 @@ def strip_self(length: float, width: float, thickness: float = 0.0) -> float:
     return float(filament_mutual(length, np.array(0.0), np.array(rho)))
 
 
-def strip_self_numeric(length: float, width: float) -> float:
+def strip_self_numeric(length: float, width):
     """Self partial inductance of a flat (zero-thickness) strip with its current spread evenly across it: the mean
-    of the filament mutuals over every pair of points across its width, integrated accurately (tape_mutual; the
-    single-GMD formula is ~5 % low when length ~ width).
+    of the filament mutuals over every pair of points across its width, integrated accurately (the single-GMD formula
+    is ~5 % low when length ~ width). `width` may be an array (one value per width, in one numpy pass).
+
+    The pairs' mean is (2/w²)∫₀^w (w − u)·M_fil(u) du over their distance u, = 2∫₀¹ (1 − s)·M_fil(w·s) ds: the
+    tape_mutual integral of a strip with itself, on the same panels graded toward u = 0 (the log singularity) but
+    vectorised over the widths (a model asks for one per narrow strip: tape_mutual per width held the GIL for
+    seconds on refboard, and the plugin window with it).
 
     Until 2026-10-20 the mean over 24 sub-strips with the GMD formula on the diagonal: it converges as 1/n and was
     0.86 % low for a square strip (VALIDATION_AUDIT.md round 6, ISSUE-28)."""
-    return tape_mutual(length, width, width, 0.0, 0.0, 0.0)
+    s, ws = _unit_rule()
+    w = np.asarray(width, float)
+    flat = np.atleast_1d(w).ravel()
+    out = np.empty(len(flat))
+    for a in range(0, len(flat), 2048):                 # chunks: 2048 widths x 240 points at a time
+        u = flat[a:a + 2048, None] * s[None, :]
+        out[a:a + 2048] = 2.0 * (filament_mutual(length, 0.0, u) * ((1.0 - s) * ws)[None, :]).sum(axis=1)
+    return float(out[0]) if w.ndim == 0 else out.reshape(w.shape)
+
+
+@lru_cache(maxsize=1)
+def _unit_rule() -> tuple[np.ndarray, np.ndarray]:
+    """The nodes and weights on (0, 1) for strip_self_numeric: TAPE_PANELS panels graded toward 0 (cached)."""
+    s, ws = _panel_rule(0.0, 1.0, 0.0, TAPE_PANELS, TAPE_ORDER)
+    s.setflags(write=False)
+    ws.setflags(write=False)
+    return s, ws
 
 
 TAPE_PANELS = 30            # tape_mutual: panels graded geometrically (ratio ½) toward a near-singular point ...
