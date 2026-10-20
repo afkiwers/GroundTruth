@@ -1003,7 +1003,7 @@ class LiveSlotBoard:
             return {"selected": len(focus) + len(context), "focus": len(focus), "lit": bool(lit) and nets,
                     "previous_layer": None, "notes": []}
 
-        def draw_issues(kb, issues, layer, wait=None):
+        def draw_issues(kb, issues, layer, wait=None, hidden=frozenset()):
             t0 = time.perf_counter()
             time.sleep(draw_time)
             self.calls.append(("draw", t0, time.perf_counter()))
@@ -2694,3 +2694,92 @@ def test_a_selection_is_shown_in_kicad_once_it_settles(app):
         assert shown == [["row3"]]
     finally:
         top.Destroy()
+
+
+def _issue(check, k, severity="error", waived=False):
+    """A made-up issue of `check` at (k, k)."""
+    from groundtruth.core.issues import Issue
+    return Issue(check, severity, f"N{k}", f"{check} {k}", (float(k), float(k)), waived=waived)
+
+
+def test_the_issues_tab_hides_the_checks_not_chosen_and_keeps_every_number(app, tmp_path):
+    """The user: "add a filter to enable/hide entries based on what Checks are selected". Hidden checks leave the
+    list, the rows keep their issue's number in the whole list (as its marker on the board is numbered), a click
+    on a row is that row's issue, the count of what is hidden shows, and the choice is kept on this computer."""
+    from groundtruth.ui import theme
+    from groundtruth.ui.results_panels import IssuesPanel
+    f = wx.Frame(None)
+    try:
+        p = IssuesPanel(f, lambda i: None, lambda: None, lambda i, r: None)
+        issues = [_issue("clearance_voltage", 1), _issue("emi_margin", 2), _issue("clearance_voltage", 3),
+                  _issue("via_overload", 4, "warning")]
+        p.show(issues)
+        assert [k for k, _ in p.rows] == [1, 2, 3, 4] and p.shown_label.GetLabel() == ""
+        assert dict(p.checks_present()) == {"clearance_voltage": 2, "emi_margin": 1, "via_overload": 1}
+        p.set_hidden({"clearance_voltage"})
+        assert p.list.GetItemCount() == 2 and [k for k, _ in p.rows] == [2, 4]
+        assert p.list.GetItemText(1, 0) == "4" and p.rows[1][1] is issues[3]
+        assert "2 of 4 shown" in p.shown_label.GetLabel()
+        assert theme.prefs()["issues_hidden"] == ["clearance_voltage"]
+        again = IssuesPanel(f, lambda i: None, lambda: None, lambda i, r: None)     # a new window: remembered
+        assert again.hidden == {"clearance_voltage"}
+        p.set_hidden(set())
+        assert p.list.GetItemCount() == 4
+    finally:
+        f.Destroy()
+        wx.Yield()
+
+
+def test_board_markers_keep_the_issue_numbers_and_skip_waived_and_hidden_checks(monkeypatch):
+    """Draw markers on board: no marker for a waived issue or a hidden check, and each marker's label carries its
+    issue's number in the Issues tab. Before, the markers counted only those drawn, so a waived issue earlier in
+    the list shifted every later number off the tab's."""
+    from groundtruth.adapters import kipy_sink
+    texts = []
+    monkeypatch.setattr(kipy_sink, "_drawing_layer", lambda board, name: "L")
+    monkeypatch.setattr(kipy_sink, "clear", lambda board, prefix=None: 0)
+    monkeypatch.setattr(kipy_sink, "_circle", lambda *a, **k: "circle")
+    monkeypatch.setattr(kipy_sink, "_text", lambda pos, text, layer, size=0.6: texts.append(text) or "text")
+    monkeypatch.setattr(kipy_sink, "_commit_group", lambda board, items, name, msg: len(items))
+    issues = [_issue("emi_margin", 1, waived=True), _issue("clearance_voltage", 2), _issue("emi_margin", 3),
+              _issue("via_overload", 4, "warning")]
+    kipy_sink.draw_issues(None, issues, "User.9", hidden=frozenset({"clearance_voltage"}))
+    assert texts == ["3 E emi_margin", "4 W via_overload"]
+
+
+def test_the_busiest_via_tile_zooms_to_it_and_shows_it_in_kicad(app, tmp_path, monkeypatch):
+    """The user: "how can I see which via is the busiest" (the tile named it only by its coordinates). On a DC
+    path's view the "busiest via" tile is a button: it zooms the maps to a FOCUS_MM square around the via (its white
+    ring marks it) and asks to show it in KiCad as a click on its marker does; the other tiles stay plain."""
+    from groundtruth.analysis.detect import detect_converters
+    from groundtruth.report.plots import busiest_via
+    from groundtruth.ui import main_frame
+    from groundtruth.ui.results_panels import FOCUS_MM
+    monkeypatch.setattr(wx, "MessageBox", lambda *a, **k: wx.YES)
+    board, sc, path = make(tmp_path, discrete_buck_board(out_connector=True), "busy", nets=())
+    spec = detect_converters(board, sc.config)[0].spec
+    spec.f_sw, spec.i_out, spec.v_in, spec.v_out = 300e3, 3.0, 12.0, 3.0
+    sc.set_converters([spec])
+    sc.save()
+    f = main_frame.MainFrame(main_frame.Session(file_path=str(path)))
+    f.Show()
+    try:
+        run_steps(app, f, [lambda: f.run(True) and None])
+        h = f.heatmap
+        k = next(i for i, r in enumerate(f.routes) if getattr(r, "view_of", None) and busiest_via(r) is not None)
+        h.choice.SetSelection(k)
+        h._route_changed()
+        v = busiest_via(h.current())
+        tiles = [t for t in h.tiles.GetChildren() if getattr(t, "title", None) is not None]
+        tile = next(t for t in tiles if t.title == "busiest via")
+        assert tile._click is not None and all(t._click is None for t in tiles if t is not tile)
+        marks = []
+        h.on_mark = lambda *a: marks.append(a)
+        tile._click()
+        x0, x1, y0, y1 = h._view
+        assert x0 <= v["x"] <= x1 and y0 <= v["y"] <= y1 and x1 - x0 == pytest.approx(FOCUS_MM)
+        assert marks and marks[0][0] == "via" and (marks[0][1]["x"], marks[0][1]["y"]) == (v["x"], v["y"])
+        assert v["name"] in marks[0][2] and " A" in marks[0][2]
+        run_steps(app, f, [lambda: None])                     # the zoomed maps render
+    finally:
+        close_window(f)

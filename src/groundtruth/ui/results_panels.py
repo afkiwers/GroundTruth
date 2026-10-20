@@ -22,12 +22,16 @@ SEV_STATUS = {"error": "error", "warning": "warn", "info": "accent"}     # theme
 
 class IssuesPanel(wx.Panel):
     """The Issues tab: the last run's issues, numbered as their markers on the board, coloured by severity (waived
-    ones muted). Clicking one shows it (in KiCad, live); the buttons draw the markers and waive an issue."""
+    ones muted). Clicking one shows it (in KiCad, live); the buttons draw the markers and waive an issue. "Checks…"
+    hides the checks the user does not want to see (the list and the markers drawn), remembered on this computer
+    (ui.json `issues_hidden`); every issue keeps its number, so the rows shown and the markers still match."""
 
     def __init__(self, parent, on_show, on_draw, on_waive, live: bool = False):
         """on_show(issue): show the clicked issue on the board (live: in KiCad); live adds the KiCad options."""
         super().__init__(parent)
         self.issues = []
+        self.rows: list[tuple[int, object]] = []      # (number, issue) of each row shown, in list order
+        self.hidden: set[str] = set(theme.prefs().get("issues_hidden") or [])
         self.on_show = on_show
         self.list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
         for i, (c, w) in enumerate([("#", 36), ("Severity", 70), ("Check", 140), ("Net", 150), ("Location", 110),
@@ -42,7 +46,14 @@ class IssuesPanel(wx.Panel):
         self.draw_button = b
         w = theme.Button(self, "Waive selected…")
         w.Bind(wx.EVT_BUTTON, lambda e: self._waive(on_waive))
-        btns.Add(w, 0, wx.RIGHT, 18)
+        btns.Add(w, 0, wx.RIGHT, 6)
+        f = theme.Button(self, "Checks…")
+        f.SetToolTip("Choose which checks the list shows (and Draw markers on board draws); the others are hidden, "
+                     "not waived, and the choice is kept on this computer")
+        f.Bind(wx.EVT_BUTTON, lambda e: self.choose_checks())
+        btns.Add(f, 0, wx.RIGHT, 6)
+        self.shown_label = wx.StaticText(self, label="")
+        btns.Add(self.shown_label, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 18)
         show = theme.Button(self, "Show in KiCad")
         show.SetToolTip("Show the selected issue in KiCad again (after you moved the view or changed the selection "
                         "there). Clicking an issue shows it too.")
@@ -69,17 +80,59 @@ class IssuesPanel(wx.Panel):
         self.SetSizer(s)
 
     def show(self, issues):
-        """List these issues (in the order the markers are numbered)."""
+        """List these issues (in the order the markers are numbered), the hidden checks left out."""
         self.issues = issues
-        self.list.DeleteAllItems()
-        for k, i in enumerate(issues, 1):
-            row = self.list.InsertItem(k - 1, str(k))
-            for col, v in enumerate([i.severity + (" (waived)" if i.waived else ""), i.check, i.net,
-                                     f"{i.location[0]:.2f}, {i.location[1]:.2f}", i.layer, i.message], 1):
-                self.list.SetItem(row, col, v)
+        self._fill()
+
+    def _fill(self):
+        """The rows: every issue whose check is not hidden, under its own number (its place in the whole list, as
+        its marker on the board is numbered), and the count of what is shown."""
+        self.rows = [(k, i) for k, i in enumerate(self.issues, 1) if i.check not in self.hidden]
+        self.list.Freeze()
+        try:
+            self.list.DeleteAllItems()
             pal = theme.palette()
-            self.list.SetItemTextColour(row, theme.colour(pal.muted if i.waived else
-                                                          getattr(pal, SEV_STATUS.get(i.severity, "text"))))
+            for n, (k, i) in enumerate(self.rows):
+                row = self.list.InsertItem(n, str(k))
+                for col, v in enumerate([i.severity + (" (waived)" if i.waived else ""), i.check, i.net,
+                                         f"{i.location[0]:.2f}, {i.location[1]:.2f}", i.layer, i.message], 1):
+                    self.list.SetItem(row, col, v)
+                self.list.SetItemTextColour(row, theme.colour(pal.muted if i.waived else
+                                                              getattr(pal, SEV_STATUS.get(i.severity, "text"))))
+        finally:
+            self.list.Thaw()
+        gone = len(self.issues) - len(self.rows)
+        self.shown_label.SetLabel(f"{len(self.rows)} of {len(self.issues)} shown ({gone} hidden)" if gone else "")
+        self.Layout()
+
+    def checks_present(self) -> list[tuple[str, int]]:
+        """(check, how many issues have it) for the checks in the list, in the list's order."""
+        counts: dict[str, int] = {}
+        for i in self.issues:
+            counts[i.check] = counts.get(i.check, 0) + 1
+        return list(counts.items())
+
+    def set_hidden(self, hidden):
+        """Hide these checks (and show the others), remember the choice on this computer, and list again."""
+        self.hidden = set(hidden)
+        theme.save_prefs(issues_hidden=sorted(self.hidden))
+        self._fill()
+
+    def choose_checks(self):
+        """"Checks…": tick the checks to show. Checks not in this list keep their state (hidden stays hidden)."""
+        present = self.checks_present()
+        if not present:
+            return
+        from ..core.issues import CHECKS
+        names = [f"{c} ({n})  {CHECKS.get(c, ('', ''))[1]}" for c, n in present]
+        with wx.MultiChoiceDialog(self, "Show the issues of these checks (the others are hidden, not waived):",
+                                  "Issues: checks", names) as dlg:
+            dlg.SetSelections([k for k, (c, _) in enumerate(present) if c not in self.hidden])
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            shown = {present[k][0] for k in dlg.GetSelections()}
+        others = {c for c in self.hidden if c not in dict(present)}
+        self.set_hidden(others | {c for c, _ in present if c not in shown})
 
     def enable_drawing(self, on: bool):
         """Drawing markers needs KiCad and no job running."""
@@ -87,25 +140,25 @@ class IssuesPanel(wx.Panel):
 
     def on_select(self, evt):
         """An issue was clicked: its title and fingerprint below the list, and it is shown on the board."""
-        i = self.issues[evt.GetIndex()]
+        i = self.rows[evt.GetIndex()][1]
         self.detail.SetLabel(f"{i.title} — fingerprint {i.fingerprint}")
         self.on_show(i)
 
     def show_selected(self):
         """Show the selected issue again (Show in KiCad, a double click or Enter)."""
         k = self.list.GetFirstSelected()
-        if 0 <= k < len(self.issues):
-            self.on_show(self.issues[k])
+        if 0 <= k < len(self.rows):
+            self.on_show(self.rows[k][1])
 
     def _waive(self, on_waive):
         """Ask for a reason and waive the selected issue with it (on_waive stores it in the settings by the
         issue's fingerprint, so it stays waived in later runs)."""
         k = self.list.GetFirstSelected()
-        if k < 0:
+        if not 0 <= k < len(self.rows):
             return
         with wx.TextEntryDialog(self, "Reason for accepting this issue:", "Waive issue") as dlg:
             if dlg.ShowModal() == wx.ID_OK and dlg.GetValue().strip():
-                on_waive(self.issues[k], dlg.GetValue().strip())
+                on_waive(self.rows[k][1], dlg.GetValue().strip())
 
 
 CB_SETDROPPEDWIDTH = 0x0160            # Win32: the drop-down list's width, independent of the box's
@@ -205,6 +258,7 @@ def views_dir() -> Path:
 
 
 ZOOM_STEP = 1.25            # one wheel notch zooms in or out this much, about the point under the mouse
+FOCUS_MM = 6.0              # the busiest via's tile zooms the maps to a square this wide around it
 SPECTRUM_IN = 2.8           # the spectrum's height on the Heatmap tab's page (full width), inches of its figure
 MAPS_MIN_PX = 300           # the maps fill the page's visible height, but never less than this
 SCROLL_PX = 40              # the page's scroll unit: one wheel notch (3 lines) scrolls 120 px
@@ -482,11 +536,34 @@ class HeatmapPanel(wx.Panel):
                 tile.Destroy()
             for figures in want[len(have):]:
                 sizer.Add(theme.Tile(self.tiles, *figures), 0, wx.ALL, 3)
+            for tile in self.tiles.GetChildren():           # the busiest via's tile zooms to it (focus_busiest)
+                if isinstance(tile, theme.Tile):
+                    tile.set_click(self.focus_busiest if tile.title == "busiest via" else None)
             self.tiles.SetToolTip(self._metrics(rr))
             if resized:
                 self.Layout()
         finally:
             self.tiles.Thaw()
+
+    def focus_busiest(self):
+        """The "busiest via" tile was clicked: zoom the maps to that via (FOCUS_MM around it; its white ring marks
+        it, plots._carriers) and, opened from KiCad, select it there as a click on its marker does (on_mark). The
+        user: "how can I see which via is the busiest" (the tile named it only by its coordinates)."""
+        from ..report.plots import busiest_via
+        rr = self.current()
+        v = busiest_via(rr) if rr is not None else None
+        if v is None or rr.grid is None:
+            return
+        x, y = v["x"], v["y"]
+        x0, x1, y0, y1 = rr.grid.extent
+        half = FOCUS_MM / 2
+        cx, cy = min(max(x, x0 + half), x1 - half), min(max(y, y0 + half), y1 - half)
+        self._view = (cx - half, cx + half, cy - half, cy + half)
+        self.redraw(maps_only=True)
+        if self.on_mark is not None:
+            rms = " RMS" if getattr(rr, "rms_of", None) is not None else ""
+            self.on_mark("via", {**v, "kind": "via"}, f"{v['name']}: {v['current_a']:.3g} A{rms} (the busiest)",
+                         self.selected_layer() or "")
 
     def tile_text(self) -> str:
         """The tiles' text (title value sub), for tests and the status line."""

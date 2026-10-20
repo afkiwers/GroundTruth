@@ -201,14 +201,19 @@ def clear(board: Any, prefix: str = GROUP_PREFIX) -> int:
 
 
 @_when_ready
-def draw_issues(board: Any, issues: Iterable[Issue], layer_name: str = "User.9") -> int:
+def draw_issues(board: Any, issues: Iterable[Issue], layer_name: str = "User.9", hidden=frozenset()) -> int:
     """Mark every live issue on the drawing layer: a circle sized by severity and a label "<number> <E|W|I>
-    <check>" (numbered as in the Issues tab), replacing the previous markers in one undo step."""
+    <check>", replacing the previous markers in one undo step. Waived issues and those of the `hidden` checks (the
+    Issues tab's Checks…) get none; every marker keeps its issue's number in the whole list, as the Issues tab
+    shows it (it counted only the issues drawn before 2026-10-20, so a waived issue earlier in the list shifted
+    every later marker's number off the tab's)."""
     layer = _drawing_layer(board, layer_name)
     clear(board, f"{GROUP_PREFIX}-issues")
     items = []
     labels = []
-    for k, i in enumerate((i for i in issues if not i.waived), 1):
+    for k, i in enumerate(issues, 1):
+        if i.waived or i.check in hidden:
+            continue
         r = {"error": 0.8, "warning": 0.6}.get(i.severity, 0.45)
         items.append(_circle(i.location, r, layer, 0.15 if i.severity == "error" else 0.1))
         items.append(_text(_label_spot(labels, (i.location[0] + r + 0.3, i.location[1] - r - 0.3), -0.8),
