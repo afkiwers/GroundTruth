@@ -141,10 +141,13 @@ class SyncTracker(Tracker):
     besides the jobs' own (the compute server in Preferences)."""
 
     def __init__(self, jobs: SafeJobs, remote: Callable[[str], object], on_change: Callable[[dict], None],
-                 servers: Callable[[], list] = lambda: []):
-        """Not started yet: start()."""
+                 servers: Callable[[], list] = lambda: [], on_round: Optional[Callable[[float], None]] = None):
+        """Not started yet: start(). on_round(time): called (from the thread) after every round, the first one
+        included: until then the list is only what this computer kept (the Server jobs tab says it is asking)."""
         super().__init__(jobs, remote, on_change)
         self.servers = servers
+        self.on_round = on_round
+        self.last_round: Optional[float] = None    # time.time() of the last round done, None before the first
         self._reconciled = 0.0
 
     def check(self):
@@ -159,6 +162,9 @@ class SyncTracker(Tracker):
         if time.monotonic() - self._reconciled >= RECONCILE_S:
             self._reconciled = time.monotonic()
             self.reconcile()
+        self.last_round = time.time()
+        if self.on_round is not None:
+            self.on_round(self.last_round)
 
     def reconcile(self) -> list[dict]:
         """Ask every known server for this computer's jobs; list the ones missing here (queued, running or done

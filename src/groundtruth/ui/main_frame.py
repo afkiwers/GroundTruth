@@ -625,7 +625,8 @@ class MainFrame(wx.Frame):
         self.remote_jobs = SafeJobs()
         close_stale(self.remote_jobs)           # waited-for jobs of a window closed meanwhile: past jobs
         self._tracker = SyncTracker(self.remote_jobs, self._remote_for, lambda m: wx.CallAfter(self._job_changed, m),
-                                    servers=self._job_servers)
+                                    servers=self._job_servers,
+                                    on_round=lambda t: wx.CallAfter(self._jobs_synced, t))
         self._tracker.start()
         # the window appears at once; its tabs follow step by step, then the board is read in the background
         wx.CallAfter(self._build_pages)
@@ -2265,10 +2266,18 @@ class MainFrame(wx.Frame):
         self._tracker.poke()
 
     def _refresh_jobs(self):
-        """The Server jobs tab from the jobs folder (a few small files)."""
+        """The Server jobs tab from the jobs folder (a few small files), and whether the servers were asked yet."""
         panel = getattr(self, "server_jobs", None)
         if panel is not None:
             panel.refresh(self.remote_jobs.all())
+            panel.set_sync(self._tracker.last_round)
+
+    def _jobs_synced(self, when: float):
+        """(GUI thread, from the tracker) A round of asking the compute servers is done: the tab's list is theirs."""
+        panel = getattr(self, "server_jobs", None) if self else None
+        if panel is not None:
+            panel.refresh(self.remote_jobs.all())
+            panel.set_sync(when)
 
     def _job_changed(self, meta: dict):
         """(GUI thread, from the tracker) A job's state changed: the tab follows; a finished one is shown at once
