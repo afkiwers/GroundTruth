@@ -107,7 +107,7 @@ KiCad (IPC) ─kipy_source──┘        + settings file        └── anal
   three decades (`log_levels`), or round steps in °C from the ambient for a thermal view (`linear_levels`); every
   decade (or fifth step) an index line. Isolines (contourpy, masked off the copper) rather than filled regions,
   Chaikin-smoothed and simplified within MAX_SEGMENTS (8000); each long line carries its value along it, upright,
-  the line broken under the label, overlapping labels moved or dropped (`_place_labels`). The Heatmap tab's Draw
+  the line broken under the label, overlapping labels moved or dropped (`_place_labels`). The Results tab's Draw
   contours (`MainFrame.on_draw_contours`, a job; on a thermal view isotherms) → `kipy_sink.draw_contours(board,
   cmap, layer, label, line_mm, index_mm)` on the settings' `drawing.current_layer`, line widths from Preferences
   (0.04 / 0.1 mm). `tools/dev/contour_preview.py` renders it over the heatmap as a PNG without KiCad.
@@ -976,7 +976,7 @@ for a boost; duty = the high-side conduction time). The inductor current is cont
     DCR, series parts) plus, once the DC paths are solved, their copper (r_copper·I²). Not counted: gate drive,
     the controller's supply, core loss, dead-time conduction. `dc_runs` solves the input path at the estimate
     without copper; `finish_converter` recomputes it with the copper and scales the input path's figures
-    (`_rescale_path`, DC is linear; also `dc_branch`). Shown in the DC input view's title, the stage's Heatmap
+    (`_rescale_path`, DC is linear; also `dc_branch`). Shown in the DC input view's title, the stage's Results
     line and a loss break-down note. Test: `test_input_current_is_output_power_plus_losses_over_the_input_voltage`.
     The result's `duty` is the high side's conduction time in both topologies (`ConverterSpec.pulse`): a boost's
     is its rectifier's V_in/V_out, so `part_losses` gives a boost I_L = I_out/d, its rectifier d and its switch (the
@@ -997,7 +997,7 @@ for a boost; duty = the high-side conduction time). The inductor current is cont
     (superposition: the DC solve is linear). From the sum: the hotspots (`_density_peaks`), every via with
     ≥ 0.01 A against IPC-2221, the copper's Joule loss Σ ρ|J|²·t·d², the total input current. The view is a
     copy of the first stage with net COMBINED_NET ("all power stages") and path COMBINED_VIEW ("currents
-    together"), first in the Heatmap tab's Route list (`main_frame`); its `current_density` / `via_overload`
+    together"), first in the Results tab's Route list (`main_frame`); its `current_density` / `via_overload`
     issues replace the stages' own DC-path issues (the copper carries all loads at once). Stages solved on
     different models (the whole-board build failed) are not combined, with a note. Not in the HTML report's maps
     yet (its issues are). Test: `test_the_stages_dc_currents_add_up_on_one_board_model` (two identical stages:
@@ -1338,7 +1338,7 @@ parameters could come straight from the schematic and are part of the symbol tha
 
 ## Frequency responses, Bode and pole-zero (`analysis/transfer.py`, M4, branch `bode`)
 The user (2026-10-17): "can we add bode and phase plots as well as pole zero plots?"; all four kinds chosen (signal
-paths, power-stage filters, PDN, control loop: M5), as Heatmap views and in the report.
+paths, power-stage filters, PDN, control loop: M5), as Results views and in the report.
 - `Response` (name, owner, quantity: voltage gain / current ratio / impedance / loop gain, f, complex h, poles,
   zeros in rad/s, exact or fitted with fit_error_db, notes; summary() decimates to 200 points). `pz_rows`: f0 and Q
   (a conjugate pair once), `fmt_hz` / `fmt_root` (3 digits; RHP).
@@ -1718,7 +1718,7 @@ the legs' hot loops, the bus ripple shared by the capacitors and the conducted e
     branch currents so any waveform re-weights them (the sweep; `drive_spectra` gives a waveform's mean, slow lines
     and per-band cross spectra). Maps per layer (fast resampled onto the slow grid), sustained/peak, vias by name
     (every via with ≥ 1 % of the largest; a part's plated hole is not a via), series parts, copper loss. Shown as a
-    Heatmap view (`rms_view`: a copy of the first leg with the RMS maps, as `dc_view` does for a DC path); `_rms_issues`
+    Results view (`rms_view`: a copy of the first leg with the RMS maps, as `dc_view` does for a DC path); `_rms_issues`
     raises `current_density` and `via_overload` from them as the DC paths do. Left out: the motor's PWM ripple
     current. Tests R1 (the slow/fast split of a chopped current against the pulse train's
     Fourier series), R2 (the motor-pin via carries the phase RMS; the battery sensor the bus's slow part).
@@ -1731,7 +1731,7 @@ the legs' hot loops, the bus ripple shared by the capacitors and the conducted e
   - **Sweep** (`sweep`): per (i_phase, speed): `six_step`, `RmsBasis.evaluate`, `caps_at` (each capacitor's
     shares of the new switching currents), `bridge_losses`, `conducted_rows` (the receiver on the kept
     transfers); L·di/dt and the radiated margin scaled with the largest switched current. Test W1: the point at
-    the operating point equals the full result. Shown as a Heatmap view of its own (`sweep_view`,
+    the operating point equals the full result. Shown as a Results view of its own (`sweep_view`,
     `draw_bridge_sweep`, `kpi._sweep`, `sweep_text`).
   - **Fixes**: a bridge's issues are power issues (not route advice); each leg's hot-loop candidates (stitching
     vias, a capacitor at the switches) link to the leg's or its bridge's issue (test F1).
@@ -1856,7 +1856,7 @@ automatic recognition more robust"; options weighed:
   at the mouse (`fig._gt_section`, `section_value`). Layer
   colours as swatches beside the row labels; margins in inches from the text sizes (see "Plot text" below).
   With little height the axis label moves into the title, then the share plot goes (side view alone). In the
-  plugin it is the middle plot of the Heatmap tab's scrolling page (below). **A canvas whose size changes**
+  plugin it is the middle plot of the Results tab's scrolling page (below). **A canvas whose size changes**
   froze the window (0.68–0.84 s in `test_jobs_run_off_the_gui_thread` when the section came or went in the old
   one-screen layout): matplotlib's resize marks a canvas undrawn, its next paint renders the figure on the GUI
   thread, and every figure's draw takes one class-wide lock (`Figure._render_lock`, matplotlib 3.11), held
@@ -1864,7 +1864,7 @@ automatic recognition more robust"; options weighed:
   the background while `defer()` (the panel's `rendering()`) says a rendered figure is on its way, and
   `_blank_canvases` clears the three figures before the section comes or goes (they are rendered again right
   after). Longest GUI gap in that test 0.675 → 0.197 s.
-- **The Heatmap tab's page** (`HeatmapPanel`, session 6; the user: "make it scrollable and have every graph
+- **The Results tab's page** (`ResultsPanel`, session 6; the user: "make it scrollable and have every graph
   occupy the entire width of the application"). Controls, tiles and the matplotlib toolbar stay at the top (the
   toolbar is made on the canvas's parent, the page, and reparented to the panel); below, a `wx.ScrolledWindow`
   (`ALWAYS_SHOW_SB`, so its client width never jumps) holds the maps, the section and the spectrum, each full
@@ -1917,7 +1917,7 @@ automatic recognition more robust"; options weighed:
   (`getBoundingClientRect`), moved down where they overlap.
 - Security: a CSP meta (`default-src 'none'; img-src data:; style-src/script-src 'unsafe-inline'`), the JSON with
   `<`, `>`, `&` escaped (it cannot close its script element), board names written with `textContent`, file names
-  from `file_stem` (letters, digits, `_.-` only). Plugin: `HeatmapPanel.open_3d` builds the page in a
+  from `file_stem` (letters, digits, `_.-` only). Plugin: `ResultsPanel.open_3d` builds the page in a
   `LatestOnly` worker, writes it under `views_dir()` and calls `webbrowser.open`. CLI: `_write_pngs` writes
   `view3d_<stem>.html`, `render_html(view3d=True)` links it (`#board` selects the board-wide scene).
 - Checked in Edge (headless screenshots, see CLAUDE.md): the demo board, a stitched layer change, refboard
@@ -2074,7 +2074,7 @@ a History tab with a comparison (and the CLI).
   computed on (`_views_from`), with that board's fingerprint and `settings_key` (the settings as far as the results
   depend on them: not drawing, report, thermal, waivers, what-if edits or the computer's resolution / threads /
   GPU) in `_views_src`. `_stale_reason` compares them with the board and settings now: after Reload board or a
-  settings edit the Heatmap's summary line starts "OUT OF DATE (the board changed …)" (`HeatmapPanel.set_stale`);
+  settings edit the Results tab's summary line starts "OUT OF DATE (the board changed …)" (`ResultsPanel.set_stale`);
   Thermal and Current capacity read the board first (`_check_board`, as Simulate does since ISSUE-19) and refuse
   stale views with a message instead of heating the design as it was; Thermal takes the thermal section as the
   settings have it now (an ambient edited after the Simulate was ignored). Server results get their key from their
@@ -2114,18 +2114,18 @@ a History tab with a comparison (and the CLI).
   `resolution_label`); the report's cover and appendix name a non-1× factor. Sharper map sets its own pitch
   (resolution reset to 1, its budget 4 × max_nodes × the resolution). Test `tests/test_resolution.py`.
 - **Heatmap markers and outlines.** `draw_heatmap` records each map's markers on its figure (`fig._gt_marks`:
-  issue circles rank 0, vias and parts 1); `mark_at` answers the plugin's hover (`HeatmapPanel._hover`: readout,
+  issue circles rank 0, vias and parts 1); `mark_at` answers the plugin's hover (`ResultsPanel._hover`: readout,
   cut to `READOUT_CHARS`, and the full text as tooltip; an issue wins over a via in reach).
   **Click** (session 10, the user: click an overloaded via "and it should highlight it on the PCB"): the figure
   also keeps what each marker stands for (`fig._gt_mark_refs`: the Issue or the via / part transfer dict);
-  `mark_ref_at` finds it under the click (`HeatmapPanel._press` → its `on_mark` callback), `MainFrame.on_map_mark` shows it in KiCad in
+  `mark_ref_at` finds it under the click (`ResultsPanel._press` → its `on_mark` callback), `MainFrame.on_map_mark` shows it in KiCad in
   the highlight thread, newest click winning: an issue as the Issues tab does (`issue_highlight`), a via or part
   marker as the copper at that point (`highlight.point_highlight`: via, else pad, else track within POINT_MM
   0.15 mm; its net lit unless a reference net). Without a live KiCad the status line says so. Which issues a view
   marks: `plots.view_issues` (a DC path's view only that path's `:dc:<path>` / `:via:<path>` issues; the
   stage's other views none of its DC paths'; the user saw the output path's overloaded via on the switch-node
   map). Tests in `test_highlight.py`, `test_plot_text.py`, `test_gui.py`.
-  `max_vias` limits the via markers to the busiest (`_carriers`; `HeatmapPanel.max_vias()`: 0 with Via markers
+  `max_vias` limits the via markers to the busiest (`_carriers`; `ResultsPanel.max_vias()`: 0 with Via markers
   off, else Vias shown, None = all); every carrier with ≥ 1 % of the current is in the results (DC paths, bridge
   RMS maps, signal routes; before the report branch they were cut to the largest few). `Footprint.outline`
   (courtyard, else fab; the file reader only) feeds `_part_outlines` (top solid, bottom dashed, with references);
@@ -2213,7 +2213,7 @@ a History tab with a comparison (and the CLI).
   progress lines on stdout, no console window, below-normal priority, Cancel kills it): pyamg's C++ holds the
   GIL for half a second at a time, a 528 ms window stall when it ran in a thread. The CLI solves in-process.
   The result is a `ThermalResult` (a RouteResult with `kind="thermal"`, °C maps in `sheet_current`,
-  `heat_scale="linear"`) in the Heatmap list. `solve_thermal` is three steps that the capacity search reuses:
+  `heat_scale="linear"`) in the Results list. `solve_thermal` is three steps that the capacity search reuses:
   `_build_model` (mesh plan, Mesh, ThermalModel, the samples' nodes), `_coupled` (the iteration, from any start
   temperature) and `_result` (maps, parts, issues).
 - **Memory watchdog** (`thermal_proc._Watchdog`, M3, after PCB Thermal's runner): the parent checks the child every
@@ -2285,7 +2285,7 @@ a History tab with a comparison (and the CLI).
   named "muted"; `style_figure` darkens the matplotlib figures in the render thread (only that figure). `Button` (a wx.Control drawn with a
   GraphicsContext: gradient body, shadow line, top highlight, hover / pressed / focus / disabled; sends
   EVT_BUTTON), `Tile` (the KPI tiles). No wx objects at import: colours stay hex strings until used.
-- **KPI tiles and readout** (`ui/kpi.py`, `HeatmapPanel._show_tiles`, `report.plots.map_value`): tiles per view
+- **KPI tiles and readout** (`ui/kpi.py`, `ResultsPanel._show_tiles`, `report.plots.map_value`): tiles per view
   kind with statuses from the settings' rules; `draw_heatmap` records `fig._gt_maps[ax] = (layer, grid,
   values, unit)` and a motion callback (`_hover`, kept across `PrerenderedCanvas` swaps) looks the value up, or
   what a marker under the mouse is (`mark_at`, above).
@@ -2301,9 +2301,9 @@ a History tab with a comparison (and the CLI).
   step it blocked the GUI thread 0.32-0.43 s, at the limit, and `test_the_window_builds_its_tabs_in_steps`
   failed one run in four; now 60-125 ms per step, and on a refboard copy `gui_probe.py` shows one stall
   over 150 ms when the window opens (Converters, 184 ms) instead of two (314 and 182 ms).
-  Since session 10 the Nets (2), Converters (3), Heatmap (2) and Bridges (5) tabs have `build_steps`
+  Since session 10 the Nets (2), Converters (3), Results (2) and Bridges (5) tabs have `build_steps`
   (`in_steps=True` from the window; built at once otherwise, as tests and tools construct them): every step
-  ≤ 90 ms in `build_profile.py` (Nets 130-170, Converters 155-240, Heatmap's three canvases ~110 ms before).
+  ≤ 90 ms in `build_profile.py` (Nets 130-170, Converters 155-240, Results tab's three canvases ~110 ms before).
 - **Garbage collection** (`ui/gil.freeze_long_lived`): once per process, when the window has its tabs, the
   objects alive then (the modules: ~110 000 objects; the window's) go into Python's permanent generation
   (`gc.freeze`). A full collection holds the GIL from start to end, whichever thread triggers it, and walked
@@ -2327,7 +2327,7 @@ a History tab with a comparison (and the CLI).
   window. tests/conftest.py sets `QUIET_S` to 0 (a person at the machine would hold the tests up); test_idle.py,
   test_gui `test_idle_time_work_waits_for_the_user`. gui_probe stands in for the user: `input_idle_s` counts from
   its last step, and it pauses READ_PAUSE_S (15 s) after Simulate as someone reading the results would.
-- **KPI tiles** (`HeatmapPanel._show_tiles`, `theme.Tile.update`): another view gives the tiles already there
+- **KPI tiles** (`ResultsPanel._show_tiles`, `theme.Tile.update`): another view gives the tiles already there
   its figures; only missing ones are made. `_fit_page` lays the scrolling page out once inside `Freeze`.
 - **Destroy events bubble**: `EVT_WINDOW_DESTROY` is a command event, so a child window's destruction (the tab
   holder, the heatmap window) reaches the frame's handler too. `_stop_timers` acts only on the frame's own id
@@ -2339,12 +2339,12 @@ a History tab with a comparison (and the CLI).
   (`ui/parts_panel.py` `PartsPanel`: a `wx.grid` of every part with value, footprint, model and its parameters,
   edits saved to the settings; a filter by reference, value, footprint or prefix; set the filtered parts to one
   model, or reset them to `suggest_model`; `select_refs` follows KiCad's selection, below), Issues
-  (`results_panels.IssuesPanel`: a click shows the issue in KiCad, see below; draw markers, waive), Heatmap
-  (`ui/results_panels.py` `HeatmapPanel`, with `PrerenderedCanvas`, `HeatmapWindow`, `ZoomToolbar`: view + layer
+  (`results_panels.IssuesPanel`: a click shows the issue in KiCad, see below; draw markers, waive), Results
+  (`ui/results_panels.py` `ResultsPanel`, with `PrerenderedCanvas`, `HeatmapWindow`, `ZoomToolbar`: view + layer
   selector, the scrolling page of maps, cross-section or a bridge's capacitor bars, and spectrum, KPI tiles, draw contours / arrows on User.7, Open in window, Open 3D view, Sharper
   map, current capacity), Fixes (`ui/fixes_panel.py`: suggest, draw ticked on User.8, place ticked vias, add
   ticked to what-if, compare). The top bar's switch "with what-if edits" applies the settings file's enabled
-  edits to Run checks / Simulate. The Heatmap and Issues tabs' toggles keep their last state (`remember`).
+  edits to Run checks / Simulate. The Results and Issues tabs' toggles keep their last state (`remember`).
 - **Showing an issue in KiCad** (`analysis/highlight.py`, `kipy_sink.show_items`, `MainFrame.on_issue_selected`).
   An issue names at most one offending segment (Tier 1: the segment nearest the piece's midpoint, a via repeated
   per layer pair, sometimes a zone, a footprint or '') and simulation and power-stage issues name nothing, so
@@ -2473,7 +2473,7 @@ a History tab with a comparison (and the CLI).
   - Settings saves (`ui/saver.py`): every edit saves. The GUI thread only copies the document
     (`SettingsFile.snapshot`, ~60 ms); the worker emits the YAML (~400 ms) and writes it atomically (temporary
     file + `os.replace`). Closing the window waits for the last write (`flush`).
-  - Heatmap renders (`HeatmapPanel.redraw`): every canvas's figure (maps, cross-section or a bridge's capacitor
+  - Results-tab renders (`ResultsPanel.redraw`): every canvas's figure (maps, cross-section or a bridge's capacitor
     bars, spectrum, and the "Open in window" maps; ~0.4 s for maps + spectrum of a 4-layer board) is built
     and rendered on new `Figure`s with an offscreen `FigureCanvasAgg` in the worker; `PrerenderedCanvas.
     show_rendered` swaps the figure into the wx canvas and reuses the rendered pixels (no second render). It

@@ -54,8 +54,8 @@ def run_steps(app, f, steps, timeout=600):
 
     def tick(_):
         now = time.perf_counter()
-        busy = f.busy() or f.heatmap.rendering()        # heatmaps render in the background too (busy() covers
-                                                        # the tabs being built, so f.heatmap exists after it)
+        busy = f.busy() or f.results_panel.rendering()        # heatmaps render in the background too (busy() covers
+                                                        # the tabs being built, so f.results_panel exists after it)
         ticks.append((now, busy))
         if now - state["t0"] > timeout:
             app.ExitMainLoop()
@@ -97,10 +97,10 @@ def longest_busy_gap(ticks):
 def wait_rendered(f, timeout=60):
     """Let the event loop run until the heatmap view asked for last is on screen."""
     deadline = time.perf_counter() + timeout
-    while f.heatmap.rendering() and time.perf_counter() < deadline:
+    while f.results_panel.rendering() and time.perf_counter() < deadline:
         wx.Yield()
         time.sleep(0.01)
-    assert not f.heatmap.rendering(), "the heatmap was not rendered in time"
+    assert not f.results_panel.rendering(), "the heatmap was not rendered in time"
 
 
 def test_jobs_run_off_the_gui_thread(app, frame):
@@ -109,7 +109,7 @@ def test_jobs_run_off_the_gui_thread(app, frame):
     assert f.board is not None and f.settings is not None, "the board was not loaded by the background job"
     assert "layer_change_stitch" in {i.check for i in f.issues}, [i.check for i in f.issues]
     assert f.routes, "the simulation produced no routes"
-    assert f.notebook.GetSelection() == f.notebook.FindPage(f.heatmap), f.notebook.GetSelection()
+    assert f.notebook.GetSelection() == f.notebook.FindPage(f.results_panel), f.notebook.GetSelection()
     busy = sum(b for _, b in ticks)
     assert busy > 20, f"only {busy} GUI timer ticks while jobs ran"        # the GUI timer kept firing during jobs
     # Work on the GUI thread would stall it for seconds. In a full test run, a worker inside a C call that holds the
@@ -163,7 +163,7 @@ def test_simulate_reads_a_board_changed_since_it_was_loaded(app, tmp_path, monke
 
 
 def test_results_of_an_earlier_board_or_settings_are_marked_and_not_heated(app, tmp_path, monkeypatch):
-    """ISSUE-29 (VALIDATION_AUDIT.md round 6): the Heatmap views keep the board and settings they were computed on,
+    """ISSUE-29 (VALIDATION_AUDIT.md round 6): the Results views keep the board and settings they were computed on,
     and Thermal and Current capacity heat those. After Reload board read a changed board (a track narrowed in
     KiCad), the old views were shown and Thermal ran on them as if they were the design's; a thermal setting edited
     after the Simulate (the ambient) was ignored by Thermal. Now: the summary line says OUT OF DATE (the board
@@ -195,7 +195,7 @@ def test_results_of_an_earlier_board_or_settings_are_marked_and_not_heated(app, 
 
     def note(key):
         """Keep the stale reason, the summary line and the views' kinds now."""
-        seen[key] = (f._stale_reason(), f.heatmap.metrics.GetLabel(), [r.kind for r in f.routes])
+        seen[key] = (f._stale_reason(), f.results_panel.metrics.GetLabel(), [r.kind for r in f.routes])
 
     def edit_current():
         """The DC load's current changed on its tab."""
@@ -460,36 +460,36 @@ def test_converters_tab_adds_a_stage_and_simulate_shows_its_hot_loop(app, conv_f
     assert [c.name for c in f.settings.config.converters] == ["buck"]
     c = f.routes[0]
     assert c.kind == "converter" and not c.error and c.conducted_worst is not None
-    assert "hot loop" in f.heatmap.tile_text()
-    assert f.notebook.GetSelection() == f.notebook.FindPage(f.heatmap)
-    assert not f.heatmap.canvas3.IsShown()                      # a power stage has no route: no cross-section
+    assert "hot loop" in f.results_panel.tile_text()
+    assert f.notebook.GetSelection() == f.notebook.FindPage(f.results_panel)
+    assert not f.results_panel.canvas3.IsShown()                      # a power stage has no route: no cross-section
     # current arrows on the map, off with the checkbox
     from matplotlib.quiver import Quiver
 
     def quivers():
-        return [c for ax in f.heatmap.fig.axes for c in ax.collections if isinstance(c, Quiver)]
+        return [c for ax in f.results_panel.fig.axes for c in ax.collections if isinstance(c, Quiver)]
     assert quivers()
     # the views render off the GUI thread and are swapped in without rendering again; the toolbar keeps its
     # mouse connections across the swap (zoom and pan, the coordinates display)
-    f.heatmap.arrows.SetValue(False)
+    f.results_panel.arrows.SetValue(False)
     t = time.perf_counter()
-    f.heatmap.redraw()
-    assert time.perf_counter() - t < 0.1 and f.heatmap.rendering()
+    f.results_panel.redraw()
+    assert time.perf_counter() - t < 0.1 and f.results_panel.rendering()
     wait_rendered(f)
     assert not quivers()
-    assert f.heatmap.canvas.figure is f.heatmap.fig and f.heatmap.canvas.reused >= 2   # pixels reused
+    assert f.results_panel.canvas.figure is f.results_panel.fig and f.results_panel.canvas.reused >= 2   # pixels reused
     from matplotlib.colors import LogNorm                       # "Log scale" off: 0 to the peak
-    assert f.heatmap.log_scale.IsEnabled() and isinstance(f.heatmap.fig.axes[0].images[0].norm, LogNorm)
-    f.heatmap.log_scale.SetValue(False)
-    f.heatmap.redraw()
+    assert f.results_panel.log_scale.IsEnabled() and isinstance(f.results_panel.fig.axes[0].images[0].norm, LogNorm)
+    f.results_panel.log_scale.SetValue(False)
+    f.results_panel.redraw()
     wait_rendered(f)
-    assert not isinstance(f.heatmap.fig.axes[0].images[0].norm, LogNorm)
-    f.heatmap.log_scale.SetValue(True)
-    moves = f.heatmap.canvas.callbacks.callbacks.get("motion_notify_event", {}).values()
+    assert not isinstance(f.results_panel.fig.axes[0].images[0].norm, LogNorm)
+    f.results_panel.log_scale.SetValue(True)
+    moves = f.results_panel.canvas.callbacks.callbacks.get("motion_notify_event", {}).values()
     assert any(getattr(ref(), "__name__", "") == "mouse_move" for ref in moves)
-    f.heatmap.arrows.SetValue(True)
+    f.results_panel.arrows.SetValue(True)
     # "Open in window": the same view in a window of its own, larger, following the tab's choices
-    h = f.heatmap
+    h = f.results_panel
     h.open_window()
     win = h.window
     # at least 1000 px wide, unless the screen is narrower (Windows fits a window to it: 640 x 480 when the
@@ -511,9 +511,9 @@ def test_converters_tab_adds_a_stage_and_simulate_shows_its_hot_loop(app, conv_f
     h.arrows.SetValue(True)
     # the DC input path is a heatmap of its own (current density on the grid it was solved on)
     k = next(i for i, r in enumerate(f.routes) if getattr(r, "view_of", "").startswith("input J1.1"))
-    f.heatmap.choice.SetSelection(k)
-    f.heatmap._route_changed()
-    assert "DC input J1.1" in f.heatmap.tile_text() and "A/mm²" in f.heatmap.tile_text()
+    f.results_panel.choice.SetSelection(k)
+    f.results_panel._route_changed()
+    assert "DC input J1.1" in f.results_panel.tile_text() and "A/mm²" in f.results_panel.tile_text()
 
 
 def test_help_opens_at_the_tab_shown_and_every_link_lands(app, frame):
@@ -533,7 +533,7 @@ def test_help_opens_at_the_tab_shown_and_every_link_lands(app, frame):
     assert all(topic_of(t) != "workflow" for t in labels), [(t, topic_of(t)) for t in labels]
     grouped = {a for _, ids in GROUPS for a in ids}
     assert set(re.findall(r'<a name="([^"]+)"></a><h3>', text)) <= grouped
-    f.notebook.SetSelection(f.notebook.FindPage(f.heatmap))
+    f.notebook.SetSelection(f.notebook.FindPage(f.results_panel))
     t0 = time.perf_counter()
     f.on_help()
     opened = time.perf_counter() - t0
@@ -618,7 +618,7 @@ def test_export_report_writes_the_page_in_the_background(app, frame, tmp_path, m
     def vias_5():
         from groundtruth.ui.prefs_dialog import defaults
         f.apply_preferences(dict(defaults({}), max_vias=5))                  # Preferences, OK
-        assert theme.prefs()["max_vias"] == 5 and f.heatmap.max_vias() == 5  # kept for every board
+        assert theme.prefs()["max_vias"] == 5 and f.results_panel.max_vias() == 5  # kept for every board
     ticks = run_steps(app, f, [lambda: f.run(True) and None, vias_5, lambda: f.on_export()])
     assert asked == [5]                                                       # the report follows it
     assert offered == [str(Path(f.board_path).parent / "groundtruth")]      # the board's groundtruth folder first
@@ -839,7 +839,7 @@ def test_nets_sent_from_kicad_land_in_the_table(app, tmp_path, monkeypatch):
         run_steps(app, f, [])                                   # board read, SPI nets auto-detected
         names = lambda: [n.name for n in f.settings.config.nets]            # noqa: E731
         assert "/MCU/SPI_SCK" in names() and "/LED" not in names()
-        f.notebook.SetSelection(f.notebook.FindPage(f.heatmap))
+        f.notebook.SetSelection(f.notebook.FindPage(f.results_panel))
         inbox.send(path, ["/LED", "/MCU/SPI_SCK"], wait=0)
         wait_for(app, lambda: "/LED" in names())
         led = next(n for n in f.settings.config.nets if n.name == "/LED")
@@ -1278,7 +1278,7 @@ def test_the_mouse_wheel_zooms_the_heatmap_and_a_double_click_shows_it_all(app, 
     from matplotlib.backend_bases import MouseEvent
     f = frame
     run_steps(app, f, [lambda: f.run(True) and None])
-    h = f.heatmap
+    h = f.results_panel
     wait_rendered(f)
     ax = h.fig.axes[0]
     full = sorted(ax.get_xlim())
@@ -1327,7 +1327,7 @@ def test_the_kpi_tiles_are_reused_between_views_and_the_modules_are_frozen_once(
     wait_rendered(f)
     assert gil._frozen                          # done when the tabs were built (the count itself is not checked:
     #                                             test_plugin_start_never_blocks_its_window unfreezes everything)
-    h = f.heatmap
+    h = f.results_panel
     tiles = [t for t in h.tiles.GetChildren() if isinstance(t, theme.Tile)]
     first = h.tile_text()
     h._route_changed()                          # the view shown again: the same tiles, the same figures
@@ -1359,7 +1359,7 @@ def test_the_heatmap_tab_scrolls_through_full_width_plots(app, frame):
     from groundtruth.ui.results_panels import SPECTRUM_IN
     f = frame
     run_steps(app, f, [lambda: f.run(True) and None])
-    h = f.heatmap
+    h = f.results_panel
     wait_rendered(f)
     assert h.canvas3.IsShown() and h.canvas3.figure is h.fig3 and len(h.fig3.axes) >= 2
     page_w = h.page.GetClientSize().width
@@ -1415,7 +1415,7 @@ def test_open_3d_view_builds_the_page_in_the_background_and_opens_it(app, frame,
     monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url) or True)
     f = frame
     run_steps(app, f, [lambda: f.run(True) and None])
-    h = f.heatmap
+    h = f.results_panel
     wait_rendered(f)
     assert h.view3d_button.IsEnabled()
     t = time.perf_counter()
@@ -1515,11 +1515,11 @@ def test_the_window_builds_its_tabs_in_steps(app, tmp_path, monkeypatch):
         assert f.pages_built() and f.board is not None
         assert [f.notebook.GetPageText(i) for i in range(f.notebook.GetPageCount())] == \
             ["Signal paths", "Converters", "Bridges", "DC loads", "Power integrity", "Signal integrity", "Parts",
-             "Issues", "Heatmap", "Fixes", "History", "Server jobs"]
+             "Issues", "Results", "Fixes", "History", "Server jobs"]
         # 12 tabs (DC loads since 2026-10-15, Power integrity since 2026-10-16, Signal integrity since 2026-10-17);
         # the forms and plots in steps of their own (`build_steps`): Bridges 5 (0.32-0.43 s in one), Converters 4
         # (155-240 ms in one on a refboard copy; its fields in two since the spread spectrum's, 125-146 ms in
-        # one), Heatmap 2 (its three canvases ~110 ms), Nets 2 (130-170 ms in one), DC loads 1, Power integrity 2
+        # one), Results 2 (its three canvases ~110 ms), Nets 2 (130-170 ms in one), DC loads 1, Power integrity 2
         # (128-191 ms in one), Signal integrity 3 (149-160 ms in one): every step under 100 ms (build_profile.py)
         assert len(steps) == 30 and max(steps) < 0.35, [f"{s:.3f}" for s in steps]
         assert [w for w in wx.GetTopLevelWindows() if w is not f and not w.GetTitle()] == []   # holder gone
@@ -1528,11 +1528,11 @@ def test_the_window_builds_its_tabs_in_steps(app, tmp_path, monkeypatch):
 
 
 def test_sharper_map_replaces_the_shown_view_in_the_background(app, frame):
-    """Heatmap tab, "Sharper map": the shown view is solved again on a finer grid as a job (the window keeps
+    """Results tab, "Sharper map": the shown view is solved again on a finer grid as a job (the window keeps
     running), then replaces the view; the summary line says so, and a second click says it is sharp already."""
     f = frame
     run_steps(app, f, [lambda: f.run(True) and None])
-    h = f.heatmap
+    h = f.results_panel
     k = h.choice.GetSelection()
     before = h.routes[k]
     ticks = run_steps(app, f, [lambda: f.on_sharper(k)])
@@ -1582,14 +1582,14 @@ def test_drawn_buttons_click_like_buttons_and_the_top_bar_uses_them(app, frame, 
         values = dlg.values()
     f.apply_preferences(values)
     assert theme.load_pref() == "dark" and "next time" in f.GetStatusBar().GetStatusText(0)
-    assert f.resolution() == 4 and f.heatmap.outlines and theme.prefs()["outlines"] is True
-    assert not f.heatmap.names and theme.prefs()["names"] is False         # a switch of its own
+    assert f.resolution() == 4 and f.results_panel.outlines and theme.prefs()["outlines"] is True
+    assert not f.results_panel.names and theme.prefs()["names"] is False         # a switch of its own
     assert defaults({"outlines": True})["names"] is True       # before it had one, the outlines brought the names
 
 
 def test_thermal_button_adds_a_temperature_view_and_its_issues(app, conv_frame):
     """Top bar, "Thermal": after Simulate, the power stage's DC paths and losses heat the board in a job; the
-    Heatmap tab gets a temperature view (tiles: hottest copper, total loss), its issues join the list, and a
+    Results tab gets a temperature view (tiles: hottest copper, total loss), its issues join the list, and a
     second run replaces the view instead of adding another."""
     pytest.importorskip("pyamg")
     from dataclasses import replace
@@ -1610,20 +1610,21 @@ def test_thermal_button_adds_a_temperature_view_and_its_issues(app, conv_frame):
     ticks = run_steps(app, f, [lambda: f.on_thermal()])
     th = [r for r in f.routes if getattr(r, "kind", "") == "thermal"]
     assert len(th) == 1 and th[0].t_max > th[0].ambient_c and not th[0].error
-    assert f.heatmap.current() is th[0] and "hottest copper" in f.heatmap.tile_text()
+    assert f.results_panel.current() is th[0] and "hottest copper" in f.results_panel.tile_text()
     assert any(i.check in ("thermal_hotspot", "part_temperature") for i in f.issues)    # warn_c 26 °C: it warns
     assert longest_busy_gap(ticks) < 0.5
     run_steps(app, f, [lambda: f.on_thermal()])
     assert len([r for r in f.routes if getattr(r, "kind", "") == "thermal"]) == 1
-    # Heatmap tab, "Current capacity": a view per stage at its capacity, next to the thermal view; tiles say it
+    # Results tab, "Current capacity": a view per stage at its capacity, next to the thermal view; tiles say it
     limit = th[0].t_max + 10.0
     f.settings.config.thermal = replace(f.settings.config.thermal, capacity_c=limit)
     f._views_from = (f._views_from[0], f.settings.config)
-    ticks = run_steps(app, f, [lambda: f.heatmap.capacity_button.click()])
+    ticks = run_steps(app, f, [lambda: f.results_panel.capacity_button.click()])
     cap = [r for r in f.routes if getattr(r, "capacity", None)]
     assert len(cap) == 1 and cap[0].capacity["stage"] == "buck" and cap[0].capacity["scale"] > 1
-    assert f.heatmap.current() is cap[0] and "current capacity" in f.heatmap.tile_text()
-    assert f.heatmap.choice.GetString(f.heatmap.choice.GetSelection()).startswith("Thermal: buck at its capacity")
+    assert f.results_panel.current() is cap[0] and "current capacity" in f.results_panel.tile_text()
+    choice = f.results_panel.choice
+    assert choice.GetString(choice.GetSelection()).startswith("Thermal: buck at its capacity")
     assert "capacity" in f.GetStatusBar().GetStatusText(0)
     assert longest_busy_gap(ticks) < 0.5
     run_steps(app, f, [lambda: f.on_thermal()])          # Thermal again keeps the capacity view
@@ -1635,7 +1636,7 @@ def test_the_bridges_tab_detects_a_motor_bridge_simulates_it_and_shows_its_drive
     """The user: "another tab for half bridges ... where those nets are auto discovered". A board with a motor
     bridge and nothing in its settings: the bridge is detected in the background and listed (orange: its operating
     point and motor are not set); Simulate says what is missing and shows the Bridges tab; set from the form, the
-    bridge is simulated: the Heatmap tab shows its drive (currents, tiles, the capacitors' ripple bars), then its
+    bridge is simulated: the Results tab shows its drive (currents, tiles, the capacitors' ripple bars), then its
     legs; map actions on the drive view ask for a leg."""
     from types import SimpleNamespace as NS
     from boardgen import bridge_board
@@ -1666,7 +1667,7 @@ def test_the_bridges_tab_detects_a_motor_bridge_simulates_it_and_shows_its_drive
         assert b.reviewed and b.v_bus == 48 and b.motor.l_ll == pytest.approx(50e-6) and len(b.legs) == 3
         assert b.sweep_i_phase == [15.0, 30.0] and b.sweep_speed_rpm == []
         ticks = run_steps(app, f, [lambda: f.run(True) and None])
-        h = f.heatmap
+        h = f.results_panel
         wait_rendered(f)
         names = [h.choice.GetString(i) for i in range(h.choice.GetCount())]
         assert names[0] == "bridge J1  (drive and bus)" and [n.split()[2] for n in names[1:4]] == ["A", "B", "C"]
@@ -1935,12 +1936,12 @@ def test_a_supply_looking_net_picked_in_kicad_can_be_added_anyway(app, frame, mo
 
 
 def test_the_draw_buttons_before_any_simulate_say_so(app, frame):
-    """The Heatmap tab's Draw contours / Draw arrows buttons are enabled once the board is read, before any
+    """The Results tab's Draw contours / Draw arrows buttons are enabled once the board is read, before any
     Simulate: with no view they used to fail on None (rr.kind before the None check)."""
     f = frame
     run_steps(app, f, [])
-    assert f.heatmap.current() is None
-    for b in (f.heatmap.draw_button, f.heatmap.arrow_button):
+    assert f.results_panel.current() is None
+    for b in (f.results_panel.draw_button, f.results_panel.arrow_button):
         f.SetStatusText("")
         b.click()
         assert "run Simulate first" in f.status_text()
@@ -2136,9 +2137,10 @@ def test_a_dc_load_is_edited_on_its_tab_and_shown_after_simulate(app, tmp_path, 
         tiles = kpi.kpis(rails[0], f.settings.config.rules)
         assert tiles[1][0] == "worst drop" and "U2.1" in tiles[1][2]
         k = f.routes.index(rails[0])
-        run_steps(app, f, [lambda: f.heatmap.choice.SetSelection(k), lambda: f.heatmap._route_changed()])
-        assert "U2.1" in f.heatmap.choice.GetStringSelection() or "VDD rail" in f.heatmap.choice.GetStringSelection()
-        assert "drop" in f.heatmap._converter_metrics(rails[0])
+        run_steps(app, f, [lambda: f.results_panel.choice.SetSelection(k), lambda: f.results_panel._route_changed()])
+        shown = f.results_panel.choice.GetStringSelection()
+        assert "U2.1" in shown or "VDD rail" in shown
+        assert "drop" in f.results_panel._converter_metrics(rails[0])
     finally:
         close_window(f)
 
@@ -2262,7 +2264,7 @@ def test_find_servers_lists_the_cluster_and_fills_the_address(app, frame, monkey
 
 
 def test_clicking_a_map_marker_shows_it_in_kicad(app, frame):
-    """Heatmap tab: a single left click on a marker (an issue's circle, a via's ▲) hands it to the window
+    """Results tab: a single left click on a marker (an issue's circle, a via's ▲) hands it to the window
     (on_map_mark), which shows it in KiCad; a double click still resets the zoom and shows nothing; on a board
     file (no KiCad) the status line says where to open it from."""
     from types import SimpleNamespace
@@ -2270,7 +2272,7 @@ def test_clicking_a_map_marker_shows_it_in_kicad(app, frame):
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     f = frame
     run_steps(app, f, [])
-    h = f.heatmap
+    h = f.results_panel
     fig = Figure(figsize=(4, 3), dpi=100)
     FigureCanvasAgg(fig)
     ax = fig.add_subplot(111)
@@ -2554,7 +2556,7 @@ def test_preferences_list_the_servers_and_update_the_old_ones(app, frame, monkey
 
 def test_a_pdn_rail_is_found_set_and_shown_after_simulate(app, tmp_path, monkeypatch):
     """The Power integrity tab (the plan's M1): Find rails lists the rail the IC draws from (VDD on pdn_board), the
-    form sets its load step and writes it; after Simulate the rail is a view of its own on the Heatmap tab (its
+    form sets its load step and writes it; after Simulate the rail is a view of its own on the Results tab (its
     curves, and what holds the rail under them) with its tiles (the target, the worst margin); the draw-on-board
     buttons are off for it."""
     from boardgen import pdn_board
@@ -2584,12 +2586,12 @@ def test_a_pdn_rail_is_found_set_and_shown_after_simulate(app, tmp_path, monkeyp
         tiles = kpi.kpis(rails[0], f.settings.config.rules)
         assert tiles[0][0] == "target" and tiles[1][0] == "worst margin"
         k = f.routes.index(rails[0])
-        run_steps(app, f, [lambda: f.heatmap.choice.SetSelection(k), lambda: f.heatmap._route_changed()])
-        wait_for(app, lambda: not f.heatmap.rendering())
-        assert "PDN" in f.heatmap.choice.GetStringSelection() and not f.heatmap.draw_button.IsEnabled()
-        assert "target" in f.heatmap.tile_text() and "U1" in f.heatmap._metrics(rails[0])
-        titles = [t.get_text() for ax in f.heatmap.fig2.axes for t in [ax.title] + ax.texts]
-        assert any("holds the rail" in t for t in titles) or f.heatmap.fig2.texts
+        run_steps(app, f, [lambda: f.results_panel.choice.SetSelection(k), lambda: f.results_panel._route_changed()])
+        wait_for(app, lambda: not f.results_panel.rendering())
+        assert "PDN" in f.results_panel.choice.GetStringSelection() and not f.results_panel.draw_button.IsEnabled()
+        assert "target" in f.results_panel.tile_text() and "U1" in f.results_panel._metrics(rails[0])
+        titles = [t.get_text() for ax in f.results_panel.fig2.axes for t in [ax.title] + ax.texts]
+        assert any("holds the rail" in t for t in titles) or f.results_panel.fig2.texts
     finally:
         close_window(f)
 
@@ -2638,20 +2640,20 @@ def test_the_signal_integrity_tab_finds_a_pair_sets_a_target_and_shows_the_resul
 
 def test_a_routes_bode_view_draws_its_curves_and_poles(app, frame):
     """After Simulate the signal path has a "Bode / poles and zeros" view (analysis/transfer.BodeView, the plan's
-    M4): the Heatmap tab draws its magnitude and phase on the main canvas and the pole-zero map below, its tiles
+    M4): the Results tab draws its magnitude and phase on the main canvas and the pole-zero map below, its tiles
     name the dominant pole, and the board-drawing buttons are off (curves, not maps)."""
     f = frame
     run_steps(app, f, [lambda: f.run(True) and None])
     k = next(i for i, v in enumerate(f.routes) if v.kind == "bode")
     view = f.routes[k]
     assert view.responses and view.responses[0].quantity == "voltage gain"
-    run_steps(app, f, [lambda: f.heatmap.choice.SetSelection(k), lambda: f.heatmap._route_changed()])
-    wait_for(app, lambda: not f.heatmap.rendering())
-    assert "Bode" in f.heatmap.choice.GetStringSelection() and not f.heatmap.draw_button.IsEnabled()
-    assert "Hz" in f.heatmap.tile_text()
-    titles = [ax.get_title(loc="left") for ax in f.heatmap.canvas.figure.axes]
+    run_steps(app, f, [lambda: f.results_panel.choice.SetSelection(k), lambda: f.results_panel._route_changed()])
+    wait_for(app, lambda: not f.results_panel.rendering())
+    assert "Bode" in f.results_panel.choice.GetStringSelection() and not f.results_panel.draw_button.IsEnabled()
+    assert "Hz" in f.results_panel.tile_text()
+    titles = [ax.get_title(loc="left") for ax in f.results_panel.canvas.figure.axes]
     assert any("Bode" in t for t in titles), titles
-    titles2 = [ax.get_title(loc="left") for ax in f.heatmap.canvas2.figure.axes]
+    titles2 = [ax.get_title(loc="left") for ax in f.results_panel.canvas2.figure.axes]
     assert any("poles" in t for t in titles2), titles2
 
 
@@ -2765,7 +2767,7 @@ def test_the_busiest_via_tile_zooms_to_it_and_shows_it_in_kicad(app, tmp_path, m
     f.Show()
     try:
         run_steps(app, f, [lambda: f.run(True) and None])
-        h = f.heatmap
+        h = f.results_panel
         k = next(i for i, r in enumerate(f.routes) if getattr(r, "view_of", None) and busiest_via(r) is not None)
         h.choice.SetSelection(k)
         h._route_changed()

@@ -2,7 +2,7 @@
 
 A rail is its net, its ground, the allowed ripple and the load step (they give the target impedance), and the part
 feeding it (found by itself: a regulator's power_out pin or a connector) with its output resistance and inductance.
-Simulate gives each IC's impedance curve against the target (Heatmap tab: the curves and what holds the rail at each
+Simulate gives each IC's impedance curve against the target (Results tab: the curves and what holds the rail at each
 frequency), and issues where it is over the target or a supply pin has no decap close by.
 """
 from __future__ import annotations
@@ -116,7 +116,7 @@ class PdnPanel(SelectableRows, wx.Panel):
         btns = button_row(self, [("Find rails", self.on_find), ("Add", self.on_add),
                                  ("Update selected", self.on_update), ("Remove selected", self.on_remove)], BUTTON_TIPS)
         about = wx.StaticText(self, label="Simulate solves each rail on the whole board: the impedance every IC sees "
-                                          "at its supply pins from 10 kHz to 1 GHz against the target (Heatmap tab: "
+                                          "at its supply pins from 10 kHz to 1 GHz against the target (Results tab: "
                                           "the curves, and what holds the rail at each frequency).")
         about.SetName("muted")
         right = wx.BoxSizer(wx.VERTICAL)

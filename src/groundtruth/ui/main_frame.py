@@ -1,4 +1,4 @@
-"""Main plugin window: Nets | Parts | Issues | Heatmap | Fixes.
+"""Main plugin window: Nets | Parts | Issues | Results | Fixes.
 
 Threading: the GUI thread only handles events and shows results. Everything that takes time is a *job* that
 runs in the one worker thread (`MainFrame._start`): reading the board (over IPC or from the file), checks,
@@ -40,7 +40,7 @@ from .jobs_panel import ServerJobsPanel
 from .nets_panel import NetsPanel
 from .parts_panel import PartsPanel
 from .progress import ProgressClock, clock, release_failure
-from .results_panels import HeatmapPanel, IssuesPanel
+from .results_panels import ResultsPanel, IssuesPanel
 
 BOARD_ARROW_SPACING_MM = 0.8   # spot spacing of the current arrows drawn on the board (arrows 0.56 mm long)
 MAX_BOARD_ARROWS = 1500        # three graphic segments each; the spacing grows beyond that
@@ -549,7 +549,7 @@ class MainFrame(wx.Frame):
             ("parts", "Parts", lambda nb: PartsPanel(nb, self.on_config_change)),
             ("issues_panel", "Issues", lambda nb: IssuesPanel(nb, self.on_issue_selected, self.on_draw_issues,
                                                              self.on_waive, live=session.live)),
-            ("heatmap", "Heatmap", lambda nb: HeatmapPanel(nb, self.on_draw_contours, self.on_draw_arrows,
+            ("results_panel", "Results", lambda nb: ResultsPanel(nb, self.on_draw_contours, self.on_draw_arrows,
                                                            self.on_sharper, self.on_capacity, in_steps=True,
                                                            on_mark=self.on_map_mark)),
             ("fixes", "Fixes", lambda nb: FixesPanel(nb, self.on_suggest, self.on_draw_suggestions,
@@ -844,7 +844,7 @@ class MainFrame(wx.Frame):
         applies when the window opens next. Resolution, threads and GPU are read by the next Simulate."""
         old = theme.load_pref()
         theme.save_prefs(**values)
-        self.heatmap.set_display(values["via_markers"], values["max_vias"], values["outlines"], values["names"])
+        self.results_panel.set_display(values["via_markers"], values["max_vias"], values["outlines"], values["names"])
         note = (f"; the {values['theme']} theme applies the next time GroundTruth opens"
                 if values["theme"] != old else "")
         self.SetStatusText(f"preferences saved: resolution {values['resolution']}×, threads {values['threads']}, "
@@ -1046,7 +1046,7 @@ class MainFrame(wx.Frame):
         self.whatif.Enable(on)
         self.fixes.enable(on)
         self.issues_panel.enable_drawing(on)
-        self.heatmap.enable_drawing(on)
+        self.results_panel.enable_drawing(on)
 
     def _progress(self, msg, frac):
         """(GUI thread) A job's progress report: the status line and the gauge."""
@@ -1297,8 +1297,8 @@ class MainFrame(wx.Frame):
         settings_path = str(self.settings.path) if self.settings else ""
         return board, issues, routes, mode, settings_path, dict(
             suggestions=suggestions, converters=converters, bridges=bridges, thermal=thermal, capacity=capacity,
-            solver=self._solver, config=cfg, max_vias=self.heatmap.max_vias(), outlines=self.heatmap.outlines,
-            names=self.heatmap.names, dc_combined=combined,
+            solver=self._solver, config=cfg, max_vias=self.results_panel.max_vias(),
+            outlines=self.results_panel.outlines, names=self.results_panel.names, dc_combined=combined,
             # views sharpened with "Sharper map": the report draws their finer maps (the user: "export the highest
             # resolution images available")
             sharper=[v for v in views if getattr(v, "sharper", None)],
@@ -1378,7 +1378,7 @@ class MainFrame(wx.Frame):
         cycles and what is alive is frozen (gil.settle_garbage): its ~200-350 ms fall where nobody is waiting,
         instead of the collector walking the results again during every later view switch."""
         from .idle import QUIET_S, input_idle_s
-        if self.busy() or self.heatmap.rendering() or input_idle_s() < QUIET_S:
+        if self.busy() or self.results_panel.rendering() or input_idle_s() < QUIET_S:
             return
         self._settle_timer.Stop()
         from .gil import settle_garbage
@@ -1619,16 +1619,16 @@ class MainFrame(wx.Frame):
         return " and ".join(why)
 
     def _show_stale(self):
-        """Mark the Heatmap's summary line (and say in the status bar) when the results shown are out of date."""
+        """Mark the Results tab's summary line (and say in the status bar) when the results shown are out of date."""
         why = self._stale_reason()
-        self.heatmap.set_stale(why)
+        self.results_panel.set_stale(why)
         if why:
             self.SetStatusText(f"the results shown are from an earlier Simulate: {why} since; Simulate again for "
                                "the current design")
 
     def _done(self, board, issues, routes, sim, cfg=None, solver=None, kept=None, si=None, what_if: bool = False,
               src: Optional[tuple] = None):
-        """Show a run: the issues, the signal-integrity figures on their tab (si), and for a Simulate the Heatmap tab
+        """Show a run: the issues, the signal-integrity figures on their tab (si), and for a Simulate the Results tab
         with its views, the fix advisor's design changes, and the run selected on the History tab (its report page
         written in the background). src: (board fingerprint, settings_key) the run was of (_stale_reason)."""
         if sim is not None:
@@ -1638,7 +1638,7 @@ class MainFrame(wx.Frame):
             self._shown_at = time.time()
             self._views_from = (board, cfg)     # what the heatmap views were computed with (what-if: the edits)
             self._views_src = src
-            self.heatmap.set_stale("")
+            self.results_panel.set_stale("")
             self._solver = solver
         self.issues = issues
         if routes:
@@ -1650,9 +1650,9 @@ class MainFrame(wx.Frame):
         self.SetStatusText(f"{n['error']} error(s), {n['warning']} warning(s), {n['info']} info"
                            + (" — with what-if edits" if what_if else "") + solver_note(solver) + self._kept(kept))
         if routes:
-            self.notebook.SetSelection(self.notebook.FindPage(self.heatmap))
-            self.heatmap.set_rules(self.settings.config.rules if self.settings else None)
-            self.heatmap.show(board, routes, issues)
+            self.notebook.SetSelection(self.notebook.FindPage(self.results_panel))
+            self.results_panel.set_rules(self.settings.config.rules if self.settings else None)
+            self.results_panel.show(board, routes, issues)
             self._note_cells(routes)
             self.fixes.show_design([r for r in routes if r.kind == "converter" and not getattr(r, "bridge", None)
                                     and not getattr(r, "view_of", None)])
@@ -1739,7 +1739,7 @@ class MainFrame(wx.Frame):
         self._highlighter.submit(work)
 
     def on_map_mark(self, kind: str, what, text: str, layer: str):
-        """Heatmap tab: a marker on a map was clicked (plots.mark_ref_at). Show what it marks in KiCad, as the
+        """Results tab: a marker on a map was clicked (plots.mark_ref_at). Show what it marks in KiCad, as the
         Issues tab shows an issue: the via, pad or track at the marker (an overloaded via, a via carrying current),
         a part marker's footprint, or, for an issue at no particular copper (a hot loop, a route's margin), the
         issue's own copper (issue_highlight). In the highlight thread, the newest click winning."""
@@ -1900,7 +1900,7 @@ class MainFrame(wx.Frame):
         why = self._stale_reason()
         if why:
             # its heat would be the DC paths of the board and settings as simulated, not as they are now (ISSUE-29)
-            self.heatmap.set_stale(why)
+            self.results_panel.set_stale(why)
             wx.MessageBox(f"{what} works from the last Simulate's DC paths and losses, but {why} since that "
                           f"Simulate: its temperatures would be those of the design as it was. Run Simulate again, "
                           f"then {what}.", "GroundTruth", wx.ICON_INFORMATION)
@@ -1917,14 +1917,14 @@ class MainFrame(wx.Frame):
         return stages, board, cfg
 
     def _show_thermal_views(self, keep, new: list, cfg, board):
-        """Put thermal views in the Heatmap list (the views `keep` says to keep, then the new ones) and show the
+        """Put thermal views in the Results list (the views `keep` says to keep, then the new ones) and show the
         first new one."""
         self.routes = [r for r in self.routes if keep(r)] + new
-        self.heatmap.set_rules(cfg.rules)
-        self.heatmap.show(board, self.routes, self.issues)
-        self.heatmap.choice.SetSelection(len(self.routes) - len(new))
-        self.heatmap._route_changed()
-        self.notebook.SetSelection(self.notebook.FindPage(self.heatmap))
+        self.results_panel.set_rules(cfg.rules)
+        self.results_panel.show(board, self.routes, self.issues)
+        self.results_panel.choice.SetSelection(len(self.routes) - len(new))
+        self.results_panel._route_changed()
+        self.notebook.SetSelection(self.notebook.FindPage(self.results_panel))
 
     def on_thermal(self, local: bool = False, fresh: bool = False):
         """Top bar, "Thermal": the power stages of the views shown (the last Simulate) heat the board through
@@ -1977,7 +1977,7 @@ class MainFrame(wx.Frame):
                     local=(lambda: self.on_thermal(local=True)) if server is not None else None)
 
     def on_capacity(self, local: bool = False, fresh: bool = False):
-        """Heatmap tab, "Current capacity": per power stage of the last Simulate, the load current that brings
+        """Results tab, "Current capacity": per power stage of the last Simulate, the load current that brings
         the hottest copper or part junction to thermal.capacity_c (default max_c), the other stages at their
         operating points (analysis/thermal.solve_capacity), in the thermal process (or on the compute server when
         Preferences say so, unless `local`); one view per stage at its capacity (replacing earlier capacity
@@ -2023,10 +2023,10 @@ class MainFrame(wx.Frame):
                     solver=True, local=(lambda: self.on_capacity(local=True)) if server is not None else None)
 
     def on_sharper(self, k: int):
-        """Heatmap tab, "Sharper map": the shown view solved again on a grid with 4x the nodes, as a job (a
+        """Results tab, "Sharper map": the shown view solved again on a grid with 4x the nodes, as a job (a
         power stage takes up to a minute); the view is replaced by the sharper one."""
         from ..analysis.sharper import describe
-        views = self.heatmap.routes
+        views = self.results_panel.routes
         if not 0 <= k < len(views) or self._refuse_if_busy():
             return
         view = views[k]
@@ -2056,13 +2056,13 @@ class MainFrame(wx.Frame):
 
         def done(new):
             """Replace the view with the sharper one."""
-            self.heatmap.replace_view(k, new)
+            self.results_panel.replace_view(k, new)
             self.SetStatusText(describe(new))
         self._start(f"sharper map of {view.net}: solving on a finer grid…", work, done, what="sharpen the map",
                     cancellable=False, solver=True)
 
     def on_draw_contours(self, rr, plane_layer):
-        """Heatmap tab, "Draw contours on board": a contour map of the shown layer's current density (or its
+        """Results tab, "Draw contours on board": a contour map of the shown layer's current density (or its
         temperature: isotherms) on the current-drawing layer, like a map's height lines with their values written
         on them (results/contours.py), as a job."""
         if rr is None:                          # no view yet (the button is live before any Simulate)
@@ -2106,7 +2106,7 @@ class MainFrame(wx.Frame):
                     kicad=True)
 
     def on_draw_arrows(self, rr, plane_layer):
-        """Heatmap tab, "Draw arrows on board": the shown layer's current arrows on the current-drawing layer, as
+        """Results tab, "Draw arrows on board": the shown layer's current arrows on the current-drawing layer, as
         a job (their number capped: each arrow is three KiCad items)."""
         if rr is None:                          # no view yet (the button is live before any Simulate)
             self.SetStatusText("run Simulate first: there is no map to draw")
@@ -2196,9 +2196,9 @@ class MainFrame(wx.Frame):
         if self.routes:
             self._views_from = (board, self._sim_config())
             self._views_src = src
-            self.heatmap.set_stale("")
-            self.heatmap.set_rules(self.settings.config.rules if self.settings else None)
-            self.heatmap.show(board, self.routes, self.issues)
+            self.results_panel.set_stale("")
+            self.results_panel.set_rules(self.settings.config.rules if self.settings else None)
+            self.results_panel.show(board, self.routes, self.issues)
         self.SetStatusText(f"{len(res.suggestions)} suggestion(s), {len(res.selected)} selected"
                            + solver_note(res.solver))
 

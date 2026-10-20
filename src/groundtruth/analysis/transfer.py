@@ -359,7 +359,7 @@ def fitted_response(name: str, owner: str, quantity: str, f, h, use_e: bool = Fa
 
 @dataclass
 class BodeView:
-    """A Heatmap-tab view of one owner's responses (a signal path, a power stage, a PDN rail): curves, not maps
+    """A Results-tab view of one owner's responses (a signal path, a power stage, a PDN rail): curves, not maps
     (ui/results_panels.py draws plots.draw_bode and draw_pz for it)."""
     owner: str
     responses: list

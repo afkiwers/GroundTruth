@@ -7,7 +7,7 @@ plugin's switch interval, and prints the longest waits and where the worker was 
         [--what report,heatmap]
 
 report: the history's report page (report/html.render_html, as MainFrame._keep_report writes it); heatmap: every
-view's figure (report/plots.draw_heatmap) drawn to a canvas, as the Heatmap tab's render worker does. No window,
+view's figure (report/plots.draw_heatmap) drawn to a canvas, as the Results tab's render worker does. No window,
 no files next to the board (--cache is written where you say).
 """
 from __future__ import annotations
@@ -106,7 +106,7 @@ def main() -> int:
         views = list(routes) + list(converters)
 
         def heat():         # each view's map, cross-section and spectrum, as ResultsPanel.redraw renders them
-            """Every view's map, cross-section and spectrum rendered offscreen, as the Heatmap tab does."""
+            """Every view's map, cross-section and spectrum rendered offscreen, as the Results tab does."""
             for rr in views:
                 for draw, size in ((lambda f: draw_heatmap(f, board, rr, issues), (12, 7)),
                                    (lambda f: draw_section(f, board, rr), (12, 3)),

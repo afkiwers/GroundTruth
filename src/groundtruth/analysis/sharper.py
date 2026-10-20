@@ -1,4 +1,4 @@
-"""A sharper heatmap for one view (the plugin's Heatmap tab, "Sharper map"): the view's own model rebuilt with
+"""A sharper heatmap for one view (the plugin's Results tab, "Sharper map"): the view's own model rebuilt with
 SHARPER_FACTOR times the node budget (about half the grid pitch) and solved at the map's frequency only.
 
 The physics is the analysis's own (prepare_route / prepare_converter on the same board and settings); only the

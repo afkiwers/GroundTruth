@@ -321,7 +321,7 @@ class Tile(wx.Control):
         self.SetCursor(wx.Cursor(wx.CURSOR_HAND if callback is not None else wx.CURSOR_DEFAULT))
 
     def update(self, title: str, value: str, sub: str = "", status: str = "", tip: str = "") -> bool:
-        """Show other figures in this tile (the Heatmap tab reuses its tiles: creating windows on the GUI thread
+        """Show other figures in this tile (the Results tab reuses its tiles: creating windows on the GUI thread
         is what took the time). True when its size may have changed."""
         changed = (title, value, sub, status) != (self.title, self.value, self.sub, self.status)
         if changed:

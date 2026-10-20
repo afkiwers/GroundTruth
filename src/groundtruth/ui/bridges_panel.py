@@ -22,7 +22,7 @@ from .widgets import InfoBox, PickDialog, button_row, parse_field, set_lazy_item
 STANDARD_CHOICES = ["(analysis default)"] + list(CONDUCTED_STANDARDS)
 
 FIELD_TIPS = {
-    "Name": "A name for this bridge, used in the lists, the Heatmap tab and the reports.",
+    "Name": "A name for this bridge, used in the lists, the Results tab and the reports.",
     "Bus net": "The net of the legs' high sides and the bus capacitors, e.g. V_BLDC or +BATT.",
     "Ground net": "The power ground the low sides return to, e.g. GND.",
     "Input connector": "Where the bus comes in, + and - pins, e.g. J5.1, J5.2 (two wire tabs: J2.1, J3.1). The LISN "

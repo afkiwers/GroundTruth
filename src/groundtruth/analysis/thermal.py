@@ -59,7 +59,7 @@ ALL_STAGES = "all power stages"         # the capacity of every stage scaled tog
 @dataclass
 class ThermalResult(RouteResult):
     """The thermal solve as a heatmap view: one temperature map per copper layer (°C, in `sheet_current` so the
-    Heatmap tab and the reports show it like the current maps), the hot spot, the parts and the heat balance.
+    Results tab and the reports show it like the current maps), the hot spot, the parts and the heat balance.
     A capacity view (solve_capacity) has `capacity` set: the stage, its operating and capacity currents."""
     kind: str = "thermal"
     ambient_c: float = 25.0
@@ -92,7 +92,7 @@ class ThermalResult(RouteResult):
                 "error": self.error}
 
     def label(self) -> str:
-        """The view's name in the Heatmap list and the reports."""
+        """The view's name in the Results list and the reports."""
         c = self.capacity
         if not c:
             return "Thermal: copper temperature"

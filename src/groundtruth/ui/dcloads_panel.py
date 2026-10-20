@@ -19,7 +19,7 @@ from .pin_complete import complete_field, complete_load_line, pin_table
 from .widgets import button_row
 
 FIELD_TIPS = {
-    "Name": "A name for this rail, used in the lists, the Heatmap tab and the reports (e.g. VDD rail).",
+    "Name": "A name for this rail, used in the lists, the Results tab and the reports (e.g. VDD rail).",
     "Source pin": "The pin the rail is fed from, as REF.PAD: the supply connector's pin, e.g. J1.2. Typing lists the "
                   "board's pins (Ctrl+Space or Down: all of them, supply connectors first); Enter or Tab takes one.",
     "Source return": "The pin the current returns to at the source, e.g. J1.1 (GND). With it (and each load's "
@@ -253,7 +253,7 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
         btns = button_row(self, [("Fill from net…", self.on_fill), ("Add", self.on_add),
                                  ("Update selected", self.on_update), ("Remove selected", self.on_remove)], BUTTON_TIPS)
         about = wx.StaticText(self, label="Simulate solves each rail on the whole board's copper: the drop each load "
-                                          "sees, the current density and the vias (Heatmap tab), and Thermal and "
+                                          "sees, the current density and the vias (Results tab), and Thermal and "
                                           "Current capacity heat the board with it.")
         about.SetName("muted")
         right = wx.BoxSizer(wx.VERTICAL)
