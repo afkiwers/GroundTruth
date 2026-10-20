@@ -1,13 +1,13 @@
 # GroundTruth handover
 
-## Current state (2026-10-20, branch `results-tab` open; `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-21, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `results-tab` (2026-10-20, from `main` d10f5a5, not merged):** the user: "In the plugin, result are shown
+- **Branch `results-tab` (2026-10-20, from `main` d10f5a5, merged into `main` on 2026-10-21 at the user's "Yes"):** the user: "In the plugin, result are shown
   under heatmap, is there a better name for it like Simulation Results or similar?", then "Rename results, I believe
   the id should change too otherwise it's hard to maintain". The **Heatmap** tab is the **Results** tab: its label,
   the frame's attribute and tab id `results_panel` (as `issues_panel`; `results` alone is SiPanel's data), the class
