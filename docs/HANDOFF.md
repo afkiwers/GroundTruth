@@ -1,12 +1,32 @@
 # GroundTruth handover
 
-## Current state (2026-10-20, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-20, branch `report-polish` open; `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `report-polish` (2026-10-20, from `main` 75be1dd, not merged):** the user: "Have a look at the html report,
+  it's content and format and see if you can improve it". Reviewed on their export of kraft (flux-2, 4x, 20:26)
+  and a fresh `simulate --thermal --format html` (out/report_polish/groundtruth-report.html).
+  - Summary: the main findings one line per check (`_findings_by_check`: severity, counts, the worst case — lowest
+    margin where the issues carry one —, a link that filters the Issues table to the check); before, the 8 most severe
+    issues one by one: eight clearance errors of +VDC, none of the converters' failing margins. New "At a glance"
+    table (`_at_a_glance`): every net / stage / bridge, operating point, radiated and conducted margins, overshoot
+    (of V in), efficiency, linked to its part.
+  - Stage cards: "Overshoot" is the largest estimate (L·di/dt, ringing, recovery) judged by the rules' shares of V_in
+    (`_overshoot`), as hot_loop does; before, a green "L·di/dt 7.5 V" beside a 40 V ringing (an error).
+  - Figures: cropped to what is drawn (`figure_png`, bbox tight) and the maps' title moved down to the maps
+    (`plots._close_title_gap`, only when the gap is over 0.5 in, legends and figure texts counted): the DC maps had
+    an empty band up to half their height.
+  - Tables: the Issues table's Finding column wide, location and layer in one cell, the fingerprint small; short
+    tables narrow (`_table(narrow=)`); DC path currents to 3 digits (5.1437 A, 4.99917 A before); victims' peak and
+    threshold with their units, the peak red over it (`_victim_row`, bridges too); the combined vias table without
+    the duplicated place; the thermal parts table without an all-"–" Junction column, "the 25 hottest of N".
+  - Method: the measuring distance, ground reflection, the band's top and the board's quasi-static limit [A47].
+  - Tests: tests/test_report_layout.py (4), test_report_filter (the summary link in headless Edge),
+    test_report_images (the cropped width).
 - **Branch `report-check-filter` (2026-10-20, from `main` a416a44, merged into `main` at the user's "merge"):** the user, of the HTML report's
   Issues table: "can we add a filter to filter errors and warnings like I only want to see clearance_voltage or
   cap_voltage or vds_rating ... or I want to see vds_rating and plane_resonance. So be able to filter out one or
