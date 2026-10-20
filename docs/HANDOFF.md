@@ -7,6 +7,12 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `jobs-fetching` (2026-10-20, from `main` abfede4, not merged):** the user, of a server job that seemed gone
+  after closing and reopening the plugin and KiCad: "That was a fluke, it simply takes some time to update. maybe worth
+  adding a message of some sort saying server data is being fetched". The Server jobs tab has a line over its lists:
+  "Asking the compute server(s) for the jobs' state…" until the tracker's first round is back, then "Checked with the
+  compute server(s) at HH:MM:SS" (`SyncTracker.on_round` / `last_round`, `ServerJobsPanel.set_sync`,
+  `MainFrame._jobs_synced`). Tests: test_job_store (2).
 - **Branch `issues-filter` (2026-10-20, from `main` ef78116, merged into `main` at the user's "commit, merge"):** three of the user's asks.
   - "add a filter to enable/hide entries based on what Checks are selected": the Issues tab's **Checks…**
     (`IssuesPanel.choose_checks`, remembered in ui.json `issues_hidden`); rows keep their number in the whole list;
