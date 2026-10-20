@@ -1,13 +1,13 @@
 # GroundTruth handover
 
-## Current state (2026-10-20, branch `report-check-filter` open; `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-20, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `report-check-filter` (2026-10-20, from `main` a416a44, not merged):** the user, of the HTML report's
+- **Branch `report-check-filter` (2026-10-20, from `main` a416a44, merged into `main` at the user's "merge"):** the user, of the HTML report's
   Issues table: "can we add a filter to filter errors and warnings like I only want to see clearance_voltage or
   cap_voltage or vds_rating ... or I want to see vds_rating and plane_resonance. So be able to filter out one or
   more". Under the severity chips a row of check chips (`report/html._issues`, rows carry `data-check`): click any
