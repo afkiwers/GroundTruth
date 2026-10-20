@@ -204,25 +204,33 @@ def output_nets(board, config, spec) -> set:
     return out
 
 
-def find_loop(board, config, spec) -> Optional[LoopParts]:
-    """The loop's parts and the controller's figures (see the module); None without a controller found."""
-    from .safety import is_ground
-    by_net = board.parts_by_net()
-    lp = LoopParts()
-    ctrl, channel = None, ""
+def controller(board, spec) -> tuple:
+    """(footprint, channel) of a stage's controller: an integrated stage's IC, else the IC with a switch-node pin
+    (SW, SW1, SW2 ...) on the stage's switch node; the channel is that pin's number ("" for a single SW pin).
+    (None, "") without one. Shared by the control loop (find_loop) and the controller's GT dead time
+    (components/fields.stage_values)."""
     if spec.switch:                                     # an integrated stage: the IC is the controller
         ctrl = board.footprint(spec.switch[0])
         sw = _pin(ctrl, "sw", "") if ctrl else None
-        channel = re.sub(r"\D", "", _norm(sw.pin_function)) if sw else ""
-    if ctrl is None and spec.switch_node:
-        for fp in by_net.get(spec.switch_node, ()):
+        if ctrl is not None:
+            return ctrl, re.sub(r"\D", "", _norm(sw.pin_function)) if sw else ""
+    if spec.switch_node:
+        for fp in board.parts_by_net().get(spec.switch_node, ()):
             if fp.dnp or not re.match(r"(U|IC)\d", fp.reference.upper()):
                 continue
             sw = next((p for p in fp.pads if p.net == spec.switch_node and PIN["sw"].match(_norm(p.pin_function))),
                       None)
             if sw is not None:
-                ctrl, channel = fp, PIN["sw"].match(_norm(sw.pin_function)).group(2)
-                break
+                return fp, PIN["sw"].match(_norm(sw.pin_function)).group(2)
+    return None, ""
+
+
+def find_loop(board, config, spec) -> Optional[LoopParts]:
+    """The loop's parts and the controller's figures (see the module); None without a controller found."""
+    from .safety import is_ground
+    by_net = board.parts_by_net()
+    lp = LoopParts()
+    ctrl, channel = controller(board, spec)
     if ctrl is None:
         return None
     lp.controller, lp.channel = ctrl.reference, channel

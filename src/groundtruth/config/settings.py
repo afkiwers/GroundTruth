@@ -140,6 +140,12 @@ class ConverterSpec:
     rds_on_low: Optional[float] = None    # low-side FET R_DS(on), ohm (default: rds_on)
     dcr: Optional[float] = None           # inductor DC resistance, ohm
     diode_vf: Optional[float] = None      # catch diode forward voltage, V (default 0.5)
+    # a synchronous rectifier FET (a buck's low side, a boost's high side): both switches are off for dead_time
+    # before every turn-on, and the inductor current then flows through the rectifier in reverse at v_sd; at the
+    # main switch's hard turn-on its body diode gives up q_rr (silicon; GaN has none) [A48, A49]
+    dead_time: Optional[float] = None     # s, per edge (default DEFAULT_DEAD_TIME, an adaptive controller's)
+    v_sd: Optional[float] = None          # V, its reverse conduction (default: GaN 2 V, silicon body diode 0.8 V)
+    q_rr: Optional[float] = None          # C, reverse-recovery charge of the side's FETs together (default none)
     # keys taken from the parts' schematic fields (components/fields.py): refreshed from them on every open and run;
     # the other parameters are set in GroundTruth (flagged where they differ from the schematic)
     from_schematic: list[str] = field(default_factory=list)
@@ -1308,6 +1314,9 @@ def config_from_data(data: Any) -> Config:
                 rds_on_low=_opt(c.get("rds_on_low"), f"{where}.rds_on_low", "ohm"),
                 dcr=_opt(c.get("dcr"), f"{where}.dcr", "ohm"),
                 diode_vf=_opt(c.get("diode_vf"), f"{where}.diode_vf", "V"),
+                dead_time=_opt(c.get("dead_time"), f"{where}.dead_time", "s"),
+                v_sd=_opt(c.get("v_sd"), f"{where}.v_sd", "V"),
+                q_rr=_opt(c.get("q_rr"), f"{where}.q_rr", "C"),
                 from_schematic=_refs(c.get("from_schematic")),
                 loop={str(k): (v if isinstance(v, (int, float)) else str(v)) for k, v in (c.get("loop") or {}).items()},
                 **_converter_snubber(c.get("snubber"), where),
@@ -1334,6 +1343,11 @@ def config_from_data(data: Any) -> Config:
             problems.append("f_sw, rise_time and i_out must be positive")
         if spec.duty is not None and not 0 < spec.duty < 1:
             problems.append("duty must be between 0 and 1")
+        if any(v is not None and v < 0 for v in (spec.dead_time, spec.v_sd, spec.q_rr)):
+            problems.append("dead_time, v_sd and q_rr must not be negative")
+        elif spec.dead_time and spec.f_sw > 0 and 2 * spec.dead_time * spec.f_sw >= 0.5:
+            problems.append(f"dead_time {spec.dead_time * 1e9:g} ns twice per period is half of the "
+                            f"{1e6 / spec.f_sw:g} µs period or more: check its unit (ns)")
         # a buck steps down, a boost up: given both voltages the wrong way round the stage would be solved at a made-up
         # duty of ½ (ConverterSpec.pulse), a buck drawing more input current than it delivers
         if spec.v_in and spec.v_out and spec.topology in ("buck", "boost") and \
@@ -1552,6 +1566,8 @@ class SettingsFile:
                                  "     low_side: Q2, f_sw: 400kHz, v_in: 24, v_out: 5, i_out: 3, rise_time: 5ns, c_oss: 1nF,\n"
                                  "     input_connector: [J1.1, J1.2], output_connector: [J2.1, J2.2]}\n"
                                  "  integrated converter IC: switch: U5 instead of high_side/low_side/switch_node\n"
+                                 "  a synchronous rectifier FET: dead_time (per edge, or the controller's GT field\n"
+                                 "  dead:20ns), v_sd (its reverse conduction), q_rr (silicon body diode's recovery)\n"
                                  "  output_connector: the load's + and - pins (DC output path and ground return)")
         doc.yaml_set_comment_before_after_key(
             "bridges", before="Motor bridges (`groundtruth detect --write` finds the legs; the operating point and the "
@@ -1769,6 +1785,12 @@ class SettingsFile:
                     d[key] = format_si(getattr(c, key), "")
             if c.diode_vf is not None:
                 d["diode_vf"] = c.diode_vf
+            if c.dead_time is not None:
+                d["dead_time"] = format_si(c.dead_time, "s")
+            if c.v_sd is not None:
+                d["v_sd"] = c.v_sd
+            if c.q_rr is not None:
+                d["q_rr"] = format_si(c.q_rr, "C")
             if c.snubber:
                 d["snubber"] = list(c.snubber)
             elif c.snubber_c and c.snubber_r:
@@ -2198,7 +2220,10 @@ _SWITCH_RANGES = (("c_oss", 1e-13, 1e-6, "a switch's output capacitance (pF to n
                   ("rds_on", 1e-5, 1.0, "a switch's R_DS(on) (mΩ)", "m", "Ω"),
                   ("rds_on_low", 1e-5, 1.0, "a switch's R_DS(on) (mΩ)", "m", "Ω"))
 _CONVERTER_RANGES = _SWITCH_RANGES + (("f_sw", 1e3, 1e8, "a switching frequency (kHz to MHz)", "k", "Hz"),
-                                      ("dcr", 1e-5, 1.0, "an inductor's DC resistance (mΩ)", "m", "Ω"))
+                                      ("dcr", 1e-5, 1.0, "an inductor's DC resistance (mΩ)", "m", "Ω"),
+                                      ("dead_time", 0.0, 2e-6, "a dead time (ns)", "n", "s"),
+                                      ("v_sd", 0.0, 10.0, "a reverse-conduction voltage (V)", "", "V"),
+                                      ("q_rr", 0.0, 1e-5, "a reverse-recovery charge (nC)", "n", "C"))
 _BRIDGE_RANGES = _SWITCH_RANGES + (("f_pwm", 1e3, 5e6, "a PWM frequency (kHz)", "k", "Hz"),
                                    ("dead_time", 0.0, 2e-6, "a dead time (ns)", "n", "s"),
                                    ("v_bus", 1.0, 1000.0, "a bus voltage (V)", "", "V"),

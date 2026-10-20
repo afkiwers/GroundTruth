@@ -2191,7 +2191,12 @@ a History tab with a comparison (and the CLI).
   DC paths' series parts (switching on the hard-switched transistor, `main` = a buck's high side or a boost's low
   side; `_synchronous`: a FET rectifier or an integrated stage → one hard edge ½·V·I·t·f and Q_oss·V·f, a diode →
   two edges and ½·Q_oss·V·f; C_oss·V² stands in for Q_oss·V without `q_oss`; session 6, after the user's EPC2306
-  datasheet: C_OSS 482 pF vs Q_OSS 38 nC at 50 V); `solve_thermal` plans PCB Thermal's adaptive mesh from those samples, builds its
+  datasheet: C_OSS 482 pF vs Q_OSS 38 nC at 50 V; since 2026-10-20 a synchronous rectifier's reverse conduction in
+  both dead times, 2·t_dead·f_sw·I·V_SD out of its channel's share [A48], and the recovered charge Q_rr·V·f_sw in
+  the main switch [A49]: `dead_time_values` gives the defaults and notes; the dead time also from the controller
+  IC's GT field, `tags.dead_time_of` via `fields.stage_values` and `loop.controller`; `power.recovery` /
+  `pulse_harmonics(rec=)` add the recovery's triangle to the hot loop's pulse spectrum and `recovery_overshoot`
+  I_rr·√(L/C_oss) to the overshoot); `solve_thermal` plans PCB Thermal's adaptive mesh from those samples, builds its
   Mesh/ThermalModel, puts the samples on the copper nodes (`mesh.locate`, at each node's own copper: `Grid.hx / hy`),
   and iterates with copper resistivity following the node temperature (currents prescribed: first order). Since
   2026-10-19 the heat also holds the switch node's inductor ripple, the hot loop's switching current and every via
