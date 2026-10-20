@@ -1291,6 +1291,9 @@ power stages: one big item can't be split further.</p>
   was recorded or to a server too old to say), the <b>resolution</b> it runs at (yours from Preferences when you handed it over; "–" for
   Thermal and Current capacity, whose setting is the thermal quality, and for a job handed over before this was
   recorded), queued with the jobs ahead or running with how far it is, the elapsed time counting up, and its <b>memory</b>: what the job uses on the server and what the server still has free (the details box adds what it has reserved from Windows, the commit, and the server's free commit: a job fails when that runs out, even with RAM free; a bigger page file on the server helps).
+  After the window opens, the list first shows what this computer kept; the line over it says <b>Asking the compute
+  server(s)…</b> until the servers have answered (a slow or unreachable one can take a while), so a job missing for
+  the first moments is not lost; then it says when they were last checked.
   Ended jobs move to <b>Past jobs</b> (shown, failed, cancelled, no longer on the server) and stay there until you
   remove them; select one for its details below (drag the line above the details to make them taller): where and how long it ran and, for a failure, the error in full
   (the server's own message and traceback, kept with the job). <b>Copy details</b> puts them on the clipboard.
