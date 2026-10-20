@@ -831,9 +831,19 @@ Motor bridges heat the board with their RMS currents and their parts' losses (se
     Without `q_oss`, C_oss·V² stands in for Q_oss·V. For GaN use Q_oss: its capacitance falls steeply with
     voltage, so the small-signal C_oss at the bus voltage underestimates the loss (EPC2306 at 52.8 V, 750 kHz:
     1.5 W from Q_OSS 38 nC, 1.0 W from C_OSS 482 pF).
+  - **dead time** (a synchronous rectifier FET): both switches are off for `dead_time` before each turns on, and the
+    inductor current flows through the rectifier in reverse at `v_sd`: 2·t_dead·f_sw·I·V_SD in the rectifier, taken
+    out of its channel's conduction time. With GaN (V_SD ≈ 1.5-2 V) often as much as the conduction loss. The dead
+    time comes from the settings or a GT field on the controller IC (`GT = dead:20ns`; per channel `dead1:20ns`; per
+    labelled converter `conv1_dead:20ns`); without one 20 ns per edge (an adaptive controller's), with a note.
+    `v_sd` from the rectifier FETs' `Vsd` field, else 2 V for GaN, 0.8 V otherwise.
+  - **reverse recovery** (`q_rr`, a silicon FET's body diode or a PN catch diode; the FETs' `Qrr` field; GaN has
+    none): Q_rr·V·f_sw in the main switch at its hard turn-on. The same charge is a current spike in the hot loop,
+    I_rr = √(2·Q_rr·di/dt) over t_rr = √(2·Q_rr/(di/dt)) at di/dt = I/t_edge, added to the pulse's spectrum, and
+    its snap-off an overshoot I_rr·√(L/C_oss) in the `hot_loop` issue.
 - **Inputs** per power stage (Converters tab; hover a field for what it means): `rds_on`, `rds_on_low`, `dcr`,
-  `diode_vf`, `q_oss` (and `c_oss`, which also sets the ringing). A missing value leaves that loss out, with a
-  note. The `thermal:` settings section: `ambient_c` (25), `orientation`
+  `diode_vf`, `q_oss` (and `c_oss`, which also sets the ringing), `dead_time`, `v_sd`, `q_rr`. A missing value
+  leaves that loss out, with a note (the dead time and V_SD take their defaults, also with a note). The `thermal:` settings section: `ambient_c` (25), `orientation`
   (horizontal / vertical), `convection` (natural / forced with `airspeed`, 1 m/s / fixed with `h_top` and
   `h_bottom`, 10 and 5 W/m²K), `radiation` (true), `quality` (draft / normal / fine; default normal), the limits
   `warn_c` (85) and `max_c` (105), `capacity_c` (see "Current capacity" below), and `theta_jb` (part → K/W) for

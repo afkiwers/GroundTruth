@@ -54,7 +54,10 @@ _UNITS = {"ohms": "ohm", "ohm": "ohm", "ω": "ohm", "r": "ohm", "farads": "F", "
           "volts": "V", "volt": "V", "v": "V", "amperes": "A", "ampere": "A", "amps": "A", "amp": "A", "a": "A",
           "hertz": "Hz", "hz": "Hz", "watts": "W", "watt": "W", "w": "W"}
 _QUANTITY_NAMES = {"ohm": "a resistance", "F": "a capacitance", "H": "an inductance", "C": "a charge",
-                   "V": "a voltage", "A": "a current", "Hz": "a frequency", "W": "a power"}
+                   "V": "a voltage", "A": "a current", "Hz": "a frequency", "W": "a power", "s": "a time"}
+# a time's unit ("20ns", "0.02us", "20 nanoseconds"): stripped before the number is read, only when a time is asked
+# for (a lone "s" is not in _UNITS: "1.8mS" is a transconductance, siemens)
+_SECONDS = re.compile(r"(?:seconds?|secs?|s)$", re.I)
 _NUMBER = re.compile(r"^([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)(.*)$")
 
 
@@ -82,11 +85,15 @@ def parse_quantity(text: str, quantity: str, assumed: float = 1.0) -> tuple[Opti
     """A part parameter as a schematic field holds it: (value in SI units, or None; why not / what was assumed).
 
     Reads InvenTree's (pint) strings ("3.8milliohm", "616 picofarad", "38 nanocoulomb", "6.9 mΩ", "100V") and
-    datasheet notation ("616p", "4m7", "2.2 uF", "10uF/16V"). quantity: "ohm", "F", "H", "C" or "V"; a unit of
-    another quantity is refused. A bare number is in `assumed` units (e.g. 1e-3 for "3.8" meaning mΩ)."""
+    datasheet notation ("616p", "4m7", "2.2 uF", "10uF/16V"). quantity: "ohm", "F", "H", "C", "V" or "s" (a time:
+    "20ns", "20 nanoseconds"); a unit of another quantity is refused. A bare number is in `assumed` units (e.g. 1e-3
+    for "3.8" meaning mΩ)."""
     if text is None or not str(text).strip():
         return None, "empty"
     s = str(text).strip().replace(",", ".").replace(" ", "")
+    timed = False                               # a time written with its unit: "1s" is 1 s, not 1 in `assumed` units
+    if quantity == "s":
+        s, timed = _SECONDS.subn("", s)         # "20ns" -> "20n": the prefix alone is then the multiplier
     f = _FRACTION.match(s)
     if f and int(f.group(2)):                   # 1/16W -> 0.0625W (read as 1 W before: the "/16W" was dropped)
         s = repr(int(f.group(1)) / int(f.group(2))) + f.group(3)
@@ -107,7 +114,8 @@ def parse_quantity(text: str, quantity: str, assumed: float = 1.0) -> tuple[Opti
             return None, f"'{text}': unit not understood"
         factor, unit, _ = u
         value = float(m.group(1)) * factor
-        if not unit and factor == 1.0 and not m.group(2).strip("/@") and "e" not in m.group(1).lower():
+        if not unit and factor == 1.0 and not m.group(2).strip("/@") and "e" not in m.group(1).lower() \
+                and not timed:
             return value * assumed, "unit assumed"          # "1e-9" is written in SI units already
     if unit and unit != quantity:
         return None, f"'{text}': not {_QUANTITY_NAMES[quantity]}"

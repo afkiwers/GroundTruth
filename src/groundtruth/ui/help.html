@@ -260,6 +260,22 @@ switches inside (leave High side, Low side and Switch node empty then); <b>Condu
 <i>(analysis default)</i> uses the settings' <code>analysis.conducted</code>; parts are references separated by
 commas (Q1, Q2), connectors plus then minus (J1.1, J1.2). <b>R_DS(on)</b>, <b>R_DS(on) low side</b>, <b>Inductor
 DCR</b> and <b>Diode V_f (V)</b> are the losses of the thermal solve.</p>
+<p><a name="deadtime"></a><b>Dead time, reverse conduction and recovery</b> (a synchronous stage: a FET as the
+rectifier, a buck's low side or a boost's high side). Before each switch turns on, both are off for the
+<b>Dead time</b>; the inductor current meanwhile flows through the rectifier FET in reverse, at <b>Reverse V_SD</b>
+(about 1.5-2 V for GaN, 0.8 V for a silicon body diode) instead of across its R_DS(on). That costs
+2·t_dead·f_sw·I·V_SD in the rectifier, taken out of its conduction time: with GaN often as much as its conduction loss
+(kraft_flux_mini_2's conv1 at 10 A: 0.32 W in 2 × 20 ns, against 0.15 W of conduction). The dead time is not the edge
+time: the edge is how fast the node swings once a switch turns on. Set it here, or give the controller IC a GT field
+(<a href="#labels">Detection labels</a>): <code>dead:20ns</code> for every converter it controls,
+<code>dead1:20ns</code> / <code>dead2:30ns</code> per channel (its SW1 / SW2 pin), <code>conv1_dead:20ns</code> for
+the converter labelled conv1; the value is then marked ◆ like the parts' fields. Empty: 20 ns (an adaptive
+controller's; the LTC7890 with its DTCA / DTCB pins on GND). V_SD comes from the rectifier FETs' <code>Vsd</code>
+field, else 2 V for a GaN part and 0.8 V otherwise. A silicon FET's body diode also has a reverse-recovery charge
+<b>Q_rr</b> (its <code>Qrr</code> field; GaN has none, leave it empty): the main switch sweeps it out at its hard turn-on
+(Q_rr·V·f_sw of loss), the hot loop carries it as a current spike of I_rr = √(2·Q_rr·di/dt) (in the conducted and
+radiated spectra), and when the recovery snaps off it adds an overshoot I_rr·√(L/C_oss), shown on the Heatmap tab's
+<b>recovery</b> tile and in the <code>hot_loop</code> issue. Thermal's notes say when a default was used.</p>
 <ul>
 <li><b>Detect…</b> finds stages from their inductors and switches; a surge stopper or reverse-polarity FET in the
   input path is recognised and taken as closed (give it a resistor model of its R_DS(on) on the Parts
@@ -594,7 +610,9 @@ stage's is listed on the Issues tab (<code>unusual_value</code>, info) in case a
 <li><b>Stages:</b> R_DS(on) comes from the high side (or the integrated switch IC) and the low side, per FET. C_oss
   and Q_oss come from the switch-node device and count a side's parallel FETs together (a bridge with two FETs per
   switch: 2 × the FET's Coss). A diode buck's c_oss is its catch diode's Cj. DCR comes from the inductor on the switch
-  node. Parallel parts whose fields disagree give no value (the note names them).</li>
+  node. A synchronous rectifier's Vsd and Qrr (its parallel FETs' Qrr together) give v_sd and q_rr, and the
+  controller's GT dead-time word the dead time (<a href="#deadtime">Dead time</a>). Parallel parts whose fields
+  disagree give no value (the note names them).</li>
 <li><b>Parts:</b> a capacitor's C, ESR, ESL and C at bias, an inductor's L and R (from DCR), a resistor's R.</li>
 <li><b>In sync:</b> a value from the schematic is marked <b>◆</b> and follows the field: it is read again every time
   the board opens and before every run, so a change in InvenTree (after <i>Update symbols from library</i> and
@@ -862,8 +880,9 @@ Simulate, it says so and asks for a Simulate instead of heating the design as it
 <ul>
 <li>copper: a converter's DC paths, a bridge's RMS currents (Joule heat, resistivity following the
   temperature);</li>
-<li>parts: their losses at the operating point (switch conduction, switching edges, output charge, an inductor's
-  DCR, series parts; for a bridge, the losses from its drive waveform).</li>
+<li>parts: their losses at the operating point (switch conduction, switching edges, output charge, a synchronous
+  rectifier's reverse conduction in the dead times and its recovery charge, an inductor's DCR, series parts; for a
+  bridge, the losses from its drive waveform).</li>
 </ul>
 <p><b>Current capacity</b> (Heatmap tab) finds, per converter, the load current, and per bridge, the phase
 current, at which the hottest copper or part junction reaches the limit (<code>thermal.capacity_c</code>, by default
@@ -993,6 +1012,10 @@ an example in <a href="#siglabels">Labelling a signal path</a>.</p>
 <tr><td><code>hb_hs</code> / <code>hb_ls</code></td><td>a bridge leg's high-side / low-side switch</td></tr>
 <tr><td><code>hb_out</code> / <code>hb_in</code></td><td>the motor connector / the bus input connector</td></tr>
 <tr><td><code>ignore</code></td><td>a part detection should never use</td></tr>
+<tr><td><code>dead:20ns</code></td><td>on a controller IC: the dead time of every converter it controls;
+  <code>dead1:20ns</code>, <code>dead2:30ns</code> per channel (its SW1 / SW2 pin); <code>conv1_dead:20ns</code> for
+  the converter labelled conv1 (wins over the others). A bare number is in ns
+  (<a href="#deadtime">Dead time</a>)</td></tr>
 <tr><td><code>sig</code></td><td>the Signal paths tab: every net of this 2-pin part is a signal (a filter resistor)</td></tr>
 <tr><td><code>sig:9</code></td><td>the net on pin 9 (pad number or pin name: <code>sig:PA3</code>) is a signal, even
   with a supply-like name (ADC_I_RAIL_1)</td></tr>

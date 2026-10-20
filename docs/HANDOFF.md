@@ -1,12 +1,36 @@
 # GroundTruth handover
 
-## Current state (2026-10-20, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-20, branch `dead-time` open; `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `dead-time` (2026-10-20, from `main` 61ba6dc, not merged):** the user, of the Converters tab's edge time:
+  "is that the dead time?", "why aren't we looking at dead time as well?", then "do all of it" (dead time and V_SD in
+  the losses, Q_rr for silicon, a validation test, kraft numbers) and "add a GT field ... to the IC on the schematic
+  for each converter that contains the intended dead time".
+  - Converters get `dead_time`, `v_sd`, `q_rr` (settings, the Converters form with ◆ marks, ranges). A synchronous
+    rectifier FET conducts in reverse for both dead times: 2·t_dead·f_sw·I·V_SD, out of its channel's share
+    (`thermal.part_losses`, `dead_time_values`; A48). Defaults with a note: 20 ns (an adaptive controller's: the
+    LTC7890 with DTCA / DTCB on GND, as kraft has them: R314 / R315 0 Ω), V_SD 2 V GaN / 0.8 V Si. Q_rr: Q_rr·V·f_sw
+    in the main switch, a triangle I_rr = √(2·Q_rr·di/dt) over t_rr added in phase to the hot loop's pulse spectrum
+    (`power.recovery`, `pulse_harmonics(rec=)`, the band to the triangle's corner), its snap-off I_rr·√(L/C_oss) in
+    the `hot_loop` issue, the Vds safety check and the fix advisor (A49, [Mohan 2003]).
+  - Fields: the FETs' `Vsd` and new `Qrr` (the rectifier side's) fill v_sd / q_rr; the controller IC's GT field
+    `dead:20ns` / `dead1:20ns` (its SW1 pin's channel) / `conv1_dead:20ns` (the stage labelled conv1) fills dead_time
+    (`tags.dead_times`, `dead_time_of`, `stage_ident`; the controller from `loop.controller`, split out of
+    find_loop). Times parse with their unit (`values.parse_quantity(..., "s")`: 20ns, 0.02us, "20 nanoseconds").
+  - kraft conv1 / conv2 (out/dead_time/): Q302 0.152 → 0.466 W, Q304 0.281 → 0.594 W at 20 ns and Vsd 1.6 V (the
+    EPC2306 field); efficiency conv1 99.12 → 99.01 %, conv2 95.44 → 94.89 %. Thermal (normal quality, both stages,
+    `thermal_check.py`, logs thermal_dt0.log / thermal_dt20_fields.log): Q302 96.1 → 103.9 °C, Q304 95.5 → 103.8 °C
+    (both now just under 105 °C), Q303 120.4 → 127.1 °C, Q301 119.1 → 125.2 °C (the shared copper); the mesh's
+    stated uncertainty ±7 K. `thermal_check.py` now applies the schematic fields as the plugin and CLI do (it ran
+    without: Vsd fell back to 2 V).
+  - Tests: tests/test_dead_time.py (11: the closed forms, capacity's linear term, the spectrum against a numerical
+    Fourier transform of the waveform, the GT words, the fields, the settings); test_thermal (2) pinned to
+    dead_time 0, test_power's energy balance with the dead-time term.
 - **Branch `jobs-fetching` (2026-10-20, from `main` abfede4, merged into `main` at the user's "merge"):** the user, of a server job that seemed gone
   after closing and reopening the plugin and KiCad: "That was a fluke, it simply takes some time to update. maybe worth
   adding a message of some sort saying server data is being fetched". The Server jobs tab has a line over its lists:

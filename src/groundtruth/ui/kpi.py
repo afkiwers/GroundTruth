@@ -198,6 +198,11 @@ def _converter(c, rules) -> list[Kpi]:
     if c.ringing:
         out.append(("ringing", f"{c.ringing['f'] / 1e6:.0f} MHz", f"Q {c.ringing['q']:.1f}", "",
                     "the hot loop's inductance with the switches' C_oss"))
+    rec = getattr(c, "recovery", None)
+    if rec:
+        out.append(("recovery", f"{rec['i_rr']:.1f} A", f"{rec['q_rr'] * 1e9:g} nC in {rec['t_rr'] * 1e9:.1f} ns"
+                    + (f", ≈{rec['overshoot_v']:.0f} V" if rec.get("overshoot_v") else ""), "",
+                    "the rectifier's reverse-recovery spike at the hard turn-on (q_rr: a silicon body diode)"))
     caps = [x for x in c.caps if not x["lisn"]][:3]
     if caps:
         out.append(("input capacitors", f"{caps[0]['share_hf'] * 100:.0f} % {caps[0]['name']}",

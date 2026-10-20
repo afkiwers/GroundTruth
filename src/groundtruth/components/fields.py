@@ -41,8 +41,11 @@ PARAMS = (
           1e-13, 1e-6, "616 picofarad", "ringing frequency and spectrum, the node charge current, switching loss"),
     Param("Qoss", "FET", "q_oss: as Coss", "C", 1e-9, "nC", 1e-12, 1e-5, "38 nanocoulomb",
           "switching loss Q_oss·V·f, the charge per edge"),
-    Param("Vsd", "FET", "v_sd (motor bridges: reverse conduction in the dead time)", "V", 1.0, "V", 0.0, 10.0,
-          "2.1V", "dead-time losses, the drive model"),
+    Param("Vsd", "FET", "v_sd: reverse conduction in the dead time (a synchronous rectifier's, a bridge's switches)",
+          "V", 1.0, "V", 0.0, 10.0, "2.1V", "dead-time losses, the drive model"),
+    Param("Qrr", "FET", "q_rr: the synchronous rectifier's reverse-recovery charge (silicon body diode; GaN has none)",
+          "C", 1e-9, "nC", 0.0, 1e-5, "62 nanocoulomb",
+          "recovery loss Q_rr·V·f_sw, the recovery current spike in the spectrum and the overshoot"),
     Param("Vds", "FET", "the switch's voltage rating (read by the fix advisor)", "V", 1.0, "V", 1.0, 5000.0, "100V",
           "the overshoot's limit: the switch node's peak below 80 % of it"),
     # InvenTree's names for the ratings (kraft_flux_mini_2's parts carry them); "Voltage" / "Power" read too
@@ -234,7 +237,9 @@ def _common(board, refs: list[str], name: str, times: int = 1) -> tuple[Optional
 def stage_values(board, config, spec) -> tuple[dict[str, Reading], list[str]]:
     """{key: Reading} a converter's or bridge's parameters take from its parts' fields, and notes (unreadable or
     disagreeing fields). Per FET: rds_on, rds_on_low, v_sd; per switch-node side (the parallel FETs together):
-    c_oss, q_oss; a catch diode's Cj is a diode buck's c_oss, its Vf the diode_vf; the inductor's DCR the dcr."""
+    c_oss, q_oss, and the synchronous rectifier's q_rr; a catch diode's Cj is a diode buck's c_oss, its Vf the
+    diode_vf; the inductor's DCR the dcr; the controller's GT dead-time word (dead:20ns, analysis/tags.py) the
+    dead_time."""
     from ..config.settings import BridgeSpec
     out: dict[str, Reading] = {}
     notes: list[str] = []
@@ -270,11 +275,34 @@ def stage_values(board, config, spec) -> tuple[dict[str, Reading], list[str]]:
     put("c_oss", spec.low_side, "Cj", len(spec.low_side))
     put("q_oss", node, "Qoss", len(node))
     put("diode_vf", spec.low_side, "Vf")
+    # the synchronous rectifier (a buck's low side, a boost's high side): its reverse conduction in the dead times
+    # and its body diode's recovered charge (the side's parallel FETs together: each recovers its own share)
+    rect = [r for r in (spec.high_side if spec.topology == "boost" else spec.low_side) if not r.upper().startswith("D")]
+    put("v_sd", rect, "Vsd")
+    put("q_rr", rect, "Qrr", len(rect))
+    if rect:
+        r = _controller_dead_time(board, spec)
+        if r is not None and "dead_time" not in out:
+            out["dead_time"] = r
     from ..analysis.power import switch_inductor
     _, inductor = switch_inductor(board, config, spec)
     if inductor is not None:
         put("dcr", [inductor.reference], "DCR")
     return out, notes
+
+
+def _controller_dead_time(board, spec) -> Optional[Reading]:
+    """The dead time the stage's controller IC gives in its GT field (analysis/tags.dead_time_of): for the stage's
+    GT id, its SW pin's channel, or every stage of the IC. None without a controller or such a word."""
+    from ..analysis.loop import controller
+    from ..analysis.tags import dead_time_of, stage_ident
+    ctrl, channel = controller(board, spec)
+    if ctrl is None:
+        return None
+    hit = dead_time_of(ctrl, stage_ident(board, spec.parts), channel)
+    if hit is None:
+        return None
+    return Reading(hit[0], hit[1], f"{ctrl.reference} GT {hit[1]}")
 
 
 def model_values(fp, kind: str) -> tuple[dict[str, Reading], list[str]]:
@@ -296,7 +324,8 @@ def same(a: Optional[float], b: Optional[float]) -> bool:
     return a is not None and b is not None and abs(a - b) <= REL_TOL * max(abs(a), abs(b), 1e-30)
 
 
-STAGE_KEYS = {"converter": ("rds_on", "rds_on_low", "c_oss", "q_oss", "diode_vf", "dcr"),
+STAGE_KEYS = {"converter": ("rds_on", "rds_on_low", "c_oss", "q_oss", "diode_vf", "dcr", "v_sd", "q_rr",
+                            "dead_time"),
               "bridge": ("rds_on", "rds_on_low", "c_oss", "q_oss", "v_sd")}
 
 
@@ -318,7 +347,7 @@ class Difference:
 
 
 _KEY_UNITS = {"rds_on": "Ω", "rds_on_low": "Ω", "dcr": "Ω", "ESR": "Ω", "R": "Ω", "c_oss": "F", "C": "F",
-              "C_bias": "F", "q_oss": "C", "v_sd": "V", "diode_vf": "V", "ESL": "H", "L": "H", "gbw": "Hz",
+              "C_bias": "F", "q_oss": "C", "q_rr": "C", "dead_time": "s", "v_sd": "V", "diode_vf": "V", "ESL": "H", "L": "H", "gbw": "Hz",
               "bandwidth": "Hz", "z_out": "Ω", "c_in": "F", "r_in": "Ω", "slew": "V/s", "cmrr": "dB", "gain": ""}
 
 
