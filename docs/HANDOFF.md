@@ -28,6 +28,11 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
     (both now just under 105 °C), Q303 120.4 → 127.1 °C, Q301 119.1 → 125.2 °C (the shared copper); the mesh's
     stated uncertainty ±7 K. `thermal_check.py` now applies the schematic fields as the plugin and CLI do (it ran
     without: Vsd fell back to 2 V).
+  - After the merge, at the user's "add the proper deadtime to the converter on the schematic": U303 in flux-2
+    (`C:\Users\iwers\OneDrive\Dokumente\github\flux-2`, dcdc_gan.kicad_sch + flux-2.kicad_pcb) got `GT =
+    dead:20ns` (tools/dev/label_project.py; backup out/kraft_backup_2026-10-20/). The datasheet itself could not be
+    fetched (analog.com reset the connection); the 20 ns adaptive figure for DTCx on GND is from its "Dead Time
+    Control" section as search results quote it. Worth checking against the PDF.
   - Tests: tests/test_dead_time.py (11: the closed forms, capacity's linear term, the spectrum against a numerical
     Fourier transform of the waveform, the GT words, the fields, the settings); test_thermal (2) pinned to
     dead_time 0, test_power's energy balance with the dead-time term.

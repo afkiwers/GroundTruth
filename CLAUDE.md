@@ -246,7 +246,9 @@ in `tools/dev/`, never only in the scratchpad.
   followers), U1102 sig_rx:9, sig_rx:10. Detection gives /CPU/ADC_I_RAIL_1 U302.3 → U301 → R303 4.7 kΩ → U1102.9
   and /CPU/ADC_I_RAIL_2 U304.3 → U305 → R337 → U1102.10 (R304 / R334 10 kΩ loads and C304 / C342 100 nF as
   shunts). Before: `out/kraft_backup_2026-10-11/` (no ADC labels), `out/kraft_backup_2026-10-11b/` (the first,
-  incomplete ADC labels).
+  incomplete ADC labels). Since 2026-10-20 (the user: "add the proper deadtime to the converter on the schematic")
+  U303 has `GT = dead:20ns` in `flux-2` (dcdc_gan.kicad_sch and the board): the LTC7890's adaptive dead time, its
+  DTCA / DTCB pins on GND through R314 / R315 0 Ω; conv1 and conv2 read it. Before: `out/kraft_backup_2026-10-20/`.
   Power stages (all found by `groundtruth detect`), rail +VDC unless noted:
 
   | Stage | Controller | Switches | Switch node | Inductor |
