@@ -1937,7 +1937,7 @@ automatic recognition more robust"; options weighed:
 - `render_html(board, issues, routes, mode, settings, suggestions=, converters=, view3d=, bridges=, thermal=,
   capacity=, solver=, config=, progress=, max_vias=, outlines=, names=)`. Sections (`part`, numbered, each in the contents
   column): cover (board, date, mode, settings file, where it was solved (`gpu.describe`), version, a non-1×
-  resolution, and `config.report`), Summary (KPI cards, the 8 worst findings), Board (`report/boardview.py`, below),
+  resolution, and `config.report`), Summary (KPI cards, the main findings one line per check with a link filtering the Issues table, `_findings_by_check`; every net / stage / bridge at a glance, `_at_a_glance`; the overshoot judged as hot_loop does, `_overshoot`), Board (`report/boardview.py`, below),
   Issues (severity filter,
   sortable), Signal nets (`_net`), Power stages (`_stage`, with each DC path's `dc_view`), Motor bridges (`_bridge`:
   drive, capacitor bars, legs, `rms_view`, `sweep_view`, victims), Temperatures (`_thermal`, capacity rows), Suggested

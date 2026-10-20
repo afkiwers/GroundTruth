@@ -55,6 +55,41 @@ PROBE = """<script>
 </script>"""
 
 
+LINK_PROBE = """<script>
+(() => {
+  document.querySelector("button.f[data-sev='error']").click();
+  document.querySelector("a[data-show-check='cap_voltage']").click();
+  const shown = [...document.querySelectorAll('#issues tbody tr')].filter(r => !r.classList.contains('hidden'))
+    .map(r => r.dataset.check).sort().join(',');
+  const on = [...document.querySelectorAll('button.f.on')].map(b => b.dataset.check || b.dataset.sev).join(',');
+  const pre = document.createElement('pre'); pre.id = 'probe'; pre.textContent = shown + '|' + on;
+  document.body.appendChild(pre);
+})();
+</script>"""
+
+
+def _edge_probe(tmp_path, body: str, probe: str) -> str:
+    """The text the probe script writes into the page after running in headless Edge."""
+    page = ("<!doctype html><html><head><style>tr.hidden{display:none}</style></head><body>" + body
+            + f"<script>{html._JS}</script>" + probe + "</body></html>")
+    f = tmp_path / "page.html"
+    f.write_text(page, encoding="utf-8")
+    run = subprocess.run([str(EDGE), "--headless=new", "--disable-gpu", f"--user-data-dir={tmp_path / 'edge'}",
+                          "--dump-dom", f.as_uri()], capture_output=True, text=True, encoding="utf-8", timeout=120)
+    m = re.search(r"<pre id=\"probe\">(.*?)</pre>", run.stdout)
+    assert m, run.stdout[-2000:] + run.stderr[-2000:]
+    return m.group(1)
+
+
+@pytest.mark.skipif(not EDGE.exists(), reason="needs Microsoft Edge for a headless page")
+def test_a_summary_finding_opens_its_check(tmp_path):
+    """The summary's count of a check (Main findings) shows that check's rows only, every severity (the Error chip
+    picked before is released)."""
+    issues = _issues()
+    out = _edge_probe(tmp_path, html._findings_by_check(issues) + html._issues(issues), LINK_PROBE)
+    assert out == "cap_voltage,cap_voltage|all,cap_voltage"
+
+
 @pytest.mark.skipif(not EDGE.exists(), reason="needs Microsoft Edge for a headless page")
 def test_clicking_checks_shows_only_them(tmp_path):
     """vds_rating and plane_resonance picked: their two rows; with Error: only vds_rating's, the chips counting
