@@ -638,7 +638,8 @@ def test_boost_pulse_is_the_input_current():
 def test_input_current_is_output_power_plus_losses_over_the_input_voltage(tmp_path):
     """Energy balance, V_in·I_in = V_out·I_out + P_loss, term by term against the hand sums: a synchronous buck,
     12 V → 3 V at 3 A (D = 0.25), 300 kHz, 4 ns edges: conduction D·I²·R_on (high side) + (1-D-2·t_d·f)·I²·R_on,low,
-    the low side's reverse conduction in two 25 ns dead times 2·t_d·f·I·V_SD [A48], one hard edge ½·V·I·t_r·f, output
+    the low side's reverse conduction in two 25 ns dead times, (2·I·t_d − 2·Q_oss)·f·V_SD (the soft edge's node
+    swing taken off) [A48], one hard edge ½·V·I·t_r·f, output
     charge Q_oss·V·f, the inductor's I²·DCR; then a DC path's copper I²·R."""
     from types import SimpleNamespace
     from groundtruth.analysis.power import input_estimate
@@ -646,13 +647,15 @@ def test_input_current_is_output_power_plus_losses_over_the_input_voltage(tmp_pa
     spec = detect_converters(board, sc.config)[0].spec
     spec.f_sw, spec.i_out, spec.v_in, spec.v_out, spec.rise_time = 300e3, 3.0, 12.0, 3.0, 4e-9
     spec.rds_on, spec.rds_on_low, spec.q_oss, spec.dcr = 10e-3, 5e-3, 20e-9, 8e-3
-    spec.dead_time, spec.v_sd = 25e-9, 0.8
+    spec.dead_rise = spec.dead_fall = 25e-9
+    spec.v_sd = 0.8
     res = SimpleNamespace(net=spec.name, duty=0.25, v_in=12.0)
     est = input_estimate(board, sc.config, spec, res)
     dead = 2 * 25e-9 * 300e3                                                # 1.5 % of the period
-    p_loss = (0.25 * 9 * 10e-3 + (0.75 - dead) * 9 * 5e-3 + dead * 3 * 0.8 + 0.5 * 12 * 3 * 4e-9 * 300e3
+    p_loss = (0.25 * 9 * 10e-3 + (0.75 - dead) * 9 * 5e-3 + (2 * 3 * 25e-9 - 2 * 20e-9) * 300e3 * 0.8
+              + 0.5 * 12 * 3 * 4e-9 * 300e3
               + 20e-9 * 12 * 300e3 + 9 * 8e-3)
-    assert est["p_out_w"] == pytest.approx(9.0) and est["p_loss_w"] == pytest.approx(p_loss)       # 0.258 W
+    assert est["p_out_w"] == pytest.approx(9.0) and est["p_loss_w"] == pytest.approx(p_loss)       # 0.248 W
     assert est["i_in_a"] == pytest.approx((9.0 + p_loss) / 12.0) and est["i_in_ideal_a"] == pytest.approx(0.75)
     assert est["efficiency"] == pytest.approx(9.0 / (9.0 + p_loss)) and not est["missing"]
     copper = [{"name": "output L1 → J2.1", "current_a": 3.0, "r_mohm": 10.0, "r_copper_mohm": 10.0, "parts": []}]
