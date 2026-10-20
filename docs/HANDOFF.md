@@ -1,13 +1,13 @@
 # GroundTruth handover
 
-## Current state (2026-10-20, branch `dead-time` open; `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-20, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `dead-time` (2026-10-20, from `main` 61ba6dc, not merged):** the user, of the Converters tab's edge time:
+- **Branch `dead-time` (2026-10-20, from `main` 61ba6dc, merged into `main` at the user's "merge"):** the user, of the Converters tab's edge time:
   "is that the dead time?", "why aren't we looking at dead time as well?", then "do all of it" (dead time and V_SD in
   the losses, Q_rr for silicon, a validation test, kraft numbers) and "add a GT field ... to the IC on the schematic
   for each converter that contains the intended dead time".
