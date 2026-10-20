@@ -33,14 +33,15 @@ def test_a_map_gets_a_pixel_per_cell_and_more(tmp_path):
 
 
 def test_the_report_draws_maps_at_their_resolution_and_a_sharpened_view(tmp_path, monkeypatch):
-    """The exported page: the maps' PNGs as wide as their DPI makes them; a view passed as `sharper` is drawn
-    instead of the one it replaces (matched by kind, net, receiver and DC path); a click script for full size."""
+    """The exported page: the maps' PNGs at the DPI their cells need (the figure's width times it, less the empty
+    margins cropped off since 2026-10-20: at most 15 %); a view passed as `sharper` is drawn instead of the one it
+    replaces (matched by kind, net, receiver and DC path); a click script for full size."""
     board, sc, _ = make(tmp_path, microstrip_board(), "m")
     res = simulate(board, sc.config)
     rr = res.routes[0]
     page = html.render_html(board, res.issues, res.routes, "simulation", config=sc.config)
     want = int(round(html._maps_size(rr)[0] * heatmap_dpi(rr, html._maps_size(rr), html.DPI, html.MAP_DPI_MAX)))
-    assert abs(png_width(page) - want) <= 2
+    assert 0.85 * want <= png_width(page) <= want + 2
     assert "classList.toggle('full')" in page and "cursor:zoom-in" in page
     drawn = []
     real = html.draw_heatmap
