@@ -83,6 +83,19 @@ FIELD_TIPS = {
                     "left out of the thermal solve.",
     "Diode V_f (V)": "A catch or boost diode's forward voltage at the load current, e.g. 0.5: its loss "
                      "(1−D)·I·V_f. Empty: 0.5 V.",
+    "Dead time": "A synchronous stage's dead time per edge, e.g. 20ns: both switches off before each turns on, the "
+                 "inductor current meanwhile in the rectifier FET in reverse at V_SD. Its loss 2·t·f_sw·I·V_SD "
+                 "(often as much as the FET's conduction with GaN). Not the edge time (how fast the node swings "
+                 "once a switch turns on). From the controller's datasheet and its dead-time pins, or a GT field "
+                 "on the controller IC: dead:20ns (per channel dead1:20ns, per labelled converter "
+                 "conv1_dead:20ns). Empty: 20 ns (an adaptive controller's).",
+    "Reverse V_SD (V)": "The rectifier FET's reverse-conduction voltage in the dead time (datasheet V_SD; the FET's "
+                        "Vsd field), e.g. 1.6 for GaN at the load current, 0.8 for a silicon body diode. Empty: "
+                        "2 V GaN, 0.8 V silicon.",
+    "Q_rr": "The rectifier FET's reverse-recovery charge (a silicon body diode's Q_rr at the load current; the FET's "
+            "Qrr field), e.g. 60n. GaN has none: leave it empty. Its loss Q_rr·V·f_sw in the main switch, a current "
+            "spike I_rr = √(2·Q_rr·di/dt) in the hot loop's spectrum, and the overshoot I_rr·√(L/C_oss) when it "
+            "snaps off.",
 }
 BUTTON_TIPS = {
     "Add": "Add a new power stage from the form.",
@@ -90,8 +103,9 @@ BUTTON_TIPS = {
                        "such as spread spectrum, are kept).",
     "Remove selected": "Remove the selected power stages (also the Delete key).",
     "Mark reviewed": "Mark the selected auto-detected stages as checked by you (they stop showing in orange).",
-    "Use schematic values": "Put the selected stages' part parameters (R_DS(on), C_oss, Q_oss, DCR, V_f) back to "
-                            "what their parts' schematic fields say, where they have them (Help: Part parameters).",
+    "Use schematic values": "Put the selected stages' part parameters (R_DS(on), C_oss, Q_oss, DCR, V_f, V_SD, Q_rr, "
+                            "and the dead time from the controller's GT field) back to what the schematic says, "
+                            "where it says it (Help: Part parameters).",
     "Detect…": "Find switching power stages on the board (an inductor next to switching transistors, a catch "
                "diode or an IC's SW pin) and choose which to add.",
 }
@@ -192,6 +206,12 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self.rds_on_low = wx.TextCtrl(fw)
         self.dcr = wx.TextCtrl(fw)
         self.diode_vf = wx.TextCtrl(fw)
+        self.dead = wx.TextCtrl(fw)              # a synchronous rectifier: dead time, V_SD, Q_rr
+        self.dead.SetHint("20ns (assumed)")
+        self.v_sd = wx.TextCtrl(fw)
+        self.v_sd.SetHint("GaN 2, Si 0.8")
+        self.q_rr = wx.TextCtrl(fw)
+        self.q_rr.SetHint("none")
         self.inp = wx.TextCtrl(fw)
         self.out = wx.TextCtrl(fw)
         self.standard = wx.Choice(fw, choices=STANDARD_CHOICES)
@@ -208,7 +228,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self.phase_deg.SetHint("even spread")
         # the part parameters the schematic fields can give: a mark beside each (◆ from the schematic, ! differs)
         self.param_ctrls = {"c_oss": self.c_oss, "q_oss": self.q_oss, "rds_on": self.rds_on,
-                            "rds_on_low": self.rds_on_low, "dcr": self.dcr, "diode_vf": self.diode_vf}
+                            "rds_on_low": self.rds_on_low, "dcr": self.dcr, "diode_vf": self.diode_vf,
+                            "dead_time": self.dead, "v_sd": self.v_sd, "q_rr": self.q_rr}
         self.marks = {}
         self._rows = {}
         for key, ctrl in self.param_ctrls.items():
@@ -229,7 +250,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
                             ("Interleave group", self.interleave), ("Phase (°)", self.phase_deg),
                             ("R_DS(on)", self.rds_on),
                             ("R_DS(on) low side", self.rds_on_low), ("Inductor DCR", self.dcr),
-                            ("Diode V_f (V)", self.diode_vf)):
+                            ("Diode V_f (V)", self.diode_vf), ("Dead time", self.dead),
+                            ("Reverse V_SD (V)", self.v_sd), ("Q_rr", self.q_rr)):
             text = wx.StaticText(fw, label=label)
             tip = FIELD_TIPS.get(label, "")
             if tip:                          # on the label and the field: hovering either explains it
@@ -319,6 +341,9 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         for ctrl, v in ((self.rds_on, c.rds_on), (self.rds_on_low, c.rds_on_low), (self.dcr, c.dcr)):
             ctrl.SetValue("" if v is None else format_si(v, "Ω"))
         self.diode_vf.SetValue("" if c.diode_vf is None else f"{c.diode_vf:g}")
+        self.dead.SetValue("" if c.dead_time is None else format_si(c.dead_time, "s"))
+        self.v_sd.SetValue("" if c.v_sd is None else f"{c.v_sd:g}")
+        self.q_rr.SetValue("" if c.q_rr is None else format_si(c.q_rr, "C"))
         self.inp.SetValue(", ".join(c.input_connector))
         self.out.SetValue(", ".join(c.output_connector))
         self.standard.SetStringSelection(c.conducted or STANDARD_CHOICES[0])
@@ -355,6 +380,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             v_out=num(self.v_out, "V"), rise_time=num(self.rise, "s") or 0.0, c_oss=num(self.c_oss, "F"),
             q_oss=num(self.q_oss, "C"), c_stray=num(self.c_stray, "F"), rds_on=num(self.rds_on, "Ω"),
             rds_on_low=num(self.rds_on_low, "Ω"), dcr=num(self.dcr, "Ω"), diode_vf=num(self.diode_vf, "V"),
+            dead_time=num(self.dead, "s"), v_sd=num(self.v_sd, "V"), q_rr=num(self.q_rr, "C"),
             input_connector=refs(self.inp), output_connector=refs(self.out),
             conducted=None if std == STANDARD_CHOICES[0] else std,
             spread=(parse_field(self.spread.GetValue().replace("%", ""), "") or 0.0) / 100 or None,

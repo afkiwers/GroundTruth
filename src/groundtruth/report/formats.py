@@ -245,6 +245,10 @@ def converter_text(c) -> list[str]:
         r = c.ringing
         out.append(f"    ringing with C_oss: {r['f'] / 1e6:.0f} MHz, Q {r['q']:.1f}"
                    + (f", overshoot ≈ {r['overshoot_v']:.1f} V" if r.get("overshoot_v") else ""))
+    rec = getattr(c, "recovery", None)
+    if rec:
+        out.append(f"    reverse recovery: {rec['q_rr'] * 1e9:g} nC, {rec['i_rr']:.1f} A peak over {rec['t_rr'] * 1e9:.1f} ns"
+                   + (f", overshoot ≈ {rec['overshoot_v']:.1f} V" if rec.get("overshoot_v") else ""))
     caps = [x for x in c.caps if not x["lisn"]][:6]
     if caps:
         out.append(f"    capacitors (share of the loop current at {c.loop_f / 1e6:g} MHz / {c.f_sw / 1e3:g} kHz): "
