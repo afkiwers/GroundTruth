@@ -135,6 +135,12 @@ class ServerJobsPanel(wx.Panel):
                                                "laptop asleep; a result waits there 24 h and comes here when the "
                                                "server can be reached.")
         self.where.SetName("muted")
+        # whether the list is the servers' yet: after the window opens it shows what this computer kept until the
+        # first round of asking the servers is back (a slow or unreachable server can take a while). The user, of a
+        # job that seemed gone after closing and reopening KiCad: "it simply takes some time to update. maybe worth
+        # adding a message of some sort saying server data is being fetched"
+        self.sync = wx.StaticText(self, label="")
+        self.set_sync(None)
 
         def button(label, tip, action, kind="default"):
             """A button acting on the selected jobs of both lists."""
@@ -203,6 +209,7 @@ class ServerJobsPanel(wx.Panel):
         self.split.Bind(wx.EVT_SPLITTER_SASH_POS_CHANGED, self._sash_moved)
         s = wx.BoxSizer(wx.VERTICAL)
         s.Add(self.where, 0, wx.EXPAND | wx.ALL, 6)
+        s.Add(self.sync, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 6)
         s.Add(top, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 6)
         s.Add(self.split, 1, wx.EXPAND)
         self.SetSizer(s)
@@ -213,6 +220,21 @@ class ServerJobsPanel(wx.Panel):
         self._id = self.GetId()
         self.Bind(wx.EVT_WINDOW_DESTROY, self._destroyed)
         self._enable()
+
+    def set_sync(self, when: Optional[float]):
+        """The line over the lists: still asking the compute servers (when None: no round back yet since the window
+        opened, so jobs may still appear or change), else when they were last asked."""
+        if when is None:
+            text = ("Asking the compute server(s) for the jobs' state… jobs this computer handed over appear or "
+                    "update as soon as they answer.")
+            colour = theme.palette().accent
+        else:
+            text = f"Checked with the compute server(s) at {time.strftime('%H:%M:%S', time.localtime(when))}."
+            colour = theme.palette().muted
+        if self.sync.GetLabel() != text:
+            self.sync.SetLabel(text)
+            self.sync.SetForegroundColour(theme.colour(colour))
+            self.Layout()
 
     def _destroyed(self, evt):
         """Stop the timer with the tab (a timer outliving its window fires into freed memory); only for this panel's

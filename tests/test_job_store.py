@@ -182,3 +182,39 @@ def test_a_split_jobs_coordinator_is_not_a_job_ahead(monkeypatch, tmp_path):
     assert ahead == 1 and srv.position(srv.jobs[jid]) == 1
     slot.split = True                                           # (a test: two coordinators)
     assert srv.position(srv.jobs[jid]) == 0
+
+
+def test_the_tracker_says_when_it_has_asked_the_servers(tmp_path):
+    """The user, of a job that seemed gone after closing and reopening KiCad: "it simply takes some time to update.
+    maybe worth adding a message of some sort saying server data is being fetched". The tracker reports the end of
+    every round (on_round, last_round; None before the first), which the Server jobs tab shows: "Asking the compute
+    server(s)…" until then, "Checked … at HH:MM:SS" after (a server that can't be reached still ends the round)."""
+    import time
+    rounds = []
+    t = SyncTracker(SafeJobs(tmp_path / "jobs"), lambda a: FakeServer([], down=True), lambda m: None,
+                    servers=lambda: ["mac:8765"], on_round=rounds.append)
+    assert t.last_round is None
+    before = time.time()
+    t.check()
+    assert len(rounds) == 1 and t.last_round == rounds[0] and t.last_round >= before
+    t.check()
+    assert len(rounds) == 2
+
+
+def test_the_server_jobs_tab_says_whether_the_servers_were_asked_yet():
+    """ServerJobsPanel.set_sync: None (no round back yet) → the asking message; a time → when they were checked."""
+    import time
+    wx = pytest.importorskip("wx")
+    app = wx.App(False) if not wx.GetApp() else None
+    from groundtruth.ui.jobs_panel import ServerJobsPanel
+    f = wx.Frame(None)
+    try:
+        p = ServerJobsPanel(f, lambda j: None, lambda j: None, lambda j: None)
+        assert p.sync.GetLabel().startswith("Asking the compute server(s)")
+        when = time.mktime((2026, 10, 20, 14, 52, 10, 0, 0, -1))
+        p.set_sync(when)
+        assert p.sync.GetLabel() == "Checked with the compute server(s) at 14:52:10."
+    finally:
+        f.Destroy()
+        if app is not None:
+            app.Destroy()
