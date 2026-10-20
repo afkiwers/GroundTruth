@@ -2192,7 +2192,9 @@ a History tab with a comparison (and the CLI).
   side; `_synchronous`: a FET rectifier or an integrated stage → one hard edge ½·V·I·t·f and Q_oss·V·f, a diode →
   two edges and ½·Q_oss·V·f; C_oss·V² stands in for Q_oss·V without `q_oss`; session 6, after the user's EPC2306
   datasheet: C_OSS 482 pF vs Q_OSS 38 nC at 50 V; since 2026-10-20 a synchronous rectifier's reverse conduction in
-  both dead times, 2·t_dead·f_sw·I·V_SD out of its channel's share [A48], and the recovered charge Q_rr·V·f_sw in
+  the dead times (one per switch-node edge, `dead_rise` / `dead_fall`; `edge_dead_times` names the hard and the soft
+  one, `reverse_conduction` takes the soft edge's node swing 2·Q_oss / I_peak off it, `ripple_pp` the valley and
+  peak currents) out of its channel's share [A48], and the recovered charge Q_rr·V·f_sw in
   the main switch [A49]: `dead_time_values` gives the defaults and notes; the dead time also from the controller
   IC's GT field, `tags.dead_time_of` via `fields.stage_values` and `loop.controller`; `power.recovery` /
   `pulse_harmonics(rec=)` add the recovery's triangle to the hot loop's pulse spectrum and `recovery_overshoot`

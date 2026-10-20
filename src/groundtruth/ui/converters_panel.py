@@ -83,12 +83,18 @@ FIELD_TIPS = {
                     "left out of the thermal solve.",
     "Diode V_f (V)": "A catch or boost diode's forward voltage at the load current, e.g. 0.5: its loss "
                      "(1−D)·I·V_f. Empty: 0.5 V.",
-    "Dead time": "A synchronous stage's dead time per edge, e.g. 20ns: both switches off before each turns on, the "
-                 "inductor current meanwhile in the rectifier FET in reverse at V_SD. Its loss 2·t·f_sw·I·V_SD "
-                 "(often as much as the FET's conduction with GaN). Not the edge time (how fast the node swings "
-                 "once a switch turns on). From the controller's datasheet and its dead-time pins, or a GT field "
-                 "on the controller IC: dead:20ns (per channel dead1:20ns, per labelled converter "
-                 "conv1_dead:20ns). Empty: 20 ns (an adaptive controller's).",
+    "Dead time, rise": "A synchronous stage's dead time from the low side turning off to the high side turning on "
+                       "(the switch node's rising edge; the LTC7890's DTCA), e.g. 20ns. Both switches are off; the "
+                       "inductor current meanwhile flows in reverse through the rectifier FET at V_SD. A buck's "
+                       "hard edge: the whole dead time is reverse conduction (often as much loss as the FET's "
+                       "conduction with GaN). Not the edge time (how fast the node swings once a switch turns on). "
+                       "From the controller's datasheet and its dead-time pins, or a GT field on the controller IC: "
+                       "dead_rise:20ns, or dead:20ns for both edges (per channel dead1_rise:20ns, per labelled "
+                       "converter conv1_dead_rise:20ns). Empty: 20 ns (an adaptive controller's).",
+    "Dead time, fall": "The dead time from the high side turning off to the low side turning on (the switch node's "
+                       "falling edge; the LTC7890's DTCB), e.g. 20ns. A buck's soft edge: the inductor current first "
+                       "swings the node down (the FETs' output charge, 2·Q_oss / I), and only the rest of the dead "
+                       "time is reverse conduction. GT field: dead_fall:20ns (or dead:20ns for both). Empty: 20 ns.",
     "Reverse V_SD (V)": "The rectifier FET's reverse-conduction voltage in the dead time (datasheet V_SD; the FET's "
                         "Vsd field), e.g. 1.6 for GaN at the load current, 0.8 for a silicon body diode. Empty: "
                         "2 V GaN, 0.8 V silicon.",
@@ -206,8 +212,10 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self.rds_on_low = wx.TextCtrl(fw)
         self.dcr = wx.TextCtrl(fw)
         self.diode_vf = wx.TextCtrl(fw)
-        self.dead = wx.TextCtrl(fw)              # a synchronous rectifier: dead time, V_SD, Q_rr
-        self.dead.SetHint("20ns (assumed)")
+        self.dead_rise = wx.TextCtrl(fw)         # a synchronous rectifier: dead times, V_SD, Q_rr
+        self.dead_rise.SetHint("20ns (assumed)")
+        self.dead_fall = wx.TextCtrl(fw)
+        self.dead_fall.SetHint("20ns (assumed)")
         self.v_sd = wx.TextCtrl(fw)
         self.v_sd.SetHint("GaN 2, Si 0.8")
         self.q_rr = wx.TextCtrl(fw)
@@ -229,7 +237,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         # the part parameters the schematic fields can give: a mark beside each (◆ from the schematic, ! differs)
         self.param_ctrls = {"c_oss": self.c_oss, "q_oss": self.q_oss, "rds_on": self.rds_on,
                             "rds_on_low": self.rds_on_low, "dcr": self.dcr, "diode_vf": self.diode_vf,
-                            "dead_time": self.dead, "v_sd": self.v_sd, "q_rr": self.q_rr}
+                            "dead_rise": self.dead_rise, "dead_fall": self.dead_fall, "v_sd": self.v_sd,
+                            "q_rr": self.q_rr}
         self.marks = {}
         self._rows = {}
         for key, ctrl in self.param_ctrls.items():
@@ -250,7 +259,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
                             ("Interleave group", self.interleave), ("Phase (°)", self.phase_deg),
                             ("R_DS(on)", self.rds_on),
                             ("R_DS(on) low side", self.rds_on_low), ("Inductor DCR", self.dcr),
-                            ("Diode V_f (V)", self.diode_vf), ("Dead time", self.dead),
+                            ("Diode V_f (V)", self.diode_vf), ("Dead time, rise", self.dead_rise),
+                            ("Dead time, fall", self.dead_fall),
                             ("Reverse V_SD (V)", self.v_sd), ("Q_rr", self.q_rr)):
             text = wx.StaticText(fw, label=label)
             tip = FIELD_TIPS.get(label, "")
@@ -341,7 +351,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         for ctrl, v in ((self.rds_on, c.rds_on), (self.rds_on_low, c.rds_on_low), (self.dcr, c.dcr)):
             ctrl.SetValue("" if v is None else format_si(v, "Ω"))
         self.diode_vf.SetValue("" if c.diode_vf is None else f"{c.diode_vf:g}")
-        self.dead.SetValue("" if c.dead_time is None else format_si(c.dead_time, "s"))
+        for ctrl, v in ((self.dead_rise, c.dead_rise), (self.dead_fall, c.dead_fall)):
+            ctrl.SetValue("" if v is None else format_si(v, "s"))
         self.v_sd.SetValue("" if c.v_sd is None else f"{c.v_sd:g}")
         self.q_rr.SetValue("" if c.q_rr is None else format_si(c.q_rr, "C"))
         self.inp.SetValue(", ".join(c.input_connector))
@@ -380,7 +391,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             v_out=num(self.v_out, "V"), rise_time=num(self.rise, "s") or 0.0, c_oss=num(self.c_oss, "F"),
             q_oss=num(self.q_oss, "C"), c_stray=num(self.c_stray, "F"), rds_on=num(self.rds_on, "Ω"),
             rds_on_low=num(self.rds_on_low, "Ω"), dcr=num(self.dcr, "Ω"), diode_vf=num(self.diode_vf, "V"),
-            dead_time=num(self.dead, "s"), v_sd=num(self.v_sd, "V"), q_rr=num(self.q_rr, "C"),
+            dead_rise=num(self.dead_rise, "s"), dead_fall=num(self.dead_fall, "s"), v_sd=num(self.v_sd, "V"),
+            q_rr=num(self.q_rr, "C"),
             input_connector=refs(self.inp), output_connector=refs(self.out),
             conducted=None if std == STANDARD_CHOICES[0] else std,
             spread=(parse_field(self.spread.GetValue().replace("%", ""), "") or 0.0) / 100 or None,
