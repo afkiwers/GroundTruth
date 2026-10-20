@@ -1,7 +1,7 @@
 """The analysis report: one self-contained HTML page (images embedded, style and script inline, nothing loaded
 from elsewhere) for sharing and for CI artifacts, from the CLI (`--format html`) and the plugin's Export report.
 
-Cover and summary first (the board, the key figures, the worst findings), then the issues, the signal nets, the
+Cover and summary first (the board, the key figures, the findings per check, everything analysed at a glance), then the issues, the signal nets, the
 power stages, the motor bridges, the thermal results and the suggested fixes, each with its figures, and an
 appendix on method and limits. On screen a contents column follows the page; printed (or saved as PDF from the
 browser) it is an A4 document with page breaks before the main sections."""
@@ -95,6 +95,14 @@ h4 { font-size:13px; text-transform:uppercase; letter-spacing:.07em; color:var(-
                font-size:13.5px; }
 .findings .pill { flex:none; margin-top:1px; }
 .findings li:last-child { border-bottom:0; }
+.findings.bycheck .pill { min-width:62px; text-align:center; }
+.findings .fcheck code { font-size:11.5px; color:var(--muted); }
+.findings .fworst { color:var(--ink2); font-size:12.5px; margin-top:2px; }
+.tablewrap.narrow { max-width:620px; }
+#issues td.finding { min-width:380px; }
+#issues td.netc { max-width:190px; overflow-wrap:anywhere; }
+#issues td.where { white-space:nowrap; }
+#issues code.fp { font-size:11px; color:var(--muted); }
 .pill { display:inline-block; padding:1px 9px; border-radius:999px; font-size:11.5px; font-weight:650;
         letter-spacing:.02em; white-space:nowrap; text-transform:capitalize; }
 .pill.error { color:var(--err); background:var(--err-bg); } .pill.warning { color:var(--warn); background:var(--warn-bg); }
@@ -195,6 +203,13 @@ _JS = """
   }));
   chks.forEach(b => b.addEventListener('click', () => { b.classList.toggle('on'); apply(); }));
   if (allChk) allChk.addEventListener('click', () => { chks.forEach(b => b.classList.remove('on')); apply(); });
+  // a check's count in the summary's main findings: the Issues table with that check only, every severity
+  document.querySelectorAll('a[data-show-check]').forEach(a => a.addEventListener('click', () => {
+    chks.forEach(b => b.classList.toggle('on', b.dataset.check === a.dataset.showCheck));
+    btns.forEach(o => o.classList.toggle('on', o.dataset.sev === 'all'));
+    sev = 'all';
+    apply();
+  }));
   // a click on a figure shows it at its full resolution (scroll inside it), another click fits it again
   document.querySelectorAll('figure img').forEach(img => img.addEventListener('click', () =>
     img.parentElement.classList.toggle('full')));
@@ -228,12 +243,13 @@ def _kpis(cards: list[str]) -> str:
     return "<div class='kpis'>" + "".join(cards) + "</div>" if cards else ""
 
 
-def _table(head: list[str], rows: list[str], sort: bool = True, tid: str = "") -> str:
-    """A table: head = column titles (a leading '#' makes a column right-aligned numbers), rows = '<tr>…</tr>'."""
+def _table(head: list[str], rows: list[str], sort: bool = True, tid: str = "", narrow: bool = False) -> str:
+    """A table: head = column titles (a leading '#' makes a column right-aligned numbers), rows = '<tr>…</tr>';
+    narrow: a few short columns, not stretched across the page (their numbers far from their names)."""
     ths = "".join(f"<th class='num'>{e(h[1:])}</th>" if h.startswith("#") else f"<th>{e(h)}</th>" for h in head)
     attrs = (f' id="{tid}"' if tid else "") + (' class="sort"' if sort else "")
-    return (f"<div class='tablewrap'><table{attrs}><thead><tr>{ths}</tr></thead><tbody>" + "".join(rows)
-            + "</tbody></table></div>")
+    return (f"<div class='tablewrap{' narrow' if narrow else ''}'><table{attrs}><thead><tr>{ths}</tr></thead><tbody>"
+            + "".join(rows) + "</tbody></table></div>")
 
 
 def _num(v, fmt: str, sort_value=None) -> str:
@@ -387,7 +403,7 @@ def render_html(board: Board, issues: list[Issue], routes: list, mode: str, sett
                      f"{e(title)}</h2>" + (f"<p class='lead'>{lead}</p>" if lead else "") + body + "</section>")
 
     part("summary", "Summary", "", _summary(issues, routes, stages, bridges, thermal, capacity, warn, figs, board,
-                                            list(routes) + list(converters)))
+                                            list(routes) + list(converters), rules))
     view = board_section(board, routes, converters, bridges, issues, config)
     if view:
         part("board", "Board", "The board as in an interactive BOM: front or back, one copper layer's pours and "
@@ -409,7 +425,7 @@ def render_html(board: Board, issues: list[Issue], routes: list, mode: str, sett
         part("power", "Power stages", "Each switching stage's hot loop (the switches, the input capacitors and the "
              "copper between them), its DC power paths and its conducted emission at the input"
              + ("; first, all stages' DC currents together." if together else "."),
-             together + "".join(_stage(board, c, issues, warn, figs, view3d) for c in stages),
+             together + "".join(_stage(board, c, issues, warn, figs, view3d, rules) for c in stages),
              ([(_anchor("stage", COMBINED_NET), "All stages: DC together")] if together else [])
              + [(_anchor("stage", c.net), c.net) for c in stages])
     rails = [d for d in dc_loads or () if not d.error and d.dc]
@@ -445,7 +461,7 @@ def render_html(board: Board, issues: list[Issue], routes: list, mode: str, sett
              _thermal(board, thermal, capacity, issues, figs))
     if suggestions is not None:
         part("fixes", "Suggested fixes", "", _suggestions_section(suggestions))
-    part("method", "Method and limits", "", _appendix(config))
+    part("method", "Method and limits", "", _appendix(config, board))
 
     nav = "".join(f"<li><a href='#{pid}'>{e(title)}</a>" + (
         "<ol>" + "".join(f"<li><a href='#{a}'>{e(t)}</a></li>" for a, t in sub) + "</ol>" if sub else "") + "</li>"
@@ -494,7 +510,7 @@ def _solver_text(solver: Optional[dict]) -> str:
 
 
 # --------------------------------------------------------------------------------------------- summary
-def _summary(issues, routes, stages, bridges, thermal, capacity, warn, figs, board, views) -> str:
+def _summary(issues, routes, stages, bridges, thermal, capacity, warn, figs, board, views, rules=None) -> str:
     """The summary part: KPI cards (issue counts, the worst margins, hottest copper), an overview table of every
     net, stage and bridge, and the board overview figure."""
     live = [i for i in issues if not i.waived]
@@ -519,14 +535,116 @@ def _summary(issues, routes, stages, bridges, thermal, capacity, warn, figs, boa
     if thermal is not None and not thermal.error:
         st = "error" if thermal.t_max >= thermal.max_c else "warn" if thermal.t_max >= thermal.warn_c else "ok"
         cards.append(_kpi("Hottest point", f"{thermal.t_max:.0f} °C", f"{thermal.power_w:.1f} W in all", st))
-    worst = sorted(live, key=lambda i: {"error": 0, "warning": 1, "info": 2}.get(i.severity, 3))[:8]
-    findings = ("<ul class='findings'>" + "".join(
-        f"<li><span class='pill {i.severity}'>{e(i.severity)}</span><span>{_finding(i)}</span></li>"
-        for i in worst) + "</ul>") if worst else "<p class='empty'>No findings.</p>"
+    findings = _findings_by_check(live)
     where = ("<p class='note'>Where they are: the <a href='#board'>Board</a> section shows the board with the "
-             "analysed routes and stages and every issue numbered.</p>") if board.footprints else ""
+             "analysed routes and stages and every issue numbered; a check's count opens the Issues table showing "
+             "only that check.</p>") if board.footprints else ""
     return (_kpis(cards) + "<div class='summary-grid one'><div class='item'>"
-            "<h4 style='margin-top:0'>Main findings</h4>" + findings + where + "</div></div>")
+            "<h4 style='margin-top:0'>Main findings</h4>" + findings + where + "</div></div>"
+            + _at_a_glance(routes, stages, bridges, issues, warn, rules))
+
+
+def _overshoot(c, rules=None) -> tuple[str, float, list, str]:
+    """A power stage's overshoot as the hot_loop check judges it: (the estimate that is largest, its volts, every
+    estimate [(name, V)], its level "error" | "warn" | "ok" against the rules' shares of V_in, "" without v_in)."""
+    rec = getattr(c, "recovery", None)
+    parts = [("L·di/dt", c.overshoot_v or 0.0), ("ringing", (c.ringing or {}).get("overshoot_v") or 0.0),
+             ("recovery", (rec or {}).get("overshoot_v") or 0.0)]
+    name, over = max(parts, key=lambda p: p[1])
+    if not c.v_in:
+        return name, over, parts, ""
+    frac = over / c.v_in
+    level = ("error" if frac >= getattr(rules, "overshoot_error", 0.5) else
+             "warn" if frac >= getattr(rules, "overshoot_warning", 0.25) else "ok")
+    return name, over, parts, level
+
+
+FINDING_CHECKS = 10            # checks listed in the summary's main findings (the rest: the Issues table)
+_SEV_RANK = {"error": 0, "warning": 1, "info": 2}
+
+
+def _findings_by_check(live: list[Issue]) -> str:
+    """The summary's main findings: one line per check, the most severe checks first and the most frequent first
+    within a severity, each with its counts per severity, its worst case (the lowest margin where the issues carry
+    one, else its first most severe issue) and a link opening the Issues table showing that check only. Before
+    2026-10-20 the eight most severe issues were listed one by one: on kraft_flux_mini_2 eight clearance errors of one
+    rail, and none of the converters' failing emission margins or their overshoot."""
+    from ..core.issues import CHECKS
+    if not live:
+        return "<p class='empty'>No findings.</p>"
+    groups: dict[str, list[Issue]] = {}
+    for i in live:
+        groups.setdefault(i.check, []).append(i)
+
+    def rank(c: str) -> tuple:
+        """Sort key of a check: its most severe issue, then the number of its issues (more first)."""
+        return min(_SEV_RANK.get(i.severity, 3) for i in groups[c]), -len(groups[c]), c
+
+    def worst(items: list[Issue]) -> Issue:
+        """The issue a check is shown by: the most severe, and among those the lowest margin where they have one."""
+        top = min(_SEV_RANK.get(i.severity, 3) for i in items)
+        same = [i for i in items if _SEV_RANK.get(i.severity, 3) == top]
+        with_margin = [i for i in same if isinstance((i.details or {}).get("margin_db"), (int, float))]
+        return min(with_margin, key=lambda i: i.details["margin_db"]) if with_margin else same[0]
+    lines = []
+    checks = sorted(groups, key=rank)
+    for c in checks[:FINDING_CHECKS]:
+        items = groups[c]
+        w = worst(items)
+        counts = ", ".join(f"{n} {s}{'s' if n > 1 and s != 'info' else ''}" for s in ("error", "warning", "info")
+                           if (n := sum(1 for i in items if i.severity == s)))
+        title = CHECKS.get(c, ("", c))[1]
+        lines.append(f"<li><span class='pill {w.severity}'>{e(w.severity)}</span><div><div class='fcheck'>"
+                     f"<b>{e(title)}</b> <code>{e(c)}</code> · <a href='#issues' data-show-check='{e(c)}'>{counts}"
+                     f"</a></div><div class='fworst'>{'worst: ' if len(items) > 1 else ''}{_finding(w)}</div></div>"
+                     "</li>")
+    more = len(checks) - FINDING_CHECKS
+    tail = f"<p class='note'>{more} more check(s) in the <a href='#issues'>Issues</a> table.</p>" if more > 0 else ""
+    return "<ul class='findings bycheck'>" + "".join(lines) + "</ul>" + tail
+
+
+def _at_a_glance(routes, stages, bridges, issues, warn, rules=None) -> str:
+    """The summary's table of everything analysed, one row each, linked to its part: a net's route or a power
+    stage's or motor bridge's operating point, its worst radiated and conducted margins, a stage's overshoot (the
+    largest estimate: L·di/dt, the ringing, a recovery) against its input voltage and its efficiency."""
+    from ..components.values import format_si
+    if not (routes or stages or bridges):
+        return ""
+    rows = []
+    for r in routes:
+        if getattr(r, "error", None):
+            continue
+        w = getattr(r, "worst", None)
+        rows.append(f"<tr><td><a href='#{_anchor('net', f'{r.net} {r.receiver}')}'>{e(r.net)}</a></td>"
+                    f"<td>net {e(r.driver)} → {e(r.receiver)}</td>"
+                    + _margin_td(w["margin_db"] if w else None, warn) + "<td class='num'>–</td>"
+                    "<td class='num'>–</td><td class='num'>–</td></tr>")
+    for c in stages:
+        if c.error:
+            continue
+        w, cw = c.worst, c.conducted_worst
+        _, over, _, level = _overshoot(c, rules)
+        cls = {"error": "bad", "warn": "meh", "ok": "good"}.get(level, "")
+        over_td = (f"<td class='num {cls}' data-v='{over}'>{over:.1f} V ({over / c.v_in * 100:.0f} %)</td>"
+                   if c.v_in else "<td class='num'>–</td>")
+        eff = (c.input or {}).get("efficiency")
+        op = (f"{c.topology}, {c.v_in:g} V, {c.pulse_a:g} A, {format_si(c.f_sw, 'Hz')}, edge "
+              f"{c.rise_time * 1e9:g} ns" if c.v_in else f"{c.topology}, {c.pulse_a:g} A, {format_si(c.f_sw, 'Hz')}")
+        rows.append(f"<tr><td><a href='#{_anchor('stage', c.net)}'>{e(c.net)}</a></td><td>{e(op)}</td>"
+                    + _margin_td(w["margin_db"] if w else None, warn)
+                    + _margin_td(cw["margin_db"] if cw else None, warn) + over_td
+                    + _num(eff * 100 if eff else None, "{:.1f} %") + "</tr>")
+    for b in bridges:
+        rad = (getattr(b, "worst_leg", None) or {}).get("radiated")
+        cw = getattr(b, "conducted_worst", None)
+        rows.append(f"<tr><td><a href='#{_anchor('bridge', b.net)}'>{e(b.net)}</a></td><td>motor bridge</td>"
+                    + _margin_td(rad["margin_db"] if rad else None, warn)
+                    + _margin_td(cw["margin_db"] if cw else None, warn) + "<td class='num'>–</td>"
+                    "<td class='num'>–</td></tr>")
+    if not rows:
+        return ""
+    return ("<h4>At a glance</h4>" + _table(["Analysed", "Operating point", "#Radiated margin", "#Conducted margin",
+                                             "#Overshoot (of V in)", "#Efficiency"], rows))
 
 
 def _finding(i: Issue) -> str:
@@ -548,11 +666,13 @@ def _issues(issues: list[Issue]) -> str:
                     f"<td class='num' data-v='{k}'>{k}"
                     f"</td><td data-v='{rank.get(i.severity, 3)}'><span class='pill {i.severity}'>{e(i.severity)}</span>"
                     f"{WAIVED if i.waived else ''}</td>"
-                    f"<td class='nw'>{e(i.check)}</td><td class='nw'>{e(i.net)}</td><td>{e(i.message)}"
+                    f"<td class='nw'>{e(i.check)}</td><td class='netc'>{e(i.net)}</td>"
+                    f"<td class='finding'>{e(i.message)}"
                     + (f"<br><span class='note'>Waived: {e(i.waiver_reason)}</span>" if i.waived and i.waiver_reason
                        else "") +
-                    f"</td><td class='num' data-v='{i.location[0]}'>{i.location[0]:.2f}, {i.location[1]:.2f}</td>"
-                    f"<td>{e(i.layer)}</td><td><code>{i.fingerprint}</code></td></tr>")
+                    f"</td><td class='where' data-v='{i.location[0]}'>{i.location[0]:.2f}, {i.location[1]:.2f}"
+                    + (f"<br><span class='note'>{e(i.layer)}</span>" if i.layer else "")
+                    + f"</td><td><code class='fp' title='fingerprint (waivers name it)'>{i.fingerprint}</code></td></tr>")
     n = {s: sum(1 for i in issues if i.severity == s) for s in rank}
     filters = ("<div class='filters noprint'><button class='f on' data-sev='all'>All " + str(len(issues))
                + "</button>" + "".join(f"<button class='f' data-sev='{s}'>{s.capitalize()} {n[s]}</button>"
@@ -570,7 +690,7 @@ def _issues(issues: list[Issue]) -> str:
                     + "".join(f"<button class='f' data-check='{e(c)}' title='{e(CHECKS.get(c, ('', ''))[1])}'>"
                               f"{e(c)} <span class='cn'>{counts[c]}</span></button>" for c in sorted(counts))
                     + "<span class='note' id='issues-shown'></span></div>")
-    return filters + _table(["#Nr", "Severity", "Check", "Net", "Finding", "#Location (mm)", "Layer", "Fingerprint"],
+    return filters + _table(["#Nr", "Severity", "Check", "Net", "Finding", "Where (mm, layer)", "Fingerprint"],
                             rows, tid="issues")
 
 
@@ -663,7 +783,7 @@ def _net(board, rr, issues, warn, figs, view3d) -> str:
 
 
 # --------------------------------------------------------------------------------------------- power stages
-def _stage(board, c, issues, warn, figs, view3d) -> str:
+def _stage(board, c, issues, warn, figs, view3d, rules=None) -> str:
     """One power stage's article: hot loop and ringing, capacitor sharing, radiated and conducted estimates, DC
     paths, the fix advisor's options, issues and notes."""
     head = (f"<article class='item' id='{_anchor('stage', c.net)}'><header><h3>{e(c.net)}</h3>"
@@ -671,15 +791,18 @@ def _stage(board, c, issues, warn, figs, view3d) -> str:
             f"{c.pulse_a:g} A, edge {c.rise_time * 1e9:g} ns</span></header>")
     if c.error:
         return head + f"<p class='bad'>{e(c.error)}</p></article>"
-    frac = c.overshoot_v / c.v_in if c.v_in else None
+    # the overshoot judged is the largest estimate (L·di/dt over the edge, the ringing with C_oss, a recovery's
+    # snap-off), as the hot_loop check takes it; its colour is that check's. Before 2026-10-20 the card showed L·di/dt
+    # alone: green "7.5 V" on kraft_flux_mini_2 beside a 40 V ringing the check called an error
+    rec = getattr(c, "recovery", None)
+    name, over, parts, status = _overshoot(c, rules)
     cards = [_kpi("Hot loop", f"{c.loop_nh:.2f} nH", f"{c.loop_mohm:.0f} mΩ at {c.loop_f / 1e6:g} MHz"),
-             _kpi("L·di/dt", f"{c.overshoot_v:.1f} V", f"{frac * 100:.0f} % of {c.v_in:g} V" if frac is not None
-                  else "set v_in", "" if frac is None else "error" if frac >= 0.5 else "warn" if frac >= 0.25 else "ok")]
+             _kpi("Overshoot", f"{over:.1f} V",
+                  (f"{over / c.v_in * 100:.0f} % of {c.v_in:g} V, from the {name}" if c.v_in else "set v_in")
+                  + "".join(f"; {n} {v:.1f} V" for n, v in parts if v and n != name), status)]
     if c.ringing:
         r = c.ringing
-        cards.append(_kpi("Ringing", f"{r['f'] / 1e6:.0f} MHz", f"Q {r['q']:.1f}" +
-                          (f", overshoot {r['overshoot_v']:.1f} V" if r.get("overshoot_v") else "")))
-    rec = getattr(c, "recovery", None)
+        cards.append(_kpi("Ringing", f"{r['f'] / 1e6:.0f} MHz", f"Q {r['q']:.1f} with C_oss and the loop"))
     if rec:
         cards.append(_kpi("Recovery", f"{rec['i_rr']:.1f} A", f"{rec['q_rr'] * 1e9:g} nC in {rec['t_rr'] * 1e9:.1f} ns" +
                           (f", overshoot {rec['overshoot_v']:.1f} V" if rec.get("overshoot_v") else "")))
@@ -724,7 +847,7 @@ def _stage(board, c, issues, warn, figs, view3d) -> str:
             [f"<tr><td>{e(x['name'])}{' (input lines)' if x['lisn'] else ''}</td>"
              f"<td class='num' data-v='{x['share_hf']}'>{share(x['share_hf'])}</td>"
              f"<td class='num' data-v='{x['share_sw'] or 0}'>"
-             f"{share(x['share_sw']) if x['share_sw'] is not None else '–'}</td></tr>" for x in caps]))
+             f"{share(x['share_sw']) if x['share_sw'] is not None else '–'}</td></tr>" for x in caps], narrow=True))
     if c.dc:
         from ..analysis.power import dc_view
         rows = []
@@ -733,7 +856,7 @@ def _stage(board, c, issues, warn, figs, view3d) -> str:
             via_txt = (f"{e(via['name'])}: {via['current_a']:.2f} A"
                        + (f", {via['load_pct']:.0f} % of IPC-2221" if via.get('load_pct') is not None else "")
                        ) if via else "–"
-            rows.append(f"<tr><td>{e(p['name'])}</td>{_num(p['current_a'], '{:g} A')}<td>{e(dc_resistance(p))}</td>"
+            rows.append(f"<tr><td>{e(p['name'])}</td>{_num(p['current_a'], '{:.3g} A')}<td>{e(dc_resistance(p))}</td>"
                         f"{_num(p['drop_mv'], '{:.1f} mV')}{_num(p['loss_w'] * 1e3, '{:.0f} mW')}"
                         f"{_num(p['sustained_a_mm2'], '{:.0f} A/mm²')}<td>{e(p['sustained_layer'])}</td>"
                         f"<td>{via_txt}</td></tr>")
@@ -746,14 +869,26 @@ def _stage(board, c, issues, warn, figs, view3d) -> str:
     body.append(_img(figs.png(f"{c.net} spectrum", draw_spectrum, c, size=(9.5, 3.4)),
                      f"{c.net}: radiated and conducted estimates against the limits"))
     if getattr(c, "victims", None):
-        from ..analysis.victims import victim_text
         body.append("<h4>Victims at the switching edges</h4>" + _table(
-            ["Finding", "#Peak", "#Threshold"],
-            [f"<tr><td>{e(victim_text(v))}</td>{_num(v['peak'], '{:.3g}')}{_num(v.get('limit'), '{:.3g}')}</tr>"
-             for v in c.victims]))
+            ["Finding", "#Peak", "#Threshold"], [_victim_row(v) for v in c.victims]))
     body.append(_responses(c.net, getattr(c, "responses", ()), figs))
     body.append(_notes(c.notes))
     return "".join(body) + "</article>"
+
+
+def _victim_row(v: dict, text=None) -> str:
+    """A victim's table row: its sentence (`text`, default analysis/victims.victim_text; a bridge's its own), the
+    peak and the threshold with their unit (V for a net's noise or a part's ground bounce, A for a current injected
+    through a capacitance), the peak red at or above the threshold."""
+    from ..components.values import format_si
+    from ..analysis.victims import victim_text
+    text = text or victim_text
+    unit = "V" if v.get("kind") in ("net", "part") else "A"
+    peak, limit = v["peak"], v.get("limit")
+    cls = " bad" if limit is not None and peak >= limit else ""
+    return (f"<tr><td>{e(text(v))}</td><td class='num{cls}' data-v='{peak}'>{format_si(float(f'{peak:.3g}'), unit)}"
+            f"</td>" + (f"<td class='num' data-v='{limit}'>{format_si(float(f'{limit:.3g}'), unit)}</td>"
+                        if limit is not None else "<td class='num'>–</td>") + "</tr>")
 
 
 COMBINED_VIAS = 12              # vias listed in the stages-together table (the busiest; the map marks them all)
@@ -983,10 +1118,10 @@ def _combined_dc(board, c, issues, rules, figs) -> str:
     rows = sorted(vias, key=lambda x: -(x.get("load_pct") or 0.0))[:COMBINED_VIAS]
     if rows:
         body.append(f"<h4>Vias on the total current (the {len(rows)} most loaded of {len(vias)})</h4>" + _table(
-            ["Via", "#Current", "#Plating density", "#Load (IPC-2221)", "Where"],
+            ["Via (net @ place, mm)", "#Current", "#Plating density", "#Load (IPC-2221)"],
             [f"<tr><td>{e(x['name'])}</td>{_num(x['current_a'], '{:.2f} A')}{_num(x['a_mm2'], '{:.0f} A/mm²')}"
              + (_num(x['load_pct'], '{:.0f} %') if x.get('load_pct') is not None else "<td class='num'>–</td>")
-             + f"<td>({x['x']:.2f}, {x['y']:.2f})</td></tr>" for x in rows]))
+             + "</tr>" for x in rows], narrow=False))
     body.append(_img(figs.heat(f"{COMBINED_NET} DC together", board, v, issues, size=_maps_size(v)),
                      f"All power stages: DC current density with every stage at its load ({p['loads']})"))
     body.append(_notes(c.notes))
@@ -1117,9 +1252,7 @@ def _bridge(board, b, legs, issues, warn, figs) -> str:
                             "#A/mm² RMS", "#Busiest cap", "#Conducted", "#Radiated"], rows))
     if b.victims:
         body.append("<h4>Victims at the switching edges</h4>" + _table(
-            ["Finding", "#Peak", "#Threshold"],
-            [f"<tr><td>{e(victim_text(v))}</td>{_num(v['peak'], '{:.3g}')}{_num(v.get('limit'), '{:.3g}')}</tr>"
-             for v in b.victims]))
+            ["Finding", "#Peak", "#Threshold"], [_victim_row(v, victim_text) for v in b.victims]))
     body.append(_notes(b.notes))
     return "".join(body) + "</article>"
 
@@ -1145,10 +1278,14 @@ def _thermal(board, thermal, capacity, issues, figs) -> str:
             body.append(_img(figs.png("part temperatures", draw_spectrum, t, size=(9.5, 3.6)),
                              "The hottest parts against the limits"))
             if t.parts:
-                body.append("<h4>Parts</h4>" + _table(
-                    ["Part", "#Board under it", "#Junction", "#Loss", "Why"],
-                    [f"<tr><td>{e(p['ref'])}</td>{_num(p['t_c'], '{:.1f} °C')}{_num(p.get('t_junction'), '{:.1f} °C')}"
-                     f"{_num(p.get('power_w'), '{:.2f} W')}<td>{e(p.get('why', ''))}</td></tr>" for p in t.parts[:25]]))
+                # the junction column only where a θJB gives one (without, every row read "–"); the hottest 25
+                shown = t.parts[:25]
+                junction = any(p.get("t_junction") is not None for p in shown)
+                body.append(f"<h4>Parts (the {len(shown)} hottest of {len(t.parts)})</h4>" + _table(
+                    ["Part", "#Board under it"] + (["#Junction"] if junction else []) + ["#Loss", "Why"],
+                    [f"<tr><td>{e(p['ref'])}</td>{_num(p['t_c'], '{:.1f} °C')}"
+                     + (_num(p.get('t_junction'), '{:.1f} °C') if junction else "")
+                     + f"{_num(p.get('power_w'), '{:.2f} W')}<td>{e(p.get('why', ''))}</td></tr>" for p in shown]))
             body.append(_notes(t.notes))
     if capacity:
         rows = []
@@ -1205,12 +1342,17 @@ def _suggestions_section(res) -> str:
     return "".join(out)
 
 
-def _appendix(config) -> str:
-    """The appendix: how the run was set up (limits, distances, standards, solver settings) and the method's
-    limits, so a reader knows what the figures are."""
+def _appendix(config, board=None) -> str:
+    """The appendix: how the run was set up (limits, distances, standards, the band, solver settings), the board's
+    quasi-static limit [A47] and the method's limits, so a reader knows what the figures are."""
+    from ..components.values import format_si
     from ..emi.conducted import describe
     a = getattr(config, "analysis", None)
     rows = []
+    qs = None
+    if board is not None:
+        from ..analysis.simulate import quasi_static_limit
+        qs = quasi_static_limit(board)
     if a is not None:
         for k, v in (("Grid", f"{a.grid_mm} mm" if a.grid_mm != "auto" else "automatic"),
                      ("Resolution", f"{a.resolution:g}× the nodes (cells 1/√ of it)"),
@@ -1219,8 +1361,20 @@ def _appendix(config) -> str:
                                                                      else "off"),
                      ("Radiated limit", a.limit_text()),
                      ("Conducted standard", describe(a.conducted, a.conducted_class) if a.conducted != "none"
-                      else "none"), ("Harmonics solved per route", str(a.max_solves))):
+                      else "none"),
+                     ("Radiated: measuring distance", f"{a.distance_m:g} m" if a.distance_m else "the limit's own "
+                      "(CISPR 32: 10 m below 1 GHz, 3 m above)"),
+                     ("Radiated: ground reflection", "on (a test site's ground plane)" if a.ground_reflection
+                      else "off (free space)"),
+                     ("Highest frequency evaluated", format_si(a.max_frequency, "Hz") if a.max_frequency
+                      else "automatic: a decade above each edge's corner, 10/(π·t_edge)"),
+                     ("Harmonics solved per route", str(a.max_solves))):
             rows.append(f"<tr><td>{e(k)}</td><td>{e(str(v))}</td></tr>")
+    if qs:
+        f_qs = format_si(float(f"{qs['f']:.3g}"), "Hz")
+        rows.append(f"<tr><td>Quasi-static up to</td><td>{e(f_qs)} (the board's "
+                    f"{qs['size_mm']:.0f} mm in εr {qs['epsilon_r']:.2g} is a quarter wavelength there; above it the "
+                    "board-wide model's emissions are indicative upper bounds)</td></tr>")
     return ("<div class='appendix'><h4>How the results are computed</h4><ul>"
             "<li><b>Rule checks</b> follow each net from its driver to its receivers and check every segment against "
             "the planes next to it (gaps, splits, plane edges, layer changes without a stitching via or a "

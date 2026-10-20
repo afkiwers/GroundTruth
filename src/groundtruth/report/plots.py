@@ -1562,11 +1562,40 @@ def draw_pdn_holds(fig: Figure, p) -> None:
 
 
 def figure_png(draw, *args, size=(8, 5), dpi=110, **kw) -> bytes:
-    """A plot as PNG bytes: draw(fig, *args, **kw) on a new figure of `size` inches, rendered off-screen (Agg)."""
+    """A plot as PNG bytes: draw(fig, *args, **kw) on a new figure of `size` inches, rendered off-screen (Agg),
+    cropped to what is drawn (a board's maps keep their aspect inside the figure: a tall board in a wide figure left
+    a band of empty paper above and below, up to half the image in the report)."""
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     fig = Figure(figsize=size, dpi=dpi)
     FigureCanvasAgg(fig)
     draw(fig, *args, **kw)
+    _close_title_gap(fig)
     buf = io.BytesIO()
-    fig.savefig(buf, format="png")
+    fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.08)
     return buf.getvalue()
+
+
+def _close_title_gap(fig, margin_in: float = 0.12, min_gap_in: float = 0.5) -> None:
+    """Move a figure's title (suptitle, and the maps' note under it) down to just above the rest of the figure when
+    that ended more than min_gap_in lower: maps keep their aspect ratio, so three tall boards side by side sit in
+    the middle of the figure with the title at its top, an empty band between them (cropping the image cannot remove
+    a band inside it). Measured on the rendered figure: the axes with their titles and tick labels, the figure's
+    legends and its other texts; an ordinary figure's gap is left as it is."""
+    texts = [t for t in (getattr(fig, "_suptitle", None), getattr(fig, "_gt_note", None)) if t is not None]
+    if not texts or not fig.axes:
+        return
+    try:
+        r = fig.canvas.get_renderer()
+        inv = fig.transFigure.inverted()
+        boxes = [ax.get_tightbbox(r) for ax in fig.axes if ax.get_visible()]
+        boxes += [lg.get_window_extent(r) for lg in fig.legends]
+        boxes += [t.get_window_extent(r) for t in fig.texts if t not in texts and t.get_text()]
+        top = max(inv.transform(b)[1][1] for b in boxes if b is not None)
+        low = min(inv.transform(t.get_window_extent(r))[0][1] for t in texts if t.get_text())
+    except (AttributeError, ValueError):
+        return
+    h = fig.get_figheight()
+    if (low - top) * h > min_gap_in:
+        gap = low - top - margin_in / h
+        for t in texts:
+            t.set_y(t.get_position()[1] - gap)
