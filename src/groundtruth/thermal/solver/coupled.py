@@ -174,6 +174,7 @@ def run(board: Board, project: Project, board_index: int, progress: Progress) ->
             el.solve(el_map.T @ T, tol=0.1 * lin_tol)
             Q += el_map @ _electrical_power(el)
         T_new = th.solve(Q, T, tol=lin_tol)
+        lin_ok = getattr(th.solver, "last_converged", True)     # an unconverged CG must not read as settled
         dT = float(np.max(np.abs(T_new - T)))
         if hist and dT > hist[-1]["dT"] * 1.05:
             omega = max(0.25, omega * 0.6)
@@ -184,11 +185,14 @@ def run(board: Board, project: Project, board_index: int, progress: Progress) ->
         if not np.isfinite(tmax) or tmax > 1000:
             raise SolverError(f"Thermal runaway: copper passes 1000 °C (iteration {it + 1}). "
                               "At this current the copper would fuse. Reduce the current or widen the path.")
-        if it >= 1 and dT < tol:
+        if it >= 1 and dT < tol and lin_ok:
             break
     else:
         warnings.append(f"Coupled iteration did not reach {tol} °C tolerance in {max_it} iterations "
                         f"(last change {hist[-1]['dT']:.3g} °C).")
+    if not getattr(th.solver, "last_converged", True):
+        warnings.append(f"The thermal linear solver did not converge (relative residual "
+                        f"{th.solver.last_residual:.1e}): temperatures may be wrong.")
 
     progress.stage("Post-processing", 0.95, 1.0)
     Tcu = th.copper_values(T)  # (ncu, columns)

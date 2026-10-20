@@ -154,6 +154,18 @@ build_package.cmd [--committed]                   # the user's console/double-cl
             [--thermal] [--src DIR] [--json OUT]   # tracks' R', drop, J, heat (and temperature) against closed forms
                                                   # and an independent cross-section (audit round 5; --src: main's tree)
 .venv/Scripts/python tools/dev/track_capacity_check.py   # a 0.4 / 0.1 mm track's current capacity against the cross-section
+.venv/Scripts/python tools/dev/tol_check.py BOARD --settings S --out-dir OUT [--tol 1e-10 --cycles 60] [--nets ...]
+                                                  # a Simulate at another GMRES tolerance (+ the KVL / KCL residuals
+                                                  # apart): result_diff against the default's (audit round 6)
+.venv/Scripts/python tools/dev/thermal_tol_check.py [--width 0.1 --amps 1] | [--board B --settings S]   # Thermal's
+                                                  # answer at its tolerances against CG 1e-12 (the error they leave)
+.venv/Scripts/python tools/dev/adversarial_dc.py [--cases neck_short,acute,parallel,tee,corner,...] [--res 1,2,4]
+                                                  # adversarial copper against the sheet solves (both pad models)
+.venv/Scripts/python tools/dev/metamorphic_dc.py  # rotations, shifts, re-drawn copper, reciprocity, linearity, 2x copper
+.venv/Scripts/python tools/dev/angle_scan.py --width 0.1 [--angles 0:90:3] [--offsets 0,0.1] [--res 1]   # R' by angle
+.venv/Scripts/python tools/dev/cavity_analytic_converge.py [--pitches 1,0.5,0.25]   # cavity f10, plate C, loop L
+                                                  # against closed forms by pitch
+.venv/Scripts/python tools/dev/stress_inputs.py   # degenerate inputs: zero widths / thicknesses / currents, runaway
 .venv/Scripts/python tools/dev/neck_check.py [--necks 2,5,20] [--resolutions 1,2,4,16]   # a neck's added R against
                                                   # an independent sheet solve per resolution (the width step, A39)
 .venv/Scripts/python tools/dev/dc_thermal_summary.py BOARD SETTINGS [--src DIR] [--json OUT] [--quality fine]

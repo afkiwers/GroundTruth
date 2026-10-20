@@ -11,6 +11,7 @@ strip from [Grover 1946]. Keys: docs/REFERENCES.md.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Optional
 
 import numpy as np
 from numpy.polynomial import legendre
@@ -75,17 +76,85 @@ def strip_self(length: float, width: float, thickness: float = 0.0) -> float:
     return float(filament_mutual(length, np.array(0.0), np.array(rho)))
 
 
-def strip_self_numeric(length: float, width: float, n: int = 24) -> float:
-    """Self partial inductance of a flat strip from n parallel sub-strips (accurate also when
-    length ~ width, where the single-GMD formula is ~5 % low)."""
-    w = width / n
-    ys = (np.arange(n) + 0.5) * w
-    dy = np.abs(ys[:, None] - ys[None, :])
-    M = filament_mutual(length, np.zeros_like(dy), dy)
-    np.fill_diagonal(M, strip_self(length, w))
-    # with the current spread evenly over the n sub-strips (1/n each), the strip's inductance is the mean of the
-    # sub-strips' inductance matrix: sum_ij M_ij / n^2
-    return float(M.mean())
+def strip_self_numeric(length: float, width):
+    """Self partial inductance of a flat (zero-thickness) strip with its current spread evenly across it: the mean
+    of the filament mutuals over every pair of points across its width, integrated accurately (the single-GMD formula
+    is ~5 % low when length ~ width). `width` may be an array (one value per width, in one numpy pass).
+
+    The pairs' mean is (2/w²)∫₀^w (w − u)·M_fil(u) du over their distance u, = 2∫₀¹ (1 − s)·M_fil(w·s) ds: the
+    tape_mutual integral of a strip with itself, on the same panels graded toward u = 0 (the log singularity) but
+    vectorised over the widths (a model asks for one per narrow strip: tape_mutual per width held the GIL for
+    seconds on kraft_flux_mini_2, and the plugin window with it).
+
+    Until 2026-10-20 the mean over 24 sub-strips with the GMD formula on the diagonal: it converges as 1/n and was
+    0.86 % low for a square strip (VALIDATION_AUDIT.md round 6, ISSUE-28)."""
+    s, ws = _unit_rule()
+    w = np.asarray(width, float)
+    flat = np.atleast_1d(w).ravel()
+    out = np.empty(len(flat))
+    for a in range(0, len(flat), 2048):                 # chunks: 2048 widths x 240 points at a time
+        u = flat[a:a + 2048, None] * s[None, :]
+        out[a:a + 2048] = 2.0 * (filament_mutual(length, 0.0, u) * ((1.0 - s) * ws)[None, :]).sum(axis=1)
+    return float(out[0]) if w.ndim == 0 else out.reshape(w.shape)
+
+
+@lru_cache(maxsize=1)
+def _unit_rule() -> tuple[np.ndarray, np.ndarray]:
+    """The nodes and weights on (0, 1) for strip_self_numeric: TAPE_PANELS panels graded toward 0 (cached)."""
+    s, ws = _panel_rule(0.0, 1.0, 0.0, TAPE_PANELS, TAPE_ORDER)
+    s.setflags(write=False)
+    ws.setflags(write=False)
+    return s, ws
+
+
+TAPE_PANELS = 30            # tape_mutual: panels graded geometrically (ratio ½) toward a near-singular point ...
+TAPE_ORDER = 8              # ... each with an 8-point Gauss-Legendre rule [Abramowitz 1964, §25.4]
+
+
+def _panel_rule(p: float, q: float, toward: Optional[float], panels: int, order: int) -> tuple[np.ndarray, np.ndarray]:
+    """Nodes and weights of a composite Gauss-Legendre rule on [p, q]: `panels` equal panels, or panels shrinking
+    geometrically (each half the next) toward the end `toward`, where the integrand varies on a short scale or has an
+    integrable log singularity. The smallest panel is 2^-(panels-1) of the interval."""
+    x, w = leggauss(order)
+    if toward is None:
+        edges = np.linspace(0.0, 1.0, panels + 1)
+    else:
+        edges = np.concatenate([[0.0], 0.5 ** np.arange(panels - 1, -1, -1)])
+        if toward == q:
+            edges = 1.0 - edges[::-1]
+    t0, t1 = edges[:-1], edges[1:]
+    nodes = p + (q - p) * (t0[:, None] + (t1 - t0)[:, None] * (x[None, :] + 1.0) / 2.0)
+    weights = (q - p) * (t1 - t0)[:, None] * w[None, :] / 2.0
+    return nodes.ravel(), weights.ravel()
+
+
+def tape_mutual(length: float, wa: float, wb: float, axial: float, lateral: float, dz: float) -> float:
+    """Mutual partial inductance (H) of two parallel flat strips (zero thickness) `length` long, wa and wb wide, in
+    parallel planes dz apart, their centres `axial` apart along them and `lateral` across: the mean of the filament
+    mutuals [Grover 1946] over every pair of points across the two widths, each width carrying its current evenly.
+
+    The double integral over the two widths is one integral over their difference v = y_b - y_a, weighted by how
+    many pairs have that difference (the overlap of the two widths shifted by v, a trapezoid) [Kreyszig 2011]:
+    M = (1 / (wa·wb)) ∫ W(v) M_fil(length, axial, √((lateral + v)² + dz²)) dv. It is split where W bends and where
+    the two filaments cross (v = -lateral), toward which the panels shrink geometrically: there the integrand
+    varies on the scale dz, or (dz = 0) has a log singularity. Accurate to ~1e-10 relative (against scipy's adaptive
+    quad), where the 8 x 8 Gauss points across both widths the near field had before missed by 1.6 % at
+    d / dz = 20 (VALIDATION_AUDIT.md round 6, ISSUE-28)."""
+    h, k, s = 0.5 * (wa + wb), 0.5 * abs(wa - wb), -lateral
+    cuts = {-h, -k, k, h}
+    if -h < s < h:
+        cuts.add(s)
+    pts = sorted(cuts)
+    total = 0.0
+    for p, q in zip(pts[:-1], pts[1:]):
+        if q - p <= 0.0:
+            continue
+        toward = p if p == s else q if q == s else None
+        v, wt = _panel_rule(p, q, toward, TAPE_PANELS if toward is not None else 4, TAPE_ORDER)
+        W = np.clip(np.minimum(0.5 * wa, v + 0.5 * wb) - np.maximum(-0.5 * wa, v - 0.5 * wb), 0.0, None)
+        rho = np.sqrt((lateral + v) ** 2 + dz * dz)
+        total += float(np.sum(wt * W * filament_mutual(length, np.full(len(v), axial), rho)))
+    return total / (wa * wb)
 
 
 def strip_kernel(n_axial: int, n_lateral: int, d: float, dz: float = 0.0) -> np.ndarray:
@@ -100,23 +169,20 @@ def strip_kernel(n_axial: int, n_lateral: int, d: float, dz: float = 0.0) -> np.
     # far field: each strip as a filament along its centre line (dz: the vertical distance between two layers)
     K = filament_mutual(d, A, np.sqrt(L * L + dz * dz))
 
-    # Near field: integrate over the strip widths (the filament approximation fails below ~3d).
+    # Near field: integrate over the strip widths (the filament approximation fails below ~3d), accurately also when
+    # the layers are much closer than a cell (tape_mutual): a plane pair's sheet inductance μ0·dz per square is the
+    # small difference of a strip's own-layer and other-layer sums, so an error in these near terms is magnified by
+    # ~d/dz (8 x 8 Gauss points read it 1.5 / 3.9 / 20 % low at d/dz = 5 / 10 / 20, its resonances that much x ½
+    # high: ISSUE-28). The offsets are symmetric in sign: each |offset| is integrated once. The strip itself (dz = 0,
+    # no offset) is its exact self inductance, where the GMD formula is ~5 % off.
     near = 4
     ca, cl = n_axial - 1, n_lateral - 1
-    sa = slice(max(ca - near, 0), ca + near + 1)
-    sl = slice(max(cl - near, 0), cl + near + 1)
-    An, Ln = A[sa, sl], L[sa, sl]
-    # 8-point Gauss-Legendre across each strip's width [Abramowitz 1964, §25.4]: 64 filament pairs per offset,
-    # weights w_i w_j / 4 (the nodes map [-1, 1] onto [-d/2, d/2], and the result is averaged over both widths)
-    x, w = leggauss(8)
-    y1 = 0.5 * d * x
-    W = np.outer(w, w).ravel() / 4.0
-    dy = (y1[:, None] - y1[None, :]).ravel()                       # y2 - y1 over all pairs
-    rho = np.sqrt((Ln[..., None] + dy) ** 2 + dz * dz)
-    Kn = (filament_mutual(d, An[..., None], rho) * W).sum(-1)
-    K[sa, sl] = Kn
-    if dz == 0.0:
-        K[ca, cl] = strip_self_numeric(d, d)        # the strip itself: square, where the GMD formula is ~5 % off
+    for ia in range(0, min(near, n_axial - 1) + 1):
+        for il in range(0, min(near, n_lateral - 1) + 1):
+            m = tape_mutual(d, d, d, ia * d, il * d, dz)
+            for sa_ in {ca + ia, ca - ia}:
+                for sl_ in {cl + il, cl - il}:
+                    K[sa_, sl_] = m
     return K
 
 

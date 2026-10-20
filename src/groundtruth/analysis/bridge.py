@@ -53,6 +53,7 @@ class BridgeResult(RouteResult):
     worst_leg: dict = field(default_factory=dict)        # overshoot, radiated margin: the worst leg's
     losses: list = field(default_factory=list)           # [{ref, power_w, what}] from the drive (bridge_losses)
     rms: dict = field(default_factory=dict)              # RMS current density, vias, series parts (bridge_rms.py)
+    rms_missing: list = field(default_factory=list)      # solves the RMS currents lack (failed): RmsBasis.missing
     sweep: list = field(default_factory=list)            # [{i_phase, speed_rpm, duty, losses, margins, ...}] (sweep)
     victims: list = field(default_factory=list)          # what the switching does to other parts and nets (victims.py)
     waveform: Optional[DriveWaveform] = None             # not in the summary
@@ -311,6 +312,7 @@ def finish_bridge(model: BoardModel, bs: BridgeSetup) -> BridgeResult:
     _victims(model, bs, legs)
     basis = RmsBasis(model, bs, legs, lambda s: _column(s, bs.legs))
     res.rms = basis.evaluate(*drive_spectra(w, b.f_pwm))
+    res.rms_missing = list(basis.missing)
     res.notes += basis.notes
     _rms_issues(model, bs)
     res.losses, notes = bridge_losses(model.board, model.config, b, w, res.caps, res.rms["parts"])
@@ -474,6 +476,13 @@ def _rms_issues(model: BoardModel, bs: BridgeSetup):
     """current_density and via_overload from the RMS currents, as a power stage's DC paths raise them."""
     rules, res, b = model.config.rules, bs.res, bs.spec
     r = res.rms
+    sev = resolve_severity("dc_unsolved", rules.severity, "warning")
+    if res.rms_missing and sev != "off":
+        bs.issues.append(Issue(
+            "dc_unsolved", sev, b.name,
+            f"{b.name}: {', '.join(res.rms_missing)} could not be solved: the RMS currents, the vias' load and "
+            "Thermal's heat leave it out; simulate again (another resolution in Preferences)", (0.0, 0.0),
+            key=f"power:{b.name}:rms_unsolved", details={"missing": list(res.rms_missing)}))
     if not r.get("maps"):
         return
     worst_via = max(r["vias"], key=lambda v: v["a_mm2"], default=None)

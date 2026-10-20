@@ -1,12 +1,42 @@
 # GroundTruth handover
 
-## Current state (2026-10-20, audit round 5 and its fixes merged)
+## Current state (2026-10-20, audit round 6 on branch `audit-6`, not merged)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `audit-6` (2026-10-20, from `main` 8f40781, not merged; on the laptop `iwers`/xps13, 4 cores):** the
+  user's brief "Independent Audit: Numerical Accuracy, Solver Convergence, and Adversarial Validation" (pasted): do the
+  solvers solve the physics accurately and reliably. The record is [NUMERICS_AUDIT.md](NUMERICS_AUDIT.md);
+  VALIDATION_AUDIT.md "Round 6" summarises it; NEXT_STEPS item 7 what it left.
+  - Verified as shipped (no change): GMRES rtol 1e-5 (kraft conv1 and SPI_SCK rerun at 1e-10/1e-11: ≤ 0.007 dB),
+    the thermal tolerances (1e-5 of the rise), the cross-section solver (≤ 0.3 % of Cohn for w/b 0.02-8, s/b
+    0.01-1), DC bends / branches / tees (≤ 0.8 % at 1x against a sheet solve with GroundTruth's pad feed), the
+    metamorphic properties (NA-1 to NA-5).
+  - Fixed, each with a test that fails on `main`: ISSUE-25 a failed DC path or bridge-leg solve left out of loss,
+    efficiency and heat silently (`dc_unsolved`, `rms_missing`, a `dc_unsolved` warning); ISSUE-26 the thermal CG (a
+    stall read as settled; a reused AMG hierarchy out of budget crashed with ValueError); ISSUE-27 the peak density
+    over 0.25 mm (`peak_density`, A45; the node value diverged at corners); ISSUE-28 the inductance kernel's near
+    field and self term exact (`kernel.tape_mutual`; a plane pair's sheet inductance read 1.5 / 3.9 / 20 % low at
+    d/dz = 5 / 10 / 20); ISSUE-29 the plugin marks results of an earlier board / settings OUT OF DATE and Thermal /
+    Capacity refuse them (Thermal takes the current thermal settings); ISSUE-30 zero copper / dielectric thickness
+    said (35 µm everywhere for copper). A46: the plane pairs' missing fringing capacitance (model uncertainty).
+  - Fixed, found on the real board: ISSUE-32, the reported worst emission was an interpolation once
+    `analysis.max_solves` was spent (the worst-harmonic solve was skipped): kraft SPI_SCK at 1x +13.2 dB reported,
+    +8.4 dB with every harmonic solved on the same code; now +7.85 dB, equal to the sweep with this round's kernel
+    (`WORST_EXTRA` solves past the budget, notes for what stays interpolated).
+  - Documented, not fixed: ISSUE-31, a track narrower than a cell reads +1 to +2.5 % resistive within ~10° of an axis
+    and up to ±3.6 % at some angles at 1x (converging: ≤ 0.8 % at 4x); round 5 had checked 0°, 30°, 45° only and its
+    summary said "any angle" (corrected). `tools/dev/angle_scan.py` maps it.
+  - New: tests/test_numerics_audit.py (40), a window test, refsolvers' fed-pad sheet solve and windowed density;
+    tools/dev/tol_check.py, thermal_tol_check.py, adversarial_dc.py, metamorphic_dc.py, cavity_analytic_converge.py,
+    stress_inputs.py, angle_scan.py. Outputs: `out/audit6/`.
+  - Full suite on the branch (`out/audit6/full_suite.log`, 43 min): 1001 passed, 1 skipped, 4 failed: three window
+    tests that pass alone (load), test_view3d's KCL check (ISSUE-32 moved its frequency; corrected to the triangle
+    inequality). The GUI probe on kraft: 11 stalls over 150 ms against `main`'s 15 (the worst of each paging during a
+    SuperLU solve); memory and time of a conv1 Simulate unchanged. Not merged: waiting for the user.
 - **Branch `audit-5` (2026-10-19 / 20, from `main`, merged into `main` as 5fee321 at the user's "update handover,
   then commit, merge"):** the user's brief
   "Second-Round Independent Physics and Engineering Validation" (pasted), with a track narrowed from 0.4 to 0.1 mm
