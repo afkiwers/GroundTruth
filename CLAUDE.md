@@ -249,6 +249,8 @@ in `tools/dev/`, never only in the scratchpad.
   incomplete ADC labels). Since 2026-10-20 (the user: "add the proper deadtime to the converter on the schematic")
   U303 has `GT = dead:20ns` in `flux-2` (dcdc_gan.kicad_sch and the board): the LTC7890's adaptive dead time, its
   DTCA / DTCB pins on GND through R314 / R315 0 Ω; conv1 and conv2 read it. Before: `out/kraft_backup_2026-10-20/`.
+  Then ("add the new para to conv2 on the schematic. keep the same dead time") `GT = dead:20ns,
+  conv2_dead_rise:20ns, conv2_dead_fall:20ns` (conv2 per edge, conv1 from dead:); before: `out/kraft_backup_2026-10-20b/`.
   Power stages (all found by `groundtruth detect`), rail +VDC unless noted:
 
   | Stage | Controller | Switches | Switch node | Inductor |

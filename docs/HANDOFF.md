@@ -1,13 +1,13 @@
 # GroundTruth handover
 
-## Current state (2026-10-20, branch `dead-edges` open; `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-20, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `dead-edges` (2026-10-20, from `main` 2fa4aea, not merged):** the user, after the LTC7890's DTCA / DTCB
+- **Branch `dead-edges` (2026-10-20, from `main` 2fa4aea, merged into `main` at the user's "yes"):** the user, after the LTC7890's DTCA / DTCB
   pins were explained ("What's DTCA and DTCB exactly?", "How would we do it if we had 2 different dead times or even 3
   or 4?"), to the offer of one dead time per edge with the soft edge's node swing: "do it".
   - Converters have `dead_rise` (low side off → high side on; the LTC7890's DTCA) and `dead_fall` (high side off →
@@ -23,6 +23,9 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
     both).
   - kraft conv1 / conv2 with U303's `dead:20ns` (both edges): the fall's node swing 7.1 / 8.1 ns, Q302 0.466 → 0.396 W
     (103.9 → 102.2 °C), Q304 0.594 → 0.524 W (103.8 → 101.6 °C) (out/dead_time/thermal_edges.log).
+  - After the merge, at the user's "add the new para to conv2 on the schematic. keep the same dead time": U303 in
+    flux-2 has `GT = dead:20ns, conv2_dead_rise:20ns, conv2_dead_fall:20ns` (label_project.py; backup
+    out/kraft_backup_2026-10-20b/; KiCad had re-saved the files since the first label, which only moved the field).
   - Tests: test_dead_time 13 (the soft-edge closed form 2·I·t − 2·Q_oss, a swing longer than the dead time,
     reverse_conduction, the edge mapping, per-edge GT words, the settings' short and long forms).
 - **Branch `dead-time` (2026-10-20, from `main` 61ba6dc, merged into `main` at the user's "merge"):** the user, of the Converters tab's edge time:
