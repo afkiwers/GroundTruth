@@ -2424,8 +2424,8 @@ def dc_view(c: "ConverterResult", name: str) -> "ConverterResult":
     v.layer_share = {l: float(m.sum()) / tot for l, m in maps.items()}
     v.map_frequency = 0.0
     v.transfers = [{"name": x["name"], "kind": "via", "layers": list(maps), "x": x["x"], "y": x["y"],
-                    "fraction": x["current_a"] / max(path["current_a"], 1e-12), "distance_mm": 0.0}
-                   for x in path["vias"]]
+                    "fraction": x["current_a"] / max(path["current_a"], 1e-12), "distance_mm": 0.0,
+                    "current_a": x["current_a"]} for x in path["vias"]]
     v.heat_label = f"current density (A/mm²) at {path['current_a']:.3g} A DC"
     # the current beside the resistance and the drop; on the input path it is the expected input current (output
     # power plus losses, input_estimate), with the efficiency it comes from

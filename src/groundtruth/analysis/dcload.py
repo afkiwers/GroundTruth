@@ -263,7 +263,8 @@ def finish_dc_load(model: BoardModel, setup: DcLoadSetup):
     # and the metrics treat it as one; thermal and capacity take it by its kind (thermal._stages)
     res.view_of = name
     res.transfers = [{"name": x["name"], "kind": "via", "layers": list(maps), "x": x["x"], "y": x["y"],
-                      "fraction": x["current_a"] / max(total, 1e-12), "distance_mm": 0.0} for x in summary["vias"]]
+                      "fraction": x["current_a"] / max(total, 1e-12), "distance_mm": 0.0,
+                      "current_a": x["current_a"]} for x in summary["vias"]]
     worst = max(res.loads, key=lambda r: r["drop_mv"], default=None)
     res.heat_label = f"current density (A/mm²) at {total:.3g} A DC"
     res.heat_title = (f"{spec.name}: DC load {total:.3g} A from {spec.source}"

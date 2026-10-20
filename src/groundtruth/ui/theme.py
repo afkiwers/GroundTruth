@@ -311,7 +311,14 @@ class Tile(wx.Control):
         self._tip = tip
         if tip:
             self.SetToolTip(tip)
+        self._click = None
+        self.Bind(wx.EVT_LEFT_UP, lambda e: self._click() if self._click is not None else e.Skip())
         self.SetInitialSize()
+
+    def set_click(self, callback) -> None:
+        """Make the tile a button (callback() on a left click, a hand cursor), or plain again with None."""
+        self._click = callback
+        self.SetCursor(wx.Cursor(wx.CURSOR_HAND if callback is not None else wx.CURSOR_DEFAULT))
 
     def update(self, title: str, value: str, sub: str = "", status: str = "", tip: str = "") -> bool:
         """Show other figures in this tile (the Heatmap tab reuses its tiles: creating windows on the GUI thread
