@@ -1,4 +1,4 @@
-"""M1 (after PCB Thermal): via loading against IPC-2221, the Heatmap tab's KPI tiles, the value under the mouse,
+"""M1 (after PCB Thermal): via loading against IPC-2221, the Results tab's KPI tiles, the value under the mouse,
 and the theme preference. No window needed (the drawn widgets are tested in test_gui.py)."""
 import math
 from types import SimpleNamespace as NS
@@ -81,7 +81,7 @@ def test_plane_displacement_has_a_tile_of_its_own():
 
 def test_capacity_tiles_and_labels():
     """A capacity view's tiles: the capacity (red under the operating point, amber within 20 % of it), what limits
-    it, the loss; its name in the Heatmap list; the bounds as text."""
+    it, the loss; its name in the Results list; the bounds as text."""
     from groundtruth.analysis.thermal import ThermalResult, capacity_text
     from groundtruth.ui.kpi import kpis
 

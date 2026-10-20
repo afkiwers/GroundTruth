@@ -22,7 +22,7 @@ SPREAD_MODES = ("random", "triangle")      # ConverterSpec.spread_mode
 
 # hover explanations of the form's fields (on the label and the field): what it is, where to find it, what it changes
 FIELD_TIPS = {
-    "Name": "A name for this power stage, used in the lists, the Heatmap tab and the reports.",
+    "Name": "A name for this power stage, used in the lists, the Results tab and the reports.",
     "Topology": "buck (steps down), boost (steps up) or custom. Sets the duty cycle (buck V out / V in) and which "
                 "switch is hard-switched (a buck's high side, a boost's low side).",
     "Rail net": "The net of the hot loop's capacitors: V in of a buck, V out of a boost.",

@@ -219,7 +219,7 @@ def test_power_stages_picked_in_the_converters_tab_light_their_whole_power_flow(
 
 
 def test_a_clicked_heatmap_marker_shows_the_copper_right_there(tmp_path):
-    """Heatmap tab, a marker clicked (point_highlight): the via at the point first (a via passes every layer), else a
+    """Results tab, a marker clicked (point_highlight): the via at the point first (a via passes every layer), else a
     pad, else a track on the map's layer; a signal's copper is lit, a ground via is not (lighting GND lights the
     whole board); nothing there: empty, so the caller falls back to the issue's own highlight."""
     from groundtruth.analysis.highlight import point_highlight

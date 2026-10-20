@@ -45,7 +45,7 @@ _ADVANCE: dict[tuple[str, bool], float] = {}     # a character's advance at 1 pt
 def _advance(ch: str, bold: bool) -> float:
     """A character's advance width at 1 pt in matplotlib's font (no hinting), measured once. matplotlib keeps a
     font object per thread, so this is thread-safe; laying out a whole text in FreeType costs ~20 µs a character,
-    which on the GUI thread (the Heatmap page's heights) stalled the window."""
+    which on the GUI thread (the Results page's heights) stalled the window."""
     a = _ADVANCE.get((ch, bold))
     if a is None:
         from matplotlib import ft2font
@@ -881,7 +881,7 @@ def _section_rows(board: Board, sec: dict) -> list[str]:
 
 
 def section_height_in(board: Board, rr) -> float:
-    """The figure height (inches) the plugin's scrolling Heatmap tab gives draw_section: the title (a second line
+    """The figure height (inches) the plugin's scrolling Results tab gives draw_section: the title (a second line
     for a plane displacement), a share plot of about an inch, 0.3 in per copper layer in the side view and the
     distance axis with its label. 0: the view has no section."""
     from ..analysis.simulate import displacement

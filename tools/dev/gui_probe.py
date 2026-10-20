@@ -14,7 +14,7 @@ no tick has come for --threshold-ms, so every stall is printed with the code tha
 
 Steps, each started once the window is idle: load (plus the auto-detection when the settings list nothing), Run
 checks, Simulate (--simulate), every heatmap view, every layer choice of the first view, the arrows off and on,
-the cross-section off and on, the Heatmap page scrolled down and up, the wheel zoom, every tab, Save settings. Message boxes are answered automatically and printed.
+the cross-section off and on, the Results page scrolled down and up, the wheel zoom, every tab, Save settings. Message boxes are answered automatically and printed.
 Garbage collections over 50 ms are listed too (each holds the GIL), and those within a stall are named with it.
 --cache R.pickle: the first run pickles Simulate's results there, later runs show them instead of simulating.
 """
@@ -288,27 +288,30 @@ def main(argv=None) -> int:
         def views():
             """One step per heatmap view in the Route list, then the first again with its layers, arrows and
             cross-section off and on, page scrolling, wheel zoom and the double-click back."""
-            n = f.heatmap.choice.GetCount()
+            n = f.results_panel.choice.GetCount()
             out_steps = []
             for i in range(n):
-                label = f.heatmap.choice.GetString(i)
+                label = f.results_panel.choice.GetString(i)
                 out_steps.append((f"heatmap view {label[:60]}",
-                                  lambda i=i: (f.heatmap.choice.SetSelection(i), f.heatmap._route_changed())))
+                                  lambda i=i: (f.results_panel.choice.SetSelection(i),
+                                               f.results_panel._route_changed())))
             if n:
-                out_steps.append(("heatmap view 1 again", lambda: (f.heatmap.choice.SetSelection(0),
-                                                                   f.heatmap._route_changed())))
-                for j in range(f.heatmap.layer.GetCount()):
-                    out_steps.append((f"layer choice {f.heatmap.layer.GetString(j)}",
-                                      lambda j=j: (f.heatmap.layer.SetSelection(j), f.heatmap.redraw())))
-                out_steps.append(("arrows off", lambda: (f.heatmap.arrows.SetValue(False), f.heatmap.redraw())))
-                out_steps.append(("arrows on", lambda: (f.heatmap.arrows.SetValue(True), f.heatmap.redraw())))
-                out_steps.append(("cross-section off", lambda: (f.heatmap.section_box.SetValue(False),
-                                                                f.heatmap.redraw())))
-                out_steps.append(("cross-section on", lambda: (f.heatmap.section_box.SetValue(True),
-                                                               f.heatmap.redraw())))
-                out_steps.append(("page scrolled to the end", lambda: f.heatmap.page.Scroll(
-                    -1, f.heatmap.page.GetVirtualSize().height)))
-                out_steps.append(("page scrolled to the top", lambda: f.heatmap.page.Scroll(-1, 0)))
+                out_steps.append(("heatmap view 1 again", lambda: (f.results_panel.choice.SetSelection(0),
+                                                                   f.results_panel._route_changed())))
+                for j in range(f.results_panel.layer.GetCount()):
+                    out_steps.append((f"layer choice {f.results_panel.layer.GetString(j)}",
+                                      lambda j=j: (f.results_panel.layer.SetSelection(j), f.results_panel.redraw())))
+                out_steps.append(("arrows off", lambda: (f.results_panel.arrows.SetValue(False),
+                                                         f.results_panel.redraw())))
+                out_steps.append(("arrows on", lambda: (f.results_panel.arrows.SetValue(True),
+                                                        f.results_panel.redraw())))
+                out_steps.append(("cross-section off", lambda: (f.results_panel.section_box.SetValue(False),
+                                                                f.results_panel.redraw())))
+                out_steps.append(("cross-section on", lambda: (f.results_panel.section_box.SetValue(True),
+                                                               f.results_panel.redraw())))
+                out_steps.append(("page scrolled to the end", lambda: f.results_panel.page.Scroll(
+                    -1, f.results_panel.page.GetVirtualSize().height)))
+                out_steps.append(("page scrolled to the top", lambda: f.results_panel.page.Scroll(-1, 0)))
                 out_steps.append(("wheel zoom in (3 notches)", lambda: wheel(3, "up")))
                 out_steps.append(("wheel zoom in (3 more)", lambda: wheel(3, "up")))
                 out_steps.append(("double-click: whole map", lambda: dblclick()))
@@ -317,7 +320,7 @@ def main(argv=None) -> int:
         def wheel(n, button):           # as the mouse wheel does, over the middle of the first map
             """n wheel notches over the middle of the first map, as the mouse would send them."""
             from matplotlib.backend_bases import MouseEvent
-            h = f.heatmap
+            h = f.results_panel
             ax = h.fig.axes[0]
             x, y = ax.bbox.x0 + ax.bbox.width * 0.45, ax.bbox.y0 + ax.bbox.height * 0.5
             for _ in range(n):
@@ -327,7 +330,7 @@ def main(argv=None) -> int:
         def dblclick():
             """A double click in the middle of the first map (back to the whole map)."""
             from matplotlib.backend_bases import MouseEvent
-            h = f.heatmap
+            h = f.results_panel
             ax = h.fig.axes[0]
             x, y = ax.bbox.x0 + ax.bbox.width / 2, ax.bbox.y0 + ax.bbox.height / 2
             h.canvas.callbacks.process("button_press_event", MouseEvent("button_press_event", h.canvas, x, y,
@@ -372,7 +375,7 @@ def main(argv=None) -> int:
         now = time.perf_counter()
         ticks.append(now)
         dog.last_tick = now
-        if f.busy() or f.heatmap.rendering() or now < state.get("hold", 0.0):
+        if f.busy() or f.results_panel.rendering() or now < state.get("hold", 0.0):
             state["idle"] = None
             return
         if state["idle"] is None:

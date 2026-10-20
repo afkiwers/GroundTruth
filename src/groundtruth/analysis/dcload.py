@@ -42,7 +42,7 @@ class DcLoadResult(ConverterResult):
     source_v: Optional[float] = None               # not modelled: the drops are relative (V at the loads = V_src - drop)
 
     def label(self) -> str:
-        """Its name in the Heatmap list."""
+        """Its name in the Results list."""
         return f"{self.net}  DC load ({self.dc[0]['current_a']:.3g} A)" if self.dc else f"{self.net}  DC load"
 
     def summary(self) -> dict:

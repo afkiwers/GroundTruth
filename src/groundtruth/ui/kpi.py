@@ -1,4 +1,4 @@
-"""The Heatmap tab's KPI tiles: the key numbers of a view (signal route, power stage, DC path, thermal), each as
+"""The Results tab's KPI tiles: the key numbers of a view (signal route, power stage, DC path, thermal), each as
 (title, value, sub-line, status, tooltip). Status: "ok" | "warn" | "error" | "" (no judgement), from the
 settings' rules. No wx here: the tiles themselves are theme.Tile."""
 from __future__ import annotations
@@ -33,7 +33,7 @@ def _level(v: float, warn: float, error: float) -> str:
 
 
 def kpis(rr, rules=None) -> list[Kpi]:
-    """The tiles for the result `rr` shown on the Heatmap tab, by what it is: a thermal result, a motor bridge
+    """The tiles for the result `rr` shown on the Results tab, by what it is: a thermal result, a motor bridge
     (one operating point or its sweep), a power stage (its hot loop, a DC path or its RMS view) or a signal route.
     rules: the settings' rules (their thresholds judge the values; defaults without them)."""
     if getattr(rr, "error", None):

@@ -384,7 +384,7 @@ def test_TW10_a_track_s_temperature_against_an_independent_cross_section(thermal
 
 
 def test_TW11_the_temperature_map_shows_a_narrow_track_s_own_temperature(thermal_tracks):
-    """TW-11: the Heatmap's temperature map (level-0 cells of 0.3 mm here) shows the 0.1 mm track at its own
+    """TW-11: the Results tab's temperature map (level-0 cells of 0.3 mm here) shows the 0.1 mm track at its own
     temperature within 2 % (each cell its hottest refined cell). Before round 5 the cell's mean: 15 % cool."""
     for w, (node, shown, _) in thermal_tracks.items():
         assert shown == pytest.approx(node, rel=0.02), w

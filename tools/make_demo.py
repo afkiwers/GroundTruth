@@ -35,7 +35,7 @@ Try it:
 1. In KiCad: File > Open Project > {name}.kicad_pro (in this folder), then open its PCB editor.
 2. Start GroundTruth (the toolbar button). The settings file groundtruth/{name}.groundtruth.yaml already lists the net.
 3. Run checks: a missing stitching via at the layer change (layer_change_stitch).
-4. Simulate, then the Heatmap tab: on each GND plane the return current runs under its trace up to the layer change,
+4. Simulate, then the Results tab: on each GND plane the return current runs under its trace up to the layer change,
    then fans out over the whole plane to the far IC's GND via. Untick "Log scale" to see where most of it flows.
    Scroll down (the mouse wheel; Ctrl + wheel over a map zooms it): the cross-section under the maps follows the
    return along the route, layer by layer: In1 and In2 share it half

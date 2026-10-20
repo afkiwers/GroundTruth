@@ -29,11 +29,11 @@ SHELL = Path(__file__).with_name("help_shell.html")
 REFERENCES = (Path(__file__).resolve().parents[2] / "docs" / "REFERENCES.md",
               Path(__file__).resolve().parents[3] / "docs" / "REFERENCES.md")
 TOPICS = ("workflow", "together", "checks", "nets", "converters", "bridges", "dcloads", "pdn", "si", "safety", "parts",
-          "fields", "issues", "heatmap", "fixes", "history", "thermal", "prefs", "export", "drawing", "labels",
+          "fields", "issues", "results", "fixes", "history", "thermal", "prefs", "export", "drawing", "labels",
           "siglabels", "settings", "speed", "methods", "limits", "references", "server")
 # the sidebar's groups, by section; a section not listed goes under "More"
 GROUPS = (("Getting started", ("workflow", "together", "checks")),
-          ("The tabs", ("nets", "converters", "bridges", "dcloads", "pdn", "si", "parts", "issues", "heatmap", "fixes",
+          ("The tabs", ("nets", "converters", "bridges", "dcloads", "pdn", "si", "parts", "issues", "results", "fixes",
                         "history")),
           ("Analyses and output", ("fields", "safety", "thermal", "prefs", "export", "drawing")),
           ("Labels and settings", ("labels", "siglabels", "settings")),
@@ -227,7 +227,7 @@ def modern_page(pal=None) -> str:
 
 
 def topic_of(tab: str) -> str:
-    """The section for a tab's label ("Heatmap" -> "heatmap"); the workflow for any other."""
+    """The section for a tab's label ("Results" -> "results"); the workflow for any other."""
     key = {"signal paths": "nets", "server jobs": "server", "dc loads": "dcloads", "power integrity": "pdn",
            "signal integrity": "si"}.get(tab.strip().lower(), tab.strip().lower())
     return key if key in TOPICS else "workflow"

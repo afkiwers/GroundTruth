@@ -115,8 +115,8 @@ build_package.cmd [--committed]                   # the user's console/double-cl
                                                   # factorisations made (ARCHITECTURE "Memory use of a Simulate";
                                                   # before/after: run main's copy in a `git worktree`)
 .venv/Scripts/python tools/dev/mem_boards.py --rounds 3 B1 S1 B2 S2   # several boards in one process: memory after each
-.venv/Scripts/python tools/dev/window_shot.py BOARD --theme dark --simulate --tabs Heatmap [--scroll] [--size 1920x1040]
-                                                  # window screenshots (--scroll: also the Heatmap page scrolled down;
+.venv/Scripts/python tools/dev/window_shot.py BOARD --theme dark --simulate --tabs Results [--scroll] [--size 1920x1040]
+                                                  # window screenshots (--scroll: also the Results page scrolled down;
                                                   # --runs 2 --tabs History: two kept runs, compared)
 .venv/Scripts/python tools/dev/thermal_check.py BOARD SETTINGS --only SW1,SW2 --rds-on 4m --dcr 5m --quality draft
                                                   # thermal solve of power stages with test loss values
