@@ -1,13 +1,13 @@
 # GroundTruth handover
 
-## Current state (2026-10-20, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-20, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `jobs-fetching` (2026-10-20, from `main` abfede4, not merged):** the user, of a server job that seemed gone
+- **Branch `jobs-fetching` (2026-10-20, from `main` abfede4, merged into `main` at the user's "merge"):** the user, of a server job that seemed gone
   after closing and reopening the plugin and KiCad: "That was a fluke, it simply takes some time to update. maybe worth
   adding a message of some sort saying server data is being fetched". The Server jobs tab has a line over its lists:
   "Asking the compute server(s) for the jobs' state…" until the tracker's first round is back, then "Checked with the
