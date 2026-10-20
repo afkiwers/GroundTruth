@@ -45,7 +45,7 @@ from .simulate import RouteResult
 
 Progress = Callable[[str, float], None]
 DIODE_VF = 0.5
-# s per edge, a synchronous stage without dead_time: an adaptive controller's (the LTC7890's with its DTCx pins on
+# s per edge, a synchronous stage without a dead time: an adaptive controller's (the LTC7890's with its DTCx pins on
 # GND [ADI LTC7890]) [A48]
 DEFAULT_DEAD_TIME = 20e-9
 V_SD_GAN, V_SD_SI = 2.0, 0.8            # V, reverse conduction without v_sd: GaN, a silicon body diode (as the bridges)
@@ -299,19 +299,43 @@ def _synchronous(spec) -> bool:
     return any(not _is_diode(r) for r in rect) or (not rect and bool(spec.switch))
 
 
-def dead_time_values(board: Board, spec) -> tuple[float, float, list[str]]:
-    """(dead time per edge in s, the rectifier's reverse-conduction voltage, notes on what was assumed) of a
-    synchronous stage: its dead_time and v_sd (set, or from the controller's GT field and the FETs' Vsd fields),
-    else DEFAULT_DEAD_TIME [A48] and GaN's or a silicon body diode's V_SD (the motor bridge's defaults)."""
+def edge_dead_times(spec) -> tuple[float, float]:
+    """(hard, soft) dead times of a synchronous stage in s, DEFAULT_DEAD_TIME where not given [A48]: the hard edge
+    is the main switch's turn-on (a buck's switch-node rise, a boost's fall), the soft one its turn-off."""
+    rise = spec.dead_rise if spec.dead_rise is not None else DEFAULT_DEAD_TIME
+    fall = spec.dead_fall if spec.dead_fall is not None else DEFAULT_DEAD_TIME
+    return (fall, rise) if spec.topology == "boost" else (rise, fall)
+
+
+def reverse_conduction(t_hard: float, t_soft: float, i_l: float, delta_i: float, q_node: float) -> dict:
+    """The rectifier's reverse conduction per period in the two dead times (CCM) [A48]: {i_hard, i_soft, slew,
+    t_soft_rev, charge}. At the hard edge (the main switch's turn-on, at the ripple's valley I_L − ΔI/2) the
+    current flows in reverse for the whole dead time. At the soft edge (its turn-off, at the peak I_L + ΔI/2) the
+    current first swings the node across, moving the two FETs' output charge q_node in slew = q_node / I; only the
+    rest of the dead time is reverse conduction. charge = i_hard·t_hard + i_soft·t_soft_rev (C per period: the
+    loss is charge·V_SD·f_sw)."""
+    i_hard, i_soft = max(i_l - delta_i / 2, 0.0), i_l + delta_i / 2
+    slew = q_node / i_soft if i_soft > 0 else 0.0
+    t_soft_rev = max(t_soft - slew, 0.0)
+    return {"i_hard": i_hard, "i_soft": i_soft, "slew": slew, "t_soft_rev": t_soft_rev,
+            "charge": i_hard * t_hard + i_soft * t_soft_rev}
+
+
+def dead_time_values(board: Board, spec) -> tuple[float, float, float, list[str]]:
+    """(rise, fall dead times in s, the rectifier's reverse-conduction voltage, notes on what was assumed) of a
+    synchronous stage: its dead_rise / dead_fall and v_sd (set, or from the controller's GT field and the FETs' Vsd
+    fields), else DEFAULT_DEAD_TIME [A48] and GaN's or a silicon body diode's V_SD (the motor bridge's defaults)."""
     notes = []
-    t = spec.dead_time
-    if t is None:
-        t = DEFAULT_DEAD_TIME
-        notes.append(f"{spec.name}: no dead_time, so {t * 1e9:g} ns per edge assumed (an adaptive controller's); set "
-                     "it, or give the controller IC a GT field 'dead:20ns' (per channel 'dead1:20ns', per labelled "
-                     "converter 'conv1_dead:20ns')")
+    rise = spec.dead_rise if spec.dead_rise is not None else DEFAULT_DEAD_TIME
+    fall = spec.dead_fall if spec.dead_fall is not None else DEFAULT_DEAD_TIME
+    unset = [e for e, t in (("rise", spec.dead_rise), ("fall", spec.dead_fall)) if t is None]
+    if unset:
+        notes.append(f"{spec.name}: no dead time for the switch node's {' and '.join(unset)}, so "
+                     f"{DEFAULT_DEAD_TIME * 1e9:g} ns assumed (an adaptive controller's); set it, or give the "
+                     "controller IC a GT field 'dead:20ns' (per channel 'dead1:20ns', per edge 'dead_rise:20ns', per "
+                     "labelled converter 'conv1_dead:20ns')")
     v = spec.v_sd
-    if v is None and t == 0:
+    if v is None and rise == 0 and fall == 0:
         v = 0.0                                   # no dead time: no reverse conduction, nothing to assume
     elif v is None:
         from .detect import FAST_SWITCHES
@@ -320,7 +344,20 @@ def dead_time_values(board: Board, spec) -> tuple[float, float, list[str]]:
         v = V_SD_GAN if gan else V_SD_SI
         notes.append(f"{spec.name}: no v_sd (the rectifier's Vsd field), so {v:g} V assumed in the dead times "
                      f"({'GaN reverse conduction' if gan else 'a silicon body diode'})")
-    return t, v, notes
+    return rise, fall, v, notes
+
+
+def ripple_pp(board: Board, config: Config, spec, duty: float, v_in: Optional[float]) -> Optional[float]:
+    """The inductor current's ripple ΔI p-p, or None without the inductor's L: V_in·D(1−D)/(L·f_sw) for a buck (D
+    its high side's on-time), V_in·D_sw/(L·f_sw) for a boost (D_sw = 1 − D, its switch's) [Erickson 2001] [A43]."""
+    from .power import switch_inductor
+    _, inductor = switch_inductor(board, config, spec)
+    lm = config.model_for(inductor.reference) if inductor is not None else None
+    l_h = lm.get("L") if lm is not None and lm.kind == "inductor" else 0.0
+    if not (l_h > 0 and spec.f_sw and v_in and 0.0 < duty < 1.0):
+        return None
+    d_on = (1.0 - duty) if spec.topology == "boost" else duty * (1.0 - duty)
+    return v_in * d_on / (l_h * spec.f_sw)
 
 
 def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], list[str]]:
@@ -386,24 +423,32 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
         main = [r for r in main if not _is_diode(r)]
         sync = _synchronous(spec)
         d_hs, d_ls = d, 1 - d                             # conduction share: the high side d in both topologies
-        # a synchronous rectifier FET conducts in reverse through both dead times of every period (both switches
-        # off: the inductor current, continuous and positive, freewheels through it at v_sd [A48]); its channel
-        # carries the rest of its share. 2·t_dead·f_sw·I_L·V_sd [Erickson 2001]: the two edges see the ripple's peak
-        # and valley, whose sum is 2·I_L, so the mean current is exact
+        # a synchronous rectifier FET conducts in reverse in the dead times (both switches off: the inductor
+        # current, continuous and positive, freewheels through it at v_sd [A48]): the whole hard-edge dead time,
+        # and at the soft edge what is left after the current has swung the node across (reverse_conduction); its
+        # channel is off for both dead times and carries the rest of its share [Erickson 2001]
         rect_fets = [r for r in rect if not _is_diode(r)]
-        dead = 0.0                                        # the share of the period in reverse conduction
+        hard_rev = False                                  # the rectifier conducts before the hard turn-on (Q_rr)
         if rect_fets and not spec.switch and spec.f_sw:
-            t_dead, v_sd, why = dead_time_values(board, spec)
+            rise, fall, v_sd, why = dead_time_values(board, spec)
             notes += why
+            t_hard, t_soft = edge_dead_times(spec)
+            # the node's charge at the soft edge: both FETs' output charge (the side's q_oss, the other side taken
+            # alike), else C_oss·V each; neither: no swing taken off the dead time (the larger loss)
+            q_node = 2 * spec.q_oss if spec.q_oss else (2 * spec.c_oss * v if spec.c_oss and v else 0.0)
+            di = ripple_pp(board, config, spec, d, spec.v_in or res.v_in)
+            rc = reverse_conduction(t_hard, t_soft, i_l, di or 0.0, q_node)
+            hard_rev = t_hard > 0 and rc["i_hard"] > 0
+            off = min((rise + fall) * spec.f_sw, d_hs if boost else d_ls)    # the channel's share given up
             if boost:
-                dead = min(2 * t_dead * spec.f_sw, d_hs)
-                d_hs -= dead
+                d_hs -= off
             else:
-                dead = min(2 * t_dead * spec.f_sw, d_ls)
-                d_ls -= dead
+                d_ls -= off
             for ref in rect_fets:
-                add(ref, dead * (i_l / len(rect_fets)) * v_sd,
-                    f"reverse conduction {v_sd:g} V in the dead times (2 × {t_dead * 1e9:g} ns)")
+                add(ref, rc["charge"] * spec.f_sw * v_sd / len(rect_fets),
+                    f"reverse conduction {v_sd:g} V: {t_hard * 1e9:g} ns at the hard turn-on, "
+                    f"{rc['t_soft_rev'] * 1e9:.3g} of {t_soft * 1e9:g} ns after the {rc['slew'] * 1e9:.3g} ns node "
+                    "swing")
         if spec.rds_on is not None:
             r_lo = spec.rds_on_low if spec.rds_on_low is not None else spec.rds_on
             fets_hs, fets_ls = [r for r in hs if not _is_diode(r)], [r for r in ls if not _is_diode(r)]
@@ -438,7 +483,7 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
             # the rectifier's recovered charge, swept out through the main switch at its hard turn-on with the full
             # voltage across it: Q_rr·V per period [Erickson 2001, §4.6] [A49]. Only when the rectifier conducted
             # before it: a diode always, a synchronous FET's body diode in the dead time
-            e_rr = spec.q_rr * v if spec.q_rr and (not sync or dead > 0) else 0.0
+            e_rr = spec.q_rr * v if spec.q_rr and (not sync or hard_rev) else 0.0
             for ref in main:
                 add(ref, p_edge / len(main), "switching, turn-on edge" if sync else "switching, both edges")
                 add(ref, e_oss * spec.f_sw, f"output charge {how}·f_sw")

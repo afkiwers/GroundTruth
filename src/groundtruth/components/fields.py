@@ -238,8 +238,8 @@ def stage_values(board, config, spec) -> tuple[dict[str, Reading], list[str]]:
     """{key: Reading} a converter's or bridge's parameters take from its parts' fields, and notes (unreadable or
     disagreeing fields). Per FET: rds_on, rds_on_low, v_sd; per switch-node side (the parallel FETs together):
     c_oss, q_oss, and the synchronous rectifier's q_rr; a catch diode's Cj is a diode buck's c_oss, its Vf the
-    diode_vf; the inductor's DCR the dcr; the controller's GT dead-time word (dead:20ns, analysis/tags.py) the
-    dead_time."""
+    diode_vf; the inductor's DCR the dcr; the controller's GT dead-time words (dead:20ns, dead_rise:20ns,
+    analysis/tags.py) the dead_rise and dead_fall."""
     from ..config.settings import BridgeSpec
     out: dict[str, Reading] = {}
     notes: list[str] = []
@@ -281,9 +281,8 @@ def stage_values(board, config, spec) -> tuple[dict[str, Reading], list[str]]:
     put("v_sd", rect, "Vsd")
     put("q_rr", rect, "Qrr", len(rect))
     if rect:
-        r = _controller_dead_time(board, spec)
-        if r is not None and "dead_time" not in out:
-            out["dead_time"] = r
+        for edge, r in _controller_dead_times(board, spec).items():
+            out.setdefault(f"dead_{edge}", r)
     from ..analysis.power import switch_inductor
     _, inductor = switch_inductor(board, config, spec)
     if inductor is not None:
@@ -291,18 +290,21 @@ def stage_values(board, config, spec) -> tuple[dict[str, Reading], list[str]]:
     return out, notes
 
 
-def _controller_dead_time(board, spec) -> Optional[Reading]:
-    """The dead time the stage's controller IC gives in its GT field (analysis/tags.dead_time_of): for the stage's
-    GT id, its SW pin's channel, or every stage of the IC. None without a controller or such a word."""
+def _controller_dead_times(board, spec) -> dict[str, Reading]:
+    """{edge: Reading} of the dead times the stage's controller IC gives in its GT field (analysis/tags.
+    dead_time_of), per switch-node edge ("rise", "fall"): for the stage's GT id, its SW pin's channel, or every
+    stage of the IC. Empty without a controller or such a word."""
     from ..analysis.loop import controller
-    from ..analysis.tags import dead_time_of, stage_ident
+    from ..analysis.tags import EDGES, dead_time_of, stage_ident
     ctrl, channel = controller(board, spec)
     if ctrl is None:
-        return None
-    hit = dead_time_of(ctrl, stage_ident(board, spec.parts), channel)
-    if hit is None:
-        return None
-    return Reading(hit[0], hit[1], f"{ctrl.reference} GT {hit[1]}")
+        return {}
+    ident, out = stage_ident(board, spec.parts), {}
+    for edge in EDGES:
+        hit = dead_time_of(ctrl, ident, channel, edge)
+        if hit is not None:
+            out[edge] = Reading(hit[0], hit[1], f"{ctrl.reference} GT {hit[1]}")
+    return out
 
 
 def model_values(fp, kind: str) -> tuple[dict[str, Reading], list[str]]:
@@ -325,7 +327,7 @@ def same(a: Optional[float], b: Optional[float]) -> bool:
 
 
 STAGE_KEYS = {"converter": ("rds_on", "rds_on_low", "c_oss", "q_oss", "diode_vf", "dcr", "v_sd", "q_rr",
-                            "dead_time"),
+                            "dead_rise", "dead_fall"),
               "bridge": ("rds_on", "rds_on_low", "c_oss", "q_oss", "v_sd")}
 
 
@@ -347,7 +349,8 @@ class Difference:
 
 
 _KEY_UNITS = {"rds_on": "Ω", "rds_on_low": "Ω", "dcr": "Ω", "ESR": "Ω", "R": "Ω", "c_oss": "F", "C": "F",
-              "C_bias": "F", "q_oss": "C", "q_rr": "C", "dead_time": "s", "v_sd": "V", "diode_vf": "V", "ESL": "H", "L": "H", "gbw": "Hz",
+              "C_bias": "F", "q_oss": "C", "q_rr": "C", "dead_rise": "s", "dead_fall": "s", "v_sd": "V", "diode_vf": "V",
+              "ESL": "H", "L": "H", "gbw": "Hz",
               "bandwidth": "Hz", "z_out": "Ω", "c_in": "F", "r_in": "Ω", "slew": "V/s", "cmrr": "dB", "gain": ""}
 
 

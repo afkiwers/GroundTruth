@@ -349,7 +349,7 @@ def input_path(board: Board, config: Config, start: str, goal: str, stop: set[st
 
 
 _KEY_UNITS = {"rds_on": "Ω", "rds_on_low": "Ω", "dcr": "Ω", "c_oss": "F", "q_oss": "C", "v_sd": "V", "diode_vf": "V",
-              "q_rr": "C", "dead_time": "s"}
+              "q_rr": "C", "dead_rise": "s", "dead_fall": "s"}
 
 
 def schematic_note(spec) -> str:
@@ -1228,15 +1228,15 @@ def stage_responses(setup: ConverterSetup) -> list:
 
 def recovery(spec: ConverterSpec, i_pulse: float, rise_time: Optional[float] = None) -> Optional[dict]:
     """The rectifier's reverse recovery at the main switch's hard turn-on, or None (no q_rr; a synchronous FET with
-    dead_time 0, whose body diode never conducts). The current commutates at di/dt = I/t_edge [A14]; a snappy
+    no dead time at the hard edge, whose body diode then never conducts). The current commutates at di/dt = I/t_edge [A14]; a snappy
     recovery then reverses the rectifier's current to I_rr = √(2·Q_rr·di/dt) within t_rr = √(2·Q_rr/(di/dt))
     [Mohan 2003, §20-3], taken as a triangle of that peak and base (its area ½·I_rr·t_rr is Q_rr) [A49].
     {q_rr, i_rr, t_rr, di_dt}; rise_time: another edge (the fix advisor's what-if), else the stage's."""
     tr = spec.rise_time if rise_time is None else rise_time
     if not spec.q_rr or i_pulse <= 0 or tr <= 0:
         return None
-    from .thermal import _synchronous
-    if _synchronous(spec) and spec.dead_time == 0:
+    from .thermal import _synchronous, edge_dead_times
+    if _synchronous(spec) and edge_dead_times(spec)[0] == 0:
         return None
     di_dt = i_pulse / tr
     return {"q_rr": spec.q_rr, "i_rr": math.sqrt(2 * spec.q_rr * di_dt), "t_rr": math.sqrt(2 * spec.q_rr / di_dt),

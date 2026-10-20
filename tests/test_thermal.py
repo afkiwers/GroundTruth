@@ -85,13 +85,13 @@ def test_part_losses_follow_the_operating_point(tmp_path):
     """Synchronous buck at 24 → 5 V, 5 A, 500 kHz, 2 ns: D = 5/24. High side D·I²·R, one hard edge ½·V·I·t·f (at
     its turn-off the inductor current carries the switch node), and the output charge C_oss·V²·f, or Q_oss·V·f
     when Q_oss is given; low side (1−D)·I²·R; inductor I²·DCR. No R_DS(on) or DCR: left out, with a note. No dead
-    time here (dead_time 0): its reverse conduction is test_dead_time's."""
+    time here (dead_rise, dead_fall 0): its reverse conduction is test_dead_time's."""
     from dataclasses import replace
     from groundtruth.analysis.detect import detect_converters
     from groundtruth.analysis.thermal import part_losses
     board, sc, _ = make(tmp_path, discrete_buck_board(), "buck", nets=())
     spec = replace(detect_converters(board, sc.config)[0].spec, i_out=5.0, v_in=24.0, v_out=5.0, f_sw=500e3,
-                   rise_time=2e-9, c_oss=600e-12, rds_on=0.010, dcr=0.020, dead_time=0.0)
+                   rise_time=2e-9, c_oss=600e-12, rds_on=0.010, dcr=0.020, dead_rise=0.0, dead_fall=0.0)
     cfg = replace(sc.config, converters=[spec])
     d = 5.0 / 24.0
     res = NS(net=spec.name, duty=d, v_in=24.0, dc=[])
@@ -264,13 +264,13 @@ def test_capacity_inputs_rescale_shared_copper_with_the_cross_term(tmp_path):
 def test_capacity_inputs_scale_the_part_losses_with_the_load_current(tmp_path):
     """The losses as quadratics in the load-current scale s, from three part_losses evaluations: at s = 1.7 the
     high side has d·(1.7·I)²·R + ½·V·(1.7·I)·t_r·f + C_oss·V²·f (C_oss stays), the low side and the inductor
-    their I² terms (no dead time: dead_time 0)."""
+    their I² terms (no dead time: dead_rise, dead_fall 0)."""
     from dataclasses import replace
     from groundtruth.analysis.detect import detect_converters
     from groundtruth.analysis.thermal import capacity_inputs
     board, sc, _ = make(tmp_path, discrete_buck_board(), "buck", nets=())
     spec = replace(detect_converters(board, sc.config)[0].spec, i_out=5.0, v_in=24.0, v_out=5.0, f_sw=500e3,
-                   rise_time=2e-9, c_oss=600e-12, rds_on=0.010, dcr=0.020, dead_time=0.0)
+                   rise_time=2e-9, c_oss=600e-12, rds_on=0.010, dcr=0.020, dead_rise=0.0, dead_fall=0.0)
     cfg = replace(sc.config, converters=[spec])
     d, s, i = 5.0 / 24.0, 1.7, 1.7 * 5.0
     stage = NS(kind="converter", net=spec.name, view_of=None, error=None, duty=d, v_in=24.0, dc=[], dc_vectors={},
