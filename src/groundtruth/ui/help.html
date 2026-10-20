@@ -692,10 +692,12 @@ their state for next time. How vias and parts are marked is set in <a href="#pre
   issues stay) and <b>Vias shown</b> limits them to the 5, 10, 20 or 50 busiest; it is your
   preference for every board, and the exported report follows it. Only the drawing changes: the
   checks (current density, via overload) always look at every via, and the tile <b>busiest via</b> names the
-  one carrying most.</li>
+  one carrying most. On the maps that via has a <b>white ring</b> and its share a white-edged label; shares of vias
+  close together are written apart (with a thin line to their via where they had to move). <b>Click the busiest
+  via tile</b> to zoom the maps to it; opened from KiCad, it is selected there too.</li>
 <li><b>Hover</b> over a map for the value under the mouse; over a red / orange issue circle for the issue
-  (severity, check and message, in full as a tooltip); over a via's ▲ or a part's ■ for its name and share of the
-  current. The green ring around a ▲ is the via's own pad, not an issue. Each view marks its own issues: a power
+  (severity, check and message, in full as a tooltip); over a via's ▲ or a part's ■ for its name, its share of the
+  current and, on a DC path, a DC load or a bridge's RMS map, its current in amperes. The green ring around a ▲ is the via's own pad, not an issue. Each view marks its own issues: a power
   stage's DC path view (input, switch node, output, ground) only that path's current-density and via issues, the
   hot-loop view the stage's other issues.</li>
 <li><b>Click</b> an issue circle, a ▲ or a ■ to show it in KiCad, as a click on the Issues tab does: the via,

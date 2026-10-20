@@ -258,6 +258,7 @@ def views_dir() -> Path:
 
 
 ZOOM_STEP = 1.25            # one wheel notch zooms in or out this much, about the point under the mouse
+FOCUS_MM = 6.0              # the busiest via's tile zooms the maps to a square this wide around it
 SPECTRUM_IN = 2.8           # the spectrum's height on the Heatmap tab's page (full width), inches of its figure
 MAPS_MIN_PX = 300           # the maps fill the page's visible height, but never less than this
 SCROLL_PX = 40              # the page's scroll unit: one wheel notch (3 lines) scrolls 120 px
@@ -535,11 +536,34 @@ class HeatmapPanel(wx.Panel):
                 tile.Destroy()
             for figures in want[len(have):]:
                 sizer.Add(theme.Tile(self.tiles, *figures), 0, wx.ALL, 3)
+            for tile in self.tiles.GetChildren():           # the busiest via's tile zooms to it (focus_busiest)
+                if isinstance(tile, theme.Tile):
+                    tile.set_click(self.focus_busiest if tile.title == "busiest via" else None)
             self.tiles.SetToolTip(self._metrics(rr))
             if resized:
                 self.Layout()
         finally:
             self.tiles.Thaw()
+
+    def focus_busiest(self):
+        """The "busiest via" tile was clicked: zoom the maps to that via (FOCUS_MM around it; its white ring marks
+        it, plots._carriers) and, opened from KiCad, select it there as a click on its marker does (on_mark). The
+        user: "how can I see which via is the busiest" (the tile named it only by its coordinates)."""
+        from ..report.plots import busiest_via
+        rr = self.current()
+        v = busiest_via(rr) if rr is not None else None
+        if v is None or rr.grid is None:
+            return
+        x, y = v["x"], v["y"]
+        x0, x1, y0, y1 = rr.grid.extent
+        half = FOCUS_MM / 2
+        cx, cy = min(max(x, x0 + half), x1 - half), min(max(y, y0 + half), y1 - half)
+        self._view = (cx - half, cx + half, cy - half, cy + half)
+        self.redraw(maps_only=True)
+        if self.on_mark is not None:
+            rms = " RMS" if getattr(rr, "rms_of", None) is not None else ""
+            self.on_mark("via", {**v, "kind": "via"}, f"{v['name']}: {v['current_a']:.3g} A{rms} (the busiest)",
+                         self.selected_layer() or "")
 
     def tile_text(self) -> str:
         """The tiles' text (title value sub), for tests and the status line."""

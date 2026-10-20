@@ -2745,3 +2745,41 @@ def test_board_markers_keep_the_issue_numbers_and_skip_waived_and_hidden_checks(
               _issue("via_overload", 4, "warning")]
     kipy_sink.draw_issues(None, issues, "User.9", hidden=frozenset({"clearance_voltage"}))
     assert texts == ["3 E emi_margin", "4 W via_overload"]
+
+
+def test_the_busiest_via_tile_zooms_to_it_and_shows_it_in_kicad(app, tmp_path, monkeypatch):
+    """The user: "how can I see which via is the busiest" (the tile named it only by its coordinates). On a DC
+    path's view the "busiest via" tile is a button: it zooms the maps to a FOCUS_MM square around the via (its white
+    ring marks it) and asks to show it in KiCad as a click on its marker does; the other tiles stay plain."""
+    from groundtruth.analysis.detect import detect_converters
+    from groundtruth.report.plots import busiest_via
+    from groundtruth.ui import main_frame
+    from groundtruth.ui.results_panels import FOCUS_MM
+    monkeypatch.setattr(wx, "MessageBox", lambda *a, **k: wx.YES)
+    board, sc, path = make(tmp_path, discrete_buck_board(out_connector=True), "busy", nets=())
+    spec = detect_converters(board, sc.config)[0].spec
+    spec.f_sw, spec.i_out, spec.v_in, spec.v_out = 300e3, 3.0, 12.0, 3.0
+    sc.set_converters([spec])
+    sc.save()
+    f = main_frame.MainFrame(main_frame.Session(file_path=str(path)))
+    f.Show()
+    try:
+        run_steps(app, f, [lambda: f.run(True) and None])
+        h = f.heatmap
+        k = next(i for i, r in enumerate(f.routes) if getattr(r, "view_of", None) and busiest_via(r) is not None)
+        h.choice.SetSelection(k)
+        h._route_changed()
+        v = busiest_via(h.current())
+        tiles = [t for t in h.tiles.GetChildren() if getattr(t, "title", None) is not None]
+        tile = next(t for t in tiles if t.title == "busiest via")
+        assert tile._click is not None and all(t._click is None for t in tiles if t is not tile)
+        marks = []
+        h.on_mark = lambda *a: marks.append(a)
+        tile._click()
+        x0, x1, y0, y1 = h._view
+        assert x0 <= v["x"] <= x1 and y0 <= v["y"] <= y1 and x1 - x0 == pytest.approx(FOCUS_MM)
+        assert marks and marks[0][0] == "via" and (marks[0][1]["x"], marks[0][1]["y"]) == (v["x"], v["y"])
+        assert v["name"] in marks[0][2] and " A" in marks[0][2]
+        run_steps(app, f, [lambda: None])                     # the zoomed maps render
+    finally:
+        close_window(f)

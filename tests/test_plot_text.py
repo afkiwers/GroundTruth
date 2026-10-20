@@ -239,7 +239,7 @@ def test_the_reports_maps_have_no_labels():
     """The user: "remove the labels from the report. they are actually not helping" (on a power stage's map the
     shares, pin letters and switch names piled up over the switches). labels=False (the report) keeps the markers
     and the pads' coloured outlines and drops every text box; the plugin's maps keep them."""
-    from groundtruth.report.plots import _carriers, _switch_pins
+    from groundtruth.report.plots import _carriers, _place_labels, _switch_pins
     ts = [{"kind": "via", "name": "v", "layers": ["F.Cu", "B.Cu"], "x": 1.0, "y": 0.0, "fraction": 0.6},
           {"kind": "part", "name": "C1", "layers": ["F.Cu"], "x": 20.0, "y": 0.0, "fraction": 0.4}]
     pins = [{"ref": "Q1", "role": role, "layers": ["F.Cu"], "x": x, "y": 5.0, "w": 1.0, "h": 1.0}
@@ -251,6 +251,7 @@ def test_the_reports_maps_have_no_labels():
         ax = fig.add_subplot(111)
         _switch_pins(ax, rr, "F.Cu", labels)
         _carriers(ax, NS(vias=[]), rr, "F.Cu", None, labels)
+        _place_labels(ax)                       # the shares are written once the view is final (draw_heatmap)
         marks = [l for l in ax.get_lines() if l.get_marker() in ("^", "s")]
         outlines = [l for l in ax.get_lines() if len(l.get_xdata()) == 5]
         return [t.get_text() for t in ax.texts], marks, outlines, ax.get_legend_handles_labels()[1]
@@ -367,3 +368,35 @@ def test_each_view_of_a_power_stage_marks_only_its_own_issues():
     assert view_issues(NS(net="buck conv1", view_of="switch node → L301"), issues) == [sw_dc]
     assert view_issues(NS(net="buck conv1", view_of="output L301 → J104.2"), issues) == [out_dc, out_via]
     assert view_issues(NS(net="SPI_SCK"), [issue("route:SPI_SCK:x", "SPI_SCK")])[0].net == "SPI_SCK"
+
+
+def test_close_vias_get_their_shares_apart_the_busiest_ringed_and_their_amperes_on_hover():
+    """The user, of a DC path's map: three vias a few tenths of a millimetre apart had their shares written over
+    each other ("58 %8 %"), so the busiest could not be read. Each share now gets a spot of its own (no two label
+    boxes overlap), the busiest via has a white ring, and a marker's hover text gives its current in amperes where
+    the view knows it ("…: 12 % of the current, 1.2 A")."""
+    from groundtruth.report.plots import _carriers, _place_labels, carrier_text
+    ts = [{"kind": "via", "name": f"via GND @({x:.2f}, 75.70)", "layers": ["F.Cu"], "x": x, "y": 75.7,
+           "fraction": f, "current_a": f * 10.0} for x, f in ((136.9, 0.07), (137.55, 0.08), (138.25, 0.12),
+                                                            (138.6, 0.58))]
+    rr = NS(transfers=ts)
+    fig = Figure(figsize=(6, 3), dpi=100)
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot(111)
+    _carriers(ax, NS(vias=[]), rr, "F.Cu")
+    ax.set_xlim(135.5, 140.0)
+    ax.set_ylim(77.5, 74.5)
+    ax.set_aspect("equal")
+    _place_labels(ax)
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+    boxes = [t.get_bbox_patch().get_window_extent(r) for t in ax.texts]
+    assert len(boxes) == 4
+    for i in range(4):
+        for j in range(i + 1, 4):
+            assert not boxes[i].overlaps(boxes[j]), (ax.texts[i].get_text(), ax.texts[j].get_text())
+    rings = [l for l in ax.get_lines() if l.get_marker() == "o" and l.get_markersize() == 19]
+    assert rings and all(list(l.get_xdata()) == [138.6] for l in rings)
+    assert carrier_text(ts[2]) == "via GND @(138.25, 75.70): 12 % of the current, 1.2 A"
+    assert carrier_text({**ts[2], "rms": True}).endswith("1.2 A RMS")
+    assert carrier_text({k: v for k, v in ts[2].items() if k != "current_a"}).endswith("12 % of the current")
