@@ -173,7 +173,15 @@ class _Loader:
                     masks[name] = DielectricLayer(name, layer.float("thickness", 0.01), layer.float("epsilon_r", 3.3),
                                                   layer.float("loss_tangent", 0.0))
                 elif name in self.copper_names:
-                    cu_t[name] = layer.float("thickness", DEFAULT_CU_THICKNESS)
+                    t = layer.float("thickness", DEFAULT_CU_THICKNESS)
+                    if not t > 0:
+                        # no copper at all would be no conductor: the PEEC models took 35 µm for it, Thermal's heat
+                        # 0 (ρJ²·t): one value everywhere, and the user told (VALIDATION_AUDIT.md round 6, ISSUE-30)
+                        self.warnings.append(f"the stackup gives {name} {t:g} mm of copper: taken as "
+                                             f"{DEFAULT_CU_THICKNESS * 1000:g} µm (set it in Board Setup > Physical "
+                                             "Stackup)")
+                        t = DEFAULT_CU_THICKNESS
+                    cu_t[name] = t
                 elif kind in ("core", "prepreg") or name.startswith("dielectric"):
                     # Sub-layers repeat thickness/epsilon_r inside the same list.
                     ts = [float(c[1]) for c in layer.find_all("thickness")]
@@ -181,6 +189,12 @@ class _Loader:
                     lts = [float(c[1]) for c in layer.find_all("loss_tangent")]
                     total = sum(ts) if ts else 0.0
                     eps = (sum(t * e for t, e in zip(ts, es)) / total) if total and es else (es[0] if es else 4.5)
+                    if not total > 0:
+                        # two copper layers in contact: their plane capacitance and mutual inductances are not
+                        # physical (Stackup.distance keeps 1 µm so nothing divides by zero) (ISSUE-30)
+                        self.warnings.append(f"the stackup gives {name} no thickness: the capacitance and coupling "
+                                             "between the copper layers around it are not physical (set it in Board "
+                                             "Setup > Physical Stackup)")
                     dielectrics.append(DielectricLayer(name, total, eps, lts[0] if lts else 0.02))
         n_cu = len(self.copper_names)
         if len(dielectrics) != max(n_cu - 1, 0):

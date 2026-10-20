@@ -77,6 +77,8 @@ REPORT_PER_DECADE = 100     # emission rows kept per decade in reports (thousand
 INPUT_PATH_MAX_OHMS = 10.0  # resistors up to this are series elements of the input path (sense, inrush)
 DC_F = 10.0                 # the DC solves: resistive (skin depth >> copper), inductance negligible
 SUSTAINED_MM = 1.0          # current density averaged over this window: what heats copper (corner peaks don't)
+PEAK_MM = 0.25              # the peak density is over this window (or the cell, if larger): a node's own value grows
+                            # without bound at a re-entrant corner as the grid is refined [A45]
 FILTER_CAPS = (1e-6, 2.2e-6, 4.7e-6, 10e-6, 22e-6, 47e-6, 100e-6)   # input-filter capacitor choices
 FILTER_L_MAX = 4.7e-6       # largest filter inductor proposed before a bigger capacitor is preferred
 
@@ -124,6 +126,8 @@ class ConverterResult(RouteResult):
     ce101_transfer: list = field(default_factory=list)  # the same at the CE101 solves (the CE101 lead at the input)
     peak_density: dict = field(default_factory=dict)     # layer -> peak sheet current at LOOP_F, A/mm at pulse_a
     dc: list = field(default_factory=list)              # DC power paths: resistance, drop, loss, current density
+    dc_unsolved: list = field(default_factory=list)     # DC paths whose solve failed: missing from `dc`, the input
+                                                        # estimate's copper and Thermal's heat (each says so)
     input: Optional[dict] = None                        # DC input current from output power + losses (input_estimate)
     dc_branch: dict = field(default_factory=dict)       # path name -> (build, signed DC current per branch, A):
                                                         # the paths of all stages add up on the shared model (combine_dc)
@@ -1346,7 +1350,7 @@ def finish_converter(model: BoardModel, setup: ConverterSetup) -> ConverterResul
         res.dc, res.dc_maps, res.dc_grids, dc_notes = dc_analysis(model, setup)
         # the input current again, now with the DC paths' copper losses; the input path was solved at the estimate
         # without them, so its figures are scaled to the final current (a DC solve is linear in its current)
-        res.input = input_estimate(model.board, config, spec, res, res.dc)
+        res.input = input_estimate(model.board, config, spec, res, res.dc, res.dc_unsolved)
         if res.input is not None:
             for p in res.dc:
                 if p["name"].startswith("input ") and p["current_a"] > 0:
@@ -1473,6 +1477,51 @@ def sustained(density: np.ndarray, copper: np.ndarray, d_mm: float, grid=None) -
     return out
 
 
+def _box(width: float) -> np.ndarray:
+    """The weights of a centred box `width` cells wide over the cells it covers (each cell [j - ½, j + ½] weighted
+    by its overlap with [-width/2, width/2]): a window of the same physical size at any cell size, where a whole
+    number of cells would round it (0.25 mm is 1 cell at 0.25 and 0.177 mm, 2 at 0.125 mm). At most a cell wide:
+    the cell alone."""
+    h = max(width, 1.0) / 2
+    m = int(math.ceil(h - 0.5))
+    j = np.arange(-m, m + 1, dtype=float)
+    return np.clip(np.minimum(j + 0.5, h) - np.maximum(j - 0.5, -h), 0.0, 1.0)
+
+
+def peak_density(density: np.ndarray, copper: np.ndarray, d_mm: float, grid=None) -> np.ndarray:
+    """The current density as the peak figure reports it: the RMS over a PEAK_MM window of the node's own net's
+    copper, √(Σ J²·A / Σ A) as `sustained` but over a quarter millimetre (the cell itself when it is larger).
+
+    A node's own density is the grid's: at a re-entrant corner the 2D current density is singular, J ∝ r^(-1/3)
+    [Jackson 1999, §2.11], so the node at the corner reads more on every finer grid (a 2 mm L at 10 A: 290 / 348 /
+    366 A/mm² at 1x / 2x / 4x, as d^(-1/3)) and the "peak" was a property of the grid. Over a fixed window the
+    singularity integrates to a finite value, so the figure converges with the grid (VALIDATION_AUDIT.md round 6,
+    ISSUE-27) [A45]."""
+    from scipy.ndimage import convolve1d
+    k = _box(PEAK_MM / d_mm)
+    if len(k) == 1:
+        return density
+
+    def window(a):
+        """The box sum of a over both axes (zero outside the grid)."""
+        return convolve1d(convolve1d(a, k, axis=0, mode="constant"), k, axis=1, mode="constant")
+
+    if grid is None or grid.label is None:
+        num = window(np.where(copper, density * density, 0.0))
+        den = window(copper.astype(float))
+        return np.where(copper, np.sqrt(np.maximum(num, 0.0) / np.maximum(den, 1e-12)), 0.0)
+    area = grid.copper_area()
+    lab = np.where(copper, grid.label, -1)
+    out = np.zeros(density.shape)
+    for net in np.unique(lab[(lab >= 0) & (density > 0)]):
+        on = lab == net
+        w = np.where(on, area, 0.0)
+        num = window(w * density * density)
+        den = window(w)
+        out = np.where(on, np.sqrt(np.maximum(num, 0.0) / np.maximum(den, 1e-12)), out)
+    return out
+
+
 def dc_path(st: StackBuild, injections: list[tuple], current: float, name: str) -> tuple[dict, dict]:
     """DC (resistive) solve of `current` A entering the copper at the + injections and leaving at the - ones
     (shares of +1 and -1 A). Returns (summary, {layer: A/mm² map})."""
@@ -1516,9 +1565,10 @@ def dc_summary(st: StackBuild, sol: Solution, current: float, name: str, plating
         maps[layer] = dens
         if not dens.size or dens.max() <= 0:
             continue
-        i, j = np.unravel_index(int(np.argmax(dens)), dens.shape)
-        if dens[i, j] > best[0]:
-            best = (float(dens[i, j]), layer, tuple(float(v) for v in g.xy(i, j)))
+        pk = peak_density(dens, g.node, st.d, g)
+        i, j = np.unravel_index(int(np.argmax(pk)), pk.shape)
+        if pk[i, j] > best[0]:
+            best = (float(pk[i, j]), layer, tuple(float(v) for v in g.xy(i, j)))
         sus = sustained(dens, g.node, st.d, g)
         i, j = np.unravel_index(int(np.argmax(sus)), sus.shape)
         if sus[i, j] > best_s[0]:
@@ -1709,14 +1759,15 @@ def dc_board_build(model: BoardModel):
         return model._dc_board
 
 
-def input_estimate(board: Board, config: Config, spec, res, dc: list = ()) -> Optional[dict]:
+def input_estimate(board: Board, config: Config, spec, res, dc: list = (), unsolved: list = ()) -> Optional[dict]:
     """The stage's DC input current from an energy balance, V_in·I_in = V_out·I_out + P_loss, instead of the
     lossless I_out·D (a buck) or I_out/(1-D) (a boost).
 
     The losses are the ones Thermal heats the parts with (thermal.part_losses: the switches' conduction, the hard
     edge's overlap and output charge, a catch or boost diode, the inductor's DCR, series parts on the DC paths)
     and, once the DC paths are solved (`dc`), their copper (r_copper·I²). Gate drive and the controller's own
-    supply are not included. A part without its value (no rds_on, no dcr) counts as lossless: `missing` says so.
+    supply are not included. A part without its value (no rds_on, no dcr) counts as lossless: `missing` says so,
+    as it does for a DC path in `unsolved` (its solve failed: its copper and series parts are not in the loss).
     Returns {i_in_a, i_in_ideal_a, p_out_w, p_loss_w, copper_w, efficiency, losses: [{ref, power_w, what}],
     missing: [notes]}, or None without an input voltage, an output voltage (or duty) and an output current."""
     from dataclasses import replace
@@ -1734,6 +1785,8 @@ def input_estimate(board: Board, config: Config, spec, res, dc: list = ()) -> Op
     one = replace(config, converters=[replace(spec, name=res.net)])
     probe = SimpleNamespace(net=res.net, duty=res.duty, v_in=v_in, dc=list(dc))
     rows, missing = part_losses(board, one, [probe])
+    missing = list(missing) + [f"DC {name} not solved: its copper and series parts are not in the loss"
+                               for name in unsolved]
     copper = sum(p.get("r_copper_mohm", 0.0) * 1e-3 * p["current_a"] ** 2 for p in dc)
     p_loss = sum(r["power_w"] for r in rows) + copper
     return {"i_in_a": (p_out + p_loss) / v_in, "i_in_ideal_a": p_out / v_in, "p_out_w": p_out, "p_loss_w": p_loss,
@@ -2048,15 +2101,17 @@ def _output_runs(model: BoardModel, setup: "ConverterSetup", sw_net: Optional[st
 
 def _density_peaks(st: StackBuild, maps: dict) -> tuple[tuple, tuple]:
     """(peak, sustained) of current-density maps {layer: A/mm²} on a build: each (A/mm², layer, (x, y)); the
-    sustained one averaged over SUSTAINED_MM (what heats the copper, see sustained)."""
+    sustained one averaged over SUSTAINED_MM (what heats the copper, see sustained), the peak over PEAK_MM
+    (peak_density: a figure that converges with the grid)."""
     best, best_s = (0.0, "", (0.0, 0.0)), (0.0, "", (0.0, 0.0))
     for k, layer in enumerate(st.names):
         dens, g = maps.get(layer), st.grids[k]
         if dens is None or not dens.size or dens.max() <= 0:
             continue
-        i, j = np.unravel_index(int(np.argmax(dens)), dens.shape)
-        if dens[i, j] > best[0]:
-            best = (float(dens[i, j]), layer, tuple(float(v) for v in g.xy(i, j)))
+        pk = peak_density(dens, g.node, st.d, g)
+        i, j = np.unravel_index(int(np.argmax(pk)), pk.shape)
+        if pk[i, j] > best[0]:
+            best = (float(pk[i, j]), layer, tuple(float(v) for v in g.xy(i, j)))
         sus = sustained(dens, g.node, st.d, g)
         i, j = np.unravel_index(int(np.argmax(sus)), sus.shape)
         if sus[i, j] > best_s[0]:
@@ -2205,12 +2260,16 @@ def dc_vector_maps(st: StackBuild, sol: Solution, current: float) -> dict:
 
 def dc_analysis(model: BoardModel, setup: "ConverterSetup") -> tuple[list[dict], dict, dict, list[str]]:
     """Summaries of the solved DC power paths. Returns (paths, maps, grids, notes); the vector maps go to
-    setup.res.dc_vectors."""
+    setup.res.dc_vectors. A path whose solve failed (GMRES did not converge, a factorisation too large) is not in
+    `paths`: it goes to setup.res.dc_unsolved, so the input estimate, Thermal and the issues say what is missing
+    instead of presenting the stage's figures as complete (VALIDATION_AUDIT.md round 6, ISSUE-25)."""
     paths, maps, grids, notes = [], {}, {}, []
+    unsolved = setup.res.dc_unsolved = []
     for name, current, run in setup.dc_runs:
         sol = run.ok().get(DC_F)
         if sol is None:
             notes.append(f"DC {name} not solved")
+            unsolved.append(name)
             continue
         ripple = None
         if name in setup.dc_ripple:
@@ -2218,6 +2277,7 @@ def dc_analysis(model: BoardModel, setup: "ConverterSetup") -> tuple[list[dict],
             sol_d = rrun.ok().get(DC_F)
             if sol_d is None:
                 notes.append(f"DC {name}: its switching share not solved (the mean current only)")
+                unsolved.append(f"{name} (its switching share)")
             else:
                 ripple = (k_r, sol_d)
         extra = setup.dc_extra.get(name, 0.0)          # the inductor's ripple on the switch node path
@@ -2266,6 +2326,7 @@ def dc_analysis(model: BoardModel, setup: "ConverterSetup") -> tuple[list[dict],
         sol = run.ok().get(DC_F)
         if sol is None:
             notes.append(f"{name}: not solved")
+            unsolved.append(name)
         else:
             st = run.build
             summary, m = dc_summary(st, sol, i_rms, name, model.config.analysis.via_plating_um)
@@ -2498,6 +2559,12 @@ def _converter_issues(setup: ConverterSetup, rules, a):
                     f"its value at {LOOP_F / 1e6:.0f} MHz: a plane-pair resonance{pair} is excited", loc,
                     layer=r["pair"][0] if r.get("pair") else res.layer, key=f"{key}:resonance", details=dict(r))
     unsolved_issue(setup, rules, spec.name, loc, res.layer, f"{key}:unsolved")
+    if res.dc_unsolved:
+        setup.issue(rules, "dc_unsolved",
+                    f"{spec.name}: DC {', '.join(res.dc_unsolved)} could not be solved: the stage's DC table, its "
+                    "input current and efficiency, and Thermal's heat leave it out; simulate again (another resolution "
+                    "in Preferences)", loc, layer=res.layer, key=f"{key}:dc_unsolved",
+                    details={"paths": list(res.dc_unsolved)})
 
 
 def prepare_converters(model: BoardModel, specs: list[ConverterSpec]):

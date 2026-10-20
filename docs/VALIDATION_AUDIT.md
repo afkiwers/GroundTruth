@@ -584,7 +584,8 @@ tests/test_physics_audit.py (PA-1 to PA-4), against independent closed forms, sh
 solvers written for the round (tests/refsolvers.py). In short:
 - The PEEC grid's strips now carry the copper's exact width across their cell border, and its nodes the exact copper
   area, with a density whose heat is the strips' I²R (ISSUE-11, -12): a track's R' within 1 % of ρ/(w·t) for
-  0.05-0.4 mm at any angle and grid position (before: 0.43 to 1.81 ×), the thermal heat equal to the solved loss
+  0.05-0.4 mm at 0°, 30° and 45° and any grid position (before: 0.43 to 1.81 ×; round 6 found narrower-than-a-cell
+  tracks +1 to +3.6 % at shallow and some other angles, ISSUE-31), the thermal heat equal to the solved loss
   (before: up to 2 ×). A narrow band's change of width is taken in series along its strips (ISSUE-21: a 2 mm neck
   −2.9 % at 1x, was −9 %); in copper wider than 4 cells a step stays within ±d/2 (A39).
 - The sustained density counts only the net's own copper (ISSUE-13); the temperature map shows each cell's hottest
@@ -596,6 +597,30 @@ solvers written for the round (tests/refsolvers.py). In short:
   path is also given at its temperature (ISSUE-23).
 - The plugin's Simulate reads the board again first and reloads it when KiCad's copy changed (ISSUE-19).
 - Documented, not changed: the thermal mesh's budget on long narrow tracks (ISSUE-24: fine quality).
+
+## Round 6 (2026-10-20, branch `audit-6`)
+
+A numerical audit: whether the solvers solve the physics accurately and reliably (stopping tests, convergence under
+refinement against independent references, adversarial copper, metamorphic properties, stale state, failure
+handling). The record is [NUMERICS_AUDIT.md](NUMERICS_AUDIT.md); the tests are tests/test_numerics_audit.py
+(ISSUE-25 to -32, NA-1 to NA-8) and one window test. In short:
+- Verified adequate as shipped: GMRES's rtol 1e-5 (a 1e-10 rerun moves refboard's results by ≤ 0.007 dB, its DC paths
+  not in the 6th digit), the thermal tolerances (1e-5 of the rise), the cross-section solver (≤ 0.3 % of Cohn's exact
+  results for w/b 0.02-8, s/b 0.01-1), the DC grid on bends, branches and junctions (≤ 0.8 % at 1x against a sheet
+  solve with GroundTruth's own pad feed, falling with the grid), and every metamorphic property (re-drawn and
+  reordered copper bit-identical, reciprocity / linearity / Tellegen to 1e-15, rotations and shifts ≤ 0.44 %).
+- Fixed: a failed DC path (or a motor bridge leg's solve) was left out of the loss, efficiency and heat silently
+  (ISSUE-25); a stalled thermal CG read as settled, and a reused AMG hierarchy out of budget crashed (ISSUE-26); the
+  peak current density was the grid's, diverging at corners (ISSUE-27: now over 0.25 mm, A45); the inductance
+  kernel's near field read a plane pair's sheet inductance up to 20 % low where the layers are close against the
+  cell (ISSUE-28); the plugin showed and heated results of an earlier board or settings (ISSUE-29); zero copper or
+  dielectric thickness was accepted silently and inconsistently (ISSUE-30). On the real board: the reported worst emission was an
+  interpolation once the solve budget was spent (ISSUE-32: refboard SPI_SCK +13.2 dB reported against +8.4 dB with
+  every harmonic solved on the same code; now +7.85 dB, equal to the sweep).
+- Documented: a track narrower than a cell is +1 to +3.6 % resistive at shallow and some other angles at 1x
+  (ISSUE-31, converging; round 5 had checked 0°, 30°, 45°).
+- Model uncertainty kept apart: the pads' feed (A42), the plane pairs' missing fringing capacitance (A46: a cavity
+  ~+1.5 % high in the limit).
 
 ## Remaining risks and unverified items
 - SP-19: above 1 GHz a board-wide resonance's worst margin moves about ±2 dB between the 4x, 8x and 16x grids on

@@ -24,6 +24,8 @@ CHECKS: dict[str, tuple[str, str]] = {
     "plane_resonance": ("warning", "Plane resonance raises the return-loop emission"),
     "emi_margin": ("warning", "Estimated radiated emission close to or above the limit"),
     "band_unsolved": ("warning", "Part of the radiated band could not be solved (emission held, not computed)"),
+    "dc_unsolved": ("warning", "A power stage's DC path could not be solved (left out of its loss, input current and "
+                               "heat)"),
     "hot_loop": ("warning", "Switch-node overshoot from the converter's hot-loop inductance"),
     "conducted_emission": ("warning", "Estimated conducted emission at the converter input close to or above the limit"),
     "power_loop_broken": ("error", "Converter hot loop cannot be modelled"),

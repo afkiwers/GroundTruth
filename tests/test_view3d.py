@@ -81,8 +81,11 @@ def test_the_board_wide_scene_shows_the_displacement_and_the_vias_it_circulates_
     sheet between In1 and In2, and the ICs' GND vias (x = 5 and 35 mm) carrying the current between the planes,
     which the return-pin rule leaves out of the transfer list. The displacement map is the solution's capacitance
     currents at its dominant phase: summed it gives their net current (at the resonance in phase with the plane
-    currents: measured 10.636 of 10.641 A per A), and the two vias carry it back less the 1 A that has to cross
-    (KCL: 4.84 + 4.82 = 10.64 - 1)."""
+    currents: measured 10.636 of 10.641 A per A), and the two vias carry it back with the 1 A that has to cross. The
+    transfers are magnitudes, so KCL bounds them by the triangle inequality, fraction - 1 <= Σ|via| <= fraction + 1:
+    equal to fraction - 1 only where the crossing current is in phase with the circulating one (4.84 + 4.82 = 10.64 - 1
+    at 1450 MHz). Since the worst harmonic is always solved (VALIDATION_AUDIT.md round 6, ISSUE-32) the maps come from
+    the resonance at 1350 MHz the old refinement missed (+5.6 dB margin, not +16.6): 33.12 against 32.35 ± 1."""
     board, rr = demo
     bm = rr.board_maps
     cap = next(t for t in rr.transfers if t["kind"] == "capacitance")
@@ -92,7 +95,8 @@ def test_the_board_wide_scene_shows_the_displacement_and_the_vias_it_circulates_
     net = float(D.sum()) * (g.d * 1e-3) ** 2                     # A per A, at the dominant phase
     assert cap["fraction"] > 1 and abs(net) == pytest.approx(cap["fraction"], rel=0.02)
     vias = [t for t in bm["transfers"] if t["kind"] == "via"]
-    assert sum(t["fraction"] for t in vias) == pytest.approx(cap["fraction"] - 1, rel=0.02)
+    total = sum(t["fraction"] for t in vias)
+    assert 0.98 * (cap["fraction"] - 1) <= total <= 1.02 * (cap["fraction"] + 1)
     m = view3d_data(board, rr)["modes"][1]
     disp = [s for s in m["sheets"] if s.get("displacement")]
     assert len(disp) == 1 and disp[0]["level"] == 1.5           # between In1 (1) and In2 (2)

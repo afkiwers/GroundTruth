@@ -162,6 +162,71 @@ def test_simulate_reads_a_board_changed_since_it_was_loaded(app, tmp_path, monke
         close_window(f)
 
 
+def test_results_of_an_earlier_board_or_settings_are_marked_and_not_heated(app, tmp_path, monkeypatch):
+    """ISSUE-29 (VALIDATION_AUDIT.md round 6): the Heatmap views keep the board and settings they were computed on,
+    and Thermal and Current capacity heat those. After Reload board read a changed board (a track narrowed in
+    KiCad), the old views were shown and Thermal ran on them as if they were the design's; a thermal setting edited
+    after the Simulate (the ambient) was ignored by Thermal. Now: the summary line says OUT OF DATE (the board
+    changed), Thermal reads the board first and refuses stale views with a message; after a new Simulate the mark is
+    gone; an edited load current marks the views (the settings changed); an edited thermal section does not, and
+    Thermal takes the new ambient."""
+    from boardgen import BoardGen
+    from groundtruth.config.settings import DcLoad, DcLoadSpec, config_from_data
+    from groundtruth.ui import main_frame
+    boxes = []
+    monkeypatch.setattr(wx, "MessageBox", lambda *a, **k: boxes.append(a[0] if a else "") or wx.YES)
+
+    def board(width):
+        """Two PWR pads joined by a 40 mm PWR track `width` wide, each part with a GND pad, 2 layers."""
+        g = BoardGen(layers=2, size=(56.0, 20.0))
+        for ref, x in (("U1", 6.0), ("U2", 46.0)):
+            g.footprint(ref, "IC", "Package_SO:Fake_IC", (x, 10.0),
+                        [{"number": 1, "at": (0, 0), "net": "PWR", "size": (1.0, 1.0)},
+                         {"number": 2, "at": (0, 3.0), "net": "GND", "size": (1.0, 1.0)}])
+        g.track((6.0, 10.0), (46.0, 10.0), "PWR", "F.Cu", width=width)
+        return g
+
+    _, sc, path = make(tmp_path, board(0.4), "stale", nets=())
+    sc.set_dc_loads([DcLoadSpec("rail", "U1.1", [DcLoad("U2.1", 1.0, "")], "")])
+    sc.save()
+    f = main_frame.MainFrame(main_frame.Session(file_path=str(path)))
+    f.Show()
+    seen = {}
+
+    def note(key):
+        """Keep the stale reason, the summary line and the views' kinds now."""
+        seen[key] = (f._stale_reason(), f.heatmap.metrics.GetLabel(), [r.kind for r in f.routes])
+
+    def edit_current():
+        """The DC load's current changed on its tab."""
+        f.settings.set_dc_loads([DcLoadSpec("rail", "U1.1", [DcLoad("U2.1", 2.0, "")], "")])
+        f.on_config_change()
+
+    def edit_ambient():
+        """Only the thermal section changed (the settings file edited by hand, read again)."""
+        f.settings.doc["thermal"] = {"ambient_c": 41.0}
+        f.settings.config = config_from_data(f.settings.doc)
+
+    try:
+        run_steps(app, f, [lambda: f.run(True) and None, lambda: note("fresh"),
+                           lambda: board(0.1).write(path) and None, lambda: f.on_reload() and None,
+                           lambda: note("reloaded"), lambda: f.on_thermal() and None, lambda: note("thermal"),
+                           lambda: f.run(True) and None, lambda: note("again"),
+                           edit_ambient, lambda: note("ambient"),
+                           lambda: seen.__setitem__("inputs", f._thermal_inputs("Thermal")),
+                           edit_current, lambda: note("current")])
+        assert seen["fresh"][0] == "" and "OUT OF DATE" not in seen["fresh"][1]
+        assert seen["reloaded"][0] == "the board changed" and "OUT OF DATE" in seen["reloaded"][1]
+        assert any("Run Simulate again" in b for b in boxes)
+        assert "thermal" not in seen["thermal"][2]                       # not heated on the old design
+        assert seen["again"][0] == "" and "OUT OF DATE" not in seen["again"][1]
+        assert seen["ambient"][0] == ""                                   # a thermal setting needs no Simulate ...
+        assert seen["inputs"][2].thermal.ambient_c == 41.0                # ... and Thermal takes it
+        assert seen["current"][0] == "the settings changed" and "OUT OF DATE" in seen["current"][1]
+    finally:
+        close_window(f)
+
+
 def test_cancel_stops_a_running_simulation(app, frame):
     f = frame
     status = []

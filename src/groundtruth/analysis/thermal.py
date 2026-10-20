@@ -551,6 +551,12 @@ def thermal_inputs(board: Board, config: Config, converters, progress: Optional[
     if progress:
         progress("thermal: the heat of the DC paths and the parts", 0.01)
     losses, notes = part_losses(board, config, stages)
+    # a DC path whose solve failed has no current map: its copper heat is missing, so say so rather than present
+    # the temperatures as the whole stage's (VALIDATION_AUDIT.md round 6, ISSUE-25)
+    notes = list(notes) + [f"{s.net}: DC {name} was not solved: its copper heat is not in these temperatures"
+                           for s in stages for name in (getattr(s, "dc_unsolved", None) or [])]
+    notes += [f"{b.net}: {name} was not solved: its heat is not in these temperatures"
+              for b in bridges for name in (getattr(b, "rms_missing", None) or [])]
     return copper_heat(board, stages, bridges), _merged(losses, *(b.losses for b in bridges)), notes
 
 
@@ -608,6 +614,7 @@ class _Solution:
     hist: list = field(default_factory=list)
     Pcu: Optional[np.ndarray] = None
     Q: Optional[np.ndarray] = None
+    linear: str = ""                      # the last linear solve's failure (CG unconverged / broken down), if any
     error: str = ""
     settled: bool = True
 
@@ -707,6 +714,12 @@ def _coupled(m: _Model, p20: np.ndarray, Qc: np.ndarray, say=None, T: Optional[n
         Pcu = p20 * (1 + COPPER.alpha * (T[nodes] - 20.0)) if len(nodes) else p20
         Q = Qc + np.bincount(nodes, weights=Pcu, minlength=th.n)
         T_new = th.solve(Q, T, tol=lin_tol)
+        # an unconverged CG returns its best x; two such in a row can differ by less than the tolerance, which would
+        # read as settled (ISSUE-26): the last solve must have converged for the answer to count
+        solver = getattr(th, "solver", None)
+        sol.linear = "" if solver is None or getattr(solver, "last_converged", True) else (
+            f"the thermal solver's CG stopped short (relative residual {solver.last_residual:.1e} after "
+            f"{solver.last_iters} iterations, asked {lin_tol:.0e})")
         dT = float(np.max(np.abs(T_new - T)))
         if hist and dT > hist[-1]["dT"] * 1.05:
             omega = max(0.25, omega * 0.6)
@@ -715,7 +728,7 @@ def _coupled(m: _Model, p20: np.ndarray, Qc: np.ndarray, say=None, T: Optional[n
         if not np.isfinite(T.max()) or T.max() > 1000:
             sol.error = "thermal runaway: the copper passes 1000 °C (the current would fuse it)"
             return sol
-        if it >= 1 and dT < tol:
+        if it >= 1 and dT < tol and not sol.linear:
             break
     else:
         sol.settled = False
@@ -735,6 +748,9 @@ def _result(board: Board, config: Config, m: _Model, sol: _Solution, losses: lis
     res.notes = list(m.notes)
     if not sol.settled:
         res.notes.append(f"the coupled iteration did not settle to 0.02 °C in {len(sol.hist)} iterations")
+    if sol.linear:
+        res.notes.append(f"{sol.linear}: the temperatures are not converged and may be wrong; try thermal.quality "
+                         "draft or fine (another mesh)")
     res.iterations = sol.hist
     res.power_w = float(sol.Q.sum())
     res.copper_w20 = float(sol.p20.sum())

@@ -5,6 +5,9 @@ the audit, so a test that compares GroundTruth with them compares two methods, n
 
 - sheet_resistance: DC resistance of planar copper (a sheet of thickness t) between two electrodes, by a
   cell-centred finite-difference solve of div(σ t grad V) = 0 on a fine uniform grid with a cell-coverage mask.
+- sheet_potentials_fed: the same copper with currents fed uniformly over pads (GroundTruth's DC-load boundary
+  condition) instead of equipotential electrodes: the feed-weighted potential of each pad;
+  sheet_density_peak_fed its peak current density, per cell and over a window.
 - cross_section_rise: steady temperature of a long straight track on a board, as the 2D heat conduction of its
   cross-section (anisotropic laminate, the copper track on top, convection on both faces and the edges).
 """
@@ -88,6 +91,92 @@ def sheet_resistance(poly, electrode_a, electrode_b, h: float, sigma: float, t: 
         cur += float(np.sum(np.where(fa[a] & ~fa[b], g * (1.0 - V[b]), 0.0)))
         cur += float(np.sum(np.where(fa[b] & ~fa[a], g * (1.0 - V[a]), 0.0)))
     return 1.0 / cur
+
+
+def _fed(poly, feeds, h: float, sigma: float, t: float):
+    """The fed sheet solve shared by sheet_potentials_fed and sheet_density_fed: (V per cell, coverage, the feeds'
+    weights per cell, the face conductances {(1, 0): x faces, (0, 1): y faces})."""
+    x0, y0, x1, y1 = poly.bounds
+    nx, ny = int(math.ceil((x1 - x0) / h)) + 2, int(math.ceil((y1 - y0) / h)) + 2
+    x0, y0 = x0 - h, y0 - h
+    c = _coverage(poly, x0, y0, h, nx, ny)
+    on = c > 1e-9
+    idx = -np.ones((nx, ny), np.int64)
+    idx[on] = np.arange(int(on.sum()))
+    n = int(on.sum())
+    g0 = sigma * t
+    rows, cols, vals = [], [], []
+    diag = np.zeros(n)
+    faces = {}
+    for di, dj in ((1, 0), (0, 1)):
+        a = (slice(0, nx - di), slice(0, ny - dj))
+        b = (slice(di, nx), slice(dj, ny))
+        ca, cb = c[a], c[b]
+        g = np.where((ca > 0) & (cb > 0), g0 * 2 * ca * cb / np.maximum(ca + cb, 1e-30), 0.0)
+        faces[(di, dj)] = g
+        ia, ib = idx[a], idx[b]
+        m = (ia >= 0) & (ib >= 0) & (g > 0)
+        rows += [ia[m], ib[m]]
+        cols += [ib[m], ia[m]]
+        vals += [-g[m], -g[m]]
+        np.add.at(diag, ia[m], g[m])
+        np.add.at(diag, ib[m], g[m])
+    rhs = np.zeros(n)
+    weights = []
+    for pad, amps in feeds:
+        w = _coverage(pad, x0, y0, h, nx, ny) * c          # the pad's copper in each cell
+        w = np.where(on, w, 0.0)
+        w = w / w.sum()
+        weights.append(w)
+        np.add.at(rhs, idx[on], (amps * w)[on])
+    A = sp.coo_matrix((np.concatenate(vals + [diag]), (np.concatenate(rows + [np.arange(n)]),
+                                                      np.concatenate(cols + [np.arange(n)]))), shape=(n, n)).tolil()
+    A[0, :] = 0.0                                       # cell 0 held at 0 V
+    A[0, 0] = 1.0
+    rhs[0] = 0.0
+    v = spsolve(A.tocsr(), rhs)
+    V = np.zeros((nx, ny))
+    V[on] = v
+    return V, c, weights, faces
+
+
+def sheet_potentials_fed(poly, feeds, h: float, sigma: float, t: float) -> list[float]:
+    """The potentials (V) of pads fed with currents, on planar copper `poly` (mm) of thickness t (m) and
+    conductivity sigma (S/m), on cells of h mm: feeds = [(pad polygon in mm, amps), ...] summing to zero, each
+    pad's current entering (+) or leaving (-) uniformly over its copper area (by cell coverage) — GroundTruth's
+    boundary condition for a DC load (analysis/dcload.py: a pin's current spread over its pad, the pin's
+    potential the feed-weighted mean of its nodes). Returns each pad's feed-weighted mean potential, relative to an
+    arbitrary reference: differences between them are the drops. The same finite-volume faces as
+    sheet_resistance [Patankar 1980]; the Neumann problem is made regular by holding one cell at 0 V (the currents
+    balance, so which cell does not matter)."""
+    V, _, weights, _ = _fed(poly, feeds, h, sigma, t)
+    return [float((V * w).sum()) for w in weights]
+
+
+def sheet_density_peak_fed(poly, feeds, h: float, sigma: float, t: float, window_mm: float) -> tuple[float, float]:
+    """(the largest cell current density, the largest RMS current density over a window_mm square of copper), both
+    A/mm², of the fed sheet solve (sheet_potentials_fed's problem; t in m). A cell's density is the mean of its two
+    faces' currents per axis over its copper's cross-section (h × coverage × t); the window's RMS is
+    √(Σ J²·c / Σ c) over the cells more than half copper. At a re-entrant corner the first grows without bound as h
+    falls (J ∝ r^(-1/3)), the second converges: compare two h."""
+    from scipy.ndimage import uniform_filter
+    V, c, _, faces = _fed(poly, feeds, h, sigma, t)
+    ix = faces[(1, 0)] * (V[:-1, :] - V[1:, :])
+    iy = faces[(0, 1)] * (V[:, :-1] - V[:, 1:])
+    jx = np.zeros(V.shape)
+    jy = np.zeros(V.shape)
+    jx[:-1, :] += ix / 2
+    jx[1:, :] += ix / 2
+    jy[:, :-1] += iy / 2
+    jy[:, 1:] += iy / 2
+    full = c > 0.5
+    J = np.where(full, np.hypot(jx, jy) / (np.maximum(c, 1e-12) * h * t * 1e3), 0.0)
+    k = max(1, int(round(window_mm / h)))
+    w = np.where(full, c, 0.0)
+    num = uniform_filter(w * J * J, size=k, mode="constant")
+    den = uniform_filter(w, size=k, mode="constant")
+    win = np.where(full, np.sqrt(np.maximum(num, 0.0) / np.maximum(den, 1e-12)), 0.0)
+    return float(J.max()), float(win.max())
 
 
 def _graded(lo: float, hi: float, fine: float, coarse: float, focus: float) -> np.ndarray:

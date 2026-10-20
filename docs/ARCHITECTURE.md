@@ -167,8 +167,16 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
   resistance of a slab with its field on one face [Dowell 1966], REFERENCES A2; until 2026-10-19 δ(1 − e^(−t/δ)),
   up to 58 % too resistive at 1-10 MHz in 35 µm copper, ISSUE-16) plus `jω·L_p`. The mutual partial
   inductance between parallel strips depends only on the grid offset and Δz, so each layer pair is a
-  **convolution kernel** (`kernel.strip_kernel`). Gauss quadrature is used for near neighbours, filaments
-  far away, and sub-strip numeric integration for the self term (the GMD formula is 5 % low for square strips).
+  **convolution kernel** (`kernel.strip_kernel`). Near neighbours (up to 4 cells) and the self term are the exact
+  mean of the filament mutuals over the two strips' widths (`kernel.tape_mutual`: the double integral reduced to one
+  over the widths' difference, composite Gauss panels graded toward where the filaments cross; 2e-11 against an
+  adaptive quadrature), filaments far away (the GMD formula is 5 % low for square strips). Until 2026-10-20 the
+  near field was 8 × 8 Gauss points across the widths and the self term 24 sub-strips: a plane pair's sheet
+  inductance μ0·dz is the small difference of a strip's own-layer and other-layer sums, so their error was
+  magnified ~d/dz times (1.5 / 3.9 / 20 % low at d/dz = 5 / 10 / 20; refboard's board-wide model has
+  d/dz = 6.4 at 1x), and the self term was 0.86 % low (VALIDATION_AUDIT.md round 6, ISSUE-28). The plane pairs'
+  capacitance is parallel-plate (no edge fringing, A46): a cavity's resonance converges about 1.5 % above the
+  magnetic-wall value.
 - Kernels are embedded circularly (they're even, so their FFT is real), FFT size P = next_fast_len(2n−1).
   The product is evaluated in **double precision**. Single precision was 3× faster, but its ~1e-7 noise made
   GMRES stall near plane resonances (10 517 iterations at 1.7 GHz).
@@ -183,7 +191,11 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
 - Loop impedance: `Z = R_trace + (V_rcv − V_drv) + jω(L_trace + ψ·I)`. Magnetic moment
   `m = ½ Σ r × I dl` over the closed loop (trace chain, strips, branches, displacement currents).
 - **GMRES** (`_gmres`, own implementation): right-preconditioned, so it stops on the true residual
-  (rtol 1e-5). Classical Gram-Schmidt as two BLAS `zgemv` calls per step on the basis in place (no conjugate
+  (rtol 1e-5). Its one norm mixes the KVL rows (volts) and the KCL rows (amperes); at low frequency the KVL rows'
+  own residual was up to 1.5e-3 of their right-hand side when the whole read 4e-6. Measured whether that limits
+  anything (round 6, `tools/dev/tol_check.py`: the same Simulate at rtol 1e-10/1e-11): refboard's conv1
+  (DC paths, conducted, radiated, fixes) moved by at most 0.007 dB and its DC paths not in the 6th digit; SPI_SCK
+  (route and board-wide model, resonances at 0.94-1.58 GHz) by 0.0003 dB. Classical Gram-Schmidt as two BLAS `zgemv` calls per step on the basis in place (no conjugate
   copies), with a second pass only when cancellation happened (DGKS). Restart length min(200, memory budget of
   400 MB). The small least-squares problem is kept triangular with **Givens rotations** (O(j) per step);
   `np.linalg.lstsq` on the whole Hessenberg matrix each step cost 18 ms at j = 120 and 44 ms at j = 200, more
@@ -538,7 +550,11 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   - Of the rest, the gap closest to the limit is split at its log-midpoint harmonic.
   - With plane capacitance, the harmonic with the worst estimated margin then gets its own solve, unless one
     lies within ±5 %. The reported worst case is therefore a solved value, not an interpolation across a
-    possible resonance.
+    possible resonance. Since 2026-10-20 (round 6, ISSUE-32) also when `max_solves` is spent, up to `WORST_EXTRA`
+    (3) more: the budget check returned first, and refboard's SPI_SCK at 1x reported +13.2 dB at 1220 MHz,
+    interpolated between solves at 1020 and 1580 MHz, where every harmonic solved gives +8.4 dB (now +7.85 dB with
+    one more solve, equal to the sweep with round 6's kernel). A worst still interpolated gets a note (`interpolated_worst_note`), and so does a budget that
+    ended with gaps near the limit unresolved (`unresolved_gaps_note`, naming them).
 - `solve_setups` runs each shared model frequency by frequency over all routes, so one factorisation serves
   every route at that frequency.
 - **Parallel solving** (`run_parallel`, `analysis.threads`: `auto` means the physical cores, at most 4):
@@ -923,8 +939,16 @@ for a boost; duty = the high-side conduction time). The inductor current is cont
     Σ A) (`sustained`, `uniform_filter` per net, REFERENCES A40): its heat is the window's. Until 2026-10-19 the
     plain mean over all copper cells, so another net's pour within the window counted as copper at 0 A/mm² (a 0.1
     mm track 0.2 mm beside a GND pour read a third low, ISSUE-13).
+  - The **peak** shown beside it (`peak_a_mm2`) is the same RMS over a 0.25 mm window (`peak_density`, `PEAK_MM`,
+    REFERENCES A45; the window's width exact at any cell size by a fractional box, the cell itself where it is
+    larger). Until 2026-10-20 it was one node's value: at a re-entrant corner the density is singular (r^(-1/3)),
+    so it grew on every finer grid (a 2 mm L at 10 A: 290 / 348 / 366 A/mm² at 1x / 2x / 4x); now 290 / 292 / 297 /
+    309 at 1x-8x against an independent fine solve's 320 (ISSUE-27). It is shown, not checked.
   - The `current_density` issue fires when the sustained density or a via's plating density exceeds
     `rules.current_density_warning` (50) or `current_density_error` (100) A/mm².
+  - A DC path whose solve fails is listed in `dc_unsolved`: the input estimate's `missing`, Thermal's notes and a
+    `dc_unsolved` warning name it (until 2026-10-20 a note only, while the loss, input current, efficiency and the
+    heat left it out as if complete: ISSUE-25).
   - `dc_view` makes a copy of the result whose heatmap is a DC density map; the plugin and the HTML list these
     views.
   - **Whole-board DC model** (`dc_board_build`, session 10): one inductive-free copper model per Simulate, cached
@@ -2035,6 +2059,15 @@ a History tab with a comparison (and the CLI).
   head. The plots' arrows stay equal. Test `test_board_arrows_get_thicker_with_the_current_density`.
 
 ## Plugin (`plugin/`, `ui/`)
+- **Results and the design they are of** (round 6, ISSUE-29): the views shown keep the board and settings they were
+  computed on (`_views_from`), with that board's fingerprint and `settings_key` (the settings as far as the results
+  depend on them: not drawing, report, thermal, waivers, what-if edits or the computer's resolution / threads /
+  GPU) in `_views_src`. `_stale_reason` compares them with the board and settings now: after Reload board or a
+  settings edit the Heatmap's summary line starts "OUT OF DATE (the board changed …)" (`HeatmapPanel.set_stale`);
+  Thermal and Current capacity read the board first (`_check_board`, as Simulate does since ISSUE-19) and refuse
+  stale views with a message instead of heating the design as it was; Thermal takes the thermal section as the
+  settings have it now (an ambient edited after the Simulate was ignored). Server results get their key from their
+  own inputs (in the job). Test: `test_results_of_an_earlier_board_or_settings_are_marked_and_not_heated`.
 - **Top bar** (`MainFrame.__init__`, drawn `theme.Button`s): Reload board, Refill zones (live), Run checks,
   Simulate, Thermal, **Export report…** (see "HTML report"), the "with what-if edits" switch, Cancel, Save settings,
   Clear EMI layers (live), and on the right **Preferences…** and **Help**. There is no theme selector any more:
@@ -2170,6 +2203,14 @@ a History tab with a comparison (and the CLI).
   RAM, or when less than 5 % (≥ 0.5 GB) is free while the child holds more than that. It sums the process tree:
   a venv's `python.exe` is a launcher whose child is the interpreter (killing the launcher ends the child: job
   object, checked). The child's peak memory goes to `mesh["memory_mb"]`. Test: a 20 MB limit stops a solve.
+- **The linear solves and the coupled iteration** (round 6): PCB Thermal's `SPDSolver` (AMG-preconditioned CG,
+  the hierarchy reused across coupled iterations and rebuilt when it slows) records each solve's outcome
+  (`last_converged`, the true relative residual `last_residual`); `analysis.thermal._coupled` (and PCB Thermal's own
+  loop) does not stop on a step whose CG did not converge, and the result's notes say so. Before, an unconverged CG
+  only wrote a log line: a stalled one (x returned as started) gave two equal answers, read as settled at the start
+  temperature (ISSUE-26); and a reused hierarchy that had used the whole budget was rebuilt with 0 iterations, which
+  pyamg refuses (ValueError). The shipped tolerances (CG 1e-5 … 1e-8 of ‖b‖, the iteration to 0.02 K) leave ~3e-4 K
+  on a 29 K rise (`tools/dev/thermal_tol_check.py`, against CG 1e-12 and four more passes).
 - **Current capacity** (`thermal.capacity_inputs`, `solve_capacity`, M3): per stage the load-current scale s at
   which max(T, junction estimates) = `thermal.capacity_c` (default max_c), the others at their operating points,
   and, with several stages, all scaled together (`ALL_STAGES`). The heat is exact in s: the DC solve is linear,
