@@ -289,10 +289,11 @@ class Session:
             refill_zones(self.kb)
 
     @_kicad_call
-    def draw_issues(self, issues, layer):
-        """Issue markers on `layer` (replacing the previous ones); the number of items drawn."""
+    def draw_issues(self, issues, layer, hidden=frozenset()):
+        """Issue markers on `layer` (replacing the previous ones), none for the `hidden` checks; the number of items
+        drawn."""
         from ..adapters.kipy_sink import draw_issues
-        return draw_issues(self.kb, issues, layer)
+        return draw_issues(self.kb, issues, layer, hidden=hidden)
 
     def enabled_layers(self) -> list[str]:
         """Drawing layers the last draws had to enable on the board (kipy_sink._drawing_layer)."""
@@ -1881,8 +1882,8 @@ class MainFrame(wx.Frame):
         if self._refuse_if_busy() or not self._need_live() or self.settings is None:
             return
         layer = self.settings.config.drawing.issues_layer
-        issues = list(self.issues)
-        self._start("drawing the issue markers…", lambda progress: self.session.draw_issues(issues, layer),
+        issues, hidden = list(self.issues), frozenset(self.issues_panel.hidden)
+        self._start("drawing the issue markers…", lambda progress: self.session.draw_issues(issues, layer, hidden),
                     lambda n: self.SetStatusText(f"drew {n} marker item(s) on {layer}"),
                     what="draw the issue markers", cancellable=False, kicad=True)
 
