@@ -1,4 +1,4 @@
-"""Issues and Heatmap tabs."""
+"""Issues and Results tabs."""
 from __future__ import annotations
 
 import os
@@ -198,10 +198,10 @@ class PrerenderedCanvas(FigureCanvasWxAgg):
     the GUI thread. matplotlib's own redraws (toolbar zoom and pan, resizing) still render here."""
 
     defer = None                # callable: True while a figure rendered in the background is on its way
-    page = None                 # the scrolled window it sits on (the Heatmap tab): the wheel scrolls that
+    page = None                 # the scrolled window it sits on (the Results tab): the wheel scrolls that
 
     def _on_mouse_wheel(self, event):
-        """On the Heatmap tab's scrolling page the wheel scrolls the page: the maps fill its first screen, so a
+        """On the Results tab's scrolling page the wheel scrolls the page: the maps fill its first screen, so a
         wheel that zoomed them left no way down to the plots under them. Ctrl + wheel zooms the map under the mouse
         (matplotlib's scroll_event, as the wheel alone does in the enlarged window) and leaves the page where it
         is. matplotlib binds this method by name (backend_wx, 3.11)."""
@@ -259,7 +259,7 @@ def views_dir() -> Path:
 
 ZOOM_STEP = 1.25            # one wheel notch zooms in or out this much, about the point under the mouse
 FOCUS_MM = 6.0              # the busiest via's tile zooms the maps to a square this wide around it
-SPECTRUM_IN = 2.8           # the spectrum's height on the Heatmap tab's page (full width), inches of its figure
+SPECTRUM_IN = 2.8           # the spectrum's height on the Results tab's page (full width), inches of its figure
 MAPS_MIN_PX = 300           # the maps fill the page's visible height, but never less than this
 SCROLL_PX = 40              # the page's scroll unit: one wheel notch (3 lines) scrolls 120 px
 ZOOM_HINT = "Ctrl + wheel over a map zooms it, double-click goes back; the wheel scrolls the page"
@@ -345,8 +345,8 @@ class HeatmapWindow(wx.Frame):
 CURVE_KINDS = ("pdn", "bode")       # views drawn as curves, not maps (no layers, arrows or board drawing)
 
 
-class HeatmapPanel(wx.Panel):
-    """The Heatmap tab: the views of the last run (a signal route, a power stage, its DC paths, a bridge, a thermal
+class ResultsPanel(wx.Panel):
+    """The Results tab: the views of the last run (a signal route, a power stage, its DC paths, a bridge, a thermal
     solve) chosen in the Route list, with the view's KPI tiles and a summary line, and below them on a scrolling
     page the current-density maps, a route's cross-section and the spectrum. Figures are built and rendered in a
     background thread (redraw) and swapped into the canvases when ready, so the window never waits for them."""
@@ -975,7 +975,7 @@ class HeatmapPanel(wx.Panel):
         if rr.error:
             return rr.error
         if rr.kind in ("converter", "dcload"):
-            return HeatmapPanel._converter_metrics(rr)
+            return ResultsPanel._converter_metrics(rr)
         if rr.kind == "pdn":
             from ..report.formats import pdn_text
             return "\n".join(pdn_text(rr))

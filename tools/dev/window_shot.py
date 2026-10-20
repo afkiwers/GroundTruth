@@ -1,11 +1,11 @@
 """Screenshots of the plugin window, for checking the look (theme, tiles, heatmaps) without KiCad.
 
     .venv/Scripts/python tools/dev/window_shot.py BOARD.kicad_pcb [--settings S.groundtruth.yaml] [--theme dark]
-        [--simulate] [--tabs "Signal paths,Heatmap"] [--out DIR] [--size 1920x1040] [--scroll] [--runs N]
+        [--simulate] [--tabs "Signal paths,Results"] [--out DIR] [--size 1920x1040] [--scroll] [--runs N]
 
 The board (and the settings file) is copied into DIR first, so nothing is written next to a real board. Each tab
-in --tabs is saved as DIR/<theme>_<tab>.png; --scroll adds the Heatmap tab's page scrolled to its end
-(<theme>_Heatmap_scrolled.png: the cross-section and the spectrum under the maps). --runs N simulates N times
+in --tabs is saved as DIR/<theme>_<tab>.png; --scroll adds the Results tab's page scrolled to its end
+(<theme>_Results_scrolled.png: the cross-section and the spectrum under the maps). --runs N simulates N times
 (kept in DIR/groundtruth/history when Preferences keep runs); the History tab is captured with its two newest runs
 compared. Captured with Win32 PrintWindow, which works while the screen
 itself cannot be read (a locked or minimised remote desktop)."""
@@ -65,10 +65,10 @@ def main() -> int:
     ap.add_argument("--settings")
     ap.add_argument("--theme", default="system", choices=["system", "light", "dark"])
     ap.add_argument("--simulate", action="store_true")
-    ap.add_argument("--tabs", default="Signal paths,Converters,Heatmap")
+    ap.add_argument("--tabs", default="Signal paths,Converters,Results")
     ap.add_argument("--out")
     ap.add_argument("--size", default="1400x900")
-    ap.add_argument("--scroll", action="store_true", help="also the Heatmap tab scrolled down to its last plot")
+    ap.add_argument("--scroll", action="store_true", help="also the Results tab scrolled down to its last plot")
     ap.add_argument("--runs", type=int, default=0, help="simulate this many times (the History tab's runs)")
     ap.add_argument("--real-prefs", action="store_true",
                    help="use this computer's Preferences and server job list (default: a private folder, so the "
@@ -102,14 +102,14 @@ def main() -> int:
     f.Show()
     steps = [lambda: f.run(False)] + [lambda: f.run(True)] * max(args.runs, 1 if args.simulate else 0)
     tabs = [t.strip() for t in args.tabs.split(",") if t.strip()]
-    if args.scroll and "Heatmap" in tabs:
-        tabs.insert(tabs.index("Heatmap") + 1, "Heatmap scrolled")
+    if args.scroll and "Results" in tabs:
+        tabs.insert(tabs.index("Results") + 1, "Results scrolled")
     state = {"idle": 0, "phase": "steps"}
 
     def tick(_):
         """Timer every 100 ms: once the window has been idle for 8 ticks (no job, render or history work), take the
         next step (switch a tab, capture, scroll), and close when done."""
-        busy = f.busy() or (hasattr(f, "heatmap") and (f.heatmap.rendering() or f.history_busy()))
+        busy = f.busy() or (hasattr(f, "results_panel") and (f.results_panel.rendering() or f.history_busy()))
         state["idle"] = 0 if busy else state["idle"] + 1
         if state["idle"] < 8:                             # 8 x 100 ms idle
             return
@@ -119,13 +119,13 @@ def main() -> int:
             return
         if tabs:
             name = tabs.pop(0)
-            if name == "Heatmap scrolled":                # the Heatmap tab's page scrolled to its end
+            if name == "Results scrolled":                # the Results tab's page scrolled to its end
                 if state.get("scrolled") is None:
-                    f.heatmap.page.Scroll(-1, f.heatmap.page.GetVirtualSize().height)
+                    f.results_panel.page.Scroll(-1, f.results_panel.page.GetVirtualSize().height)
                     state["scrolled"] = True
                     tabs.insert(0, name)                  # capture on the next idle tick, once painted
                     return
-                path = out / f"{args.theme}_Heatmap_scrolled.png"
+                path = out / f"{args.theme}_Results_scrolled.png"
                 print(f"{path}: {'ok' if capture(f, path) else 'PrintWindow failed'}")
                 return
             if name == "History" and len(f.history.runs) >= 2 and state.get("compared") is None:
@@ -144,8 +144,8 @@ def main() -> int:
                 return
             path = out / f"{args.theme}_{name}.png"
             print(f"{path}: {'ok' if capture(f, path) else 'PrintWindow failed'}")
-            if name == "Heatmap" and f.heatmap.routes:
-                print(f"  tiles: {f.heatmap.tile_text()}")
+            if name == "Results" and f.results_panel.routes:
+                print(f"  tiles: {f.results_panel.tile_text()}")
             return
         timer.Stop()
         f.Destroy()

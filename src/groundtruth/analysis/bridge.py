@@ -61,7 +61,7 @@ class BridgeResult(RouteResult):
     view: str = ""                                       # "sweep": the sweep's view of it (sweep_view)
 
     def label(self) -> str:
-        """The bridge's name in the Heatmap tab's view list."""
+        """The bridge's name in the Results tab's view list."""
         if self.view == "sweep":
             return f"{self.net}  sweep (phase current × speed)"
         return f"{self.net}  (drive and bus)"
@@ -329,7 +329,7 @@ def finish_bridge(model: BoardModel, bs: BridgeSetup) -> BridgeResult:
 
 
 def sweep_view(b: BridgeResult) -> Optional[BridgeResult]:
-    """The bridge's sweep as a view of its own for the Heatmap tab (None without a sweep)."""
+    """The bridge's sweep as a view of its own for the Results tab (None without a sweep)."""
     return replace(b, view="sweep") if b.sweep and not b.error else None
 
 

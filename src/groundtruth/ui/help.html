@@ -16,7 +16,7 @@ next one).</p>
 <li><a href="#checks">Run checks and Simulate</a></li>
 <li>The tabs: <a href="#nets">Signal paths</a> · <a href="#converters">Converters</a> · <a href="#bridges">Bridges</a> ·
   <a href="#dcloads">DC loads</a> · <a href="#pdn">Power integrity</a> · <a href="#si">Signal integrity</a> ·
-  <a href="#parts">Parts</a> · <a href="#issues">Issues</a> · <a href="#heatmap">Heatmap</a> · <a href="#fixes">Fixes</a> ·
+  <a href="#parts">Parts</a> · <a href="#issues">Issues</a> · <a href="#results">Results</a> · <a href="#fixes">Fixes</a> ·
   <a href="#history">History</a></li>
 <li><a href="#safety">Voltage-aware safety checks</a></li>
 <li><a href="#fields">Part parameters from the schematic (InvenTree fields)</a></li>
@@ -43,7 +43,7 @@ next one).</p>
   operating point, a bridge's legs. Fill in what the board cannot tell: frequencies, edge times, currents,
   voltages, a motor's data. Press <b>Mark reviewed</b>.</li>
 <li><b>Run checks</b> (seconds): rule checks on the nets' routes against the planes.</li>
-<li><b>Simulate</b> (minutes): the field solver on everything listed. Results go to the Issues and Heatmap
+<li><b>Simulate</b> (minutes): the field solver on everything listed. Results go to the Issues and Results
   tabs.</li>
 <li><b>Look and fix:</b> click an issue to see it in KiCad, look at the current maps, let <b>Suggest fixes</b>
   (Fixes tab) propose vias and capacitors, try them as what-if edits, place the vias.</li>
@@ -61,7 +61,7 @@ Hover over <b>Thermal</b>, <b>Export report…</b>, <b>with what-if edits</b>, <
 what it does.</p>
 <p>The results shown are always of the board and settings they were computed on. When the board was read again and
 differs (Reload board, or a Simulate that found it changed in KiCad), or a setting the results depend on was
-changed, the Heatmap tab's summary line starts with <b>OUT OF DATE</b> and says which; Simulate again for the
+changed, the Results tab's summary line starts with <b>OUT OF DATE</b> and says which; Simulate again for the
 current design. The <b>thermal</b> settings (ambient, convection, limits) are not among them: Thermal reads them
 when it runs.</p>
 
@@ -129,7 +129,7 @@ not the noise a converter or a bridge puts on it. That interaction has its own a
 <p><b>Where the results come together:</b></p>
 <ul>
 <li><b>Issues</b> lists every problem of every net, converter and bridge, sorted by severity.</li>
-<li><b>Heatmap</b> has a view per net route, converter, DC path, bridge, bridge leg, RMS map and sweep.</li>
+<li><b>Results</b> has a view per net route, converter, DC path, bridge, bridge leg, RMS map and sweep.</li>
 <li><b>Thermal</b> and <b>Current capacity</b> add the heat of every converter and every bridge on the board:
   they share the copper.</li>
 <li><b>Suggest fixes</b> works through all the issues and proposes fixes per net, converter or bridge leg; a fix
@@ -149,7 +149,7 @@ what-if edits (virtual vias, capacitors, fills) added; with none enabled, it say
 <p>Run checks without nets runs the board-wide checks only; Simulate needs a net, a converter, a bridge, a DC load
 or a PDN rail. Afterwards the status line
 counts the errors, warnings and infos (waived ones left out) and the window turns to the Issues tab (Run checks) or
-the Heatmap tab (Simulate).</p>
+the Results tab (Simulate).</p>
 <p>The settings are checked first. A value that looks like a missing unit is refused with what to write instead
 (a C_oss of <code>482</code> is 482 F: write <code>482p</code>); a bridge without its operating point or motor
 data is listed with what is missing.</p>
@@ -280,7 +280,7 @@ parts' fields. Empty: 20 ns (an adaptive controller's; the LTC7890 with its DTCA
 field, else 2 V for a GaN part and 0.8 V otherwise. A silicon FET's body diode also has a reverse-recovery charge
 <b>Q_rr</b> (its <code>Qrr</code> field; GaN has none, leave it empty): the main switch sweeps it out at its hard turn-on
 (Q_rr·V·f_sw of loss), the hot loop carries it as a current spike of I_rr = √(2·Q_rr·di/dt) (in the conducted and
-radiated spectra), and when the recovery snaps off it adds an overshoot I_rr·√(L/C_oss), shown on the Heatmap tab's
+radiated spectra), and when the recovery snaps off it adds an overshoot I_rr·√(L/C_oss), shown on the Results tab's
 <b>recovery</b> tile and in the <code>hot_loop</code> issue. Thermal's notes say when a default was used.</p>
 <ul>
 <li><b>Detect…</b> finds stages from their inductors and switches; a surge stopper or reverse-polarity FET in the
@@ -309,7 +309,7 @@ radiated spectra), and when the recovery snaps off it adds an overshoot I_rr·�
 <li><b>DC paths on the whole board, and all stages together.</b> Every stage's DC power paths (switch node,
   input, output, ground return) are solved on one copper model of the whole board, so nothing is cut off at the
   edge of a box around the stage and the current spreads as far as the copper takes it. With two or more stages
-  the Heatmap tab's Route list starts with <b>all power stages DC currents together</b>: every stage at its own
+  the Results tab's Route list starts with <b>all power stages DC currents together</b>: every stage at its own
   load at once, their currents added (they share the input connector, a surge stopper, the rail and the
   ground). Its title gives the loads, the total input current and the copper's loss of the total current.
   The current-density and via-load checks run on this total, as issues of <i>all power stages</i>; the
@@ -321,7 +321,7 @@ radiated spectra), and when the recovery snaps off it adds an overshoot I_rr·�
   (R_DS(on)), the hard edge (½·V·I·t_r·f_sw) and output charge (Q_oss·V·f_sw), a diode's V_f, the inductor's DCR,
   series parts and the copper of the DC paths; gate drive and the controller's own supply are not counted, and a
   value not given (no R_DS(on), no DCR) counts as no loss: the stage's notes say which. The stage's line on the
-  Heatmap tab shows the input current and efficiency, its notes the loss break-down, and the DC input path's map
+  Results tab shows the input current and efficiency, its notes the loss break-down, and the DC input path's map
   (connector to the high side) carries this current: its title reads "expected input current … A (efficiency
   … %)" beside the path's resistance and voltage drop. The ground return splits by it too: the input connector's
   minus pin takes the input current back, the low side the rest.</li>
@@ -392,7 +392,7 @@ ticked.</p>
   modelled as a <code>short</code> gets no loss: give it a resistor model);</li>
 <li><b>checks the victims</b> (see <a href="#together">above</a>) and runs the <b>sweep</b>.</li>
 </ul>
-<p>On the Heatmap tab a bridge has four kinds of view: its drive (phase and bus currents, capacitor ripple,
+<p>On the Results tab a bridge has four kinds of view: its drive (phase and bus currents, capacitor ripple,
 conducted spectrum, losses), each leg's hot loop, its <b>RMS currents</b> map, and its <b>sweep</b> (losses, RMS
 density, conducted and radiated margin against the phase current, one line per speed; a hollow marker where the
 current is not reached).</p>
@@ -404,7 +404,7 @@ board (pours, tracks and vias, as for a power stage's DC paths) and shows:</p>
 <ul>
 <li>the <b>voltage drop each load sees</b>: on the supply side (from the source pin to the load's pin) and, when the
   return pins are given, on the ground side (back to the source's return pin), and the total;</li>
-<li>the <b>current density</b> with its flow (a view of its own on the Heatmap tab), the hottest narrow spot and the
+<li>the <b>current density</b> with its flow (a view of its own on the Results tab), the hottest narrow spot and the
   busiest vias against IPC-2221, and the copper's loss; these are checked like a power stage's DC paths
   (current_density, via_overload), and a load above the rail's <b>Max drop</b> is an issue (dc_drop). The checked
   density is the one sustained over 1 mm of the rail's own copper (another net's pour beside a track does not
@@ -464,7 +464,7 @@ added to the IC's curve. An IC whose small pads the board-wide grid cannot join 
 with a note (raise the resolution).</p>
 <p>The <b>Power integrity</b> tab lists the rails: <b>Find rails</b> adds every rail ICs draw supply from (its source
 found by itself); set each one's <b>Load step</b> for a target (and its voltage when the name has none). After
-Simulate, each rail is a view on the <b>Heatmap</b> tab: the curves with the target, and under them what holds the
+Simulate, each rail is a view on the <b>Results</b> tab: the curves with the target, and under them what holds the
 rail at each IC across frequency. In the settings file:</p>
 <pre>pdn:
   - {rail: +3V3, i_step: 300mA}
@@ -665,7 +665,7 @@ soldered pin is not checked as a via: the pin carries the current between the la
 <li>Opened on a board file, clicking an issue tells in the status line what it is about and where.</li>
 </ul>
 
-<hr><a name="heatmap"></a><h3>Heatmap tab</h3>
+<hr><a name="results"></a><h3>Results tab</h3>
 <p>One view per analysed item: pick it in the <b>Route</b> list at the top, and the copper layer in <b>Layer</b>.
 <b>Current arrows</b>, <b>Log scale</b> and <b>Cross-section</b> switch those parts of the view on and off and keep
 their state for next time. How vias and parts are marked is set in <a href="#prefs">Preferences</a>.</p>
@@ -798,7 +798,7 @@ simulates the board with and without the enabled what-if edits and lists what ch
 <li><b>Suggest fixes</b> starts from the last Simulate when neither the board, the settings nor the resolution
   changed since, and its models were kept: they are kept while they take less than a quarter of the memory this
   computer has free (a large board with every net and stage: ~2 GB). Otherwise it simulates first. That
-  simulation also updates the Issues and Heatmap tabs.</li>
+  simulation also updates the Issues and Results tabs.</li>
 <li><b>Draw ticked on board</b> draws crosses and labels on the suggestion layer. <b>Add ticked to what-if</b>
   stores the ticked vias, capacitors and fills in the settings and ticks <b>with what-if edits</b>.</li>
 <li><b>Place ticked vias in KiCad</b> lists the vias (pad and drill) and asks first; afterwards refill the zones
@@ -890,7 +890,7 @@ Simulate, it says so and asks for a Simulate instead of heating the design as it
   rectifier's reverse conduction in the dead times and its recovery charge, an inductor's DCR, series parts; for a
   bridge, the losses from its drive waveform).</li>
 </ul>
-<p><b>Current capacity</b> (Heatmap tab) finds, per converter, the load current, and per bridge, the phase
+<p><b>Current capacity</b> (Results tab) finds, per converter, the load current, and per bridge, the phase
 current, at which the hottest copper or part junction reaches the limit (<code>thermal.capacity_c</code>, by default
 <code>max_c</code>), the others at their operating points. The thermal settings: ambient temperature,
 orientation, natural or forced convection (air speed), the warning and maximum temperatures, and the parts'
@@ -898,7 +898,7 @@ junction-to-board resistances (<code>theta_jb</code>). The thermal mesh is the s
 (draft, normal, fine) unless <a href="#prefs">Preferences</a> sets one for this computer. Both run in the
 background; <b>Cancel</b> stops them. The solve is steady state: a load that lasts a few seconds (a cranking pulse)
 heats less than shown.</p>
-<p>Thermal adds a temperature view to the Heatmap tab's <b>Route</b> list (replacing an earlier one), its issues
+<p>Thermal adds a temperature view to the Results tab's <b>Route</b> list (replacing an earlier one), its issues
 join the Issues tab, and the status line gives the hottest copper and its layer and the power in copper and parts.
 The map shows each of its cells at the hottest point the solve found in it, so a track narrower than a map cell
 shows its own temperature. The copper's heat is exactly the DC paths' I²·R, its resistivity following the
@@ -956,7 +956,7 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   file</i> keeps <code>thermal.quality</code>.</td></tr>
 <tr><td valign="top"><b>Via markers</b>, <b>Vias shown</b></td><td>whether the maps mark the vias carrying the
   current, and how many at most (All, 5, 10, 20, 50, the busiest first; greyed while Via markers is unticked; see
-  <a href="#heatmap">Heatmap</a>).</td></tr>
+  <a href="#results">Results</a>).</td></tr>
 <tr><td valign="top"><b>Part outlines</b></td><td>every part's outline over the maps.</td></tr>
 <tr><td valign="top"><b>Part names</b></td><td>every part's reference over the maps (with or without the outlines).</td></tr>
 <tr><td valign="top"><b>Contour line</b>, <b>Index contour line</b></td><td>the line widths of <b>Draw contours on
@@ -972,7 +972,7 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   next time GroundTruth opens.</td></tr>
 </table>
 <p>The exported report follows the heatmap settings and names the resolution it was simulated at. The working
-toggles keep their last state for next time too: the Heatmap tab's <b>Current arrows</b>, <b>Log scale</b> and
+toggles keep their last state for next time too: the Results tab's <b>Current arrows</b>, <b>Log scale</b> and
 <b>Cross-section</b>, the Issues tab's <b>Zoom to it</b> and <b>Highlight its net</b>.</p>
 
 <hr><a name="export"></a><h3>Export report</h3>
