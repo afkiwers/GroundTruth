@@ -394,4 +394,7 @@ Simulate's memory is unchanged (`tools/dev/mem_profile.py` on conv1: peak privat
 1775 against 1696 MB, 206 against 207 s, the same 40 factorisations; `out/audit6/mem_profile_conv1.txt`). The first
 version of ISSUE-28 had 47 stalls (above), fixed.
 
+**Full suite on `main` after the merge (534b469)** (`out/audit6/full_suite_main.log`, 44 min): **1005 passed, 1
+skipped, 0 failed**.
+
 Quality gates: `tools/dev/undocumented.py` 0, `py311_check.py` 0 rejected, `ref_keys.py` 117 / 117.

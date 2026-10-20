@@ -1,13 +1,13 @@
 # GroundTruth handover
 
-## Current state (2026-10-20, audit round 6 on branch `audit-6`, not merged)
+## Current state (2026-10-20, audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `audit-6` (2026-10-20, from `main` 8f40781, not merged; on the laptop `iwers`/xps13, 4 cores):** the
+- **Branch `audit-6` (2026-10-20, from `main` 8f40781, merged into `main` as 534b469 at the user's "merge it first, then run a full suite"; on the laptop `iwers`/xps13, 4 cores):** the
   user's brief "Independent Audit: Numerical Accuracy, Solver Convergence, and Adversarial Validation" (pasted): do the
   solvers solve the physics accurately and reliably. The record is [NUMERICS_AUDIT.md](NUMERICS_AUDIT.md);
   VALIDATION_AUDIT.md "Round 6" summarises it; NEXT_STEPS item 7 what it left.
@@ -36,7 +36,9 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
   - Full suite on the branch (`out/audit6/full_suite.log`, 43 min): 1001 passed, 1 skipped, 4 failed: three window
     tests that pass alone (load), test_view3d's KCL check (ISSUE-32 moved its frequency; corrected to the triangle
     inequality). The GUI probe on kraft: 11 stalls over 150 ms against `main`'s 15 (the worst of each paging during a
-    SuperLU solve); memory and time of a conv1 Simulate unchanged. Not merged: waiting for the user.
+    SuperLU solve); memory and time of a conv1 Simulate unchanged. On `main` after the merge: 1005 passed, 1 skipped,
+    0 failed (`out/audit6/full_suite_main.log`). A shareable summary: the Claude Docs page "GroundTruth Numerical
+    Audit (Round 6)" (https://claude.ai/code/artifact/fce9eea5-397e-4761-beb7-253a5ddbf2bd, private until shared).
 - **Branch `audit-5` (2026-10-19 / 20, from `main`, merged into `main` as 5fee321 at the user's "update handover,
   then commit, merge"):** the user's brief
   "Second-Round Independent Physics and Engineering Validation" (pasted), with a track narrowed from 0.4 to 0.1 mm
