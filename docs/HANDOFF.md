@@ -1,12 +1,22 @@
 # GroundTruth handover
 
-## Current state (2026-10-20, audit round 6 merged into `main`)
+## Current state (2026-10-20, branch `qs-band` open; audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `qs-band` (2026-10-20, from `main` 9782b76, not merged):** the user, of a 16x server job solving a buck's
+  board-wide model at 1592 MHz: "does it actually make sense to consider such high frequencies?", "especially because
+  we are using quasi-static methods", then "I like that idea" (an automatic validity marker plus a max-frequency
+  setting). `simulate.quasi_static_limit` (f = c/(4·size·√εr), A47) marks the board-wide model's emissions above it
+  `indicative` (note, issue texts, a grey band on the spectrum); `analysis.max_frequency: auto | <Hz>` cuts the band
+  (`band_top`; the cut range hatched and said "not computed", never passed). kraft numbers unchanged; tests/test_band.py
+  (6). Why 1592 MHz: 10/(π·2 ns), detection's GaN edge (10 ns → 318 MHz). Full suite on the branch: 1011 passed, 1 skipped
+  (`out/qs_band/full_suite.log`). Installers built from 6f3f60b for the user to try in parallel (laptop, release key
+  present): `out/dist/groundtruth-0.1.42074-6f3f60b-pcm.zip`, `groundtruth-server-0.1.42074-6f3f60b.zip` (+ .sig). Still open from the user: a compute-server
+  job no longer listed after the plugin and KiCad were closed and reopened (not looked at yet).
 - **Branch `audit-6` (2026-10-20, from `main` 8f40781, merged into `main` as 534b469 at the user's "merge it first, then run a full suite"; on the laptop `iwers`/xps13, 4 cores):** the
   user's brief "Independent Audit: Numerical Accuracy, Solver Convergence, and Adversarial Validation" (pasted): do the
   solvers solve the physics accurately and reliably. The record is [NUMERICS_AUDIT.md](NUMERICS_AUDIT.md);

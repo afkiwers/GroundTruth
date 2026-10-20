@@ -538,6 +538,17 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
     (1.8× the centre).
 
 ### Frequency planning
+- **The band and its trustworthy part** (2026-10-20, branch `qs-band`, REFERENCES A47; the user, of a 16x server job
+  at 1.59 GHz: "does it actually make sense to consider such high frequencies? ... especially because we are using
+  quasi-static methods"). The top harmonic is `band_top`: the edge's own band (a decade above 1/(π·t_r), A6; a power
+  stage at least to its ringing) or `analysis.max_frequency` when that is set and lower (`auto` by default); a cut
+  band says so in a note and the spectrum hatches it ("not evaluated", never passed). With the board-wide model,
+  `quasi_static_limit` (f = c/(4·size·√εr): the board's longer side a quarter wavelength in its densest dielectric;
+  kraft_flux_mini_2, 87 mm: 406 MHz) marks every emission row above it `indicative`, adds a note, and the margin and
+  plane-resonance issues say "an indicative upper bound" when theirs lies there; the spectrum shades that range
+  grey. Results unchanged (kraft SPI_SCK and conv1: 1e-12). On kraft 28 of SPI_SCK's 38 rows and 61 of conv1's 201
+  radiated rows are above 406 MHz; conv1's real failure (−19.9 dB at 162.5 MHz, its ringing) is below, its "+30 dB
+  resonance" at the band edge (1592 MHz) above. Tests: tests/test_band.py.
 - Harmonics come from the trapezoid spectrum up to the analysis band. Solves happen **at harmonics**
   (`initial_frequencies`: f0 plus `solve_points − 1` log-spaced harmonics in the limit band, 30 MHz–6 GHz),
   so no interpolation error appears where a solved emission is evaluated.

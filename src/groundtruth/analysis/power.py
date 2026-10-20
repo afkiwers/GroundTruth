@@ -53,7 +53,8 @@ from ..emi.spectrum import analysis_band, trapezoid_harmonics
 from ..solver.peec import Branch, RouteExcitation, Solution, SolverError, TraceSegment
 from .pins import feed_layers
 from .simulate import (BoardModel, ModelRun, RouteResult, StackBuild, _choose_pitch, _interp_loglog,
-                       _solve_row, _top_plane_pair, band_moments, initial_frequencies, transfers, unsolved_band,
+                       _solve_row, _top_plane_pair, band_moments, band_notes, band_top, indicative_text,
+                       initial_frequencies, mark_quasi_static, resonance_text, transfers, unsolved_band,
                        unsolved_issue)
 
 LOOP_F = 100e6              # hot-loop inductance: far above the input capacitors' self-resonance
@@ -722,7 +723,8 @@ def prepare_converter(model: BoardModel, spec: ConverterSpec, region: Optional[t
     res.dc_connected = exc.dc_connected
 
     f_max = max(analysis_band(spec.f_sw, spec.rise_time), 1e9 if spec.c_oss else 0.0)
-    freqs, amps = trapezoid_harmonics(spec.f_sw, spec.rise_time, i_pulse, duty, min(f_max, RING_F_MAX))
+    top, res.band = band_top(config, min(f_max, RING_F_MAX))
+    freqs, amps = trapezoid_harmonics(spec.f_sw, spec.rise_time, i_pulse, duty, top)
     fine, cond = ModelRun(st, exc), ModelRun(cond_st, cond_exc)
     setup = ConverterSetup(spec, res, fine, cavity, cond, freqs, amps, amps.copy(), elements, LOOP_F, lisn,
                            standard, a.conducted_class, issues, t_start, config=config)
@@ -1286,10 +1288,12 @@ def finish_converter(model: BoardModel, setup: ConverterSetup) -> ConverterResul
         # spread spectrum read by the receiver as for the conducted estimate (emi/spread.py)
         res.emissions = emission_table(freqs[rad], setup.currents[rad], m_curve, a.limit_spec(), a.distance_m,
                                        a.ground_reflection, per_decade=REPORT_PER_DECADE, spread=spread_of(setup.spec))
+        mark_quasi_static(res, model.board)
         compared = [r for r in res.emissions if r["margin_db"] is not None]
         if compared:
             res.worst = min(compared, key=lambda r: r["margin_db"])
             res.unsolved = unsolved_band(setup.spectrum_run, max(r["f"] for r in compared))
+    res.notes += band_notes(res)
     # a plane resonance: the moment per ampere rising above its value at LOOP_F (a loop's moment is flat in
     # frequency until the board-wide cavity resonates)
     if setup.cavity is not None and len(fs) > 1:
@@ -2549,14 +2553,16 @@ def _converter_issues(setup: ConverterSetup, rules, a):
         setup.issue(rules, "emi_margin",
                     f"{spec.name}: hot loop radiates an estimated {w['e_dbuv']:.1f} dBµV/m at {w['f'] / 1e6:.4g} MHz "
                     f"({w['distance_m']:g} m) vs {a.limit_text()} limit {w['limit_dbuv']:.1f} dBµV/m "
-                    f"(margin {w['margin_db']:+.1f} dB)", loc, severity=sev, layer=res.layer, key=f"{key}:emi",
-                    details={k: w[k] for k in ("f", "e_dbuv", "limit_dbuv", "margin_db")})
+                    f"(margin {w['margin_db']:+.1f} dB){indicative_text(w)}", loc, severity=sev, layer=res.layer,
+                    key=f"{key}:emi", details={**{k: w[k] for k in ("f", "e_dbuv", "limit_dbuv", "margin_db")},
+                                               "indicative": bool(w.get("indicative"))})
     r = res.resonance
     if r and r["rise_db"] >= rules.resonance_db:
         pair = f" between {r['pair'][0]} and {r['pair'][1]}" if r.get("pair") else ""
         setup.issue(rules, "plane_resonance",
                     f"{spec.name}: the hot loop's moment rises {r['rise_db']:+.1f} dB at {r['f'] / 1e6:.4g} MHz over "
-                    f"its value at {LOOP_F / 1e6:.0f} MHz: a plane-pair resonance{pair} is excited", loc,
+                    f"its value at {LOOP_F / 1e6:.0f} MHz: a plane-pair resonance{pair} is excited"
+                    f"{resonance_text(res, r)}", loc,
                     layer=r["pair"][0] if r.get("pair") else res.layer, key=f"{key}:resonance", details=dict(r))
     unsolved_issue(setup, rules, spec.name, loc, res.layer, f"{key}:unsolved")
     if res.dc_unsolved:
