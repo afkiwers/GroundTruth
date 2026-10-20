@@ -138,8 +138,8 @@ def _converter(model, view):
         tot = sum(float(m.sum()) for m in maps.values()) or 1.0
         out.layer_share = {l: float(m.sum()) / tot for l, m in maps.items()}
         out.transfers = [{"name": x["name"], "kind": "via", "layers": list(maps), "x": x["x"], "y": x["y"],
-                          "fraction": x["current_a"] / max(summary["current_a"], 1e-12), "distance_mm": 0.0}
-                         for x in summary["vias"]]
+                          "fraction": x["current_a"] / max(summary["current_a"], 1e-12), "distance_mm": 0.0,
+                          "current_a": x["current_a"]} for x in summary["vias"]]
         return out
     sol = setup.fine.exc.solve(LOOP_F)           # the hot loop
     st = setup.fine.build

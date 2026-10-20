@@ -185,6 +185,64 @@ def _route(ax, board: Board, rr: RouteResult):
 
 CARRIER = "#39e75f"         # vias and parts that carry the current between layers / nets
 MIN_LABEL = 0.05            # their share of the current is written next to them from this share on
+# where a carrier's label may go, in points from its marker (first free one wins; the busiest is placed first):
+# right / left of it, then higher and lower rows. (dx, dy, horizontal alignment)
+LABEL_SPOTS = [(7, 5, "left"), (7, -14, "left"), (-7, 5, "right"), (-7, -14, "right"), (7, 16, "left"),
+               (7, -25, "left"), (-7, 16, "right"), (-7, -25, "right"), (7, 27, "left"), (7, -36, "left"),
+               (-7, 27, "right"), (-7, -36, "right")]
+
+
+def busiest_via(rr) -> Optional[dict]:
+    """The via the view's "busiest via" tile names (ui/kpi.py): a DC path's (or a DC load's) via carrying the most
+    current, or a motor bridge's RMS view's; {name, x, y, current_a, ...} or None (other views, no vias)."""
+    rms = getattr(rr, "rms_of", None)
+    if rms is not None:
+        vias = (getattr(rms, "rms", None) or {}).get("vias") or []
+    else:
+        view = getattr(rr, "view_of", None)
+        path = next((p for p in (getattr(rr, "dc", None) or []) if p.get("name") == view), None) if view else None
+        vias = (path or {}).get("vias") or []
+    return vias[0] if vias else None
+
+
+def carrier_text(t: dict) -> str:
+    """A carrier marker's hover text: its name, its share of the current and, where the view knows it, its
+    current in amperes ("via GND @(138.25, 75.70): 12 % of the current, 1.20 A"; a motor bridge's: A RMS)."""
+    amps = t.get("current_a")
+    extra = f", {amps:.3g} A" + (" RMS" if t.get("rms") else "") if amps is not None else ""
+    return f"{t['name']}: {t['fraction'] * 100:.0f} % of the current{extra}"
+
+
+def _place_labels(ax) -> None:
+    """Write the carriers' share labels that _carriers queued on `ax`, once its limits and aspect are final (the
+    pixel positions are only known then): each at the first of LABEL_SPOTS whose box overlaps no label placed
+    before it and no other marker, the busiest first, with a thin leader line when it had to move from beside its
+    marker. The user: on a DC path's map the shares of vias a millimetre apart were written over each other ("58 %"
+    "8 %"), so which via was the busiest could not be read."""
+    specs = getattr(ax, "_gt_label_specs", None) or []
+    if not specs:
+        return
+    ax.apply_aspect()
+    k = ax.figure.dpi / 72.0
+    pts = ax.transData.transform([(s["x"], s["y"]) for s in specs])
+    taken: list[tuple[float, float, float, float]] = [(px - 5 * k, py - 5 * k, px + 5 * k, py + 5 * k)
+                                                      for px, py in pts]      # the markers themselves
+    for s, (px, py) in sorted(zip(specs, pts), key=lambda sp: -sp[0]["fraction"]):
+        w, h = (len(s["text"]) * 0.62 * FS_MARK + 6) * k, FS_MARK * 1.5 * k
+        spot = LABEL_SPOTS[0]
+        for dx, dy, ha in LABEL_SPOTS:
+            x0 = px + dx * k - (w if ha == "right" else 0.0)
+            box = (x0, py + dy * k - 0.2 * h, x0 + w, py + dy * k + 0.8 * h)
+            if not any(box[0] < t[2] and t[0] < box[2] and box[1] < t[3] and t[1] < box[3] for t in taken):
+                spot = (dx, dy, ha)
+                taken.append(box)
+                break
+        moved = spot[:2] != LABEL_SPOTS[0][:2]
+        ax.annotate(s["text"], (s["x"], s["y"]), textcoords="offset points", xytext=spot[:2], ha=spot[2],
+                    fontsize=FS_MARK, color="#ffffff", fontweight="bold", zorder=5,
+                    arrowprops={"arrowstyle": "-", "color": CARRIER, "lw": 0.6} if moved else None,
+                    bbox={"boxstyle": "round,pad=0.15", "fc": "#101018", "lw": 0.6 if not s["busiest"] else 1.4,
+                          "ec": "#ffffff" if s["busiest"] else CARRIER, "alpha": 0.85})
 
 
 def _carriers(ax, board: Board, rr: RouteResult, lname: str, max_vias: Optional[int] = None,
@@ -197,7 +255,9 @@ def _carriers(ax, board: Board, rr: RouteResult, lname: str, max_vias: Optional[
     over the whole pair and comes from the board-wide model at another frequency (a square labelled "1286 %" at
     its weighted centre said nothing about where it flows); the tiles and the transfer list give it.
     max_vias: mark at most that many vias, the view's busiest (the user's "Vias shown"; 0: "Via markers"
-    unticked); None: every one. labels False: the markers without their shares (the report)."""
+    unticked); None: every one. labels False: the markers without their shares (the report).
+    The via with the largest share gets a white ring (the "busiest via" tile's, on a DC path's map); the shares are
+    queued on the axes and written by _place_labels once the view is final, apart from each other."""
     shown = rr.transfers
     if max_vias is not None:
         busiest = sorted((t for t in shown if t.get("kind") == "via"), key=lambda t: -t["fraction"])[:max_vias]
@@ -229,11 +289,14 @@ def _carriers(ax, board: Board, rr: RouteResult, lname: str, max_vias: Optional[
             continue
         ax.plot([t["x"] for t in group], [t["y"] for t in group], linestyle="none", marker=marker, ms=9,
                 mfc=CARRIER, mec="#000000", mew=1.0, zorder=4)
-        for t in group:
-            if labels and t["fraction"] >= MIN_LABEL:
-                ax.annotate(f"{t['fraction'] * 100:.0f} %", (t["x"], t["y"]), textcoords="offset points",
-                            xytext=(7, 5), fontsize=FS_MARK, color="#ffffff", fontweight="bold", zorder=5,
-                            bbox={"boxstyle": "round,pad=0.15", "fc": "#101018", "ec": CARRIER, "lw": 0.6, "alpha": 0.8})
+    top = max(vias, key=lambda t: t["fraction"], default=None)
+    if top is not None:                         # the busiest via: a white ring with a dark halo, on any colour
+        for colour, mew in (("#000000", 3.6), ("#ffffff", 1.8)):
+            ax.plot([top["x"]], [top["y"]], linestyle="none", marker="o", ms=19, mfc="none", mec=colour, mew=mew,
+                    zorder=4.5)
+    if labels:
+        ax._gt_label_specs = [{"x": t["x"], "y": t["y"], "fraction": t["fraction"], "busiest": t is top,
+                               "text": f"{t['fraction'] * 100:.0f} %"} for t in ts if t["fraction"] >= MIN_LABEL]
     return ts
 
 
@@ -463,7 +526,7 @@ def _heatmap_layout(rr, layers: list[str], w_in: float, h_in: float, vectors: bo
     what = _what(rr)
     title = getattr(rr, "heat_title", None) or (f"{rr.net}  {rr.driver}→{rr.receiver}  {what} current @ "
                                                   f"{rr.map_frequency / 1e6:.4g} MHz")
-    note = "▲ via / ■ part carrying it (% of the current), red / orange ○ issue"
+    note = "▲ via / ■ part carrying it (% of the current; white ring: the busiest via), red / orange ○ issue"
     if vectors and getattr(rr, "sheet_vectors", None):
         note += "; arrows: current direction, more arrows = more current"
     if scale == "linear":
@@ -622,8 +685,7 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
         fig._gt_marks = getattr(fig, "_gt_marks", {})        # for the plugin's hover: what a marker is
         fig._gt_marks[ax] = ([(i.location[0], i.location[1], 0, f"{i.severity} · {i.check}: {i.message}")
                               for i in mine]
-                             + [(t["x"], t["y"], 1, f"{t['name']}: {t['fraction'] * 100:.0f} % of the current")
-                                for t in carried])
+                             + [(t["x"], t["y"], 1, carrier_text(t)) for t in carried])
         # what each marker refers to, in the same order (for the plugin's click: show it in KiCad, mark_ref_at)
         fig._gt_mark_refs = getattr(fig, "_gt_mark_refs", {})
         fig._gt_mark_refs[ax] = ([("issue", i) for i in mine]
@@ -633,6 +695,7 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
         ax.set_xlim(x0, x1)
         ax.set_ylim(y1, y0)  # KiCad y axis points down
         ax.set_aspect("equal")
+        _place_labels(ax)
         ax.tick_params(labelsize=FS_TICK)
         share = rr.layer_share.get(lname)
         if linear:

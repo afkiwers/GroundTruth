@@ -243,7 +243,8 @@ def _dc(c, rules) -> list[Kpi]:
         out.append(("busiest via", f"{v['current_a']:.2f} A",
                     f"{v['name']}" + (f", {load:.0f} % of IPC-2221" if load is not None else ""),
                     _level(load, 80.0, 100.0) if load is not None else "",
-                    "IPC-2221 capacity for a 10 K rise from the drill and plating"))
+                    "IPC-2221 capacity for a 10 K rise from the drill and plating; click: zoom the maps to it (the "
+                    "white ring), and from KiCad select it there"))
     if c.kind == "dcload" and getattr(c, "loads", None):     # a DC rail: the drop its worst-off load sees
         worst = max(c.loads, key=lambda r: r["drop_mv"])
         limit = c.max_drop * 1e3 if c.max_drop else None
@@ -301,7 +302,8 @@ def _rms(b, rules) -> list[Kpi]:
         out.append(("busiest via", f"{v['current_a']:.2f} A RMS",
                     f"{v['name']}" + (f", {load:.0f} % of IPC-2221" if load is not None else ""),
                     _level(load, 80.0, 100.0) if load is not None else "",
-                    "IPC-2221 capacity for a 10 K rise from the drill and plating"))
+                    "IPC-2221 capacity for a 10 K rise from the drill and plating; click: zoom the maps to it (the "
+                    "white ring), and from KiCad select it there"))
     return out
 
 

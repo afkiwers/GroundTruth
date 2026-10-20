@@ -222,7 +222,8 @@ def rms_view(b: BridgeResult, leg):
     v.map_frequency = 0.0
     top = max(b.drive.get("phase_rms") or [1.0])
     v.transfers = [{"name": x["name"], "kind": "via", "layers": list(r["maps"]), "x": x["x"], "y": x["y"],
-                    "fraction": x["current_a"] / max(top, 1e-12), "distance_mm": 0.0} for x in r["vias"]]
+                    "fraction": x["current_a"] / max(top, 1e-12), "distance_mm": 0.0,
+                    "current_a": x["current_a"], "rms": True} for x in r["vias"]]
     v.heat_label = f"RMS current density (A/mm²), six-step at {b.operating.get('i_target', 0):g} A"
     v.heat_title = f"{b.net}: RMS currents, battery to motor ({r['copper_w']:.2f} W in the copper)"
     v.view_of = "RMS"

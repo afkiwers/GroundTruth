@@ -7,6 +7,20 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `issues-filter` (2026-10-20, from `main` ef78116, not merged):** three of the user's asks.
+  - "add a filter to enable/hide entries based on what Checks are selected": the Issues tab's **Checks…**
+    (`IssuesPanel.choose_checks`, remembered in ui.json `issues_hidden`); rows keep their number in the whole list;
+    Draw markers on board leaves hidden checks out (`kipy_sink.draw_issues(hidden=)`). Found on the way: markers were
+    numbered over the non-waived issues only, so a waived issue earlier in the list shifted every later marker's
+    number off the tab's; now each marker carries its issue's number in the whole list.
+  - "how can I see which via is the busiest", then "do this": the busiest via (largest share on the map) gets a white
+    ring and a white-edged label (`plots._carriers`); share labels are placed apart once the view is final
+    (`plots._place_labels`, LABEL_SPOTS, leader lines); clicking the **busiest via** tile zooms the maps 6 mm around
+    it (`HeatmapPanel.focus_busiest`, `theme.Tile.set_click`) and, live, selects it in KiCad (`on_map_mark`).
+  - "add the current in A as well to that hover-over note": DC-type via markers carry `current_a` (power.dc_view,
+    dcload, bridge RMS with "rms", sharper); `plots.carrier_text`: "…: 9 % of the current, 0.905 A".
+  - Tests: test_gui (filter, marker numbers, the tile), test_plot_text (labels apart, ring, hover). GUI tests 80
+    passed. Checked on kraft conv2's output path (`out/issues_filter/`).
 - **Branch `qs-band` (2026-10-20, from `main` 9782b76, merged into `main` at the user's "merge"):** the user, of a 16x server job solving a buck's
   board-wide model at 1592 MHz: "does it actually make sense to consider such high frequencies?", "especially because
   we are using quasi-static methods", then "I like that idea" (an automatic validity marker plus a max-frequency
