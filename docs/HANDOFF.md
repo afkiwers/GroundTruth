@@ -1,12 +1,20 @@
 # GroundTruth handover
 
-## Current state (2026-10-20, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-20, branch `report-check-filter` open; `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `report-check-filter` (2026-10-20, from `main` a416a44, not merged):** the user, of the HTML report's
+  Issues table: "can we add a filter to filter errors and warnings like I only want to see clearance_voltage or
+  cap_voltage or vds_rating ... or I want to see vds_rating and plane_resonance. So be able to filter out one or
+  more". Under the severity chips a row of check chips (`report/html._issues`, rows carry `data-check`): click any
+  number of them, `all` resets; they combine with the severity, each chip counts its rows of the chosen severity
+  (dimmed at 0), "N of M shown". The plugin's Issues tab already had Checks… (branch issues-filter). Tests:
+  tests/test_report_filter.py (the markup; the clicks in headless Edge, skipped without it). Checked on kraft's
+  check report (out/report_filter/).
 - **Branch `dead-edges` (2026-10-20, from `main` 2fa4aea, merged into `main` at the user's "yes"):** the user, after the LTC7890's DTCA / DTCB
   pins were explained ("What's DTCA and DTCB exactly?", "How would we do it if we had 2 different dead times or even 3
   or 4?"), to the offer of one dead time per edge with the soft edge's node swing: "do it".

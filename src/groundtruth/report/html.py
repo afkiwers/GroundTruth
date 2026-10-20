@@ -126,6 +126,9 @@ details.notes ul { margin:6px 0 0; padding-left:20px; } details.notes li { margi
 button.f { font:inherit; font-size:12.5px; padding:4px 11px; border-radius:999px; border:1px solid var(--line);
            background:var(--paper); color:var(--ink2); cursor:pointer; }
 button.f.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+button.f.dim { opacity:.45; }
+.filters.checks { align-items:center; }
+.filters .cn { opacity:.75; margin-left:2px; }
 .empty { color:var(--muted); font-style:italic; }
 .note { color:var(--muted); font-size:13px; }
 .appendix p, .appendix li { max-width:900px; color:var(--ink2); }
@@ -161,13 +164,37 @@ _JS = """
       rows.forEach(r => tb.appendChild(r));
     });
   }));
-  // the issues' severity filter
-  const btns = document.querySelectorAll('button.f[data-sev]');
+  // the issues' filters: one severity (or all), and any number of checks (none picked: every check); a row shows
+  // when it passes both. Each check chip counts its rows of the chosen severity (a chip with none is dimmed)
+  const btns = [...document.querySelectorAll('button.f[data-sev]')];
+  const chks = [...document.querySelectorAll('button.f[data-check]')];
+  const allChk = document.querySelector('button.f[data-check-all]');
+  const rows = [...document.querySelectorAll('#issues tbody tr')];
+  let sev = 'all';
+  const apply = () => {
+    const picked = new Set(chks.filter(b => b.classList.contains('on')).map(b => b.dataset.check));
+    let shown = 0;
+    rows.forEach(r => {
+      const hide = (sev !== 'all' && r.dataset.sev !== sev) || (picked.size > 0 && !picked.has(r.dataset.check));
+      r.classList.toggle('hidden', hide);
+      if (!hide) shown++;
+    });
+    chks.forEach(b => {
+      const n = rows.filter(r => r.dataset.check === b.dataset.check && (sev === 'all' || r.dataset.sev === sev)).length;
+      b.querySelector('.cn').textContent = n;
+      b.classList.toggle('dim', n === 0);
+    });
+    if (allChk) allChk.classList.toggle('on', picked.size === 0);
+    const out = document.getElementById('issues-shown');
+    if (out) out.textContent = shown === rows.length ? '' : `${shown} of ${rows.length} shown`;
+  };
   btns.forEach(b => b.addEventListener('click', () => {
     btns.forEach(o => o.classList.toggle('on', o === b));
-    document.querySelectorAll('#issues tbody tr').forEach(r =>
-      r.classList.toggle('hidden', b.dataset.sev !== 'all' && r.dataset.sev !== b.dataset.sev));
+    sev = b.dataset.sev;
+    apply();
   }));
+  chks.forEach(b => b.addEventListener('click', () => { b.classList.toggle('on'); apply(); }));
+  if (allChk) allChk.addEventListener('click', () => { chks.forEach(b => b.classList.remove('on')); apply(); });
   // a click on a figure shows it at its full resolution (scroll inside it), another click fits it again
   document.querySelectorAll('figure img').forEach(img => img.addEventListener('click', () =>
     img.parentElement.classList.toggle('full')));
@@ -367,7 +394,8 @@ def render_html(board: Board, issues: list[Issue], routes: list, mode: str, sett
              "tracks, the parts with their pads, outlines and references, the analysed routes and power stages, "
              "and the issues numbered as in the Issues table. Drag to pan, wheel to zoom; hover over a part in "
              "the list to find it on the board, click an issue's marker for its message.", view)
-    part("issues", "Issues", "Every finding of the run, most severe first. The filter shows one severity; a click on "
+    part("issues", "Issues", "Every finding of the run, most severe first. The first filter shows one severity; the "
+         "checks below it show only the ones clicked (one or more; all: every check); a click on "
          "a column header sorts by it. A waived issue was accepted in the settings (with its reason).",
          _issues(issues))
     if routes:
@@ -516,7 +544,8 @@ def _issues(issues: list[Issue]) -> str:
     rank = {"error": 0, "warning": 1, "info": 2}
     rows = []
     for k, i in enumerate(sorted(issues, key=lambda i: (i.waived, rank.get(i.severity, 3))), 1):
-        rows.append(f"<tr data-sev='{i.severity}' class='{'waived' if i.waived else ''}'><td class='num' data-v='{k}'>{k}"
+        rows.append(f"<tr data-sev='{i.severity}' data-check='{e(i.check)}' class='{'waived' if i.waived else ''}'>"
+                    f"<td class='num' data-v='{k}'>{k}"
                     f"</td><td data-v='{rank.get(i.severity, 3)}'><span class='pill {i.severity}'>{e(i.severity)}</span>"
                     f"{WAIVED if i.waived else ''}</td>"
                     f"<td class='nw'>{e(i.check)}</td><td class='nw'>{e(i.net)}</td><td>{e(i.message)}"
@@ -528,6 +557,19 @@ def _issues(issues: list[Issue]) -> str:
     filters = ("<div class='filters noprint'><button class='f on' data-sev='all'>All " + str(len(issues))
                + "</button>" + "".join(f"<button class='f' data-sev='{s}'>{s.capitalize()} {n[s]}</button>"
                                        for s in rank if n[s]) + "</div>")
+    # the checks: one chip each (its count follows the severity chosen), any number of them picked; none picked shows
+    # every check. The user: "I only want to see clearance_voltage or cap_voltage ... or vds_rating and
+    # plane_resonance. So be able to filter out one or more"
+    from ..core.issues import CHECKS
+    counts: dict[str, int] = {}
+    for i in issues:
+        counts[i.check] = counts.get(i.check, 0) + 1
+    if len(counts) > 1:
+        filters += ("<div class='filters noprint checks'><span class='note'>Checks:</span>"
+                    "<button class='f on' data-check-all='1' title='Show every check'>all</button>"
+                    + "".join(f"<button class='f' data-check='{e(c)}' title='{e(CHECKS.get(c, ('', ''))[1])}'>"
+                              f"{e(c)} <span class='cn'>{counts[c]}</span></button>" for c in sorted(counts))
+                    + "<span class='note' id='issues-shown'></span></div>")
     return filters + _table(["#Nr", "Severity", "Check", "Net", "Finding", "#Location (mm)", "Layer", "Fingerprint"],
                             rows, tid="issues")
 
