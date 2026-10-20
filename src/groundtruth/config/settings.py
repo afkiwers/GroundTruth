@@ -360,6 +360,8 @@ class AnalysisSettings:
     plane_capacitance: bool = True        # displacement current / cavity resonance between facing planes
     cavity_max_nodes: int = 40_000        # grid budget of the board-wide plane-capacitance model
     max_solves: int = 10                  # harmonics solved per route (initial + adaptive refinement)
+    max_frequency: Optional[float] = None  # Hz: the highest harmonic evaluated (None = auto: the edge's own band,
+                                           # simulate.band_top); above it nothing is computed and the result says so
     resolution: float = 1.0               # every model's node budget x this, its cell / sqrt(this): the plugin's
                                           # per-machine "Resolution" and the CLI's --resolution (not in the file)
     driver_ohms: float = 25.0             # default driver output resistance
@@ -1129,6 +1131,8 @@ def config_from_data(data: Any) -> Config:
             plane_capacitance=bool(a.get("plane_capacitance", True)),
             cavity_max_nodes=int(a.get("cavity_max_nodes", 40_000)),
             max_solves=int(a.get("max_solves", 10)),
+            max_frequency=None if str(a.get("max_frequency", "auto")).lower() == "auto"
+            else _num(a.get("max_frequency"), "analysis.max_frequency", "Hz"),
             driver_ohms=_num(a.get("driver_ohms", 25.0), "analysis.driver_ohms", "ohm"),
             load_pf=_num(a.get("load_pf", 5.0), "analysis.load_pf", "pF"),
             threads=_threads(a.get("threads", "auto"), errors),
@@ -1154,6 +1158,8 @@ def config_from_data(data: Any) -> Config:
             errors.append("analysis.ce101 needs a conducted model at the input: set analysis.conducted (mil461)")
         if cfg.analysis.planes not in ("auto", "nearest"):
             errors.append("analysis.planes must be auto or nearest")
+        if cfg.analysis.max_frequency is not None and not cfg.analysis.max_frequency > 0:
+            errors.append("analysis.max_frequency must be auto or a frequency above 0 (e.g. 1GHz)")
 
         if cfg.analysis.limit_class not in ("A", "B"):
             errors.append("analysis.limit_class must be A or B")
@@ -1523,7 +1529,7 @@ class SettingsFile:
         doc["reference_nets"].fa.set_flow_style()
         doc["analysis"] = CommentedMap(grid_mm="auto", margin_mm=10.0, solve_points=4, limit_class="B",
                                        distance_m="auto", ground_reflection=True,
-                                       planes="auto", plane_capacitance=True, cavity_max_nodes=40000, max_solves=10,
+                                       planes="auto", plane_capacitance=True, cavity_max_nodes=40000, max_solves=10, max_frequency="auto",
                                        driver_ohms=25.0, load_pf=5.0, threads="auto", gpu="auto", conducted="cispr32",
                                        conducted_class="B", via_plating_um=25.0)
         doc["rules"] = CommentedMap(stitch_distance_mm=2.0, decap_distance_mm=5.0, edge_factor=3.0, min_gap_mm=0.1,

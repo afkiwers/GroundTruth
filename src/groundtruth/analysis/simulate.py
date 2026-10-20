@@ -77,6 +77,8 @@ REFINE_DB = 3.0             # solve between two harmonics whose loop moments dif
 REFINE_OCTAVE_DB = 3.0      # ...or (with plane capacitance) that are far apart: an octave counts as 3 dB
 REFINE_MARGIN_DB = 20.0     # ...unless the emission there stays this far below the warning level
 WORST_SOLVED_LOG = 0.05     # the worst harmonic gets its own solve unless one lies within ±5 %
+QS_FRACTION = 0.25          # the board-wide model is quasi-static while the board is under this many wavelengths
+                            # across [A47]: above, its emissions are indicative upper bounds (quasi_static_limit)
 WORST_EXTRA = 3             # ... even past analysis.max_solves, at most this many more (VALIDATION_AUDIT.md round 6,
                             # ISSUE-32: with the budget spent, the reported worst was an interpolation)
 SHUNT_MIN_SHARE = 0.01      # a shunt part on a signal path gets a loop of its own when it carries this share of the
@@ -125,6 +127,9 @@ class RouteResult:
     m_excess_db: Optional[float] = None
     resonance: Optional[dict] = None          # strongest rise of the loop moment over its f0 value
     unsolved: Optional[dict] = None           # {"from", "failed"} Hz: the band above "from" is held, not solved
+    band: dict = field(default_factory=dict)  # the band evaluated: f_max (Hz, the top harmonic's limit), natural (the
+                                              # edge's own), capped (analysis.max_frequency below it), and with the
+                                              # board-wide model f_qs (quasi_static_limit) [A47]
     dc_connected: bool = True                # conductive return path between the return pins
     plane_capacitance: bool = False
     z0: float = 0.0
@@ -1354,8 +1359,8 @@ def prepare_route(model: BoardModel, spec: NetSpec, route: Route) -> tuple[Optio
 
     f0 = spec.freq
     edge = min(spec.rise_time, spec.fall_time or spec.rise_time)
-    freqs, amps = trapezoid_harmonics(f0, spec.rise_time, spec.amplitude_v, spec.duty,
-                                      analysis_band(f0, edge), spec.fall_time)
+    top, res.band = band_top(config, analysis_band(f0, edge))
+    freqs, amps = trapezoid_harmonics(f0, spec.rise_time, spec.amplitude_v, spec.duty, top, spec.fall_time)
     setup = RouteSetup(spec, route, res, ModelRun(st, exc), cavity, drv_ret, rcv_ret, route_refs, main_ref, h_mm,
                        freqs, issues=issues, t_start=t_start)
     # Current on the line per harmonic: driver resistance (+ series parts), line Z0/εeff, receiver load
@@ -1581,6 +1586,8 @@ def finish_route(model: BoardModel, setup: RouteSetup) -> RouteResult:
     currents = setup.currents
     res.emissions = emission_table(freqs, currents, m_curve, a.limit_spec(), a.distance_m, a.ground_reflection)
     compared = [r for r in res.emissions if r["margin_db"] is not None]
+    mark_quasi_static(res, model.board)
+    res.notes += band_notes(res)
     if compared:
         res.worst = min(compared, key=lambda r: r["margin_db"])
         res.unsolved = unsolved_band(setup.spectrum_run, max(r["f"] for r in compared))
@@ -1643,6 +1650,74 @@ def finish_route(model: BoardModel, setup: RouteSetup) -> RouteResult:
     _route_issues(setup, rules, a)
     res.seconds = time.time() - setup.t_start
     return res
+
+
+def quasi_static_limit(board: Board) -> Optional[dict]:
+    """{"f": Hz, "size_mm", "epsilon_r"}: the frequency at which the board's longer outline side is QS_FRACTION of a
+    wavelength in its densest dielectric, f = QS_FRACTION·c / (size·√εr) [A47] (100 mm of FR-4, εr 4.5: 354 MHz).
+    Above it the board-wide model, whose partial inductances and capacitances are static [A1], leaves out the
+    retardation across the board and the planes' radiation loss: its resonances are placed about right (the cells'
+    L and C carry the standing wave) but their peaks are too high. None without an outline."""
+    pts = [pt for poly in board.outline for pt in poly[0]]
+    if not pts:
+        return None
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    size = max(max(xs) - min(xs), max(ys) - min(ys))
+    if size <= 0:
+        return None
+    er = max((d.epsilon_r for d in board.stackup.dielectrics), default=4.5)
+    from ..emi.radiation import C0
+    return {"f": QS_FRACTION * C0 / (size * 1e-3 * math.sqrt(er)), "size_mm": size, "epsilon_r": er}
+
+
+def band_top(config: Config, natural: float) -> tuple[float, dict]:
+    """(the highest frequency to evaluate, the result's `band` record): the edge's own band (`natural`: a decade above
+    its second corner [A6], or the ringing's reach), cut at analysis.max_frequency when that is set and lower. A cut
+    band is not a passed one: band_notes says so and the plots grey it out."""
+    cap = config.analysis.max_frequency
+    top = natural if cap is None else min(natural, cap)
+    return top, {"f_max": float(top), "natural": float(natural), "capped": bool(cap is not None and cap < natural)}
+
+
+def mark_quasi_static(res: RouteResult, board: Board):
+    """With the board-wide model (res.cavity): every emission row above quasi_static_limit gets "indicative": True,
+    the band record its f_qs, and a note says what that means when any row lies there [A47]. A route or hot loop
+    alone is a few millimetres and stays quasi-static far higher: without the board-wide model nothing is marked."""
+    qs = quasi_static_limit(board) if res.cavity else None
+    if qs is None:
+        return
+    res.band["f_qs"] = qs["f"]
+    above = [r for r in res.emissions if r["f"] > qs["f"]]
+    for r in above:
+        r["indicative"] = True
+    if above:
+        res.notes.append(f"above {qs['f'] / 1e6:.0f} MHz the board ({qs['size_mm']:.0f} mm, εr {qs['epsilon_r']:g}) is "
+                         f"more than a quarter wavelength across: the board-wide model's static fields leave out the "
+                         "retardation across it and the planes' radiation loss, so the emissions there are indicative "
+                         "upper bounds (resonances about where they are, their peaks too high)")
+
+
+def indicative_text(worst: Optional[dict]) -> str:
+    """What an emission issue adds when its worst harmonic lies in the indicative band (mark_quasi_static)."""
+    if not worst or not worst.get("indicative"):
+        return ""
+    return "; above the board's quasi-static range: an indicative upper bound"
+
+
+def resonance_text(res: RouteResult, r: dict) -> str:
+    """What a plane_resonance issue adds when its resonance lies above the board's quasi-static limit [A47]."""
+    f_qs = res.band.get("f_qs")
+    return "; above the board's quasi-static range: an indicative upper bound" if f_qs and r["f"] > f_qs else ""
+
+
+def band_notes(res: RouteResult) -> list[str]:
+    """The note for a band cut by analysis.max_frequency: nothing above it was computed (not passed)."""
+    b = res.band
+    if not b.get("capped"):
+        return []
+    return [f"evaluated up to {b['f_max'] / 1e6:.4g} MHz (analysis.max_frequency); the edge's spectrum reaches "
+            f"{b['natural'] / 1e6:.4g} MHz: nothing above {b['f_max'] / 1e6:.4g} MHz was computed, so it is not "
+            "checked against the limit"]
 
 
 def interpolated_worst_note(worst: dict, fs: list, warn_db: float) -> Optional[str]:
@@ -1765,7 +1840,7 @@ def _route_issues(setup: RouteSetup, rules, a):
         setup.issue(rules, "plane_resonance",
                     f"{route.driver.pin}→{route.receiver.pin}: the loop moment rises {r['rise_db']:+.1f} dB at "
                     f"{r['f'] / 1e6:.4g} MHz over its value at {(setup.f_ref or setup.spec.freq) / 1e6:.4g} MHz: a plane-pair "
-                    f"resonance{pair} is excited by this net's return current", loc,
+                    f"resonance{pair} is excited by this net's return current{resonance_text(res, r)}", loc,
                     layer=r["pair"][0] if r.get("pair") else res.reference_layer, key=f"resonance:{key_base}",
                     details=dict(r))
     unsolved_issue(setup, rules, f"{route.driver.pin}→{route.receiver.pin}", loc, res.reference_layer,
@@ -1776,9 +1851,10 @@ def _route_issues(setup: RouteSetup, rules, a):
         setup.issue(rules, "emi_margin",
                     f"{route.driver.pin}→{route.receiver.pin}: estimated {w['e_dbuv']:.1f} dBµV/m at "
                     f"{w['f'] / 1e6:.4g} MHz ({w['distance_m']:g} m) vs {a.limit_text()} limit "
-                    f"{w['limit_dbuv']:.1f} dBµV/m (margin {w['margin_db']:+.1f} dB)", loc, severity=sev,
-                    layer=res.reference_layer, key=f"emi:{key_base}",
-                    details={k: w[k] for k in ("f", "e_dbuv", "limit_dbuv", "margin_db")})
+                    f"{w['limit_dbuv']:.1f} dBµV/m (margin {w['margin_db']:+.1f} dB){indicative_text(w)}", loc,
+                    severity=sev, layer=res.reference_layer, key=f"emi:{key_base}",
+                    details={**{k: w[k] for k in ("f", "e_dbuv", "limit_dbuv", "margin_db")},
+                             "indicative": bool(w.get("indicative"))})
 
 
 def _interp_loglog(f, fs, vs):
