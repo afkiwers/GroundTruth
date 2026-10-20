@@ -23,12 +23,20 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
     d/dz = 5 / 10 / 20); ISSUE-29 the plugin marks results of an earlier board / settings OUT OF DATE and Thermal /
     Capacity refuse them (Thermal takes the current thermal settings); ISSUE-30 zero copper / dielectric thickness
     said (35 µm everywhere for copper). A46: the plane pairs' missing fringing capacitance (model uncertainty).
+  - Fixed, found on the real board: ISSUE-32, the reported worst emission was an interpolation once
+    `analysis.max_solves` was spent (the worst-harmonic solve was skipped): kraft SPI_SCK at 1x +13.2 dB reported,
+    +8.4 dB with every harmonic solved on the same code; now +7.85 dB, equal to the sweep with this round's kernel
+    (`WORST_EXTRA` solves past the budget, notes for what stays interpolated).
   - Documented, not fixed: ISSUE-31, a track narrower than a cell reads +1 to +2.5 % resistive within ~10° of an axis
     and up to ±3.6 % at some angles at 1x (converging: ≤ 0.8 % at 4x); round 5 had checked 0°, 30°, 45° only and its
     summary said "any angle" (corrected). `tools/dev/angle_scan.py` maps it.
-  - New: tests/test_numerics_audit.py (39), a window test, refsolvers' fed-pad sheet solve and windowed density;
+  - New: tests/test_numerics_audit.py (40), a window test, refsolvers' fed-pad sheet solve and windowed density;
     tools/dev/tol_check.py, thermal_tol_check.py, adversarial_dc.py, metamorphic_dc.py, cavity_analytic_converge.py,
     stress_inputs.py, angle_scan.py. Outputs: `out/audit6/`.
+  - Full suite on the branch (`out/audit6/full_suite.log`, 43 min): 1001 passed, 1 skipped, 4 failed: three window
+    tests that pass alone (load), test_view3d's KCL check (ISSUE-32 moved its frequency; corrected to the triangle
+    inequality). The GUI probe on kraft: 11 stalls over 150 ms against `main`'s 15 (the worst of each paging during a
+    SuperLU solve); memory and time of a conv1 Simulate unchanged. Not merged: waiting for the user.
 - **Branch `audit-5` (2026-10-19 / 20, from `main`, merged into `main` as 5fee321 at the user's "update handover,
   then commit, merge"):** the user's brief
   "Second-Round Independent Physics and Engineering Validation" (pasted), with a track narrowed from 0.4 to 0.1 mm

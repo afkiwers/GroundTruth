@@ -15,7 +15,7 @@ metamorphic properties, stale state, and failure handling. Source keys in square
 6. [Metamorphic and property tests](#6-metamorphic-and-property-tests)
 7. [Stale state and caches](#7-stale-state-and-caches)
 8. [Stress, failure, recovery](#8-stress-failure-recovery)
-9. [Defects: ISSUE-25 to ISSUE-30](#9-defects-issue-25-to-issue-30)
+9. [Defects: ISSUE-25 to ISSUE-32](#9-defects-issue-25-to-issue-32)
 10. [The real board](#10-the-real-board)
 11. [Accuracy, convergence and model uncertainty, apart](#11-accuracy-convergence-and-model-uncertainty-apart)
 12. [Remaining limitations](#12-remaining-limitations)
@@ -54,7 +54,7 @@ round's code is on `audit-6`; the before/after figures name the tree they come f
 rows' residuals apart), `thermal_tol_check.py` (Thermal at the shipped tolerances against CG 1e-12),
 `adversarial_dc.py` (the shapes of section 5 at 1x/2x/4x against both sheet references), `metamorphic_dc.py`
 (section 6), `cavity_analytic_converge.py` (the cavity, the plate capacitance and the loop inductance against closed
-forms by pitch), `stress_inputs.py` (section 8).
+forms by pitch), `stress_inputs.py` (section 8), `angle_scan.py` (R' by angle, ISSUE-31).
 
 ## 2. The numerical methods
 
@@ -69,6 +69,7 @@ forms by pitch), `stress_inputs.py` (section 8).
 | Current density | node field from the strips' heat over the node's copper; sustained = own-net RMS over 1 mm [A40]; **peak = own-net RMS over 0.25 mm** [A45] | – | the peak was a node's value, singular at corners: **ISSUE-27** |
 | 2D cross-section | finite differences on a graded grid, two grids Richardson-extrapolated (first order: the r^(−½) edge charge) | – | – |
 | Thermal | finite volumes, cut cells, adaptive refinement [Patankar 1980]; AMG-preconditioned CG [Hestenes 1952] [Ruge 1987], hierarchy reused | CG ‖r‖ ≤ tol·‖b‖ (1e-5 … 1e-8, tightened as the iteration settles); coupled ρ(T) until max ΔT < 0.02 K, under-relaxed on growth | CG unconverged/broken down: a log line; a reused hierarchy out of budget: ValueError → **ISSUE-26** |
+| Frequency refinement (`next_frequencies`) | solves at harmonics; gaps split while their uncertainty (the moment's change, or 3 dB per octave with plane capacitance) is ≥ 3 dB near the limit; the worst harmonic gets its own solve; between solves log-log interpolation [A22] | `analysis.max_solves` (10) per route | budget spent → the worst's own solve skipped, the reported worst an interpolation across a resonance, no word → **ISSUE-32** |
 | Vector fitting | [Gustavsen 1999] | its largest error over the band, shown with every fitted view ("fitted, ±2.86 dB") | reported, not hidden |
 | Plugin state | the views keep their board and settings | Board.fingerprint (round 5), settings key | shown and heated as current after a reload or edit → **ISSUE-29** |
 | Stackup input | copper and dielectric thicknesses from the file / KiCad | – | 0 µm copper: 35 µm in the PEEC models, 0 in Thermal's heat, silent → **ISSUE-30** |
@@ -77,7 +78,9 @@ forms by pitch), `stress_inputs.py` (section 8).
 did not solve was dropped while the stage's efficiency and heat were shown as complete (ISSUE-25, also motor
 bridges' legs); a stalled thermal CG gave a "settled" field at the start temperature (ISSUE-26); a reported peak
 density that was the grid's, not the board's (ISSUE-27); results of an earlier board shown, and heated, as current
-(ISSUE-29). And one that looked suspicious but measures clean: GMRES's single norm over volts and amperes (section 4).
+(ISSUE-29); a reported worst emission that was an interpolation across a resonance the solve budget had not reached
+(ISSUE-32, found on the real board). And one that looked suspicious but measures clean: GMRES's single norm over
+volts and amperes (section 4).
 
 ## 3. Independent references
 
@@ -102,12 +105,13 @@ density that was the grid's, not the board's (ISSUE-27); results of an earlier b
 | Case | Solves | KVL rows' own residual at 1e-5 | Largest change, tight vs shipped |
 |---|---|---|---|
 | example series_path (route + board-wide) | 11 | 6.7e-6 | 6e-5 dB |
-| kraft conv1 (DC paths, hot loop, conducted to 150 kHz, radiated, fixes) | 29 | **1.5e-3** at 150 kHz (the whole 4e-6) | 0.007 dB (conducted, 563 kHz); every DC path identical to 6 digits |
+| kraft conv1 (DC paths, hot loop, conducted to 150 kHz, radiated, fixes) | 29 | **1.5e-3** at 150 kHz (the whole 4e-6) | 0.007 dB (a conducted harmonic); the four DC paths both runs solved identical to 6 digits |
 | kraft SPI_SCK (route + board-wide, resonances 0.94-1.58 GHz) | 12 | 7.8e-6 | 0.0003 dB |
 
 The mixed-units norm lets the KVL rows sit at 1e-3 of their own size at low frequency, but nothing reported moves by
-more than 0.007 dB: the tolerance is adequate as shipped. (At 1e-11 one 10 Hz DC solve could not converge, the floor
-of double precision there; that exposed ISSUE-25.)
+more than 0.007 dB: the tolerance is adequate as shipped. (At 1e-11 the input path's 10 Hz DC solve did not reach
+the tolerance: GMRES stagnated, its extra cycles stopping when a restart gains less than 30 %. That run's report
+dropped the path while showing the stage's loss and efficiency: ISSUE-25.)
 
 **Thermal tolerances.** A 100 mm, 0.1 mm track at 1 A (1.14 M unknowns, normal quality): CG converged in 6-13
 iterations per solve (true residual 4e-6 … 3e-7), 5 coupled iterations; continuing from that answer with CG at 1e-12
@@ -124,7 +128,7 @@ runaway, which is caught (T > 1000 °C).
 | 0.4 + 0.1 mm in parallel, R | fed (30.51 mΩ) | −0.80 % | −0.66 % | −0.42 % |
 | the same, the narrow branch's share | the branches' R | +1.6 % | +1.8 % | +1.6 % |
 | symmetric tee, 0.5 A per arm | fed (23.64 mV) | +0.15 % | +0.79 % | +0.37 % |
-| the same three against equipotential pads | `sheet_resistance` | +1.2 / +2.0 % | +1.3 / +1.1 % | +1.6 / +1.5 % |
+| the parallel pair / the tee against equipotential pads | `sheet_resistance` | +1.2 / +2.0 % | +1.3 / +1.1 % | +1.6 / +1.5 % |
 
 The last row is the pads' model, not the grid: against a reference with GroundTruth's own feed the errors fall to
 the first rows' and shrink with the grid. An equipotential pad (a perfect conductor over the whole pad) and a
@@ -224,9 +228,10 @@ independent 320 A/mm²; the sustained value 210 / 207 / 207 / 207.
 | the thermal CG stalls (forced) | **was** "settled" at the start temperature → not settled, noted (ISSUE-26) |
 | a reused AMG hierarchy uses the whole budget | **was** ValueError → rebuilt with its own budget (ISSUE-26) |
 | GMRES unconverged on a route | SolverError, the frequency unsolved, `band_unsolved` warning (sessions 7-8) |
+| the solve budget spent before the band is resolved | **was** silent, the worst an interpolation (kraft SPI_SCK: 4.8 dB optimistic) → the worst solved (up to 3 more), notes for what stays interpolated (ISSUE-32) |
 | SuperLU out of memory / past its 32-bit limit | the memory ladder, diagonal pivots, `lu_too_large` (sessions 8-10, test_memory_relief, test_lu_size) |
 
-## 9. Defects: ISSUE-25 to ISSUE-30
+## 9. Defects: ISSUE-25 to ISSUE-32
 
 | ID | Area | Severity | Status |
 |---|---|---|---|
@@ -237,6 +242,7 @@ independent 320 A/mm²; the sustained value 210 / 207 / 207 / 207.
 | ISSUE-29 | Plugin: results of an earlier board / settings shown and heated as current | Medium | Fixed, tested |
 | ISSUE-30 | Zero copper / dielectric thickness accepted silently and inconsistently | Low | Fixed, tested |
 | ISSUE-31 | A track narrower than a cell: R' +1 to +3.6 % at shallow and some other angles at 1x | Low-Medium | Documented (converges with the grid); round 5's "any angle" corrected |
+| ISSUE-32 | The reported worst emission an interpolation once the solve budget was spent | High | Fixed, tested, checked on kraft |
 
 **ISSUE-25.** *Reproduce:* kraft conv1 at GMRES 1e-11: the input path's 10 Hz solve did not converge; the report
 then had four DC paths, input copper 0.229 instead of 0.301 W, losses 3.11 instead of 3.36 W, efficiency 98.9 instead
@@ -260,6 +266,11 @@ the scale dz ≪ d, and a plane pair's sheet inductance is a difference of sums 
 self term's 24 sub-strips converge as 1/n (0.86 % low). *Fix:* `kernel.tape_mutual`, the exact reduction to one
 integral over the widths' difference with panels graded toward the crossing (2e-11), for the near field and the self
 term (`strip_self_numeric`, `_narrow_self` with it). *Tests:* `test_ISSUE28_…` (10 cases, all fail on `main`).
+*Caught before release:* the first version called `tape_mutual` once per narrow strip's width (a model's narrow
+strips are nearly all distinct widths since round 5); on kraft that held the GIL for seconds and the plugin window
+stalled 47 times over 150 ms during a Simulate (`tools/dev/gui_probe.py`, `out/audit6/gui_probe.txt`). The self term
+is now one vectorised pass over all widths (2∫₀¹(1 − s)·M(w·s) ds on the same panels, equal to 4e-16; 50 000
+strips in 1.4 s of array work): 11 stalls (`gui_probe2.txt`), none in the kernels.
 *Reach:* every model's partial self inductance +0.86 %; plane-pair cavities where d/dz is large (kraft's board-wide
 model: 6.4 at 1x); a route's loop inductance +0.03 to +0.11 % by pitch (Wheeler: +0.04 … +0.13 → +0.15 … +0.17 %).
 
@@ -276,16 +287,60 @@ checked 0°, 30° and 45° (all within 1 %), and its summary said "any angle": c
 VALIDATION_AUDIT.md. *Not fixed:* a cure is a different face model for oblique sub-cell copper; at 2x the worst seen
 is 2.2 %, at 4x 0.8 %. *Test:* NA-8 (1.5 % at least a cell wide, 4 % below).
 
+**ISSUE-32.** *Reproduce:* kraft SPI_SCK at 1x: Simulate's board-wide solves were 20, 60, 260, 660, 820, 860, 900,
+940, 1020 and 1580 MHz (the budget of 10); its worst, +13.2 dB at 1220 MHz, was the log-log interpolation between
+1020 and 1580 MHz (~55 mm²). The same model solved at every harmonic from 800 to 1300 MHz (`cavity_converge.py`)
+reads 93 / 96 mm² at 1220 / 1260 MHz on the same code: +8.4 dB (+7.85 dB after this round's kernel fix).
+*Root cause:* `next_frequencies` returned as soon as `max_solves` was spent, before its rule that the worst harmonic gets a solve of its own (the guarantee ARCHITECTURE stated), and the
+1020-1580 MHz gap had counted as resolved (its uncertainty, max(1.0 dB change, 3 dB/octave × 0.63 octave) = 1.9
+dB, under the 3 dB threshold). *Fix:* the worst's own solve may go `WORST_EXTRA` (3) past the budget; a worst still
+interpolated gets a note (`interpolated_worst_note`), and a budget that ended with gaps near the limit unresolved
+gets one naming them (`unresolved_gaps_note`); the gap threshold is unchanged (the budget allocation is the user's
+setting). *Evidence:* kraft SPI_SCK now +7.851 dB at 1220 MHz with one more solve, equal to the every-harmonic
+sweep of the same code; conv1 one more solve, its worst unchanged. The demo board of test_view3d (budget 6): the
+worst +16.55 dB at 1450 MHz before, +5.59 dB at 1350 MHz now (a resonance the budget had skipped, 11 dB worse); that
+test's KCL check assumed the crossing current in phase with the circulating one, true only at 1450 MHz, and now uses
+the triangle inequality the magnitudes obey. On kraft SPI_SCK the gap note names 5 gaps left by the budget of 10
+(around 140, 420, 860, 1100 MHz …). *Test:* `test_ISSUE32_…` (on `main` the worst, 550 MHz, was interpolated between 150 MHz and 3.15 GHz).
+
 ## 10. The real board
 
 kraft_flux_mini_2 (`flux-2`, read only; settings `out/kraft_refresh/kraft_all.groundtruth.yaml`, scratch copies),
-1x, CPU, on this laptop (4 cores): conv1 and SPI_SCK before (the tree before ISSUE-27/28) and after.
+1x, CPU, on this laptop (4 cores). Before: conv1 on `main`'s code, SPI_SCK on the branch before ISSUE-28 and -32
+(ISSUE-25 to -27 do not touch a route); after: this branch.
 
-KRAFT_TBD
+**conv1** (`main` → this branch; `out/audit6/reports/tol_kraft_conv1_1e-5.json` → `final_kraft_conv1_v2.json`):
+
+| Quantity | `main` | now | |
+|---|---|---|---|
+| DC paths: R, drop, loss, sustained and peak density (5 paths) | | identical to 4 digits | the DC cells (0.235 mm) are about the 0.25 mm window |
+| hot-loop inductance | 1.5607 nH | 1.5646 nH | +0.25 %: the kernels' self term (ISSUE-28) |
+| conducted worst | −38.777 dB | −38.774 dB | |
+| radiated worst | −19.89 dB at 162.5 MHz | −19.89 dB at 162.5 MHz | the loop's own ringing |
+| board-wide resonance (1592 MHz) rise | 30.92 dB | 30.25 dB | the inter-layer kernel (d/dz = 6.4) |
+| harmonics near the top of the band | | ±0.7 dB | the same |
+| victims' ground step, U1101 / U1102 | 0.57 / 1.06 mV | 0.70 / 1.20 mV | sub-mV differences of plane potentials, magnified as the sheet inductance is |
+| board-wide solves | 10 | 11 | the worst's own (ISSUE-32), no note |
+
+**SPI_SCK** (`tol_kraft_sck_1e-5.json` → `final_kraft_sck_v2.json`): the reported worst +13.20 dB at 1220 MHz
+(interpolated) → **+7.85 dB at 1220 MHz (solved)**; the route model's loop inductance 13.922 → 13.940 nH (+0.13 %).
+The board-wide model on the same harmonics at 1x and 2x, before and after the kernel fix
+(`out/audit6/cavity_before_after.log`):
+
+| | 1x before | 1x after | 2x before | 2x after |
+|---|---|---|---|---|
+| worst over 800-1300 MHz | +8.4 dB at 1260 | +7.9 dB at 1220 | +15.3 dB at 1220 | +16.2 dB at 1220 |
+| |m| at 940 / 980 / 1220 / 1260 MHz (mm²) | 66 / 96 / 93 / 96 | 75 / 88 / 101 / 86 | 15 / 18 / 43 / 20 | 15 / 19 / 38 / 20 |
+
+The kernel fix moves 1x's modes down in frequency by a few per cent (as a higher sheet inductance does); 1x and 2x
+still differ by ~8 dB above 1 GHz, the grid sensitivity rounds 3-4 measured (±2 dB from 4x on; the grid note asks
+for 4x there).
 
 ## 11. Accuracy, convergence and model uncertainty, apart
 
-- **Demonstrated accuracy** (against an independent reference, converged): track R' (0.1 %), DC paths through bends,
+- **Demonstrated accuracy** (against an independent reference, converged): the reported worst emission against the
+  same model solved at every harmonic (kraft SPI_SCK: equal after ISSUE-32, +7.851 dB both; before, on the same
+  code, +13.2 reported against +8.4 dB: 4.8 dB optimistic), track R' (0.1 %), DC paths through bends,
   branches and junctions with GroundTruth's own pad model (≤ 0.8 % at 1x, falling with the grid), plate capacitance
   (0.04 %), loop inductance (0.16 %), stripline Z0 (≤ 0.3 %), kernels (2e-11), thermal tolerance (1e-5 of the rise),
   the windowed peak (−10 % at 1x, −4 % at 8x, converging from below).
@@ -308,6 +363,10 @@ KRAFT_TBD
   fed reference covers 90° bends only.
 - GMRES's stopping test keeps one norm over volts and amperes; measured harmless on the real board (≤ 0.007 dB), not
   proven for every board. `tools/dev/tol_check.py` checks any board.
+- The radiated band's solve budget (`analysis.max_solves`, 10) can still leave a resonance between solves away from
+  the worst harmonic; now said in a note naming the gaps (ISSUE-32). The gap rule (3 dB per octave) lets a
+  half-octave gap above 1 GHz pass as resolved; the worst's own solve and the note cover it, a denser rule would
+  spend the budget elsewhere.
 - The board's part index and plane cache are keyed by list identity and length: safe for today's code paths, not for
   a future in-place list edit.
 - Not exercised here: the GPU path (no usable GPU on this laptop), a live KiCad (the checks use the file reader),
@@ -315,7 +374,24 @@ KRAFT_TBD
 
 ## 13. Tests and checks
 
-New: tests/test_numerics_audit.py (ISSUE-25 to -30, NA-1 to NA-8: 39 tests), one window test in test_gui.py;
+New: tests/test_numerics_audit.py (ISSUE-25 to -32, NA-1 to NA-8: 40 tests), one window test in test_gui.py;
 refsolvers' fed sheet solve and windowed density; tools/dev/angle_scan.py.
 
-FULLSUITE_TBD
+**Full suite** on the branch (`out/audit6/full_suite.log`, 43 min on this 4-core laptop): **1001 passed, 1 skipped,
+4 failed**. Three were window tests that pass alone (the long status message, the Bridges tab, the jobs tab's details
+box: layout and timing under the suite's load, as CLAUDE.md notes for GUI tests); the fourth,
+test_view3d's board-wide scene, failed because of ISSUE-32 (above) and was corrected; after it the affected files
+(test_view3d, test_numerics_audit, test_capacitance, test_solver) 71 passed.
+
+After the full suite the kernel's self term was vectorised (the GUI probe below); the kernel-dependent files
+(test_solver, test_track_width, test_pours, test_numerics_audit's ISSUE-28 / NA-7 / NA-8, test_validation_audit's
+strip and neck cases) passed again: 54 + 19 + 7.
+
+**The window** (`tools/dev/gui_probe.py` on a copy of kraft with Simulate, this laptop with KiCad open): `main` 15
+stalls over 150 ms, the worst 708 ms; this branch 11, the worst 2776 ms. Both worst stalls are paging during a
+SuperLU solve (51 000 / 91 000 page faults; the GUI thread waits in its event loop, not on our code), and the same
+Simulate's memory is unchanged (`tools/dev/mem_profile.py` on conv1: peak private 6265 against 6313 MB, working set
+1775 against 1696 MB, 206 against 207 s, the same 40 factorisations; `out/audit6/mem_profile_conv1.txt`). The first
+version of ISSUE-28 had 47 stalls (above), fixed.
+
+Quality gates: `tools/dev/undocumented.py` 0, `py311_check.py` 0 rejected, `ref_keys.py` 117 / 117.

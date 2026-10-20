@@ -1416,7 +1416,7 @@ def initial_frequencies(setup: RouteSetup, points: int, band: tuple = (LIMIT_F_M
 
 
 def next_frequencies(setup: RouteSetup, run: ModelRun, max_solves: int, config: Optional[Config] = None,
-                     k: int = 1) -> list[float]:
+                     k: int = 1, gaps_only: bool = False) -> list[float]:
     """Up to k harmonics to solve next (from different gaps), or [] when the band is resolved well enough.
 
     Every gap between solved neighbours gets an uncertainty: the change of the loop moment across it or,
@@ -1431,7 +1431,8 @@ def next_frequencies(setup: RouteSetup, run: ModelRun, max_solves: int, config: 
     The gaps share the budget max_solves; the worst harmonic's own solve does not stop at it, up to WORST_EXTRA
     more. It did: with the budget spent the function returned before that rule, and the reported worst could be an
     interpolation across a resonance (kraft_flux_mini_2's SPI_SCK at 1x: +13.2 dB at 1220 MHz from the solves at
-    1020 and 1580 MHz, where solving every harmonic gives +7.9 dB: ISSUE-32). finish_route says when it still is."""
+    1020 and 1580 MHz, where solving every harmonic gives +8.4 dB: ISSUE-32). finish_route says when it still is.
+    gaps_only: the gaps' midpoints only, never the worst's own solve (unresolved_gaps_note asks what the gaps want)."""
     k = min(k, max_solves - len(run.sols))
     if k <= 0 and len(run.sols) >= max_solves + WORST_EXTRA:
         return []
@@ -1483,7 +1484,7 @@ def next_frequencies(setup: RouteSetup, run: ModelRun, max_solves: int, config: 
             gaps.append((math.inf, float(mid)))
     if gaps:
         return list(dict.fromkeys(f for _, f in sorted(gaps, reverse=True)))[:k]
-    if weigh and octave_db:     # a purely inductive model is smooth: interpolating it is accurate
+    if weigh and octave_db and not gaps_only:     # a purely inductive model is smooth: interpolating it is accurate
         inner = (H_all > fs[0]) & (H_all < fs[-1]) & solvable & np.isfinite(margins)
         if inner.any():
             j = np.nonzero(inner)[0][int(np.argmin(margins[inner]))]
@@ -1667,7 +1668,7 @@ def unresolved_gaps_note(setup: RouteSetup, config: Config) -> Optional[str]:
     run, n = setup.spectrum_run, config.analysis.max_solves
     if run is None or run is not setup.cavity or len(run.sols) < n:
         return None
-    left = [f for f in next_frequencies(setup, run, len(run.sols) + 10 ** 6, config, 10 ** 6)]
+    left = next_frequencies(setup, run, len(run.sols) + 10 ** 6, config, 10 ** 6, gaps_only=True)
     if not left:
         return None
     where = ", ".join(f"{f / 1e6:.4g}" for f in sorted(left)[:4]) + (" …" if len(left) > 4 else "")

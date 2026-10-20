@@ -437,7 +437,7 @@ def test_ISSUE32_the_worst_emission_is_solved_even_when_the_budget_is_spent(tmp_
     ±5 % (ARCHITECTURE "Frequency planning"), so the worst case is not an interpolation across a resonance. But
     next_frequencies returned at once when analysis.max_solves was spent, before that rule: kraft_flux_mini_2's
     SPI_SCK at 1x reported +13.2 dB at 1220 MHz, interpolated between solves at 1020 and 1580 MHz, where solving
-    every harmonic gives +7.9 dB (a resonance between them). Now the worst's own solve may go up to WORST_EXTRA past
+    every harmonic gives +8.4 dB (a resonance between them). Now the worst's own solve may go up to WORST_EXTRA past
     the budget (kraft: one more, +7.85 dB at 1220 MHz), and a worst still interpolated gets a note, as do gaps the
     budget left unresolved near the limit. Here a budget of 3 solves on the cavity test board: the worst lies within
     ±5 % of a solve of the board-wide model (or is noted); on the old code it was interpolated between 150 MHz and
