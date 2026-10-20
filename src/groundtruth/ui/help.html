@@ -1482,6 +1482,12 @@ heating.</p>
   quasi-static (no radiation from plane edges), it estimates the differential-mode loop of each net or hot loop,
   and common-mode currents on cables, which often dominate real emissions, are not modelled (a converter's
   common-mode budget is the exception).</li>
+<li>The board-wide model is quasi-static: above the frequency at which the board is a quarter wavelength across in
+  its laminate (about 350 MHz for 100 mm of FR-4) its emissions are <b>indicative upper bounds</b>. The spectrum shades
+  that range grey, the issue says so, and a finer Resolution than 4× buys no accuracy there. <code>analysis.max_frequency</code>
+  in the settings file (e.g. <code>1GHz</code>; <code>auto</code> = the edge's own band, a decade above 1/(π·rise time))
+  cuts the band evaluated: faster runs, or a test plan's own top; the range above it is hatched and the notes say it was
+  not computed, not that it passed.</li>
 <li>Plane resonance peaks are upper estimates (the model has no radiation loss); margins set by a resonance are
   good to a few dB.</li>
 <li>The edge time sets the high-frequency content and L·di/dt: use the fastest edge at the operating current

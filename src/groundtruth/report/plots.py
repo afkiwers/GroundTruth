@@ -702,6 +702,8 @@ def _converter_spectrum(fig: Figure, c) -> None:
         lim = np.array([np.nan if r[lim_key] is None else r[lim_key] for r in rows])
         if np.isfinite(lim).any():
             ax.plot(f, lim, "-", lw=1.2, color="#d62728", label="limit")   # breaks where no limit applies
+        if kind != "ce101":
+            _band_marks(ax, c, f, radiated=kind == "radiated")
         _freq_axis(ax, f)
         ax.set_ylabel(unit, fontsize=FS_TEXT)
         ax.tick_params(labelsize=FS_TICK, which="both")
@@ -746,6 +748,23 @@ def _thermal_parts(fig: Figure, t) -> None:
     ax.set_ylim(t.ambient_c, max(hi, (max(temps) - room * t.ambient_c) / (1 - room)) + 0.02 * (hi - t.ambient_c))
 
 
+def _band_marks(ax, rr, f_mhz, radiated: bool = True) -> None:
+    """Mark where a spectrum's numbers are not plain results (RouteResult.band): grey above the board's
+    quasi-static limit (radiated, with the board-wide model: indicative upper bounds [A47]) and hatched from
+    analysis.max_frequency to the edge's own band top (not computed, so not checked)."""
+    band = getattr(rr, "band", None) or {}
+    if not len(f_mhz):
+        return
+    top = float(np.max(f_mhz))
+    f_qs = band.get("f_qs")
+    if radiated and f_qs and f_qs / 1e6 < top:
+        ax.axvspan(f_qs / 1e6, top * 1.05, color="#888888", alpha=0.12, lw=0,
+                   label="indicative")
+    if band.get("capped") and band["natural"] > band["f_max"]:
+        ax.axvspan(band["f_max"] / 1e6, band["natural"] / 1e6, facecolor="none", edgecolor="#888888", hatch="//",
+                   lw=0, label="not evaluated")
+
+
 def draw_spectrum(fig: Figure, rr: RouteResult) -> None:
     """The view's spectrum plot: a route's harmonics against the CISPR 32 limit; a power stage's radiated and
     conducted estimates; a bridge's conducted readings; a thermal view's hottest parts instead."""
@@ -772,6 +791,7 @@ def draw_spectrum(fig: Figure, rr: RouteResult) -> None:
     if lim:
         lf, lv = zip(*lim)
         ax.step(lf, lv, where="mid", color="#d62728", label="CISPR 32 limit")
+    _band_marks(ax, rr, f)
     _freq_axis(ax, f)
     ax.set_ylabel("dBµV/m", fontsize=FS_TEXT)
     ax.tick_params(labelsize=FS_TICK, which="both")
