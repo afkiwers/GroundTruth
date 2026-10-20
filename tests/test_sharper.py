@@ -1,4 +1,4 @@
-"""The Heatmap tab's "Sharper map" (analysis/sharper.py): a view's own model solved again on a finer grid. The
+"""The Results tab's "Sharper map" (analysis/sharper.py): a view's own model solved again on a finer grid. The
 user: "the individual layer view need a much higher res heatmap". Same physics, finer grid: the current that
 crosses the plane must stay the same, and nothing outside the maps changes."""
 import numpy as np

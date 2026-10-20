@@ -300,7 +300,7 @@ def test_hovering_a_marker_says_what_it_is(route):
 
 
 def test_part_outlines_are_read_and_drawn(route, tmp_path):
-    """Part outlines (Heatmap tab): a footprint's courtyard is read from the board file (else its fab outline);
+    """Part outlines (Results tab): a footprint's courtyard is read from the board file (else its fab outline);
     over the maps every part gets one, a part without either a box around its pads."""
     from matplotlib.collections import LineCollection
     from groundtruth.adapters.file_source import loads_board
@@ -339,7 +339,7 @@ def test_part_outlines_are_read_and_drawn(route, tmp_path):
 
 
 def test_the_usual_characters_are_measured_in_a_worker_before_the_page_needs_them():
-    """The plugin's Heatmap page measures its titles on the GUI thread (heatmap_height_in); the first measurement
+    """The plugin's Results page measures its titles on the GUI thread (heatmap_height_in); the first measurement
     looks matplotlib's font up, which stalled the window ~300 ms on kraft_flux_mini_2 after a Simulate. warm_text
     (submitted to the page's render worker when the tab is built) measures them beforehand, the same widths."""
     from groundtruth.report import plots
