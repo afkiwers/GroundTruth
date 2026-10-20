@@ -17,6 +17,13 @@ An op-amp stage in a signal path (part model `amplifier`, its gain from a Gain f
 
     GT = amp_in:3, amp_out:1     the stage's input and output pins (a dual op-amp: amp_in:5, amp_out:7)
 
+A converter's dead time (its dead_time, components/fields.stage_values), on the controller IC (the one with the
+stage's SW pin):
+
+    GT = dead:20ns               every converter this IC controls
+    GT = dead1:20ns, dead2:30ns  the converter on its SW1 / SW2 pin (a dual controller's channels)
+    GT = conv1_dead:20ns         the converter labelled conv1 (wins over the two above)
+
 A tag is <kind><id>_<role>: the kind (conv, hb), an optional id (letters and digits: conv1, conv5V, hbA) and the
 role; the id may also follow the role (conv_out_1, hb_hs_A). Several tags are separated by commas. Upper or lower
 case does not matter.
@@ -41,6 +48,9 @@ CONNECTOR_ROLES = ("in", "out")                                          # share
 TAG = re.compile(r"^(conv|hb)([a-z0-9.+]*)_([a-z]+)(?:_([a-z0-9.+]+))?$", re.I)   # conv1_out or conv_out_1
 SIG = re.compile(r"^sig(?:_(drv|rx))?(?::(.+))?$", re.I)                         # sig, sig:9, sig_drv:PA3
 AMP = re.compile(r"^amp_(in|out):(.+)$", re.I)                                    # amp_in:3, amp_out:OUTA
+# a controller's dead time (the converter's dead_time): dead:20ns (every stage it controls), dead1:20ns (the stage on
+# its SW1 pin), conv1_dead:20ns (the stage labelled conv1)
+DEAD = re.compile(r"^(?:conv([a-z0-9.+]*)_)?dead(\d*)\s*[:=]\s*(.+)$", re.I)
 PHASE = re.compile(r"^[A-CU-W1-3]$", re.I)
 
 HELP = {
@@ -59,6 +69,10 @@ HELP = {
         "A connector's through-hole pin values may follow its labels (GT = conv_in, contact:0.5m, fill:75): contact "
         "and joint (Ω per pin), fill (% of the hole soldered), pin (hole, copper, brass, bronze, becu, tellurium), "
         "pin_d (mm), pin_r (Ω); Help (F1) › Through-hole pins.\n"
+        "The dead time of a synchronous converter goes on its controller IC (the part with the converter's SW pin): "
+        "GT = dead:20ns for every converter it controls, dead1:20ns, dead2:30ns per channel (its SW1 / SW2 pin), or "
+        "conv1_dead:20ns for the converter labelled conv1. The rectifier FETs' Vsd and Qrr fields give the reverse "
+        "conduction and the recovery charge.\n"
         "Several converters in one sheet: number them, conv1_hs, conv1_L, conv2_hs … (any letters or digits: "
         "conv5V_hs; the number may also follow the role: conv_out_1). A connector shared by several converters: conv_in feeds every converter it reaches, or list "
         "them: conv1_in, conv2_in. A sheet used several times (one per rail) needs the labels once: every copy "
@@ -230,6 +244,9 @@ def parse(text: str, ref: str = "") -> tuple[list[Tag], bool, list[str]]:
         if is_pin_word(word):                   # a through-hole pin value (contact:0.5m, fill:75): analysis/pins.py
             problems += [f"{ref}: GT {p}" for p in parse_words(word)[1]]
             continue
+        if DEAD.match(word):                    # a controller's dead time: read per stage (dead_times)
+            problems += [f"{ref}: GT {why}" for *_, why in dead_times(word) if why]
+            continue
         am = AMP.match(word)
         if am:
             tags.append(Tag("amp", am.group(2), am.group(1).lower(), ref))
@@ -258,6 +275,45 @@ def parse(text: str, ref: str = "") -> tuple[list[Tag], bool, list[str]]:
             continue
         tags.append(Tag(kind, ident, role, ref))
     return tags, ignore, problems
+
+
+def dead_times(text: str) -> list[tuple[str, str, Optional[float], str, str]]:
+    """The dead-time words of a controller's GT field: [(converter id or "", channel or "", seconds or None, the
+    word as written, why it is unusable or "")]. "dead:20ns" applies to every stage the IC controls, "dead2:20ns" to
+    the one on its SW2 pin, "conv1_dead:20ns" to the stage labelled conv1; a bare number is in ns."""
+    from ..components.values import parse_quantity
+    out = []
+    for raw in re.split(r"[,;]", text or ""):
+        word = raw.strip()
+        m = DEAD.match(word.replace(" ", ""))
+        if not m:
+            continue
+        value, why = parse_quantity(m.group(3), "s", 1e-9)
+        if value is not None and not 0.0 <= value <= 2e-6:
+            value, why = None, f"'{m.group(3)}' is not a dead time (0 to 2 µs)"
+        out.append(((m.group(1) or "").lower(), m.group(2) or "", value, word,
+                    f"'{word}': {why}" if value is None else ""))
+    return out
+
+
+def dead_time_of(fp: Footprint, ident: str, channel: str) -> Optional[tuple[float, str]]:
+    """(seconds, the word) the controller `fp`'s GT field gives the stage with GT id `ident` on its channel
+    `channel` (its SW pin's number): a conv<id>_dead word first, then dead<channel>, then a plain dead; None
+    without one that applies."""
+    words = [w for w in dead_times(tag_text(fp)) if w[2] is not None]
+    for pick in ((lambda w: ident and w[0] == ident), (lambda w: not w[0] and channel and w[1] == channel),
+                 (lambda w: not w[0] and not w[1])):
+        hit = next((w for w in words if pick(w)), None)
+        if hit is not None:
+            return hit[2], hit[3]
+    return None
+
+
+def stage_ident(board: Board, refs: list[str]) -> str:
+    """The GT id of the labelled converter whose parts include any of `refs` ("" when none is labelled with
+    one)."""
+    want = set(refs)
+    return next((st.ident for st in board_tags(board).of("conv") if want & set(st.refs(*st.roles))), "")
 
 
 def amp_label_pins(fp: Footprint) -> Optional[tuple[str, str]]:

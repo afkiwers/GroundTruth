@@ -46,6 +46,8 @@ def main() -> int:
     from groundtruth.config.settings import SettingsFile
     board = load_board(args.board)
     cfg = SettingsFile.load(Path(args.settings)).config
+    from groundtruth.components.fields import apply_fields
+    apply_fields(cfg, board)              # the schematic's values, as the plugin and the CLI take them (Vsd, Qrr ...)
     keep = [c for c in cfg.converters if not args.only or any(k in c.name for k in args.only.split(","))]
     over = {}
     if args.rds_on:

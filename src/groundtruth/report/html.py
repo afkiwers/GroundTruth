@@ -637,6 +637,10 @@ def _stage(board, c, issues, warn, figs, view3d) -> str:
         r = c.ringing
         cards.append(_kpi("Ringing", f"{r['f'] / 1e6:.0f} MHz", f"Q {r['q']:.1f}" +
                           (f", overshoot {r['overshoot_v']:.1f} V" if r.get("overshoot_v") else "")))
+    rec = getattr(c, "recovery", None)
+    if rec:
+        cards.append(_kpi("Recovery", f"{rec['i_rr']:.1f} A", f"{rec['q_rr'] * 1e9:g} nC in {rec['t_rr'] * 1e9:.1f} ns" +
+                          (f", overshoot {rec['overshoot_v']:.1f} V" if rec.get("overshoot_v") else "")))
     if c.conducted_worst:
         w = c.conducted_worst
         cards.append(_kpi("Conducted", f"{w['margin_db']:+.1f} dB",

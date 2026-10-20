@@ -217,8 +217,8 @@ def evaluate(setup, change: Optional[Change] = None) -> Outcome:
     """The stage's figures with a design change, on its own solves (see the module's note)."""
     from ..emi.conducted import conducted_arrays, frequency_range
     from ..emi.radiation import emission_arrays, limit_range
-    from .power import (_interp_loglog, _snubber_rc, _transfer, cm_estimate, pulse_harmonics,
-                        spread_of, stage_spectrum)
+    from .power import (_interp_loglog, _snubber_rc, _transfer, cm_estimate, pulse_harmonics, recovery,
+                        recovery_overshoot, spread_of, stage_spectrum)
     from .simulate import band_moments
     from .thermal import _synchronous
     change = change or Change()
@@ -229,10 +229,14 @@ def evaluate(setup, change: Optional[Change] = None) -> Outcome:
     r_loop = (res.loop_mohm or 0.0) * 1e-3
     snub = change.snubber or _snubber_rc(cfg, spec)
     freqs = setup.harmonics
-    pulse = pulse_harmonics(freqs, spec.f_sw, res.pulse_a, res.duty, tr)
+    # the rectifier's recovery at this edge (a slower edge, a lower di/dt: a smaller, longer spike)
+    rec = recovery(spec, res.pulse_a, tr)
+    pulse = pulse_harmonics(freqs, spec.f_sw, res.pulse_a, res.duty, tr, rec, boost=spec.topology == "boost")
     currents, ring = stage_spectrum(spec, freqs, pulse, res.v_in, res.pulse_a, L, r_loop, tr, snub)
+    rec = recovery_overshoot(rec, L, spec.c_oss)
     out = Outcome(f_ring=ring["f"] if ring else None, q=ring["q"] if ring else None,
-                  overshoot_v=max(L * res.pulse_a / tr if tr > 0 else 0.0, (ring or {}).get("overshoot_v", 0.0)))
+                  overshoot_v=max(L * res.pulse_a / tr if tr > 0 else 0.0, (ring or {}).get("overshoot_v", 0.0),
+                                  (rec or {}).get("overshoot_v", 0.0)))
     fs, ms = band_moments(setup)
     if fs:
         rad = freqs >= limit_range(a.limit_spec())[0] * 0.5

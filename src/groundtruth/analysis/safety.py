@@ -581,7 +581,8 @@ def after_simulate(board: Board, config, result) -> list:
         spec = next((s for s in config.stages() if s.name == c.net), None)
         if spec is None or c.v_in is None or c.error:
             continue
-        overshoot = max(c.overshoot_v or 0.0, (c.ringing or {}).get("overshoot_v", 0.0) or 0.0)
+        overshoot = max(c.overshoot_v or 0.0, (c.ringing or {}).get("overshoot_v", 0.0) or 0.0,
+                        (getattr(c, "recovery", None) or {}).get("overshoot_v", 0.0) or 0.0)
         rail_v = spec.v_out if spec.topology == "boost" and spec.v_out else c.v_in     # what the node swings to
         peak = rail_v + overshoot
         refs = list(spec.high_side or spec.switch) + list(spec.low_side)

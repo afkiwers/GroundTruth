@@ -116,6 +116,8 @@ class ConverterResult(RouteResult):
     loop_f: float = LOOP_F
     overshoot_v: Optional[float] = None      # L·I/tr
     ringing: Optional[dict] = None           # f, q, r_ohm, overshoot_v
+    recovery: Optional[dict] = None          # the rectifier's reverse recovery (recovery()): q_rr, i_rr, t_rr, di_dt,
+                                             # and with C_oss overshoot_v = I_rr·√(L/C_oss)
     caps: list = field(default_factory=list)        # rail capacitors: share of the loop current at LOOP_F and f_sw
     conducted: list = field(default_factory=list)   # receiver readings (rows)
     conducted_worst: Optional[dict] = None
@@ -346,7 +348,8 @@ def input_path(board: Board, config: Config, start: str, goal: str, stop: set[st
     return None
 
 
-_KEY_UNITS = {"rds_on": "Ω", "rds_on_low": "Ω", "dcr": "Ω", "c_oss": "F", "q_oss": "C", "v_sd": "V", "diode_vf": "V"}
+_KEY_UNITS = {"rds_on": "Ω", "rds_on_low": "Ω", "dcr": "Ω", "c_oss": "F", "q_oss": "C", "v_sd": "V", "diode_vf": "V",
+              "q_rr": "C", "dead_time": "s"}
 
 
 def schematic_note(spec) -> str:
@@ -722,9 +725,17 @@ def prepare_converter(model: BoardModel, spec: ConverterSpec, region: Optional[t
             res.notes.append("plane capacitance not modelled for this converter")
     res.dc_connected = exc.dc_connected
 
-    f_max = max(analysis_band(spec.f_sw, spec.rise_time), 1e9 if spec.c_oss else 0.0)
+    # a rectifier's reverse recovery adds a current spike of base t_rr to the pulse: its corner sets the band when
+    # it is the faster edge (a triangle of base t_rr falls like an edge of t_rr/2)
+    res.recovery = recovery(spec, i_pulse)
+    edge = min(spec.rise_time, res.recovery["t_rr"] / 2) if res.recovery else spec.rise_time
+    f_max = max(analysis_band(spec.f_sw, edge), 1e9 if spec.c_oss else 0.0)
     top, res.band = band_top(config, min(f_max, RING_F_MAX))
     freqs, amps = trapezoid_harmonics(spec.f_sw, spec.rise_time, i_pulse, duty, top)
+    if res.recovery:          # every harmonic: the spike fills the trapezoid's nulls
+        freqs = spec.f_sw * np.arange(1, max(1, int(top // spec.f_sw)) + 1)
+        amps = pulse_harmonics(freqs, spec.f_sw, i_pulse, duty, spec.rise_time, res.recovery,
+                               boost=spec.topology == "boost")
     fine, cond = ModelRun(st, exc), ModelRun(cond_st, cond_exc)
     setup = ConverterSetup(spec, res, fine, cavity, cond, freqs, amps, amps.copy(), elements, LOOP_F, lisn,
                            standard, a.conducted_class, issues, t_start, config=config)
@@ -1174,6 +1185,16 @@ def apply_ringing(setup: ConverterSetup):
         res.ringing["snubber"] = {"c": snub[0], "r": snub[1], "parts": list(spec.snubber)}
     if res.ringing is not None:
         setup.ringing_model = (L, res.ringing["r_ohm"], spec.c_oss, snub)
+    res.recovery = recovery_overshoot(res.recovery, L, spec.c_oss)
+
+
+def recovery_overshoot(rec: Optional[dict], L: float, c_oss: Optional[float]) -> Optional[dict]:
+    """The recovery with its overshoot: a snappy recovery ends with I_rr in the loop inductance, whose energy
+    ½·L·I_rr² swings into the node's C_oss: V = I_rr·√(L/C_oss) above the rail (undamped, an upper bound)
+    [Mohan 2003, §20-3] [A49]. Unchanged without C_oss or a loop inductance."""
+    if rec is None or not c_oss or L <= 0:
+        return rec
+    return dict(rec, overshoot_v=rec["i_rr"] * math.sqrt(L / c_oss))
 
 
 def stage_responses(setup: ConverterSetup) -> list:
@@ -1205,11 +1226,41 @@ def stage_responses(setup: ConverterSetup) -> list:
     return out
 
 
-def pulse_harmonics(freqs: np.ndarray, f_sw: float, amplitude: float, duty: float, rise_time: float) -> np.ndarray:
+def recovery(spec: ConverterSpec, i_pulse: float, rise_time: Optional[float] = None) -> Optional[dict]:
+    """The rectifier's reverse recovery at the main switch's hard turn-on, or None (no q_rr; a synchronous FET with
+    dead_time 0, whose body diode never conducts). The current commutates at di/dt = I/t_edge [A14]; a snappy
+    recovery then reverses the rectifier's current to I_rr = √(2·Q_rr·di/dt) within t_rr = √(2·Q_rr/(di/dt))
+    [Mohan 2003, §20-3], taken as a triangle of that peak and base (its area ½·I_rr·t_rr is Q_rr) [A49].
+    {q_rr, i_rr, t_rr, di_dt}; rise_time: another edge (the fix advisor's what-if), else the stage's."""
+    tr = spec.rise_time if rise_time is None else rise_time
+    if not spec.q_rr or i_pulse <= 0 or tr <= 0:
+        return None
+    from .thermal import _synchronous
+    if _synchronous(spec) and spec.dead_time == 0:
+        return None
+    di_dt = i_pulse / tr
+    return {"q_rr": spec.q_rr, "i_rr": math.sqrt(2 * spec.q_rr * di_dt), "t_rr": math.sqrt(2 * spec.q_rr / di_dt),
+            "di_dt": di_dt}
+
+
+def pulse_harmonics(freqs: np.ndarray, f_sw: float, amplitude: float, duty: float, rise_time: float,
+                    rec: Optional[dict] = None, boost: bool = False) -> np.ndarray:
     """The trapezoid's harmonic amplitudes (trapezoid_harmonics) on given harmonics of f_sw: another edge time on
-    a stage's own frequency grid (the fix advisor)."""
+    a stage's own frequency grid (the fix advisor). With `rec` (recovery()), the recovery's triangle is added in
+    phase: a buck's right after the pulse's rising edge (the high side's turn-on: its current overshoots to
+    I + I_rr), a boost's right after the falling edge with the opposite sign (its rectifier, the pulse, swings to
+    −I_rr when the low side turns on). Fourier coefficients X_n = (1/T)∫x·e^(−j2πnf t) dt [Paul 2006]: the
+    trapezoid's A·D·sinc(nD)·sinc(n·f·tr)·e^(−jπn(D + f·tr)), the triangle's ±Q_rr·f·sinc²(n·f·t_rr/2)·
+    e^(−j2πn·f·t0) at its centre t0; c_n = 2·|X_n + Y_n|."""
     n = np.rint(np.asarray(freqs, float) / f_sw)
-    return 2 * amplitude * duty * np.abs(np.sinc(n * duty)) * np.abs(np.sinc(n * f_sw * rise_time))
+    x = amplitude * duty * np.sinc(n * duty) * np.sinc(n * f_sw * rise_time)
+    if rec is None:
+        return 2 * np.abs(x)
+    x = x * np.exp(-1j * np.pi * n * (duty + f_sw * rise_time))
+    t0 = (duty / f_sw if boost else 0.0) + rise_time + rec["t_rr"] / 2
+    y = (-1.0 if boost else 1.0) * rec["q_rr"] * f_sw * np.sinc(n * f_sw * rec["t_rr"] / 2) ** 2 \
+        * np.exp(-2j * np.pi * n * f_sw * t0)
+    return 2 * np.abs(x + y)
 
 
 def stage_spectrum(spec: ConverterSpec, freqs: np.ndarray, pulse: np.ndarray, v: Optional[float], i_pulse: float,
@@ -2482,13 +2533,18 @@ def _converter_issues(setup: ConverterSetup, rules, a):
     if res.loop_nh is not None and res.v_in:
         v_l = res.overshoot_v or 0.0
         v_r = (res.ringing or {}).get("overshoot_v") or 0.0
-        worst = max(v_l, v_r)
+        v_rr = (res.recovery or {}).get("overshoot_v") or 0.0
+        worst = max(v_l, v_r, v_rr)
         frac = worst / res.v_in
         if frac >= rules.overshoot_warning:
             sev = "error" if frac >= rules.overshoot_error else "warning"
             ring = res.ringing
             ring_txt = (f"; with C_oss {spec.c_oss * 1e12:.0f} pF it rings at {ring['f'] / 1e6:.0f} MHz (Q {ring['q']:.1f})"
                         f", ≈{v_r:.1f} V" if ring else "")
+            if v_rr:
+                rec = res.recovery
+                ring_txt += (f"; the rectifier's {rec['q_rr'] * 1e9:g} nC recovery adds {rec['i_rr']:.1f} A, "
+                             f"≈{v_rr:.1f} V when it snaps off")
             top = ", ".join(c["name"] for c in res.caps[:2] if not c["lisn"])
             setup.issue(rules, "hot_loop",
                         f"{spec.name}: hot-loop inductance {res.loop_nh:.2f} nH ({top} closest); switching "
