@@ -17,12 +17,15 @@ An op-amp stage in a signal path (part model `amplifier`, its gain from a Gain f
 
     GT = amp_in:3, amp_out:1     the stage's input and output pins (a dual op-amp: amp_in:5, amp_out:7)
 
-A converter's dead time (its dead_time, components/fields.stage_values), on the controller IC (the one with the
-stage's SW pin):
+A converter's dead times (its dead_rise / dead_fall, components/fields.stage_values), on the controller IC (the one
+with the stage's SW pin):
 
-    GT = dead:20ns               every converter this IC controls
+    GT = dead:20ns               every converter this IC controls, both edges
     GT = dead1:20ns, dead2:30ns  the converter on its SW1 / SW2 pin (a dual controller's channels)
     GT = conv1_dead:20ns         the converter labelled conv1 (wins over the two above)
+    GT = dead_rise:20ns, dead_fall:10ns    one edge of the switch node: rise = low side off -> high side on
+                                 (the LTC7890's DTCA), fall = high side off -> low side on (its DTCB); also
+                                 dead1_rise:20ns, conv1_dead_fall:10ns. For each edge the most specific word wins.
 
 A tag is <kind><id>_<role>: the kind (conv, hb), an optional id (letters and digits: conv1, conv5V, hbA) and the
 role; the id may also follow the role (conv_out_1, hb_hs_A). Several tags are separated by commas. Upper or lower
@@ -48,9 +51,10 @@ CONNECTOR_ROLES = ("in", "out")                                          # share
 TAG = re.compile(r"^(conv|hb)([a-z0-9.+]*)_([a-z]+)(?:_([a-z0-9.+]+))?$", re.I)   # conv1_out or conv_out_1
 SIG = re.compile(r"^sig(?:_(drv|rx))?(?::(.+))?$", re.I)                         # sig, sig:9, sig_drv:PA3
 AMP = re.compile(r"^amp_(in|out):(.+)$", re.I)                                    # amp_in:3, amp_out:OUTA
-# a controller's dead time (the converter's dead_time): dead:20ns (every stage it controls), dead1:20ns (the stage on
-# its SW1 pin), conv1_dead:20ns (the stage labelled conv1)
-DEAD = re.compile(r"^(?:conv([a-z0-9.+]*)_)?dead(\d*)\s*[:=]\s*(.+)$", re.I)
+# a controller's dead time (the converter's dead_rise / dead_fall): dead:20ns (every stage it controls, both edges),
+# dead1:20ns (the stage on its SW1 pin), conv1_dead:20ns (the stage labelled conv1); _rise / _fall: one edge only
+DEAD = re.compile(r"^(?:conv([a-z0-9.+]*)_)?dead(\d*)(?:_(rise|fall))?\s*[:=]\s*(.+)$", re.I)
+EDGES = ("rise", "fall")      # the switch node's edges: rise = low side off -> high side on, fall = the other
 PHASE = re.compile(r"^[A-CU-W1-3]$", re.I)
 
 HELP = {
@@ -71,8 +75,10 @@ HELP = {
         "pin_d (mm), pin_r (Ω); Help (F1) › Through-hole pins.\n"
         "The dead time of a synchronous converter goes on its controller IC (the part with the converter's SW pin): "
         "GT = dead:20ns for every converter it controls, dead1:20ns, dead2:30ns per channel (its SW1 / SW2 pin), or "
-        "conv1_dead:20ns for the converter labelled conv1. The rectifier FETs' Vsd and Qrr fields give the reverse "
-        "conduction and the recovery charge.\n"
+        "conv1_dead:20ns for the converter labelled conv1. One edge only: dead_rise:20ns (low side off, high side "
+        "on; the LTC7890's DTCA), dead_fall:10ns (high side off, low side on; its DTCB), also dead1_rise:20ns or "
+        "conv1_dead_fall:10ns. The rectifier FETs' Vsd and Qrr fields give the reverse conduction and the recovery "
+        "charge.\n"
         "Several converters in one sheet: number them, conv1_hs, conv1_L, conv2_hs … (any letters or digits: "
         "conv5V_hs; the number may also follow the role: conv_out_1). A connector shared by several converters: conv_in feeds every converter it reaches, or list "
         "them: conv1_in, conv2_in. A sheet used several times (one per rail) needs the labels once: every copy "
@@ -277,10 +283,11 @@ def parse(text: str, ref: str = "") -> tuple[list[Tag], bool, list[str]]:
     return tags, ignore, problems
 
 
-def dead_times(text: str) -> list[tuple[str, str, Optional[float], str, str]]:
-    """The dead-time words of a controller's GT field: [(converter id or "", channel or "", seconds or None, the
-    word as written, why it is unusable or "")]. "dead:20ns" applies to every stage the IC controls, "dead2:20ns" to
-    the one on its SW2 pin, "conv1_dead:20ns" to the stage labelled conv1; a bare number is in ns."""
+def dead_times(text: str) -> list[tuple[str, str, str, Optional[float], str, str]]:
+    """The dead-time words of a controller's GT field: [(converter id or "", channel or "", edge "rise" / "fall" or
+    "" for both, seconds or None, the word as written, why it is unusable or "")]. "dead:20ns" applies to every
+    stage the IC controls, "dead2:20ns" to the one on its SW2 pin, "conv1_dead:20ns" to the stage labelled conv1;
+    "_rise" / "_fall" after "dead<n>" to that switch-node edge only; a bare number is in ns."""
     from ..components.values import parse_quantity
     out = []
     for raw in re.split(r"[,;]", text or ""):
@@ -288,24 +295,27 @@ def dead_times(text: str) -> list[tuple[str, str, Optional[float], str, str]]:
         m = DEAD.match(word.replace(" ", ""))
         if not m:
             continue
-        value, why = parse_quantity(m.group(3), "s", 1e-9)
+        value, why = parse_quantity(m.group(4), "s", 1e-9)
         if value is not None and not 0.0 <= value <= 2e-6:
-            value, why = None, f"'{m.group(3)}' is not a dead time (0 to 2 µs)"
-        out.append(((m.group(1) or "").lower(), m.group(2) or "", value, word,
+            value, why = None, f"'{m.group(4)}' is not a dead time (0 to 2 µs)"
+        out.append(((m.group(1) or "").lower(), m.group(2) or "", (m.group(3) or "").lower(), value, word,
                     f"'{word}': {why}" if value is None else ""))
     return out
 
 
-def dead_time_of(fp: Footprint, ident: str, channel: str) -> Optional[tuple[float, str]]:
-    """(seconds, the word) the controller `fp`'s GT field gives the stage with GT id `ident` on its channel
-    `channel` (its SW pin's number): a conv<id>_dead word first, then dead<channel>, then a plain dead; None
-    without one that applies."""
-    words = [w for w in dead_times(tag_text(fp)) if w[2] is not None]
-    for pick in ((lambda w: ident and w[0] == ident), (lambda w: not w[0] and channel and w[1] == channel),
-                 (lambda w: not w[0] and not w[1])):
-        hit = next((w for w in words if pick(w)), None)
-        if hit is not None:
-            return hit[2], hit[3]
+def dead_time_of(fp: Footprint, ident: str, channel: str, edge: str) -> Optional[tuple[float, str]]:
+    """(seconds, the word) the controller `fp`'s GT field gives one switch-node `edge` ("rise" / "fall") of the
+    stage with GT id `ident` on its channel `channel` (its SW pin's number); None without a word that applies. The
+    most specific word wins: the stage's own (conv<id>_dead), then its channel's (dead<n>), then the IC's (dead);
+    at each level a word for this edge before one for both."""
+    words = [w for w in dead_times(tag_text(fp)) if w[3] is not None]
+    levels = ((lambda w: bool(ident) and w[0] == ident), (lambda w: not w[0] and bool(channel) and w[1] == channel),
+              (lambda w: not w[0] and not w[1]))
+    for level in levels:
+        for which in (edge, ""):
+            hit = next((w for w in words if level(w) and w[2] == which), None)
+            if hit is not None:
+                return hit[3], hit[4]
     return None
 
 

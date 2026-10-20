@@ -261,16 +261,22 @@ switches inside (leave High side, Low side and Switch node empty then); <b>Condu
 commas (Q1, Q2), connectors plus then minus (J1.1, J1.2). <b>R_DS(on)</b>, <b>R_DS(on) low side</b>, <b>Inductor
 DCR</b> and <b>Diode V_f (V)</b> are the losses of the thermal solve.</p>
 <p><a name="deadtime"></a><b>Dead time, reverse conduction and recovery</b> (a synchronous stage: a FET as the
-rectifier, a buck's low side or a boost's high side). Before each switch turns on, both are off for the
-<b>Dead time</b>; the inductor current meanwhile flows through the rectifier FET in reverse, at <b>Reverse V_SD</b>
-(about 1.5-2 V for GaN, 0.8 V for a silicon body diode) instead of across its R_DS(on). That costs
-2·t_dead·f_sw·I·V_SD in the rectifier, taken out of its conduction time: with GaN often as much as its conduction loss
-(kraft_flux_mini_2's conv1 at 10 A: 0.32 W in 2 × 20 ns, against 0.15 W of conduction). The dead time is not the edge
-time: the edge is how fast the node swings once a switch turns on. Set it here, or give the controller IC a GT field
-(<a href="#labels">Detection labels</a>): <code>dead:20ns</code> for every converter it controls,
-<code>dead1:20ns</code> / <code>dead2:30ns</code> per channel (its SW1 / SW2 pin), <code>conv1_dead:20ns</code> for
-the converter labelled conv1; the value is then marked ◆ like the parts' fields. Empty: 20 ns (an adaptive
-controller's; the LTC7890 with its DTCA / DTCB pins on GND). V_SD comes from the rectifier FETs' <code>Vsd</code>
+rectifier, a buck's low side or a boost's high side). Before each switch turns on, both are off for a dead time;
+the inductor current meanwhile flows through the rectifier FET in reverse, at <b>Reverse V_SD</b> (about 1.5-2 V for
+GaN, 0.8 V for a silicon body diode) instead of across its R_DS(on). Each edge of the switch node has its own:
+<b>Dead time, rise</b> (low side off → high side on; the LTC7890's DTCA) and <b>Dead time, fall</b> (high side off →
+low side on; its DTCB). At the main switch's turn-on (a buck's rise, the hard edge) the whole dead time is reverse
+conduction, at the ripple's valley current. At its turn-off (a buck's fall, the soft edge) the inductor current, at
+its peak, first swings the node across, moving both FETs' output charge (2·Q_oss, else 2·C_oss·V): only the rest of
+that dead time is reverse conduction. The rectifier's channel is off for both. With GaN the loss is often as much as
+the FET's conduction (kraft_flux_mini_2's conv1 at 10 A with 2 × 20 ns: 0.25 W, against 0.15 W of conduction; the
+fall's 7 ns node swing takes 0.07 W off). The dead time is not the edge time: the edge is how fast the node swings
+once a switch turns on. Set them here, or give the controller IC a GT field (<a href="#labels">Detection
+labels</a>): <code>dead:20ns</code> for both edges of every converter it controls, <code>dead1:20ns</code> /
+<code>dead2:30ns</code> per channel (its SW1 / SW2 pin), <code>conv1_dead:20ns</code> for the converter labelled conv1,
+and any of them for one edge: <code>dead_rise:20ns</code>, <code>dead1_fall:10ns</code>,
+<code>conv1_dead_rise:15ns</code> (for each edge the most specific word wins). The values are then marked ◆ like the
+parts' fields. Empty: 20 ns (an adaptive controller's; the LTC7890 with its DTCA / DTCB pins on GND). V_SD comes from the rectifier FETs' <code>Vsd</code>
 field, else 2 V for a GaN part and 0.8 V otherwise. A silicon FET's body diode also has a reverse-recovery charge
 <b>Q_rr</b> (its <code>Qrr</code> field; GaN has none, leave it empty): the main switch sweeps it out at its hard turn-on
 (Q_rr·V·f_sw of loss), the hot loop carries it as a current spike of I_rr = √(2·Q_rr·di/dt) (in the conducted and
@@ -1013,6 +1019,8 @@ an example in <a href="#siglabels">Labelling a signal path</a>.</p>
 <tr><td><code>hb_out</code> / <code>hb_in</code></td><td>the motor connector / the bus input connector</td></tr>
 <tr><td><code>ignore</code></td><td>a part detection should never use</td></tr>
 <tr><td><code>dead:20ns</code></td><td>on a controller IC: the dead time of every converter it controls;
+  <code>dead_rise:20ns</code> / <code>dead_fall:10ns</code> one edge of the switch node (rise: low side off → high
+  side on);
   <code>dead1:20ns</code>, <code>dead2:30ns</code> per channel (its SW1 / SW2 pin); <code>conv1_dead:20ns</code> for
   the converter labelled conv1 (wins over the others). A bare number is in ns
   (<a href="#deadtime">Dead time</a>)</td></tr>
