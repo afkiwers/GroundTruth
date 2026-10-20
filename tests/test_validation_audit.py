@@ -513,10 +513,14 @@ def test_CV10_the_common_mode_budget_is_linear_in_the_stray_capacitance():
     assert cm_estimate(spec, res, "cispr32", "B")["worst"]["margin_db"] == pytest.approx(-6.02, abs=0.05)
 
 
-def _loss_reference(topology, rect_diode, d_sw, i_out, v_in, v_out, rds, rds_lo, f, tr, q_oss, vf, dcr):
+def _loss_reference(topology, rect_diode, d_sw, i_out, v_in, v_out, rds, rds_lo, f, tr, q_oss, vf, dcr,
+                    t_rise=0.0, t_fall=0.0, v_sd=0.0):
     """Independent stage losses: the main switch conducts the switch duty D, the rectifier D' = 1 − D; the inductor
     carries I_out (buck) or I_out/D' (boost); the hard-switched edge ½·V·I_L·tr·f per hard edge (one with a
-    synchronous rectifier, two with a diode); the output charge Q_oss·V·f (½ with a diode); a diode's D'·I_L·V_f."""
+    synchronous rectifier, two with a diode); the output charge Q_oss·V·f (½ with a diode); a diode's D'·I_L·V_f.
+    A synchronous rectifier's dead times (A48; the board's inductor has no L: no ripple, I_L at both edges): the
+    hard edge's (the main switch turning on: a buck's switch-node rise, a boost's fall) all in reverse at V_SD, the
+    soft edge's what is left after I_L has moved both FETs' output charge 2·Q_oss; the channel off for both."""
     boost = topology == "boost"
     i_l = i_out / (1 - d_sw) if boost else i_out
     v = v_out if boost else v_in
@@ -524,7 +528,14 @@ def _loss_reference(topology, rect_diode, d_sw, i_out, v_in, v_out, rds, rds_lo,
     edges = 2 if rect_diode else 1
     main["edge"] = 0.5 * v * i_l * edges * tr * f
     main["qoss"] = (0.5 if rect_diode else 1.0) * q_oss * v * f
-    rect = (1 - d_sw) * i_l * vf if rect_diode else (1 - d_sw) * i_l ** 2 * (rds if boost else rds_lo)
+    if rect_diode:
+        rect = (1 - d_sw) * i_l * vf
+    else:
+        t_hard, t_soft = (t_fall, t_rise) if boost else (t_rise, t_fall)
+        swing = 2 * q_oss / i_l if i_l > 0 else 0.0
+        reverse = f * v_sd * i_l * (t_hard + max(t_soft - swing, 0.0))
+        share = (1 - d_sw) - min((t_rise + t_fall) * f, 1 - d_sw)
+        rect = share * i_l ** 2 * (rds if boost else rds_lo) + reverse
     return sum(main.values()), rect, i_l ** 2 * dcr, i_l
 
 
@@ -555,17 +566,18 @@ def test_CV11_part_losses_match_an_independent_loss_budget(tmp_path, topology, r
     from groundtruth.config.settings import ConverterSpec
     board, sc, _ = make(tmp_path, _stage_parts_board(), "b", nets=())
     f, tr, q, rds, rlo, vf = 400e3, 5e-9, 20e-9, 0.02, 0.03, 0.4
+    t_rise, t_fall, v_sd = 15e-9, 50e-9, 0.9                     # unequal: the hard and the soft edge apart
     rect = "D1" if rect_diode else "Q2"
     if topology == "boost":
         spec = ConverterSpec("s", "VOUT", "GND", "SW", [rect], ["Q1"], topology="boost", f_sw=f, i_out=1.0,
                              v_in=v_in, v_out=v_out, rise_time=tr, q_oss=q, rds_on=rds, rds_on_low=rlo, diode_vf=vf,
-                             dcr=0.01)
+                             dcr=0.01, dead_rise=t_rise, dead_fall=t_fall, v_sd=v_sd)
         d_sw = 1 - v_in / v_out
         main_ref, rect_ref = "Q1", rect
     else:
         spec = ConverterSpec("s", "VOUT", "GND", "SW", ["Q1"], [rect], topology="buck", f_sw=f, i_out=1.0,
                              v_in=v_in, v_out=v_out, rise_time=tr, q_oss=q, rds_on=rds, rds_on_low=rlo, diode_vf=vf,
-                             dcr=0.01)
+                             dcr=0.01, dead_rise=t_rise, dead_fall=t_fall, v_sd=v_sd)
         d_sw = v_out / v_in
         main_ref, rect_ref = "Q1", rect
     if board.footprint(rect_ref) is None:
@@ -574,7 +586,8 @@ def test_CV11_part_losses_match_an_independent_loss_budget(tmp_path, topology, r
     rows, _ = part_losses(board, replace(sc.config, converters=[spec]),
                           [NS(net="s", duty=duty, v_in=v_in if topology == "buck" else v_out, dc=[])])
     got = {r["ref"]: r["power_w"] for r in rows}
-    main, rect_w, _, _ = _loss_reference(topology, rect_diode, d_sw, 1.0, v_in, v_out, rds, rlo, f, tr, q, vf, 0.01)
+    main, rect_w, _, _ = _loss_reference(topology, rect_diode, d_sw, 1.0, v_in, v_out, rds, rlo, f, tr, q, vf, 0.01,
+                                         t_rise, t_fall, v_sd)
     assert got.get(main_ref, 0.0) == pytest.approx(main, rel=1e-6), (topology, got)
     assert got.get(rect_ref, 0.0) == pytest.approx(rect_w, rel=1e-6), (topology, got)
 
@@ -665,11 +678,12 @@ def test_CV13_a_boost_s_input_current_is_its_energy_balance(tmp_path, v_in, v_ou
     board, sc, _ = make(tmp_path, _stage_parts_board(), "bal", nets=())
     f, tr, q, rds, rlo, dcr = 400e3, 5e-9, 20e-9, 0.02, 0.03, 0.01
     spec = ConverterSpec("s", "VOUT", "GND", "SW", ["Q2"], ["Q1"], topology="boost", f_sw=f, i_out=1.0, v_in=v_in,
-                         v_out=v_out, rise_time=tr, q_oss=q, rds_on=rds, rds_on_low=rlo, dcr=dcr)
+                         v_out=v_out, rise_time=tr, q_oss=q, rds_on=rds, rds_on_low=rlo, dcr=dcr, dead_rise=30e-9,
+                         dead_fall=10e-9, v_sd=1.2)
     _, duty = spec.pulse()
     est = input_estimate(board, sc.config, spec, NS(net="s", duty=duty, v_in=v_out))
     main, rect, ind, _ = _loss_reference("boost", False, 1 - v_in / v_out, 1.0, v_in, v_out, rds, rlo, f, tr, q,
-                                         0.0, dcr)
+                                         0.0, dcr, 30e-9, 10e-9, 1.2)
     assert est["p_loss_w"] == pytest.approx(main + rect + ind, rel=1e-6)
     assert est["i_in_a"] == pytest.approx((v_out * 1.0 + main + rect + ind) / v_in, rel=1e-6)
 
@@ -1027,16 +1041,18 @@ def test_P4_losses_are_positive_and_the_energy_balance_holds_at_random_operating
         v_in, v_out = (v_lo, v_hi) if topo == "boost" else (v_hi, v_lo)
         f, tr, q, i = rng.uniform(50e3, 3e6), rng.uniform(1e-9, 30e-9), rng.uniform(1e-9, 100e-9), rng.uniform(0.1, 20)
         rds, rlo, vf, dcr = rng.uniform(1e-3, 0.1), rng.uniform(1e-3, 0.1), rng.uniform(0.2, 0.8), rng.uniform(0, 0.05)
+        t_r, t_f, v_sd = rng.uniform(0, 10e-9), rng.uniform(0, 10e-9), rng.uniform(0.5, 2.5)
         rect = "D1" if diode else "Q2"
         hs, ls = ([rect], ["Q1"]) if topo == "boost" else (["Q1"], [rect])
         spec = ConverterSpec("s", "VOUT" if topo == "boost" else "VIN", "GND", "SW", hs, ls, topology=topo, f_sw=f,
                              i_out=i, v_in=v_in, v_out=v_out, rise_time=tr, q_oss=q, rds_on=rds, rds_on_low=rlo,
-                             diode_vf=vf, dcr=dcr)
+                             diode_vf=vf, dcr=dcr, dead_rise=t_r, dead_fall=t_f, v_sd=v_sd)
         _, duty = spec.pulse()
         est = input_estimate(board, sc.config, spec, NS(net="s", duty=duty, v_in=v_out if topo == "boost" else v_in))
         assert all(r["power_w"] >= 0 for r in est["losses"])
         d_sw = 1 - v_in / v_out if topo == "boost" else v_out / v_in
-        main, rect_w, ind, _ = _loss_reference(topo, diode, d_sw, i, v_in, v_out, rds, rlo, f, tr, q, vf, dcr)
+        main, rect_w, ind, _ = _loss_reference(topo, diode, d_sw, i, v_in, v_out, rds, rlo, f, tr, q, vf, dcr,
+                                               t_r, t_f, v_sd)
         assert est["p_loss_w"] == pytest.approx(main + rect_w + ind, rel=1e-9)
         assert est["i_in_a"] * v_in == pytest.approx(v_out * i + est["p_loss_w"], rel=1e-9)
         assert 0 < est["efficiency"] <= 1 and est["i_in_a"] >= est["i_in_ideal_a"]
