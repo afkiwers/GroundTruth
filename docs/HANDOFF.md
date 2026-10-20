@@ -1,13 +1,13 @@
 # GroundTruth handover
 
-## Current state (2026-10-20, branch `report-polish` open; `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-20, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `report-polish` (2026-10-20, from `main` 75be1dd, not merged):** the user: "Have a look at the html report,
+- **Branch `report-polish` (2026-10-20, from `main` 75be1dd, merged into `main` at the user's "Yes"):** the user: "Have a look at the html report,
   it's content and format and see if you can improve it". Reviewed on their export of kraft (flux-2, 4x, 20:26)
   and a fresh `simulate --thermal --format html` (out/report_polish/groundtruth-report.html).
   - Summary: the main findings one line per check (`_findings_by_check`: severity, counts, the worst case — lowest
