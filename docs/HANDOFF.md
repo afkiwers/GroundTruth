@@ -1,13 +1,13 @@
 # GroundTruth handover
 
-## Current state (2026-10-21, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-21, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `audit-dead-time` (2026-10-21, from `main` 4bb511b, not merged) and installers:** the user's "Do it" (the full suite, then installers). Full suite on `main` 4bb511b: 1029 passed, 8 failed, 1 skipped (`out/release_2026-10-21/full_suite.log`, 44 min on the laptop). Two were GUI timing tests under the suite's load (`test_jobs_run_off_the_gui_thread`, the bridges tab's): pass alone. Six were the validation audit's independent loss budget (CV-11, CV-13, P-4) without the dead-time term the model charges since `dead-time` (A48): the budget now has it and the tests set unequal rise / fall dead times and V_SD (random in P-4); 9 pass. Installers from `main` 4bb511b (signed with the laptop's release key): `out/dist/groundtruth-0.1.42170-4bb511b-pcm.zip`, `groundtruth-server-0.1.42170-4bb511b.zip` (+ .sig).
+- **Branch `audit-dead-time` (2026-10-21, from `main` 4bb511b, merged into `main` at the user's "merge") and installers:** the user's "Do it" (the full suite, then installers). Full suite on `main` 4bb511b: 1029 passed, 8 failed, 1 skipped (`out/release_2026-10-21/full_suite.log`, 44 min on the laptop). Two were GUI timing tests under the suite's load (`test_jobs_run_off_the_gui_thread`, the bridges tab's): pass alone. Six were the validation audit's independent loss budget (CV-11, CV-13, P-4) without the dead-time term the model charges since `dead-time` (A48): the budget now has it and the tests set unequal rise / fall dead times and V_SD (random in P-4); 9 pass. Installers from `main` 4bb511b (signed with the laptop's release key): `out/dist/groundtruth-0.1.42170-4bb511b-pcm.zip`, `groundtruth-server-0.1.42170-4bb511b.zip` (+ .sig).
 - **Branch `results-tab` (2026-10-20, from `main` d10f5a5, merged into `main` on 2026-10-21 at the user's "Yes"):** the user: "In the plugin, result are shown
   under heatmap, is there a better name for it like Simulation Results or similar?", then "Rename results, I believe
   the id should change too otherwise it's hard to maintain". The **Heatmap** tab is the **Results** tab: its label,
