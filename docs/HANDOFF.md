@@ -13,7 +13,9 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
   setting). `simulate.quasi_static_limit` (f = c/(4·size·√εr), A47) marks the board-wide model's emissions above it
   `indicative` (note, issue texts, a grey band on the spectrum); `analysis.max_frequency: auto | <Hz>` cuts the band
   (`band_top`; the cut range hatched and said "not computed", never passed). kraft numbers unchanged; tests/test_band.py
-  (6). Why 1592 MHz: 10/(π·2 ns), detection's GaN edge (10 ns → 318 MHz). Still open from the user: a compute-server
+  (6). Why 1592 MHz: 10/(π·2 ns), detection's GaN edge (10 ns → 318 MHz). Full suite on the branch: 1011 passed, 1 skipped
+  (`out/qs_band/full_suite.log`). Installers built from 6f3f60b for the user to try in parallel (laptop, release key
+  present): `out/dist/groundtruth-0.1.42074-6f3f60b-pcm.zip`, `groundtruth-server-0.1.42074-6f3f60b.zip` (+ .sig). Still open from the user: a compute-server
   job no longer listed after the plugin and KiCad were closed and reopened (not looked at yet).
 - **Branch `audit-6` (2026-10-20, from `main` 8f40781, merged into `main` as 534b469 at the user's "merge it first, then run a full suite"; on the laptop `iwers`/xps13, 4 cores):** the
   user's brief "Independent Audit: Numerical Accuracy, Solver Convergence, and Adversarial Validation" (pasted): do the
