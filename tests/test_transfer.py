@@ -66,6 +66,25 @@ def test_a_coarse_fit_says_so_and_a_delay_is_left_above_the_band():
     assert any("coarse" in n or "above ten times" in n for n in resp.notes)
 
 
+def test_the_bode_legend_names_the_curves_and_the_markers_it_shows():
+    """The Bode plot's legend (the user: "some form of legend would help"): each curve, then "pole" and "zero" for
+    the markers drawn; a curve with no pole or zero in its sweep adds neither."""
+    from matplotlib.figure import Figure
+    from groundtruth.analysis.transfer import BodeView
+    from groundtruth.report.plots import draw_bode
+    rc = 1e3 * 10e-9                                         # a pole at 15.9 kHz, a zero at 159 kHz
+    lead = exact_response("net: receiver / source", "net", "voltage gain", F, [rc / 10, 1.0], [rc, 1.0])
+    flat = exact_response("U1: output", "net", "voltage gain", F, [1.0], [1.0])
+
+    def labels(responses):
+        """The legend's labels of a Bode plot of `responses`."""
+        fig = Figure(figsize=(9.5, 5.0))
+        draw_bode(fig, BodeView("net", responses))
+        return [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
+    assert labels([lead, flat]) == ["receiver / source", "U1: output", "pole", "zero"]
+    assert labels([flat]) == ["U1: output"]
+
+
 def test_the_response_curves_and_summary():
     """Magnitude in dB (a ratio) or Ω (an impedance), the phase unwrapped (a delay's phase keeps falling), the JSON
     summary decimated."""

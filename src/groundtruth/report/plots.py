@@ -1401,7 +1401,8 @@ def _signed_hz(v: float, _pos=None) -> str:
 def draw_bode(fig: Figure, view) -> None:
     """A Bode plot of a view's responses (analysis/transfer.BodeView): magnitude on top (dB, or Ω on a log axis for
     impedances), the unwrapped phase below, on one log frequency axis; each response in its colour, its poles (×)
-    and zeros (○) marked at their natural frequencies on its magnitude curve."""
+    and zeros (○) marked at their natural frequencies on its magnitude curve, the legend naming the curves and the
+    two markers."""
     from ..analysis.transfer import response_label
     fig.clear()
     resp = [r for r in view.responses if len(r.f)]
@@ -1414,7 +1415,7 @@ def draw_bode(fig: Figure, view) -> None:
     ax_m = fig.add_subplot(gs[0])
     ax_p = fig.add_subplot(gs[1], sharex=ax_m)
     ohms = all(r.quantity == "impedance" for r in resp)
-    f_all = []
+    f_all, marked = [], set()
     for k, r in enumerate(resp):
         c = PDN_COLOURS[k % len(PDN_COLOURS)]
         f = np.asarray(r.f) / 1e6
@@ -1428,6 +1429,12 @@ def draw_bode(fig: Figure, view) -> None:
                 f0 = np.array([row["f0"] for row in rows])
                 ax_m.plot(f0 / 1e6, np.interp(np.log(f0), np.log(r.f), mag), marker, ls="none", color=c, ms=6,
                           mfc="none", mew=1.4)
+                marked.add(marker)
+    # the markers' key in the legend, after the curves' (the user: "some form of legend would help"): grey, as each
+    # marker takes its curve's colour; only the kinds the plot shows
+    for marker, what in (("x", "pole"), ("o", "zero")):
+        if marker in marked:
+            ax_m.plot([], [], marker, ls="none", color="0.35", ms=6, mfc="none", mew=1.4, label=what)
     if ohms:
         ax_m.set_yscale("log")
     ax_m.set_ylabel("|Z| (Ω)" if ohms else "|H| (dB)", fontsize=FS_TEXT)
@@ -1439,7 +1446,7 @@ def draw_bode(fig: Figure, view) -> None:
         ax.grid(True, which="both", alpha=0.3)
     w_in, h_in = fig.get_size_inches()
     left_in, right_in = _lh(FS_TEXT) + _width_in("-1000", FS_TICK) + 0.24, 0.25
-    header = _title_and_key(ax_m, f"{view.owner}: Bode (× poles, ○ zeros)", w_in - left_in - right_in)
+    header = _title_and_key(ax_m, f"{view.owner}: Bode", w_in - left_in - right_in)
     # the first response's transfer function in its part names (analysis/symbolic.py), in matplotlib's math text
     # under the title: the user, "i want the transfer function to be shown in the results as well"
     sym = next((r.symbolic for r in resp if getattr(r, "symbolic", None)), None)
