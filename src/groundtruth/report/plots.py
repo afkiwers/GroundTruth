@@ -205,6 +205,25 @@ def busiest_via(rr) -> Optional[dict]:
     return vias[0] if vias else None
 
 
+def hot_spot(rr) -> Optional[dict]:
+    """The view's sustained current-density spot its "current density" / "RMS current density" tile names (ui/kpi.py):
+    {x, y, layer, a_mm2} of a DC path's (a DC load's) or a motor bridge's RMS view, where draw_heatmap marks it
+    with a cyan ×; None for other views or without maps (a bridge's sweep: plots, not maps)."""
+    if getattr(rr, "grid", None) is None or not getattr(rr, "sheet_current", None):
+        return None
+    rms = getattr(rr, "rms_of", None)
+    if rms is not None:
+        src = getattr(rms, "rms", None) or {}
+    else:
+        view = getattr(rr, "view_of", None)
+        src = next((p for p in (getattr(rr, "dc", None) or []) if p.get("name") == view), None) if view else None
+    at = (src or {}).get("sustained_at")
+    if not at:
+        return None
+    return {"x": float(at[0]), "y": float(at[1]), "layer": src.get("sustained_layer") or "",
+            "a_mm2": src.get("sustained_a_mm2")}
+
+
 def carrier_text(t: dict) -> str:
     """A carrier marker's hover text: its name, its share of the current and, where the view knows it, its
     current in amperes ("via GND @(138.25, 75.70): 12 % of the current, 1.20 A"; a motor bridge's: A RMS)."""
@@ -752,10 +771,11 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
                          fontsize=FS_TEXT)
         if rr.kind == "thermal" and rr.hotspot_layer == lname:     # the thermal hot spot
             ax.plot(*rr.hotspot, marker="x", ms=10, mew=2, color="#00e5ff")
-        if getattr(rr, "view_of", None):           # DC density map: mark the hottest sustained spot
-            path = next((p for p in rr.dc if p["name"] == rr.view_of), None)
-            if path and path["sustained_layer"] == lname:
-                ax.plot(*path["sustained_at"], marker="x", ms=9, mew=2, color="#00e5ff")
+        # a DC path's or a bridge's RMS density map: its hottest sustained spot (where its density tile's click zooms;
+        # the RMS map had none before 2026-10-21)
+        spot = hot_spot(rr) if getattr(rr, "view_of", None) else None
+        if spot and spot["layer"] == lname:
+            ax.plot(spot["x"], spot["y"], marker="x", ms=9, mew=2, color="#00e5ff")
     fig.suptitle("\n".join(head), fontsize=FS_TITLE, y=1 - 0.08 / h_in, va="top")
     fig._gt_note = fig.text(0.5, 1 - (0.08 + _lh(FS_TITLE, len(head))) / h_in, "\n".join(notes), ha="center",
                             va="top", fontsize=FS_TEXT)

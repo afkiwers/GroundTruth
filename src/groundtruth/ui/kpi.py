@@ -241,7 +241,9 @@ def _dc(c, rules) -> list[Kpi]:
             "path resistance (copper, vias and the series parts on it), drop and loss"),
            ("current density", f"{p['sustained_a_mm2']:.0f} A/mm²",
             f"sustained, on {p['sustained_layer']} (peak {p['peak_a_mm2']:.0f})",
-            _level(p["sustained_a_mm2"], w, e), "averaged over 1 mm of copper; the peak is one grid cell")]
+            _level(p["sustained_a_mm2"], w, e),
+            "averaged over 1 mm of copper; the peak is one grid cell; click: zoom the maps to the spot (the cyan ×), "
+            "and from KiCad show its copper there")]
     if p["vias"]:
         v = p["vias"][0]
         load = v.get("load_pct")
@@ -298,7 +300,8 @@ def _rms(b, rules) -> list[Kpi]:
     out = [("RMS current density", f"{r['sustained_a_mm2']:.0f} A/mm²",
             f"sustained, on {r['sustained_layer']} (peak {r['peak_a_mm2']:.0f})", _level(r["sustained_a_mm2"], w, e),
             "the six-step drive's currents, battery to motor and the switching currents, as RMS: what heats the "
-            "copper; averaged over 1 mm, the peak is one grid cell"),
+            "copper; averaged over 1 mm, the peak is one grid cell; click: zoom the maps to the spot (the cyan "
+            "×), and from KiCad show its copper there"),
            ("copper loss", f"{r['copper_w']:.2f} W", f"phase {max(b.drive['phase_rms']):.3g} A RMS", "",
             "Joule heat in the copper of the modelled region (vias and parts not included)")]
     if r["vias"]:

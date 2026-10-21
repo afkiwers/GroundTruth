@@ -259,6 +259,7 @@ def views_dir() -> Path:
 
 ZOOM_STEP = 1.25            # one wheel notch zooms in or out this much, about the point under the mouse
 FOCUS_MM = 6.0              # the busiest via's tile zooms the maps to a square this wide around it
+DENSITY_TILES = ("current density", "RMS current density")   # tiles a click zooms to their hot spot (focus_hot)
 SPECTRUM_IN = 2.8           # the spectrum's height on the Results tab's page (full width), inches of its figure
 MAPS_MIN_PX = 300           # the maps fill the page's visible height, but never less than this
 SCROLL_PX = 40              # the page's scroll unit: one wheel notch (3 lines) scrolls 120 px
@@ -536,9 +537,13 @@ class ResultsPanel(wx.Panel):
                 tile.Destroy()
             for figures in want[len(have):]:
                 sizer.Add(theme.Tile(self.tiles, *figures), 0, wx.ALL, 3)
-            for tile in self.tiles.GetChildren():           # the busiest via's tile zooms to it (focus_busiest)
+            # the busiest via's tile zooms to it (focus_busiest), a current-density tile to its hot spot (focus_hot)
+            from ..report.plots import hot_spot
+            hot = hot_spot(rr) is not None
+            for tile in self.tiles.GetChildren():
                 if isinstance(tile, theme.Tile):
-                    tile.set_click(self.focus_busiest if tile.title == "busiest via" else None)
+                    tile.set_click(self.focus_busiest if tile.title == "busiest via" else
+                                   self.focus_hot if hot and tile.title in DENSITY_TILES else None)
             self.tiles.SetToolTip(self._metrics(rr))
             if resized:
                 self.Layout()
@@ -554,16 +559,36 @@ class ResultsPanel(wx.Panel):
         v = busiest_via(rr) if rr is not None else None
         if v is None or rr.grid is None:
             return
-        x, y = v["x"], v["y"]
+        self._focus(rr, v["x"], v["y"])
+        if self.on_mark is not None:
+            rms = " RMS" if getattr(rr, "rms_of", None) is not None else ""
+            self.on_mark("via", {**v, "kind": "via"}, f"{v['name']}: {v['current_a']:.3g} A{rms} (the busiest)",
+                         self.selected_layer() or "")
+
+    def focus_hot(self):
+        """A current-density tile was clicked ("current density", "RMS current density"): zoom the maps to its
+        sustained hot spot (FOCUS_MM around it; the cyan × marks it on its layer) and, opened from KiCad, show the
+        copper there on that layer, as a click on the map does (on_mark). The user: "I would like the same [as the
+        busiest via] for when clicking on RMS current density that it zooms into the area of interest"."""
+        from ..report.plots import hot_spot
+        rr = self.current()
+        h = hot_spot(rr) if rr is not None else None
+        if h is None:
+            return
+        self._focus(rr, h["x"], h["y"])
+        if self.on_mark is not None:
+            rms = " RMS" if getattr(rr, "rms_of", None) is not None else ""
+            self.on_mark("point", {"x": h["x"], "y": h["y"]},
+                         f"the highest sustained{rms} current density, {h['a_mm2']:.0f} A/mm² on {h['layer']}",
+                         h["layer"])
+
+    def _focus(self, rr, x: float, y: float):
+        """Zoom the maps to a FOCUS_MM square around (x, y) mm, kept inside the view's grid."""
         x0, x1, y0, y1 = rr.grid.extent
         half = FOCUS_MM / 2
         cx, cy = min(max(x, x0 + half), x1 - half), min(max(y, y0 + half), y1 - half)
         self._view = (cx - half, cx + half, cy - half, cy + half)
         self.redraw(maps_only=True)
-        if self.on_mark is not None:
-            rms = " RMS" if getattr(rr, "rms_of", None) is not None else ""
-            self.on_mark("via", {**v, "kind": "via"}, f"{v['name']}: {v['current_a']:.3g} A{rms} (the busiest)",
-                         self.selected_layer() or "")
 
     def tile_text(self) -> str:
         """The tiles' text (title value sub), for tests and the status line."""
