@@ -100,7 +100,7 @@ h4 { font-size:13px; text-transform:uppercase; letter-spacing:.07em; color:var(-
 .findings .fworst { color:var(--ink2); font-size:12.5px; margin-top:2px; }
 .tablewrap.narrow { max-width:620px; }
 #issues td.finding { min-width:380px; }
-#issues td.netc { max-width:190px; overflow-wrap:anywhere; }
+#issues td.netc { min-width:120px; max-width:240px; }
 #issues td.where { white-space:nowrap; }
 #issues code.fp { font-size:11px; color:var(--muted); }
 .pill { display:inline-block; padding:1px 9px; border-radius:999px; font-size:11.5px; font-weight:650;
@@ -120,7 +120,11 @@ tbody tr:nth-child(even) td { background:color-mix(in srgb, var(--line2) 45%, tr
 tbody tr:hover td { background:var(--accent2); }
 td.nw { white-space:nowrap; }
 td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
-tr.waived td { opacity:.5; } tr.hidden { display:none; }
+tr.waived td { opacity:.5; } tr.hidden, tr.pgout { display:none; }
+.pager { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:-6px 0 14px; font-size:12.5px; }
+.pager .pginfo { color:var(--muted); margin-right:8px; } .pager .pgnav { display:flex; gap:4px; margin-left:auto;
+                                                                           align-items:center; }
+.pager button.f.pg { min-width:30px; padding:3px 8px; } .pager button.f:disabled { opacity:.4; cursor:default; }
 .bad { color:var(--err); font-weight:650; } .meh { color:var(--warn); font-weight:650; } .good { color:var(--ok); }
 figure { margin:12px 0 18px; background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px; }
 figure img { display:block; max-width:100%; height:auto; margin:0 auto; cursor:zoom-in; }
@@ -153,12 +157,71 @@ footer { margin-top:40px; padding-top:14px; border-top:1px solid var(--line); co
   section.part.first { break-before:auto; } thead th { position:static; }
   tr, figure, .kpis { break-inside:avoid; } h2, h3, h4 { break-after:avoid; }
   * { -webkit-print-color-adjust:exact; print-color-adjust:exact; } a { color:inherit; }
-  tr.hidden { display:table-row; }
+  tr.hidden, tr.pgout { display:table-row; }
 }
 """
 
 _JS = """
 (() => {
+  // long tables (class 'paged'): a page of 25 rows at a time, or 50, 100 or all, with a pager under the table; the
+  // rows the issues' filters hide are left out of the count; a sort or a filter goes back to the first page;
+  // printing shows every row
+  const pagers = new Map();
+  const paginate = (t, page) => {
+    const p = pagers.get(t);
+    if (!p) return;
+    if (page !== undefined) p.page = page;
+    const all = [...t.tBodies[0].rows];
+    const rows = all.filter(r => !r.classList.contains('hidden'));
+    const size = p.size || Math.max(rows.length, 1);
+    const pages = Math.max(1, Math.ceil(rows.length / size));
+    p.page = Math.min(Math.max(p.page, 0), pages - 1);
+    const from = p.page * size, to = Math.min(from + size, rows.length);
+    all.forEach(r => r.classList.remove('pgout'));
+    rows.forEach((r, k) => r.classList.toggle('pgout', k < from || k >= to));
+    p.info.textContent = rows.length ? `Rows ${from + 1}–${to} of ${rows.length}` : 'No rows';
+    p.sizes.forEach(b => b.classList.toggle('on', Number(b.dataset.size) === p.size));
+    // the pages: the first, the last and two either side of this one, gaps as "…"
+    const want = [...new Set([0, pages - 1, ...[-2, -1, 0, 1, 2].map(d => p.page + d)])]
+      .filter(k => k >= 0 && k < pages).sort((a, b) => a - b);
+    p.nav.replaceChildren();
+    const btn = (label, k, on, off) => {
+      const b = document.createElement('button');
+      b.className = 'f pg' + (on ? ' on' : '');
+      b.textContent = label;
+      b.disabled = !!off;
+      b.addEventListener('click', () => paginate(t, k));
+      p.nav.appendChild(b);
+    };
+    if (pages > 1) {
+      btn('‹', p.page - 1, false, p.page === 0);
+      want.forEach((k, n) => {
+        if (n && k - want[n - 1] > 1) p.nav.appendChild(Object.assign(document.createElement('span'), {textContent: '…'}));
+        btn(String(k + 1), k, k === p.page);
+      });
+      btn('›', p.page + 1, false, p.page === pages - 1);
+    }
+  };
+  document.querySelectorAll('table.paged').forEach(t => {
+    const box = document.createElement('div');
+    box.className = 'pager noprint';
+    const info = document.createElement('span');
+    info.className = 'pginfo';
+    const show = Object.assign(document.createElement('span'), {className: 'note', textContent: 'Show'});
+    const sizes = [25, 50, 100, 0].map(n => {
+      const b = document.createElement('button');
+      b.className = 'f';
+      b.dataset.size = n;
+      b.textContent = n ? String(n) : 'all';
+      b.addEventListener('click', () => { pagers.get(t).size = n; paginate(t, 0); });
+      return b;
+    });
+    const nav = Object.assign(document.createElement('span'), {className: 'pgnav'});
+    box.append(info, show, ...sizes, nav);
+    t.closest('.tablewrap').after(box);
+    pagers.set(t, {size: 25, page: 0, info, sizes, nav});
+    paginate(t, 0);
+  });
   // sortable tables: a click on a column header sorts by it (numbers by their data-v value)
   document.querySelectorAll('table.sort').forEach(t => t.querySelectorAll('th').forEach((th, col) => {
     th.classList.add('sortable');
@@ -170,6 +233,7 @@ _JS = """
       rows.sort((a, b) => { const x = val(a), y = val(b), n = parseFloat(x) - parseFloat(y);
         const c = isNaN(n) ? String(x).localeCompare(String(y)) : n; return dir === 'asc' ? c : -c; });
       rows.forEach(r => tb.appendChild(r));
+      paginate(t, 0);
     });
   }));
   // the issues' filters: one severity (or all), and any number of checks (none picked: every check); a row shows
@@ -195,6 +259,8 @@ _JS = """
     if (allChk) allChk.classList.toggle('on', picked.size === 0);
     const out = document.getElementById('issues-shown');
     if (out) out.textContent = shown === rows.length ? '' : `${shown} of ${rows.length} shown`;
+    const table = document.getElementById('issues');
+    if (table) paginate(table, 0);
   };
   btns.forEach(b => b.addEventListener('click', () => {
     btns.forEach(o => o.classList.toggle('on', o === b));
@@ -243,11 +309,18 @@ def _kpis(cards: list[str]) -> str:
     return "<div class='kpis'>" + "".join(cards) + "</div>" if cards else ""
 
 
-def _table(head: list[str], rows: list[str], sort: bool = True, tid: str = "", narrow: bool = False) -> str:
+PAGE_ROWS = 25             # a paged table shows this many rows at first (then 50, 100, all: the page's script)
+
+
+def _table(head: list[str], rows: list[str], sort: bool = True, tid: str = "", narrow: bool = False,
+           paged: bool = False) -> str:
     """A table: head = column titles (a leading '#' makes a column right-aligned numbers), rows = '<tr>…</tr>';
-    narrow: a few short columns, not stretched across the page (their numbers far from their names)."""
+    narrow: a few short columns, not stretched across the page (their numbers far from their names); paged: with
+    more than PAGE_ROWS rows, a page at a time with a pager under it (the user: "these tables are too long in the
+    report. can we pageinate, default is 25, then 50, 100, all")."""
     ths = "".join(f"<th class='num'>{e(h[1:])}</th>" if h.startswith("#") else f"<th>{e(h)}</th>" for h in head)
-    attrs = (f' id="{tid}"' if tid else "") + (' class="sort"' if sort else "")
+    classes = " ".join(c for c, on in (("sort", sort), ("paged", paged and len(rows) > PAGE_ROWS)) if on)
+    attrs = (f' id="{tid}"' if tid else "") + (f' class="{classes}"' if classes else "")
     return (f"<div class='tablewrap{' narrow' if narrow else ''}'><table{attrs}><thead><tr>{ths}</tr></thead><tbody>"
             + "".join(rows) + "</tbody></table></div>")
 
@@ -666,7 +739,7 @@ def _issues(issues: list[Issue]) -> str:
                     f"<td class='num' data-v='{k}'>{k}"
                     f"</td><td data-v='{rank.get(i.severity, 3)}'><span class='pill {i.severity}'>{e(i.severity)}</span>"
                     f"{WAIVED if i.waived else ''}</td>"
-                    f"<td class='nw'>{e(i.check)}</td><td class='netc'>{e(i.net)}</td>"
+                    f"<td class='nw'>{e(i.check)}</td><td class='netc'>{e(i.net).replace('/', '/<wbr>')}</td>"
                     f"<td class='finding'>{e(i.message)}"
                     + (f"<br><span class='note'>Waived: {e(i.waiver_reason)}</span>" if i.waived and i.waiver_reason
                        else "") +
@@ -691,7 +764,7 @@ def _issues(issues: list[Issue]) -> str:
                               f"{e(c)} <span class='cn'>{counts[c]}</span></button>" for c in sorted(counts))
                     + "<span class='note' id='issues-shown'></span></div>")
     return filters + _table(["#Nr", "Severity", "Check", "Net", "Finding", "Where (mm, layer)", "Fingerprint"],
-                            rows, tid="issues")
+                            rows, tid="issues", paged=True)
 
 
 # --------------------------------------------------------------------------------------------- signal nets
@@ -870,7 +943,7 @@ def _stage(board, c, issues, warn, figs, view3d, rules=None) -> str:
                      f"{c.net}: radiated and conducted estimates against the limits"))
     if getattr(c, "victims", None):
         body.append("<h4>Victims at the switching edges</h4>" + _table(
-            ["Finding", "#Peak", "#Threshold"], [_victim_row(v) for v in c.victims]))
+            ["Finding", "#Peak", "#Threshold"], [_victim_row(v) for v in c.victims], paged=True))
     body.append(_responses(c.net, getattr(c, "responses", ()), figs))
     body.append(_notes(c.notes))
     return "".join(body) + "</article>"
@@ -1216,7 +1289,7 @@ def _bridge(board, b, legs, issues, warn, figs) -> str:
         body.append("<h4>Parts' losses at the operating point</h4>" + _table(
             ["Part", "#Loss", "What"],
             [f"<tr><td>{e(x['ref'])}</td>{_num(x['power_w'], '{:.3g} W')}<td>{e(x['what'])}</td></tr>"
-             for x in b.losses]))
+             for x in b.losses], paged=True))
     rv = rms_view(b, legs[0]) if legs else None
     if rv is not None:
         body.append(_img(figs.heat(f"{b.net} RMS currents", board, rv, issues, size=_maps_size(rv)),
@@ -1227,7 +1300,7 @@ def _bridge(board, b, legs, issues, warn, figs) -> str:
                  for p in r.get("parts", [])]
         if rows:
             body.append("<h4>Busiest vias and series parts (RMS)</h4>"
-                        + _table(["Item", "#RMS current", "#Of its IPC-2221 rating"], rows))
+                        + _table(["Item", "#RMS current", "#Of its IPC-2221 rating"], rows, paged=True))
     else:
         figs.done += 1
     if b.sweep:
@@ -1252,7 +1325,7 @@ def _bridge(board, b, legs, issues, warn, figs) -> str:
                             "#A/mm² RMS", "#Busiest cap", "#Conducted", "#Radiated"], rows))
     if b.victims:
         body.append("<h4>Victims at the switching edges</h4>" + _table(
-            ["Finding", "#Peak", "#Threshold"], [_victim_row(v, victim_text) for v in b.victims]))
+            ["Finding", "#Peak", "#Threshold"], [_victim_row(v, victim_text) for v in b.victims], paged=True))
     body.append(_notes(b.notes))
     return "".join(body) + "</article>"
 
