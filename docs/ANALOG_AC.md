@@ -1,6 +1,6 @@
 # Plan: a generic small-signal model of op-amp circuits (any topology)
 
-Status: **steps 1-5 done** on branch `analog-ac` (2026-10-21); the step response is the next branch. Asked by the user, of refboard's ADC path (ZXCT1107 → R304 →
+Status: **steps 1-5 done and merged into `main`** (2026-10-21, 56fb575); the step response is the next branch. Asked by the user, of refboard's ADC path (ZXCT1107 → R304 →
 TLV6001 follower → R303 / C304 → ADC): "Are we currently considering the Opamp circuit and it's amplification etc.
 If I were to build an active lowpass filter, would that simulate it as one?", then "yes plan it", "present the
 plan", and: **"I want a generic model that can calculate any circuit made from an OPA"**. Builds on `bode-sweep`
