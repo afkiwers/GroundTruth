@@ -72,7 +72,17 @@ def _bode(rr) -> list[Kpi]:
                     "fallen 3 dB below that (the bandwidth)" + (f"; it peaks {g['peak_db']:.1f} dB above it at "
                                                                 f"{fmt_hz(g['peak_f'])} (a resonance)"
                                                                 if g["peak_db"] else "")))
-    for r in rr.responses[:4]:
+    # the lowest phase margin of the op-amps' loops (emi/mna.Circuit.loop_gain): a loop that rings or oscillates
+    from ..analysis.transfer import PM_ERROR, PM_WARN
+    loops = [r for r in rr.responses if getattr(r, "margin", None)]
+    if loops:
+        worst = min(loops, key=lambda r: r.margin["pm"])
+        pm = worst.margin["pm"]
+        out.append(("phase margin", f"{pm:.0f}°", f"{worst.name.split(':')[0]} at {fmt_hz(worst.margin['f_c'])}",
+                    "error" if pm < PM_ERROR else "warn" if pm < PM_WARN else "",
+                    "the lowest phase margin of the op-amps' loops (180° + the loop gain's phase where it falls "
+                    "through 1): below 45° the circuit rings, near 0° it oscillates"))
+    for r in [x for x in rr.responses if x.quantity != "loop gain"][:4]:
         if len(out) >= 4:
             break
         rows = pz_rows(r.poles)

@@ -197,3 +197,31 @@ def test_a_line_two_port_open_at_its_end_is_its_capacitance():
     assert np.allclose(ckt.transfer(f, "b"), 1 / (1 + 2j * math.pi * f * 1e3 * cl), rtol=1e-3)
     with pytest.raises(ValueError):
         ckt.poles_zeros("b")
+
+
+def test_the_loop_gain_and_phase_margin_of_followers_and_an_inverting_stage():
+    """loop_gain broken at the op-amp's ideal output: a follower with one pole: |T| = A0 at DC, crossover at GBW,
+    90° of phase margin; with a second pole at GBW: crossover at 0.786·GBW (x·√(1 + x²) = 1) and
+    90° − atan(0.786) = 51.8°; an inverting stage of gain 10: T = A0/11 at DC, crossover GBW/11 [Franco 2015]."""
+    from groundtruth.analysis.transfer import phase_margin
+
+    def follower(fp2=None):
+        """A follower (GBW 1 MHz, A0 1e5, R_O 1 mΩ)."""
+        c = Circuit()
+        c.vsource("in", "0")
+        c.opamp("U1", "in", "out", "out", OpAmpParams(gbw=1e6, a0=1e5, fp2=fp2, r_out=1e-3, c_in=0.0))
+        return c
+    f = np.geomspace(1, 1e8, 2000)
+    t = follower().loop_gain("U1", f)
+    assert abs(t[0]) == pytest.approx(1e5 / math.hypot(1, 1 / 10.0), rel=1e-6)      # its open-loop pole at GBW/A0 = 10 Hz
+    pm = phase_margin(f, t)
+    assert pm["f_c"] == pytest.approx(1e6, rel=0.01) and pm["pm"] == pytest.approx(90.0, abs=0.5)
+    pm = phase_margin(f, follower(1e6).loop_gain("U1", f))
+    x = math.sqrt((math.sqrt(5) - 1) / 2)
+    assert pm["f_c"] == pytest.approx(x * 1e6, rel=0.01)
+    assert pm["pm"] == pytest.approx(90 - math.degrees(math.atan(x)), abs=0.5)
+    inv = _inverting(1e3, 10e3, 1e6)
+    t = inv.loop_gain("U1", f)
+    beta = 1e3 / (1e3 + 10e3 + 50.0)
+    assert abs(t[0]) == pytest.approx(1e5 * beta / math.hypot(1, 1 / 10.0), rel=1e-6)
+    assert phase_margin(f, t)["f_c"] == pytest.approx(1e6 * beta, rel=0.01)

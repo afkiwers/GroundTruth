@@ -1278,6 +1278,19 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
     sym = symbolic_transfer(net.schematic)
     if sym is not None and out:
         out[0].symbolic = {"text": sym.text, "latex": sym.latex, "mathml": sym.mathml}
+    # each op-amp's loop gain and phase margin (emi/mna.Circuit.loop_gain): a loop that rings or oscillates shows
+    from .transfer import PM_WARN, fmt_hz, phase_margin
+    for name in net.circuit.opamps:
+        t = net.circuit.loop_gain(name, f)
+        r = Response(f"{name}: loop gain", spec.name, "loop gain", np.asarray(f, float), t)
+        pm = phase_margin(f, t)
+        r.margin = pm
+        if pm is None:
+            r.notes.append("its loop gain does not fall through 1 in the sweep (sweep higher for the phase margin)")
+        else:
+            r.notes.append(f"crossover {fmt_hz(pm['f_c'])}, phase margin {pm['pm']:.0f}°"
+                           + (" (it rings: below 45°)" if pm["pm"] < PM_WARN else ""))
+        out.append(r)
     notes = list(dict.fromkeys(net.notes + lumped.notes))
     kinds = ", ".join(f"{n} ({k})" for n, k in net.opamps)
     notes.insert(0, f"circuit: {len(net.nets)} net(s), {len(net.parts)} part(s), {net.tracks} track segment(s)"
