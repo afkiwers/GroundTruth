@@ -721,7 +721,9 @@ their state for next time. How vias and parts are marked is set in <a href="#pre
   close together are written apart (with a thin line to their via where they had to move). <b>Click the busiest
   via tile</b> to zoom the maps to it; opened from KiCad, it is selected there too. <b>Click the current density
   tile</b> (a DC path's, a DC load's, a bridge's <b>RMS current density</b>) to zoom the maps to its hottest
-  sustained spot, the cyan ×; opened from KiCad, the copper there is shown on its layer.</li>
+  sustained spot, the cyan ×; opened from KiCad, KiCad zooms there too (whatever <b>Zoom to it</b> says), on that
+  layer: KiCad can only zoom to selected copper, so the small copper around the spot (the vias, pads and short
+  tracks of the spot's net within 3 mm) is selected and the pour the spot lies in is selected after the zoom.</li>
 <li><b>Hover</b> over a map for the value under the mouse; over a red / orange issue circle for the issue
   (severity, check and message, in full as a tooltip). Issues whose circles would overlap at the shown zoom share
   one circle, in the worst one's colour, with their number beside it: its tooltip counts them and names the worst,
