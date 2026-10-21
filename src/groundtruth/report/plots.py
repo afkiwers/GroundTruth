@@ -1402,6 +1402,7 @@ def draw_bode(fig: Figure, view) -> None:
     """A Bode plot of a view's responses (analysis/transfer.BodeView): magnitude on top (dB, or Ω on a log axis for
     impedances), the unwrapped phase below, on one log frequency axis; each response in its colour, its poles (×)
     and zeros (○) marked at their natural frequencies on its magnitude curve."""
+    from ..analysis.transfer import response_label
     fig.clear()
     resp = [r for r in view.responses if len(r.f)]
     if not resp:
@@ -1419,7 +1420,7 @@ def draw_bode(fig: Figure, view) -> None:
         f = np.asarray(r.f) / 1e6
         f_all += list(f)
         mag = np.abs(r.h) if ohms else 20 * np.log10(np.maximum(np.abs(r.h), 1e-30))
-        ax_m.plot(f, mag, color=c, lw=1.3, label=r.name.split(": ", 1)[-1])
+        ax_m.plot(f, mag, color=c, lw=1.3, label=response_label(r, view.owner))
         ax_p.plot(f, r.phase_deg(), color=c, lw=1.1)
         for roots, marker in ((r.poles, "x"), (r.zeros, "o")):
             rows = _pz_in_band(roots, r.f)
@@ -1436,10 +1437,22 @@ def draw_bode(fig: Figure, view) -> None:
     ax_p.tick_params(labelsize=FS_TICK, which="both")
     for ax in (ax_m, ax_p):
         ax.grid(True, which="both", alpha=0.3)
-    w_in, _ = fig.get_size_inches()
+    w_in, h_in = fig.get_size_inches()
     left_in, right_in = _lh(FS_TEXT) + _width_in("-1000", FS_TICK) + 0.24, 0.25
     header = _title_and_key(ax_m, f"{view.owner}: Bode (× poles, ○ zeros)", w_in - left_in - right_in)
-    _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TICK) + 0.08, header + 0.06, hspace=0.08)
+    # the first response's transfer function in its part names (analysis/symbolic.py), in matplotlib's math text
+    # under the title: the user, "i want the transfer function to be shown in the results as well"
+    sym = next((r.symbolic for r in resp if getattr(r, "symbolic", None)), None)
+    extra = 0.0
+    if sym and sym.get("latex"):
+        tex = sym["latex"].replace(r"\left(", "(").replace(r"\right)", ")")      # sizes mathtext does not need
+        try:
+            fig.text(left_in / w_in, 1 - 0.08 / h_in, f"${tex}$", ha="left", va="top", fontsize=FS_TEXT * 1.6,
+                     transform=fig.transFigure)
+            extra = 0.5
+        except ValueError:                  # math text it can't parse: the summary line shows the plain text
+            extra = 0.0
+    _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TICK) + 0.08, header + 0.06 + extra, hspace=0.08)
 
 
 def _pz_in_band(roots, f) -> list[dict]:
@@ -1453,6 +1466,7 @@ def draw_pz(fig: Figure, view) -> None:
     """The pole-zero map of a view's responses: the s-plane in Hz (σ/2π across, ω/2π up) on symmetric log axes
     (poles and zeros span decades), × poles and ○ zeros in each response's colour, the dominant ones labelled with
     their natural frequency and Q."""
+    from ..analysis.transfer import response_label
     fig.clear()
     ax = fig.add_subplot(111)
     pts = []
@@ -1463,7 +1477,7 @@ def draw_pz(fig: Figure, view) -> None:
             ys = [complex(s).imag / (2 * math.pi) for s in roots]
             if xs:
                 ax.plot(xs, ys, marker, color=c, ms=7, mfc="none", mew=1.5,
-                        label=r.name.split(": ", 1)[-1] if marker == "x" else None)
+                        label=response_label(r, view.owner) if marker == "x" else None)
                 pts += [abs(v) for v in xs + ys if v]
     if not pts:
         ax.text(0.5, 0.5, "no poles or zeros", ha="center", va="center", transform=ax.transAxes, fontsize=FS_TEXT)
