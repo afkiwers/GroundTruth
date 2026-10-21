@@ -546,7 +546,8 @@ def _ic_nets(fp: Footprint, config: Config) -> tuple[Optional[str], Optional[str
 
 
 GATE_FN = re.compile(r"^G(ATE|N)?\d*$", re.I)
-KELVIN_FN = re.compile(r"^(KS|SK|KELVIN|S_?K(ELVIN)?|SS)\d*$", re.I)     # a FET's Kelvin (driver) source pin
+# a FET's Kelvin (driver) source pin; RTN / GR: a GaN FET's gate return (EPC230x symbols name it so)
+KELVIN_FN = re.compile(r"^(KS|SK|KELVIN|S_?K(ELVIN)?|SS|RTN|GR|G_?RTN)\d*$", re.I)
 SENSE_PIN = re.compile(r"^I_?P[+-]$", re.I)                            # a current-sense IC's primary: IP+ / IP-
 DRIVER_SW_PIN = re.compile(r"(^|[^A-Z])(SW|LX|PH|PHASE|SWITCH|HS|VS|HB|SH)[A-CU-W]?\d*($|[^A-Z])", re.I)
 DRIVER_IN_PIN = re.compile(r"^(H|L)?IN[HL]?[A-CU-W]?\d*$|^IN_?[HL][A-CU-W]?\d*$|^PWM[HL]?[A-CU-W]?\d*$", re.I)

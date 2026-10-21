@@ -141,3 +141,18 @@ def test_an_op_amp_driven_net_gets_the_fastest_signal_its_op_amp_can_make(tmp_pa
     assert ("U5's" in after.reasons[-1]) == bool(fields)
     before, _ = suggest_net(board, cfg, "SIG_A")
     assert (before.spec.freq, before.spec.rise_time) == (10e6, 2e-9)
+
+
+@pytest.mark.parametrize("kelvin", ["RTN", "GR", "KS"])
+def test_a_gan_fet_with_a_gate_return_pin_is_read_as_a_transistor(kelvin):
+    """An EPC230x as a library symbol draws it: GN, three SN and three DN pads and a gate return (Kelvin source)
+    named RTN or GR on its own net. The return pin is left out, so the part is one gate and two power nets (it was
+    four nets, not a transistor, and a bridge of them had no legs)."""
+    from groundtruth.analysis.detect import fet_terms
+    from groundtruth.core.board import Footprint, Pad
+    nets = {"GN": "GATE_A", "SN": "PH_A", "DN": "VBUS", kelvin: "HI_RTN"}
+    names = ["GN", "SN", "DN", "SN", "DN", "SN", "DN", kelvin]
+    pads = [Pad("Q1", str(i + 1), (i, 0.0), 0.0, (0.5, 0.5), "rect", ["F.Cu"], nets[n], pin_function=n)
+            for i, n in enumerate(names)]
+    fp = Footprint("Q1", "EPC2302", "Package_GAN:EPC_EPC230x_QFN-7_3x5_Kelvin", (0.0, 0.0), 0.0, "F.Cu", pads)
+    assert fet_terms(fp) == ("GATE_A", {"PH_A", "VBUS"})
