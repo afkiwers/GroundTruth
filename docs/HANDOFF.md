@@ -1,12 +1,26 @@
 # GroundTruth handover
 
-## Current state (2026-10-21, `analog-ac`, `bode-sweep`, `pin-shares`, `electrothermal`, `density-pcb`, `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-21, branch `step-response` open; `analog-ac`, `bode-sweep`, `pin-shares`, `electrothermal`, `density-pcb`, `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `step-response` (2026-10-21, from `main` 1de736c; OPEN, committed, not merged):** the user: "let's do it
+  now -> Step response" (the plan's second branch, ANALOG_AC.md). Each signal-path response (the receiver, each
+  op-amp output) gets its step response: `emi/mna.Circuit.step` (BDF2 [Gear 1971] on the lumped circuit, from rest,
+  one factorisation), `simulate._step_of` (12 time constants of the slowest pole, 3000 steps, the DC gain as the
+  final value; none for an integrator), `transfer.step_metrics` (final value, 10-90 % rise, overshoot, undershoot,
+  peak, settling into ±2 % [Ogata 2010]); a plot on the Results tab's third canvas under the Bode plot
+  (`plots.draw_step`, a panel per time scale), a `step` tile, the console line, the report (figure and figures),
+  JSON `step`, `groundtruth bode --plots` `<path>_step.png`. Kraft ADC_I_RAIL_1: rise 775 µs (2.197·R303·C304 =
+  774 µs), settles in 1.38 ms (3.91 τ), no overshoot; U301's output rise 512 ns. Tests: test_step (RC within 1e-4,
+  rise τ·ln 9 and settling τ·ln 50 to 0.5 %; a Q 2 RLC within 1e-3 and 44.43 % overshoot; the Sallen-Key board's
+  4.32 %; an all-pass's undershoot; an integrator none), the Bode-button GUI test (the canvas, the tile). Also on it,
+  first: the analog-ac merge's two real suite failures fixed (a stage's input current is what enters its first piece:
+  SP-9; the help's 'analog' section in its topics); that suite: 1087 passed, 1 skipped, 5 failed (those two, three
+  GUI timing checks that pass alone).
 - **Branch `analog-ac` (2026-10-21, from `main` e9b2c7d, 56fb575; into `main` at the user's "commit and merge", a
   fast-forward, branch deleted; the full suite was still running at the merge: its result below):** the
   user, of kraft's ADC path: "Are we currently considering the Opamp circuit and it's amplification etc. If I were
@@ -34,8 +48,8 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
     signal path)" (Gain left as it is): `max_bandwidth` per path and an op-amp stage's Bandwidth field as limits
     (`bandwidth_limit`), `opamp_stability` (phase margin below 45° / 20°), the fields Aol / Fp2 / PM (PM → fp2 =
     GBW·sin(PM)·tan(PM), exact), A55; every equation cites its source in the code ("make sure you add references").
-  - **Left**: the step response (a second branch, as decided). Full suite at the merge: running
-    (`out/analog/full_suite.log`); its result to be added here.
+  - Full suite at the merge: 1087 passed, 1 skipped, 5 failed (two fixed on `step-response`, three GUI timing
+    checks that pass alone; `out/analog/full_suite.log`). The step response: branch `step-response`.
 - **Branch `bode-sweep` (2026-10-21, from `main` dc810f5, 2fe38f5; into `main` at the user's "merge", a fast-forward, branch deleted):** the user, with the Signal
   paths tab: "could we add a frequency sweep of a sinusoidal signal to retrieve amplitude and phase plots as well as
   pole zero plots?" Simulate already made Bode / poles and zeros views per path, but only over the signal's band

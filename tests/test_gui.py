@@ -2074,6 +2074,9 @@ def test_the_bode_button_sweeps_the_selected_path_over_its_own_range(app, frame)
     assert len(views) == 1 and views[0].owner == n.name and len(views[0].responses[0].f) == 150
     assert f.results_panel.current() is views[0] and f.results_panel.tile_text().startswith("gain ")
     assert "swept" in f.status_text()
+    # its step response: on the third canvas, under the Bode plot, and a "step" tile
+    assert views[0].responses[0].step is not None and f.results_panel.canvas3.IsShown()
+    assert "step" in f.results_panel.tile_text()
 
 
 def test_several_nets_picked_in_kicad_become_one_path_with_its_models_and_labels(app, tmp_path, monkeypatch):

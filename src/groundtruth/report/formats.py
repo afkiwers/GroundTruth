@@ -394,6 +394,10 @@ def response_lines(r) -> list[str]:
                                      if margin else "no crossover in the sweep")]
     out = ([f"    {r.name}: gain {gain_text(g)}"] if g is not None else []) + \
         [f"    {r.name}: poles {roots(pz_rows(r.poles))}; zeros {roots(pz_rows(r.zeros))} ({how})"]
+    st = getattr(r, "step", None)
+    if st:
+        from ..analysis.transfer import step_text
+        out.append(f"    {r.name}: step: {step_text(st['metrics'])}")
     sym, nf = getattr(r, "symbolic", None), getattr(r, "normal", None)
     if sym:
         out.append(f"    {r.name}: {sym['text']}   (ideal circuit, part names)")

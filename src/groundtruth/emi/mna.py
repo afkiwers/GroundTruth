@@ -284,6 +284,38 @@ class Circuit:
         """H(f) = (v(out) − v(ref)) per volt of the input, at each frequency."""
         return self.solve(f) @ self.output(out, ref)
 
+    def step(self, out: str, t, ref: Optional[str] = None) -> np.ndarray:
+        """The step response v(out) − v(ref) at the times t (s, uniform from 0) for a 1 V step of the input at t = 0,
+        everything at rest before: the descriptor system C·x' + G·x = b·u integrated by the second-order backward
+        differentiation formula (Gear's BDF2, what SPICE uses for stiff circuits [Gear 1971]; its first step backward
+        Euler), (3C/2h + G)·x_{n+1} = b + C·(4x_n − x_{n−1})/2h, one sparse factorisation for the whole run. BDF2 is
+        A-stable and damps the circuit's fast modes (a track's GHz resonances beside a filter's kHz poles) instead
+        of ringing on them, and handles C's singular rows (the circuit's algebraic equations). Refuses a circuit with
+        two-ports (frequency-domain only: use its lumped π sections)."""
+        if self._y2:
+            raise ValueError("a circuit with frequency-dependent two-ports has no time-domain model: use lumped=True")
+        import scipy.sparse.linalg as spl
+        g, c, b = self._sparse()
+        b = b.real
+        t = np.asarray(t, float)
+        if len(t) < 3:
+            raise ValueError("a step response wants at least three times")
+        h = float(t[1] - t[0])
+        cv = self.output(out, ref)
+        n = self.size
+        x0 = np.zeros(n)
+        be = spl.splu((c / h + g).tocsc())               # the first step: backward Euler
+        x1 = be.solve(b + c @ x0 / h)
+        lu = spl.splu((1.5 * c / h + g).tocsc())
+        y = np.empty(len(t))
+        y[0], y[1] = cv @ x0, cv @ x1
+        xm, xn = x0, x1
+        for k in range(2, len(t)):
+            xp = lu.solve(b + c @ (4 * xn - xm) / (2 * h))
+            y[k] = cv @ xp
+            xm, xn = xn, xp
+        return y
+
     def loop_gain(self, name: str, f) -> np.ndarray:
         """The loop gain T(f) around op-amp channel `name` (opamp): its loop broken at its internal output, which
         is an ideal source (the buffer before R_O), so driving it with 1 V instead loads nothing and the break is

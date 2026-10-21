@@ -82,6 +82,18 @@ def _bode(rr) -> list[Kpi]:
                     "error" if pm < PM_ERROR else "warn" if pm < PM_WARN else "",
                     "the lowest phase margin of the op-amps' loops (180° + the loop gain's phase where it falls "
                     "through 1): below 45° the circuit rings, near 0° it oscillates"))
+    # the path's step response: its overshoot and settling time (emi/mna.Circuit.step)
+    from ..analysis.transfer import fmt_s
+    st = next((r.step for r in rr.responses if getattr(r, "step", None)), None)
+    if st and len(out) < 4:
+        m = st["metrics"]
+        if m.get("rise") is not None:
+            out.append(("step", f"{m['overshoot_pct']:.1f} % overshoot",
+                        f"rise {fmt_s(m['rise'])} · settles {fmt_s(m['settling'])}",
+                        "warn" if m["overshoot_pct"] >= 20 else "",
+                        "the receiver's response to a 1 V step at the driver: its overshoot above the final value, "
+                        "the 10-90 % rise time and the time it stays within ±2 % of the final value (the plot below "
+                        "the Bode plot)"))
     # a bandwidth limit exceeded (the path's max_bandwidth, an op-amp's Bandwidth field: network_responses)
     over = [n for r in rr.responses for n in r.notes if n.startswith("bandwidth_limit: ")]
     if over:

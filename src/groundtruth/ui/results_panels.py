@@ -850,7 +850,10 @@ class ResultsPanel(wx.Panel):
                          max_vias=max_vias, outlines=outlines, names=names)
         views = [(self.canvas, heat)]
         if not maps_only:
-            if self.canvas3.IsShown():
+            if self.canvas3.IsShown() and rr.kind == "bode":     # a Bode view's step responses
+                from ..report.plots import draw_step
+                views.append((self.canvas3, lambda fig: draw_step(fig, rr)))
+            elif self.canvas3.IsShown():
                 views.append((self.canvas3, lambda fig: draw_section(fig, board, rr)))
             if rr.kind == "pdn":
                 from ..report.plots import draw_pdn_holds
@@ -925,7 +928,7 @@ class ResultsPanel(wx.Panel):
         width (plots.heatmap_height_in: no empty bands above and below them); the cross-section (a route's, when
         ticked) and the spectrum have heights of their own (plots.section_height_in, SPECTRUM_IN); all as wide as
         the page. The page then scrolls over all of them."""
-        from ..report.plots import heatmap_height_in, section_height_in
+        from ..report.plots import STEP_IN, heatmap_height_in, section_height_in
         w, h = self.page.GetClientSize()
         inch = self._px(1.0)
         if rr.kind in CURVE_KINDS:              # the curves: the page's height, as a map would get at most
@@ -933,7 +936,8 @@ class ResultsPanel(wx.Panel):
         else:
             maps = self._px(heatmap_height_in(rr, w / inch, max(h - 6, MAPS_MIN_PX) / inch, layer, vectors, scale))
         heights = ((self.canvas, max(maps, MAPS_MIN_PX)),
-                   (self.canvas3, self._px(section_height_in(self.board, rr)) if self.canvas3.IsShown() else 120),
+                   (self.canvas3, (self._px(STEP_IN) if rr.kind == "bode" else
+                                   self._px(section_height_in(self.board, rr))) if self.canvas3.IsShown() else 120),
                    (self.canvas2, self._px(SPECTRUM_IN)))
         for c, h in heights:
             if c.GetMinSize().height != h:
@@ -983,6 +987,9 @@ class ResultsPanel(wx.Panel):
     def section_shown(self, rr=None) -> bool:
         """The cross-section is wanted (its box ticked) and the view has one (a signal route)."""
         rr = rr if rr is not None else self.current()
+        if rr is not None and rr.kind == "bode":        # a Bode view: its step responses there (plots.draw_step)
+            from ..report.plots import has_step
+            return has_step(rr)
         if rr is not None and rr.kind == "bridge":      # its capacitors' ripple bars (not on the sweep)
             return bool(self.section_box.GetValue() and getattr(rr, "caps", None) and rr.view != "sweep")
         return bool(self.section_box.GetValue() and rr is not None and getattr(rr, "section", None)
