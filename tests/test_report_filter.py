@@ -70,7 +70,7 @@ LINK_PROBE = """<script>
 
 def _edge_probe(tmp_path, body: str, probe: str) -> str:
     """The text the probe script writes into the page after running in headless Edge."""
-    page = ("<!doctype html><html><head><style>tr.hidden{display:none}</style></head><body>" + body
+    page = ("<!doctype html><html><head><style>" + html._CSS + "</style></head><body>" + body
             + f"<script>{html._JS}</script>" + probe + "</body></html>")
     f = tmp_path / "page.html"
     f.write_text(page, encoding="utf-8")
@@ -79,6 +79,53 @@ def _edge_probe(tmp_path, body: str, probe: str) -> str:
     m = re.search(r"<pre id=\"probe\">(.*?)</pre>", run.stdout)
     assert m, run.stdout[-2000:] + run.stderr[-2000:]
     return m.group(1)
+
+
+PAGER_PROBE = """<script>
+(() => {
+  const vis = () => [...document.querySelectorAll('#issues tbody tr')]
+    .filter(r => getComputedStyle(r).display !== 'none').length;
+  const info = () => document.querySelector('.pager .pginfo').textContent;
+  const res = {};
+  res.first = [vis(), info()];
+  [...document.querySelectorAll('.pager button.pg')].find(b => b.textContent === '2').click();
+  res.page2 = [vis(), info()];
+  document.querySelector(".pager button[data-size='50']").click();
+  res.fifty = [vis(), info()];
+  document.querySelector(".pager button[data-size='0']").click();
+  res.all = [vis(), info(), document.querySelectorAll('.pager button.pg').length];
+  document.querySelector(".pager button[data-size='25']").click();
+  [...document.querySelectorAll('.pager button.pg')].find(b => b.textContent === '3').click();
+  document.querySelector("button.f[data-sev='error']").click();
+  res.errors = [vis(), info()];
+  document.querySelector("button.f[data-sev='all']").click();
+  [...document.querySelectorAll('.pager button.pg')].find(b => b.textContent === '2').click();
+  document.querySelector('#issues th').click();
+  res.sorted = [vis(), info()];
+  const pre = document.createElement('pre'); pre.id = 'probe'; pre.textContent = JSON.stringify(res);
+  document.body.appendChild(pre);
+})();
+</script>"""
+
+
+def test_long_tables_are_paged_and_short_ones_not():
+    """More than 25 rows: the table is 'paged'; 25 or fewer: no pager."""
+    many = [Issue("cap_voltage", "warning", "C1", f"c {k}", (float(k), 0.0), key=str(k)) for k in range(26)]
+    assert 'class="sort paged"' in html._issues(many)
+    assert "paged" not in html._issues(many[:25])
+
+
+@pytest.mark.skipif(not EDGE.exists(), reason="needs Microsoft Edge for a headless page")
+def test_the_pager_pages_the_issues_with_their_filters(tmp_path):
+    """60 issues (20 errors): 25 rows at first; page 2 the next 25; 50 rows; all (no page buttons); on page 3 the
+    Error filter goes back to the first page of its 20; a sort goes back to page 1."""
+    import json
+    issues = [Issue("cap_voltage" if k % 2 else "clearance_voltage", "error" if k % 3 == 0 else "warning", "+VDC",
+                    f"m {k}", (float(k), 0.0), key=str(k)) for k in range(60)]
+    res = json.loads(_edge_probe(tmp_path, html._issues(issues), PAGER_PROBE).replace("&quot;", '"'))
+    assert res["first"] == [25, "Rows 1–25 of 60"] and res["page2"] == [25, "Rows 26–50 of 60"]
+    assert res["fifty"] == [50, "Rows 1–50 of 60"] and res["all"] == [60, "Rows 1–60 of 60", 0]
+    assert res["errors"] == [20, "Rows 1–20 of 20"] and res["sorted"] == [25, "Rows 1–25 of 60"]
 
 
 @pytest.mark.skipif(not EDGE.exists(), reason="needs Microsoft Edge for a headless page")
@@ -95,7 +142,7 @@ def test_clicking_checks_shows_only_them(tmp_path):
     """vds_rating and plane_resonance picked: their two rows; with Error: only vds_rating's, the chips counting
     errors; 'all' checks with Error: the two errors; back to All: all seven."""
     import json
-    page = ("<!doctype html><html><head><style>tr.hidden{display:none}</style></head><body>"
+    page = ("<!doctype html><html><head><style>" + html._CSS + "</style></head><body>"
             + html._issues(_issues()) + f"<script>{html._JS}</script>" + PROBE + "</body></html>")
     f = tmp_path / "issues.html"
     f.write_text(page, encoding="utf-8")
