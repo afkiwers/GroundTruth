@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Return-path and EMI analysis for KiCad 10+ boards: KiCad plugin and CI command line"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "GPL-3.0-only" }   # the LICENSE file (GNU GPL v3), as README says
 dependencies = [
     "numpy>=1.26",
     "scipy>=1.11",

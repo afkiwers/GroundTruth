@@ -719,7 +719,9 @@ their state for next time. How vias and parts are marked is set in <a href="#pre
   checks (current density, via overload) always look at every via, and the tile <b>busiest via</b> names the
   one carrying most. On the maps that via has a <b>white ring</b> and its share a white-edged label; shares of vias
   close together are written apart (with a thin line to their via where they had to move). <b>Click the busiest
-  via tile</b> to zoom the maps to it; opened from KiCad, it is selected there too.</li>
+  via tile</b> to zoom the maps to it; opened from KiCad, it is selected there too. <b>Click the current density
+  tile</b> (a DC path's, a DC load's, a bridge's <b>RMS current density</b>) to zoom the maps to its hottest
+  sustained spot, the cyan ×; opened from KiCad, the copper there is shown on its layer.</li>
 <li><b>Hover</b> over a map for the value under the mouse; over a red / orange issue circle for the issue
   (severity, check and message, in full as a tooltip). Issues whose circles would overlap at the shown zoom share
   one circle, in the worst one's colour, with their number beside it: its tooltip counts them and names the worst,
@@ -1553,5 +1555,87 @@ heating.</p>
 The code cites the same keys where it uses them: <code>[Grover 1946]</code> in a comment means that line applies that
 source, <code>[A12]</code> that it relies on assumption A12. This is the project's docs/REFERENCES.md.</p>
 @REFERENCES@
+<hr><a name="licenses"></a><h3>Third-party software and licences</h3>
+<p><b>GroundTruth</b> is free software under the <b>GNU General Public License v3.0</b> (the LICENSE file shipped with
+it). Its thermal solver (<code>groundtruth.thermal</code>) is the author's own PCB Thermal app, included in
+GroundTruth. Everything else it runs on is other people's work, listed here with its licence. Every Python package
+it uses is named below, those it asks for and those they in turn pull in; the Python standard library is Python's
+own (PSF License). Each package's full licence text is installed with it, in the plugin's Python environment
+(<code>site-packages/&lt;package&gt;-&lt;version&gt;.dist-info</code>). Versions are whatever pip installs, at least
+the ones the plugin's <code>requirements.txt</code> names.</p>
+
+<p><b>Installed with the plugin</b> (KiCad installs them into the plugin's own Python environment from its
+<code>requirements.txt</code>):</p>
+<table border="1" cellpadding="3" cellspacing="0">
+<tr><th>Package</th><th>Used for</th><th>Licence</th><th>Home</th></tr>
+<tr><td>kicad-python (kipy)</td><td>reading the board from KiCad and drawing on it (KiCad's IPC API)</td><td>MIT</td>
+  <td>gitlab.com/kicad/code/kicad-python</td></tr>
+<tr><td>NumPy</td><td>every array, the FFTs of the field solver's kernels</td><td>BSD-3-Clause (parts under 0BSD,
+  MIT, Zlib, CC0-1.0)</td><td>numpy.org</td></tr>
+<tr><td>SciPy</td><td>the sparse solvers (SuperLU, GMRES, CG), special functions, interpolation</td>
+  <td>BSD-3-Clause</td><td>scipy.org</td></tr>
+<tr><td>Shapely</td><td>the copper's geometry: polygons, clearances, rasterising</td><td>BSD-3-Clause (its wheels
+  include GEOS: LGPL-2.1)</td><td>github.com/shapely/shapely</td></tr>
+<tr><td>ruamel.yaml</td><td>the settings file, keeping its comments and layout</td><td>MIT</td>
+  <td>sourceforge.net/projects/ruamel-yaml</td></tr>
+<tr><td>Matplotlib</td><td>every map, plot and spectrum (the Results tab, the report)</td><td>Matplotlib License
+  (PSF-based, BSD-compatible)</td><td>matplotlib.org</td></tr>
+<tr><td>contourpy</td><td>the contour lines (Draw contours on board)</td><td>BSD-3-Clause</td>
+  <td>github.com/contourpy/contourpy</td></tr>
+<tr><td>wxPython</td><td>the plugin's window (with wxWidgets inside)</td><td>wxWindows Library Licence (LGPL-2.0
+  with an exception for binaries)</td><td>wxpython.org</td></tr>
+<tr><td>Numba</td><td>compiling the thermal solver's kernels and the field solver's multiply-add</td>
+  <td>BSD-2-Clause</td><td>numba.pydata.org</td></tr>
+<tr><td>PyAMG</td><td>algebraic multigrid for the thermal solve</td><td>MIT</td><td>github.com/pyamg/pyamg</td></tr>
+<tr><td>psutil</td><td>the memory and processor figures (how much a Simulate may use)</td><td>BSD-3-Clause</td>
+  <td>github.com/giampaolo/psutil</td></tr>
+</table>
+<p>Pulled in by those:</p>
+<table border="1" cellpadding="3" cellspacing="0">
+<tr><th>Package</th><th>Needed by</th><th>Licence</th></tr>
+<tr><td>protobuf</td><td>kicad-python (KiCad's API messages)</td><td>BSD-3-Clause</td></tr>
+<tr><td>pynng (with NNG)</td><td>kicad-python (the socket to KiCad)</td><td>MIT</td></tr>
+<tr><td>sniffio</td><td>pynng</td><td>MIT or Apache-2.0</td></tr>
+<tr><td>jsonschema, jsonschema-specifications, referencing, rpds-py, attrs</td><td>kicad-python</td><td>MIT</td></tr>
+<tr><td>typing_extensions</td><td>kicad-python</td><td>PSF-2.0</td></tr>
+<tr><td>llvmlite (with LLVM)</td><td>Numba (its compiler)</td><td>BSD-2-Clause; LLVM: Apache-2.0 with LLVM exception</td></tr>
+<tr><td>cycler, kiwisolver</td><td>Matplotlib</td><td>BSD-3-Clause</td></tr>
+<tr><td>fonttools</td><td>Matplotlib</td><td>MIT</td></tr>
+<tr><td>packaging</td><td>Matplotlib</td><td>Apache-2.0 or BSD-2-Clause</td></tr>
+<tr><td>Pillow</td><td>Matplotlib (the PNGs)</td><td>MIT-CMU (HPND)</td></tr>
+<tr><td>pyparsing</td><td>Matplotlib</td><td>MIT</td></tr>
+<tr><td>python-dateutil</td><td>Matplotlib</td><td>Apache-2.0 or BSD-3-Clause</td></tr>
+<tr><td>six</td><td>python-dateutil</td><td>MIT</td></tr>
+</table>
+
+<p><b>Only with the GPU install</b> (<code>tools/install_gpu.py</code>, on a machine with a big GPU):</p>
+<table border="1" cellpadding="3" cellspacing="0">
+<tr><th>Package</th><th>Used for / needed by</th><th>Licence</th></tr>
+<tr><td>PyTorch (<code>torch</code>)</td><td>the field solver on the GPU (CUDA or ROCm)</td><td>BSD-3-Clause (parts under
+  Apache-2.0, BSD-2-Clause, BSL-1.0, MIT)</td></tr>
+<tr><td>NVIDIA CUDA libraries (in PyTorch's CUDA builds) / AMD ROCm (in its ROCm builds)</td><td>PyTorch</td>
+  <td>NVIDIA Software License Agreement / AMD ROCm's licences (mostly MIT, BSD)</td></tr>
+<tr><td>triton</td><td>PyTorch's CUDA builds on Linux</td><td>MIT</td></tr>
+<tr><td>sympy, mpmath, networkx, fsspec</td><td>PyTorch</td><td>BSD-3-Clause</td></tr>
+<tr><td>Jinja2, MarkupSafe</td><td>PyTorch</td><td>BSD-3-Clause</td></tr>
+<tr><td>filelock, setuptools</td><td>PyTorch</td><td>MIT</td></tr>
+</table>
+
+<p><b>Only for the compute server</b> (its signed update packages):</p>
+<table border="1" cellpadding="3" cellspacing="0">
+<tr><th>Package</th><th>Used for / needed by</th><th>Licence</th></tr>
+<tr><td>cryptography</td><td>the Ed25519 signatures of the server's update packages (a server installs only a signed one)</td><td>Apache-2.0 or BSD-3-Clause</td></tr>
+<tr><td>cffi</td><td>cryptography</td><td>MIT-0</td></tr>
+<tr><td>pycparser</td><td>cffi</td><td>BSD-3-Clause</td></tr>
+</table>
+
+<p><b>What it runs in</b> (not shipped with GroundTruth): <b>KiCad</b> (GPL-3.0-or-later) and its <b>Python</b>
+(PSF License); on Windows the help window uses Microsoft's <b>Edge WebView2</b> runtime (Microsoft Software License
+Terms) where it is installed, else wxWidgets' own HTML view.</p>
+<p><b>Only for developing GroundTruth</b> (not shipped): pytest (MIT) for the tests; NGSolve (LGPL-2.1) for a
+finite-element comparison in <code>tools/dev/fem_spike.py</code>, in a Python environment of its own.</p>
+<p>The list is kept with <code>tools/dev/licenses.py</code>, which prints every installed package GroundTruth needs
+with its version and licence from the packages' own metadata; a test checks that each package the plugin installs is
+named here.</p>
 <p><a href="#top">Back to the top</a></p>
 </body></html>

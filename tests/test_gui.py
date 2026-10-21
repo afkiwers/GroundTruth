@@ -2774,7 +2774,9 @@ def test_the_busiest_via_tile_zooms_to_it_and_shows_it_in_kicad(app, tmp_path, m
         v = busiest_via(h.current())
         tiles = [t for t in h.tiles.GetChildren() if getattr(t, "title", None) is not None]
         tile = next(t for t in tiles if t.title == "busiest via")
-        assert tile._click is not None and all(t._click is None for t in tiles if t is not tile)
+        dens = next(t for t in tiles if t.title == "current density")
+        assert tile._click is not None and dens._click is not None
+        assert all(t._click is None for t in tiles if t not in (tile, dens))
         marks = []
         h.on_mark = lambda *a: marks.append(a)
         tile._click()
@@ -2783,6 +2785,16 @@ def test_the_busiest_via_tile_zooms_to_it_and_shows_it_in_kicad(app, tmp_path, m
         assert marks and marks[0][0] == "via" and (marks[0][1]["x"], marks[0][1]["y"]) == (v["x"], v["y"])
         assert v["name"] in marks[0][2] and " A" in marks[0][2]
         run_steps(app, f, [lambda: None])                     # the zoomed maps render
+        # the user: "the same for when clicking on RMS current density": the density tile zooms to its hot spot
+        # (the path's sustained spot, the cyan ×) and shows the copper there, on its layer, in KiCad
+        from groundtruth.report.plots import hot_spot
+        spot = hot_spot(h.current())
+        dens._click()
+        x0, x1, y0, y1 = h._view
+        assert x0 <= spot["x"] <= x1 and y0 <= spot["y"] <= y1 and x1 - x0 == pytest.approx(FOCUS_MM)
+        assert marks[-1][0] == "point" and (marks[-1][1]["x"], marks[-1][1]["y"]) == (spot["x"], spot["y"])
+        assert marks[-1][3] == spot["layer"] and "current density" in marks[-1][2]
+        run_steps(app, f, [lambda: None])
     finally:
         close_window(f)
 
