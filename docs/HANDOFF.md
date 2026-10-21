@@ -7,6 +7,19 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `bode-legend` (2026-10-22, from `main` e1f1131; into `main` at the user's "merge", a fast-forward,
+  branch deleted):** the user, of a Bode plot's blue ×: "some form of legend would help", then "when hovering over
+  the poles and zeros with the mouse can you show a hover-over note like a tooltip?". `plots.draw_bode`'s legend
+  ends with grey "pole" / "zero" entries for the kinds it marks (the title lost "(× poles, ○ zeros)"); draw_bode
+  and draw_pz record each marker's text on the figure (`_gt_marks`, `plots.pz_tip`: whose, f0, a pair's Q and
+  ζ = 1/2Q, RHP said so), shown by `results_panels._hover` (mark_at) as the tooltip and the readout, on the Bode
+  canvas and now the pole-zero canvas (canvas2); only map markers keep "click: show it in KiCad". Tests:
+  test_transfer (legend; mark_at at a marker's pixel), test_gui (the tooltip). test_gui, test_transfer,
+  test_bode, the report tests: 114 passed (the full suite not run). Also answered: Sweep to takes any value above
+  the band (nothing caps it); kraft's ADC paths at 750 kHz −66.3 dB (U301 / U305 −1.9 dB); above ~10 MHz the
+  circuit lacks resistor parallel C, track-to-track coupling and op-amp feedthrough, so its −150 dB there is too
+  optimistic (offered as a milestone; the user only needs 750 kHz); U305's crossover 638 kHz = GBW × the R_O / R337
+  divider 0.67 with the 1.94 MHz second pole.
 - **Kraft's ADC signal (2026-10-22, on `main`, settings only):** the user: "Fix this" (NEXT_STEPS 2). The two ADC
   paths in the user's `flux-2/groundtruth/flux-2.groundtruth.yaml` ran on detection's generic 10 MHz / 2 ns
   (`detect` still proposes it: their driver, the ZXCT1107, is modelled `open`, and the TLV6001 further along does
