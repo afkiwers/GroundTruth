@@ -1022,7 +1022,10 @@ def _shunt_loops(model: "BoardModel", setup: RouteSetup, shunts: list[dict], ele
         band_moments weights the loops' moments with. A shunt too small for its own loop passes its current on
         to the next kept loop (carry)."""
         net = getattr(setup, "network", None)
-        q = net.results(fs, np.ones(len(fs)))[0] if net is not None else             path_currents(fs, np.ones(len(fs)), elements, source, load)
+        if net is not None:
+            q = net.results(fs, np.ones(len(fs)))[0]
+        else:
+            q = path_currents(fs, np.ones(len(fs)), elements, source, load)
         lc = q.loop_currents()
         out, carry = [], 0
         for k in range(len(shunts)):
@@ -1346,8 +1349,11 @@ def _amplified_route(model: "BoardModel", setup: RouteSetup, freqs, amps, source
     def weights(fs: np.ndarray) -> list:
         """Each loop's current at frequencies fs, per volt of the source (stage by stage: the shunt loops kept,
         then the stage's terminal loop), for band_moments."""
-        qs = setup.network.results(fs, np.ones(len(fs))) if setup.network is not None else             amplified_path(fs, np.ones(len(fs)), els, [PathAmp(a.name, a.gain, a.z_in, a.z_out) for a in pamps],
-                           source, load)
+        if setup.network is not None:
+            qs = setup.network.results(fs, np.ones(len(fs)))
+        else:
+            qs = amplified_path(fs, np.ones(len(fs)), els,
+                                [PathAmp(a.name, a.gain, a.z_in, a.z_out) for a in pamps], source, load)
         out = []
         for k, q in enumerate(qs):
             lc, carry = q.loop_currents(), 0
@@ -1402,7 +1408,8 @@ def sweep_range(spec: NetSpec, harmonics) -> np.ndarray:
 
 
 POLE_SPAN = 10.0               # poles and zeros up to this many times the sweep's top are listed and written out
-DOUBLET = 1e-3                 # a pole and a zero this close (relative) cancel in the lists and the written-out H(s)
+DOUBLET = 1e-3                 # a pole and a zero this close (relative) cancel in the lists and the written-out
+                               # H(s) [A54]
 
 
 def cancel_doublets(poles, zeros) -> tuple[list, list, int]:
@@ -1422,8 +1429,8 @@ def cancel_doublets(poles, zeros) -> tuple[list, list, int]:
 def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str, f: np.ndarray,
                       cache=None) -> tuple[list, list[str], list[dict]]:
     """The path's responses from its whole circuit (analysis/analog_net: every op-amp and part on its nets, any
-    topology; docs/ANALOG_AC.md): the receiver per volt of the source, swept with every track a line; its poles and
-    zeros exact, from the circuit with each track as its π section (emi/mna.Circuit.poles_zeros), up to POLE_SPAN
+    topology [A53]; docs/ANALOG_AC.md): the receiver per volt of the source, swept with every track a line; its
+    poles and zeros exact, from the circuit with each track as its π section (emi/mna.Circuit.poles_zeros), up to POLE_SPAN
     times the sweep's top; the numeric normal form (transfer.normal_form) and the ideal circuit's H(s) in its part
     names (analysis/symbolic.py); each op-amp's output as a response of its own; each op-amp's loop gain. Findings:
     the path's bandwidth above its max_bandwidth, an op-amp stage's above its Bandwidth field (bandwidth_limit), a
@@ -1477,7 +1484,7 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
 
 def _bandwidth_and_stability(board: Board, config: Config, spec: NetSpec, receiver: str, net, f: np.ndarray,
                              responses: list) -> list[dict]:
-    """The findings of a path's circuit (network_responses): its bandwidth at the receiver against the net's
+    """The findings of a path's circuit (network_responses) [A55]: its bandwidth at the receiver against the net's
     max_bandwidth, each op-amp stage solved as a circuit against its Bandwidth field (the stage's own transfer, from
     the previous op-amp's output or the driver pin to its output: an upstream filter does not count against it),
     each loop's phase margin (without a route to order the op-amps by, an unrouted board: each from the driver pin).

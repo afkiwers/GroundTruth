@@ -101,7 +101,8 @@ def _plain_normal(nf: Optional[dict]) -> Optional[dict]:
 
 def pz_rows(roots) -> list[dict]:
     """Poles or zeros as rows {f0 (Hz), q (None for a real one), s (re, im in rad/s)}: a conjugate pair once (its
-    upper member), sorted by f0."""
+    upper member), sorted by f0; f0 = |s|/2π and Q = |s|/(−2σ), the natural frequency and quality factor of the
+    pair's second-order factor [Ogata 2010]."""
     rows = []
     for s in roots:
         s = complex(s)
@@ -176,11 +177,12 @@ def normal_form(poles, zeros, k: complex, f_max: Optional[float] = None) -> dict
     return {"k": kval, "m": m, "poles": ps, "zeros": zs, "beyond": more, "text": text, "latex": latex}
 
 
-BW_TOL = 0.01                  # a bandwidth this much above its limit is a bandwidth_limit issue (numerics: 1 %)
+BW_TOL = 0.01                  # a bandwidth this much above its limit is a bandwidth_limit issue (numerics: 1 %) [A55]
 
 
 def upper_3db(f, h) -> Optional[float]:
-    """A response's bandwidth: the first frequency above its passband peak (|H|'s largest value in the sweep) where
+    """A response's bandwidth [Franco 2015]: the first frequency above its passband peak (|H|'s largest value in the
+    sweep) where
     |H| has fallen 3 dB below that peak, (|H_peak|/|H|)² interpolated linearly in f² to 2 between the samples around
     it (exact for one pole, as gain_figures). None when it does not fall that far above the peak within the sweep (a
     high-pass, or a band reaching past the sweep's top)."""
@@ -203,7 +205,7 @@ def upper_3db(f, h) -> Optional[float]:
 
 
 PM_WARN = 45.0                 # degrees: a loop with less phase margin rings (a warning); below PM_ERROR it is close
-PM_ERROR = 20.0                # to oscillating (an error)
+PM_ERROR = 20.0                # to oscillating (an error) [A55]
 
 
 def phase_margin(f, t) -> Optional[dict]:

@@ -81,8 +81,9 @@ class OpAmpChannel:
 
 
 def opamp_channels(fp: Footprint, model) -> list[OpAmpChannel]:
-    """The op-amp channels of an `amplifier` part: by the GT labels amp_in / amp_inv / amp_out (one channel), else by
-    the pins' schematic names grouped by channel; a channel without IN− is kept with inn None (the gain block)."""
+    """The op-amp channels of an `amplifier` part [A52]: by the GT labels amp_in / amp_inv / amp_out (one channel),
+    else by the pins' schematic names grouped by channel; a channel without IN− is kept with inn None (the gain
+    block)."""
     from .tags import amp_label_roles
     params = dict(model.params)
     labels = amp_label_roles(fp)
@@ -120,9 +121,9 @@ def opamp_channels(fp: Footprint, model) -> list[OpAmpChannel]:
 
 
 def ac_ground_nets(board: Board, config: Config) -> set[str]:
-    """The nets that are AC ground for a small-signal circuit: the reference nets, every net on a supply pin of a
-    part (schematic pin type power_in / power_out, or an op-amp's V+ / V− / VCC / VEE pin), and nets named as rails
-    (+3V3, VCC, VDD_x, VREF ...): stiff sources, decoupled to ground."""
+    """The nets that are AC ground for a small-signal circuit [A53]: the reference nets, every net on a supply pin of
+    a part (schematic pin type power_in / power_out, or an op-amp's V+ / V− / VCC / VEE pin), and nets named as
+    rails (+3V3, VCC, VDD_x, VREF ...): stiff sources, decoupled to ground."""
     out = set(config.reference_nets)
     for fp in board.footprints:
         for p in fp.pads:
@@ -159,7 +160,8 @@ class AnalogNetwork:
 
 def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, lumped: bool = False,
                    f_top: float = 1e9, cache=None) -> AnalogNetwork:
-    """The circuit of the path `spec` to `receiver` (see the module docstring). lumped: tracks as π sections (exact
+    """The circuit of the path `spec` to `receiver` [A53] (see the module docstring). lumped: tracks as π sections
+    (exact
     poles and zeros; a track longer than SHORT_TRACK of the wavelength at f_top gets a note), else as lines.
     cache: the cross-section cache (simulate.line_cache) for the tracks' Z0."""
     from .route import copper_graph, signal_nets
@@ -251,7 +253,8 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
         if len(ids) > 1:
             unrouted.add(net)
     if unrouted:
-        notes.append(f"not joined by copper, joined as the netlist says (no track there): {', '.join(sorted(unrouted))}")
+        notes.append("not joined by copper, joined as the netlist says (no track there): "
+                     + ", ".join(sorted(unrouted)))
     ckt = Circuit()
     name = lambda i: f"n{find(i)}"                                    # noqa: E731
     from ..emi.path import PathLine
@@ -355,8 +358,9 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
         gbw = prm.get("gbw") or AMP_GBW
         if not prm.get("gbw"):
             notes.append(f"{nm}: no GBW, {AMP_GBW / 1e6:g} MHz assumed")
-        # PM → the second pole: a follower's loop A(s) = GBW/s · 1/(1 + s/ω2) crosses over at x·GBW with
-        # x·√(1 + (x·GBW/fp2)²) = 1 and has PM = 90° − atan(x·GBW/fp2), so x = sin(PM) and fp2 = GBW·sin(PM)·tan(PM)
+        # PM → the second pole [Franco 2015]: a follower's loop A(s) = GBW/s · 1/(1 + s/ω2) crosses over at x·GBW
+        # with x·√(1 + (x·GBW/fp2)²) = 1 and has PM = 90° − atan(x·GBW/fp2), so x = sin(PM) and
+        # fp2 = GBW·sin(PM)·tan(PM)
         # (exact for A0 ≫ 1; GBW·tan(PM), which takes the crossover at GBW, gave 29° for 15°)
         pm = math.radians(prm["pm"]) if prm.get("pm") else None
         fp2 = prm.get("fp2") or (gbw * math.sin(pm) * math.tan(pm) if pm else None)
@@ -432,12 +436,14 @@ def _pi_section(ckt: Circuit, a: str, b: str, line, f_top: float, notes: list):
     ckt.c(b, ckt.ground, cp * length / 2)
     from ..emi.spectrum import C0
     if length > SHORT_TRACK * C0 / (math.sqrt(line.eeff) * f_top) and "long tracks" not in " ".join(notes):
-        notes.append(f"long tracks as one π section each: exact below {SHORT_TRACK * C0 / (math.sqrt(line.eeff) * length) / 1e6:.3g} MHz")
+        exact_to = SHORT_TRACK * C0 / (math.sqrt(line.eeff) * length)
+        notes.append(f"long tracks as one π section each: exact below {exact_to / 1e6:.3g} MHz")
 
 
 def _gain_block(ckt: Circuit, name: str, inp: str, out: str, prm: dict):
-    """An amplifier as its gain block: v = gain·v(in) through one pole (bandwidth, else gbw/|gain|; none: flat) and
-    a buffer behind its output impedance (z_out), its input C to ground."""
+    """An amplifier as its gain block [A52]: v = gain·v(in) through one pole (bandwidth, else gbw/|gain|: a
+    voltage-feedback op-amp's closed-loop bandwidth [Franco 2015]; none: flat) and a buffer behind its output
+    impedance (z_out), its input C to ground."""
     gain = float(prm.get("gain") if prm.get("gain") is not None else 1.0)
     bw = prm.get("bandwidth") or (prm["gbw"] / max(abs(gain), 1.0) if prm.get("gbw") else None)
     if prm.get("c_in"):
