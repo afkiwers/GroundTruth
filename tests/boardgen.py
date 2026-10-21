@@ -261,6 +261,29 @@ def rc_lowpass_board(r: str = "1k", c: str = "10n") -> BoardGen:
     return g
 
 
+def opamp_circuit_board(parts: Sequence[tuple], opamps: Sequence[tuple], out_net: str = "OUT",
+                        in_net: str = "SIG_IN") -> BoardGen:
+    """Any op-amp circuit, unrouted (the pads carry their nets; analysis/analog_net joins them as the netlist says),
+    over a GND plane: the driver U1.1 on `in_net`, the receiver U2.1 on `out_net`, each `parts` entry (ref, value,
+    kind "R"/"C", net 1, net 2) a 0402 part on a grid, each `opamps` entry (ref, {pin number: (pin name, net)}) a
+    part with those pins (pin types: V+/V- power_in, OUT output, the rest input)."""
+    g = BoardGen(layers=2, size=(80.0, 40.0))
+    g.ic("U1", (4.0, 20.0), in_net, gnd_offset=(0.0, 1.0))
+    g.ic("U2", (76.0, 20.0), out_net, gnd_offset=(0.0, 1.0))
+    for k, (ref, value, kind, a, b) in enumerate(parts):
+        g.two_pin(ref, value, (12.0 + 6.0 * (k % 8), 8.0 + 5.0 * (k // 8)), a, b, kind=kind)
+    for k, (ref, pins) in enumerate(opamps):
+        pads = []
+        for j, (num, (name, net)) in enumerate(sorted(pins.items())):
+            ptype = "power_in" if name.upper() in ("V+", "V-") else "output" if name.upper().startswith("OUT") \
+                else "input"
+            pads.append({"number": num, "at": (-1.5 + 0.65 * j, 0.0), "net": net, "pintype": ptype,
+                         "pinfunction": name})
+        g.footprint(ref, "OPAMP", "Package_SO:Fake_OPAMP", (20.0 + 15.0 * k, 30.0), pads)
+    g.plane("GND", g.cu[-1])
+    return g
+
+
 def opamp_path_board(r_after: Optional[str] = None, **fields: str) -> BoardGen:
     """A signal path through an op-amp stage over a GND plane: U1.1 (SIG_A) → R1 33 Ω → SIG_B → U5 (+IN pin 3,
     OUT pin 1, GND pin 2 with a via to the plane) → SIG_C → U2.1. `fields`: U5's symbol fields as InvenTree would

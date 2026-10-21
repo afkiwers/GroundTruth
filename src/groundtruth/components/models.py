@@ -24,12 +24,14 @@ MODEL_PARAMS: dict[str, tuple[str, ...]] = {
     "inductor": ("L", "R"),
     "ferrite": ("R", "L"),
     # an op-amp stage: gain (V/V, the stage's closed-loop gain, negative = inverting), gbw / bandwidth (Hz),
-    # z_out (Ω), c_in (F), r_in (Ω), slew (V/s), cmrr (dB, kept and shown: a single-ended path has no common mode)
-    "amplifier": ("gain", "gbw", "bandwidth", "z_out", "c_in", "r_in", "slew", "cmrr"),
+    # z_out (Ω), c_in (F), r_in (Ω), slew (V/s), cmrr (dB, kept and shown: a single-ended path has no common mode);
+    # for the circuit model (analysis/analog_net, emi/mna.Circuit.opamp): aol (open-loop DC gain, dB), fp2 (a second
+    # open-loop pole, Hz) or pm (the phase margin at unity gain, degrees: fp2 = gbw·tan(pm))
+    "amplifier": ("gain", "gbw", "bandwidth", "z_out", "c_in", "r_in", "slew", "cmrr", "aol", "fp2", "pm"),
 }
 # Parameters that may stay empty: C_bias, a ceramic capacitor's capacitance at its DC bias (from the maker's
 # DC-bias curve; an X7R 10 µF 100 V 1210 keeps ~30-60 % at 50 V), used instead of C where given
-OPTIONAL_PARAMS = {"C_bias", "gbw", "bandwidth", "z_out", "c_in", "r_in", "slew", "cmrr"}
+OPTIONAL_PARAMS = {"C_bias", "gbw", "bandwidth", "z_out", "c_in", "r_in", "slew", "cmrr", "aol", "fp2", "pm"}
 AMP_Z_OUT = 1.0         # Ω, an amplifier's output impedance when its z_out is not given
 AMP_C_IN = 2e-12        # F, its input capacitance when its c_in is not given
 AMP_IN = re.compile(r"^(\+IN|IN\+|INP|IN_P|\+|NONINV|VIN\+|\+VIN|IN)$", re.I)     # the input pin's name

@@ -20,7 +20,7 @@ def _f0q(poles):
 
 
 def test_an_rc_low_pass_and_its_one_pole():
-    """1 kΩ, 10 nF: H = 1/(1 + sRC) at every frequency to 1e-12; one pole at −1/RC, no zeros, k = 1/RC."""
+    """1 kΩ, 10 nF: H = 1/(1 + sRC) at every frequency to 1e-12; one pole at −1/RC, no zeros, the normal form's k = 1."""
     ckt = Circuit()
     ckt.vsource("in", "0")
     ckt.r("in", "out", 1e3)
@@ -28,7 +28,7 @@ def test_an_rc_low_pass_and_its_one_pole():
     f = np.geomspace(1, 1e8, 50)
     assert np.allclose(ckt.transfer(f, "out"), 1 / (1 + 2j * math.pi * f * 1e-5), rtol=1e-12, atol=0)
     p, z, k = ckt.poles_zeros("out")
-    assert len(z) == 0 and len(p) == 1 and p[0] == pytest.approx(-1e5, rel=1e-9) and k == pytest.approx(1e5)
+    assert len(z) == 0 and len(p) == 1 and p[0] == pytest.approx(-1e5, rel=1e-9) and k == pytest.approx(1.0)
 
 
 def test_a_series_rlc_band_pass_and_a_capacitors_esl_notch():
@@ -44,7 +44,7 @@ def test_a_series_rlc_band_pass_and_a_capacitors_esl_notch():
     f0, q = _f0q(p)
     assert f0 == pytest.approx(1 / (TAU * math.sqrt(1e-6 * 1e-9)), rel=1e-9)
     assert q == pytest.approx(math.sqrt(1e-6 / 1e-9) / 50.0, rel=1e-9)
-    assert len(z) == 1 and abs(z[0]) < 1e-3
+    assert len(z) == 1 and z[0] == 0
     ckt = Circuit()
     ckt.vsource("in", "0")
     ckt.r("in", "out", 50.0)
