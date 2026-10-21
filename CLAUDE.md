@@ -262,6 +262,9 @@ in `tools/dev/`, never only in the scratchpad.
   DTCA / DTCB pins on GND through R314 / R315 0 Ω; conv1 and conv2 read it. Before: `out/kraft_backup_2026-10-20/`.
   Then ("add the new para to conv2 on the schematic. keep the same dead time") `GT = dead:20ns,
   conv2_dead_rise:20ns, conv2_dead_fall:20ns` (conv2 per edge, conv1 from dead:); before: `out/kraft_backup_2026-10-20b/`.
+  Since 2026-10-21 (the user: "do that for me") the two ADC paths in the user's own settings (`flux-2/groundtruth/
+  flux-2.groundtruth.yaml`) have `sweep_from: 1Hz, max_bandwidth: 1kHz` (Bode from DC; the R303 / C304 corner
+  451 Hz is within it); before: `out/kraft_backup_2026-10-21_settings/`.
   Power stages (all found by `groundtruth detect`), rail +VDC unless noted:
 
   | Stage | Controller | Switches | Switch node | Inductor |

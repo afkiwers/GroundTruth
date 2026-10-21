@@ -21,6 +21,13 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
   first: the analog-ac merge's two real suite failures fixed (a stage's input current is what enters its first piece:
   SP-9; the help's 'analog' section in its topics); that suite: 1087 passed, 1 skipped, 5 failed (those two, three
   GUI timing checks that pass alone).
+  - The user, then: "do that for me": the user's flux-2 settings' two ADC paths got `sweep_from: 1Hz` and
+    `max_bandwidth: 1kHz` (only those two lines changed; backup `out/kraft_backup_2026-10-21_settings/`); `groundtruth
+    bode` from them: −3 dB at 451 / 452 Hz (within the limit), rise 775 µs, settling 1.38 ms, U301 / U305 loops 89°
+    (one pole: the board's symbols don't have the Aol / Fp2 / PM fields the user added in InvenTree yet: Update
+    symbols from library, then Update PCB from Schematic). "forget about it" for the PCB-EMI folder and CE2264's FET
+    fields (dropped). Full suite on the branch: running (`out/step/full_suite.log`), then merge (the user: "yes run
+    it").
 - **Branch `analog-ac` (2026-10-21, from `main` e9b2c7d, 56fb575; into `main` at the user's "commit and merge", a
   fast-forward, branch deleted; the full suite was still running at the merge: its result below):** the
   user, of kraft's ADC path: "Are we currently considering the Opamp circuit and it's amplification etc. If I were
