@@ -56,10 +56,25 @@ def kpis(rr, rules=None) -> list[Kpi]:
 
 
 def _bode(rr) -> list[Kpi]:
-    """A Bode view: per response its dominant pole (the lowest natural frequency, with Q), up to four tiles."""
-    from ..analysis.transfer import fmt_hz, pz_rows
+    """A Bode view: the first gain's figures (its gain at the sweep's low end, the −3 dB frequency: the user asked
+    for "the DC gain and the −3 dB bandwidth"), then per response its dominant pole (the lowest natural frequency,
+    with Q), up to four tiles."""
+    from ..analysis.transfer import fmt_hz, gain_figures, pz_rows
     out = []
+    g = next((x for x in map(gain_figures, rr.responses) if x is not None), None)
+    if g is not None:
+        out.append(("gain", f"{g['low_db']:+.2f} dB",
+                    (f"−3 dB at {fmt_hz(g['f_3db'])}" if g["f_3db"] else "no −3 dB point in the sweep")
+                    + (f" · peaks +{g['peak_db']:.1f} dB" if g["peak_db"] else ""),
+                    "warn" if g["peak_db"] and g["peak_db"] >= 3.0 else "",
+                    f"the receiver's voltage per volt of the driver at {fmt_hz(g['low_f'])} (the sweep's lowest "
+                    f"frequency: the DC gain when it starts low enough; {g['low_ratio']:.4g}×), and where it has "
+                    "fallen 3 dB below that (the bandwidth)" + (f"; it peaks {g['peak_db']:.1f} dB above it at "
+                                                                f"{fmt_hz(g['peak_f'])} (a resonance)"
+                                                                if g["peak_db"] else "")))
     for r in rr.responses[:4]:
+        if len(out) >= 4:
+            break
         rows = pz_rows(r.poles)
         if not rows:
             continue

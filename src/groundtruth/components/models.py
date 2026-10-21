@@ -118,8 +118,26 @@ class ComponentModel:
         return 1.0 / y if y != 0 else complex(1e12)
 
     def amp_z_out(self) -> float:
-        """An amplifier's output impedance (ohm): z_out, else AMP_Z_OUT (a closed-loop op-amp output is low)."""
+        """An amplifier's output impedance (ohm) as given: z_out, else AMP_Z_OUT (a closed-loop op-amp output is
+        low). The path model uses amp_z_out_at."""
         return float(self.params.get("z_out") or AMP_Z_OUT)
+
+    def amp_z_out_at(self, f) -> complex:
+        """The stage's output impedance at f (ohm). z_out is the op-amp's open-loop output impedance (the datasheet's
+        R_O or Z_O, e.g. 2.3 kΩ for a TLV6001): with its loop known (`bandwidth`, else gbw / |gain|: the closed-loop
+        corner f_c, as in amp_gain) the feedback divides it by 1 + Aβ, A = GBW/jf, so Z_out = z_out·jf/(jf + f_c)
+        [Franco 2015]: far below z_out up to f_c, inductive, z_out above it. Without a loop it is used as given;
+        without z_out, AMP_Z_OUT flat. (Before 2026-10-21 z_out was taken as flat at every frequency: refboard's
+        TLV6001 followers put 2.3 kΩ in series with R303 and moved the ADC filter's corner from 451 to 303 Hz.)"""
+        zo = self.params.get("z_out")
+        if not zo:
+            return complex(AMP_Z_OUT)
+        g = complex(self.params.get("gain", 1.0) if self.params.get("gain") is not None else 1.0)
+        bw = self.params.get("bandwidth") or (self.params["gbw"] / max(abs(g), 1.0) if self.params.get("gbw")
+                                              else None)
+        if not bw:
+            return complex(zo)
+        return complex(zo) * 1j * f / (1j * f + bw)
 
     def passes_signal(self) -> bool:
         """True if a signal route may run through this part in series (termination R, 0R, bead...)."""

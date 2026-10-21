@@ -1044,13 +1044,15 @@ def _responses(owner: str, responses, figs) -> str:
     responses = [r for r in responses if len(r.f)]
     if not responses:
         return ""
-    from ..analysis.transfer import BodeView, fmt_root, pz_rows, unit_groups
+    from ..analysis.transfer import BodeView, fmt_root, gain_figures, gain_text, pz_rows, unit_groups
     from .plots import draw_bode, draw_pz
     rows = []
     for r in responses:
         how = "exact" if r.exact else (f"fitted (max {r.fit_error_db:.2f} dB)" if r.fit_error_db is not None
                                        else "no fit")
-        rows.append(f"<tr><td>{e(r.name.split(': ', 1)[-1])}</td><td>{e(how)}</td>"
+        g = gain_figures(r)
+        rows.append(f"<tr><td>{e(r.name.split(': ', 1)[-1])}</td><td>{e(gain_text(g) if g else '')}</td>"
+                    f"<td>{e(how)}</td>"
                     f"<td>{e(', '.join(fmt_root(x) for x in pz_rows(r.poles)) or 'none')}</td>"
                     f"<td>{e(', '.join(fmt_root(x) for x in pz_rows(r.zeros)) or 'none')}</td></tr>")
     out = ["<h4>Frequency response, poles and zeros</h4>"]
@@ -1060,7 +1062,7 @@ def _responses(owner: str, responses, figs) -> str:
                         f"{name}: magnitude and phase; × poles and ○ zeros at their natural frequencies"))
     out.append(_img(figs.png(f"{owner} poles and zeros", draw_pz, BodeView(owner, responses), size=(9.5, 4.0)),
                     f"{owner}: poles and zeros in the s-plane (Hz; symmetric log axes)"))
-    out.append(_table(["Response", "Model", "Poles (f0, Q)", "Zeros (f0, Q)"], rows, sort=False))
+    out.append(_table(["Response", "Gain, bandwidth", "Model", "Poles (f0, Q)", "Zeros (f0, Q)"], rows, sort=False))
     return "".join(out)
 
 

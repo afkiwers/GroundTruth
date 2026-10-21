@@ -45,6 +45,10 @@ NET_TIPS = {
     "Pass through": "Parts the signal path may run through although they don't pass a signal by default, e.g. C12 "
                     "for an AC-coupling capacitor or R7 for a resistor above 1 kΩ (comma-separated). Series "
                     "resistors up to 1 kΩ, ferrites and inductors are passed anyway; every part's impedance counts.",
+    "Sweep from": "Where the path's Bode sweep starts, e.g. 1Hz for a sensor or ADC input (down to 10mHz; empty: a "
+                  "hundredth of the frequency). The gain at the sweep's start is shown as the path's DC gain.",
+    "Sweep to": "Where the Bode sweep ends, e.g. 10MHz (empty: the top of the signal's harmonics' band).",
+    "Sweep points": "How many log-spaced frequencies the Bode sweep has, 20 to 5000 (empty: 300).",
 }
 NET_BUTTON_TIPS = {
     "Add": "Add a new net from the form.",
@@ -52,6 +56,10 @@ NET_BUTTON_TIPS = {
     "Remove selected": "Remove the selected nets (also the Delete key).",
     "Mark reviewed": "Mark the selected auto-detected nets as checked by you (they stop showing in orange).",
     "Detect…": "Find fast clock and data nets on the board (SPI, I²C, USB, Ethernet …) and choose which to add.",
+    "Bode": "Sweep the selected paths (all ticked ones when none is selected) with a sine from Sweep from to Sweep "
+            "to: the receiver's voltage per volt of the driver through the path's lines, parts, filters and op-amp "
+            "stages, as magnitude and phase, its poles and zeros, the gain and the −3 dB frequency (Results tab). "
+            "Seconds: no field solve (Simulate does the same sweep with its results).",
 }
 
 
@@ -110,8 +118,9 @@ class NetsPanel(SelectableRows, wx.Panel):
     and the parts across it to ground (loads, filter capacitors)."""
 
     def __init__(self, parent, on_change, run_job=None, on_add_selection=None, on_show=None,
-                 in_steps: bool = False):
+                 in_steps: bool = False, on_bode=None):
         """run_job(status, work, done, what): runs work(progress) off the GUI thread, then done(result).
+        on_bode(names): sweep these paths (the window runs analysis.simulate.bode_paths; no button without it).
         on_add_selection(): adds the nets selected in KiCad (live mode only; no button without it).
         on_show(names, zoom): the selected rows changed: show those nets in KiCad (live mode only).
         in_steps: the form's rows and the layout are built later, in two `build_steps` (MainFrame._build_pages runs
@@ -152,10 +161,13 @@ class NetsPanel(SelectableRows, wx.Panel):
         self.duty = wx.TextCtrl(self, value="0.5")
         self.fall, self.src_r, self.src_l, self.src_c, self.load_r, self.load_c, self.through = (
             wx.TextCtrl(self) for _ in range(7))
+        self.sweep_from, self.sweep_to, self.sweep_pts = (wx.TextCtrl(self) for _ in range(3))
         for ctrl, hint in ((self.fall, "= rise time"), (self.src_r, "25 (default)"), (self.src_l, "none"),
                            (self.src_c, "none"), (self.load_r, "none"), (self.load_c, "5 (default)"),
-                           (self.through, "e.g. C12, R7")):
+                           (self.through, "e.g. C12, R7"), (self.sweep_from, "auto: frequency / 100"),
+                           (self.sweep_to, "auto: the band's top"), (self.sweep_pts, "300")):
             ctrl.SetHint(hint)
+        self._on_bode = on_bode
         self.through.Bind(wx.EVT_KILL_FOCUS, lambda e: (e.Skip(), self.on_net(keep=True)))
         self._form_sizer, self._on_add_selection = form, on_add_selection
         self.build_steps = [self._form_rows, self._form_layout]
@@ -169,7 +181,9 @@ class NetsPanel(SelectableRows, wx.Panel):
                             ("Frequency", self.freq), ("Rise time", self.rise), ("Amplitude (V)", self.ampl),
                             ("Duty cycle", self.duty), ("Fall time", self.fall), ("Source R (Ω)", self.src_r),
                             ("Source L (nH)", self.src_l), ("Source C (pF)", self.src_c), ("Load R (Ω)", self.load_r),
-                            ("Load C (pF)", self.load_c), ("Pass through", self.through)):
+                            ("Load C (pF)", self.load_c), ("Pass through", self.through),
+                            ("Sweep from", self.sweep_from), ("Sweep to", self.sweep_to),
+                            ("Sweep points", self.sweep_pts)):
             text = wx.StaticText(self, label=label)
             text.SetToolTip(NET_TIPS[label])         # on the label and the field: hovering either explains it
             ctrl.SetToolTip(NET_TIPS[label])
@@ -182,7 +196,8 @@ class NetsPanel(SelectableRows, wx.Panel):
         del self._form_sizer, self._on_add_selection
         btns = button_row(self, [("Add", self.on_add), ("Update selected", self.on_update),
                                  ("Remove selected", self.on_remove), ("Mark reviewed", self.on_reviewed),
-                                 ("Detect…", self.on_detect)], NET_BUTTON_TIPS)
+                                 ("Detect…", self.on_detect)]
+                          + ([("Bode", self.on_bode)] if self._on_bode is not None else []), NET_BUTTON_TIPS)
         if on_add_selection is not None:
             b = theme.Button(self, "Add KiCad selection")
             b.SetToolTip("Adds the net of the track, via or pad selected in KiCad's PCB editor (click or right-click "
@@ -353,6 +368,9 @@ class NetsPanel(SelectableRows, wx.Panel):
         for ctrl, v in ((self.src_r, n.driver_ohms), (self.src_l, n.driver_nh), (self.src_c, n.driver_pf),
                         (self.load_r, n.load_ohms), (self.load_c, n.load_pf)):
             ctrl.SetValue("" if v is None else f"{v:g}")
+        for ctrl, v in ((self.sweep_from, n.sweep_from), (self.sweep_to, n.sweep_to)):
+            ctrl.SetValue("" if v is None else format_si(v, "Hz"))
+        self.sweep_pts.SetValue("" if n.sweep_points is None else str(n.sweep_points))
 
     def _optional(self, ctrl, strip: str = "") -> tuple[Optional[float], bool]:
         """(the field's number or None when empty, whether it was readable)."""
@@ -394,6 +412,16 @@ class NetsPanel(SelectableRows, wx.Panel):
             if not ok:
                 problems.append(f"{label} must be a number or empty")
             extra[key] = v
+        for key, ctrl, label in (("sweep_from", self.sweep_from, "sweep from"),
+                                 ("sweep_to", self.sweep_to, "sweep to")):
+            v, ok = self._optional(ctrl, "Hz")
+            if not ok:
+                problems.append(f"{label} must be a frequency (e.g. 1Hz, 10MHz) or empty")
+            extra[key] = v
+        pts, ok = self._optional(self.sweep_pts)
+        if not ok or (pts is not None and pts != int(pts)):
+            problems.append("sweep points must be a whole number or empty")
+        extra["sweep_points"] = int(pts) if ok and pts is not None and pts == int(pts) else None
         if problems:
             wx.MessageBox("\n".join(problems), "groundtruth", wx.ICON_WARNING)
             return None
@@ -437,6 +465,16 @@ class NetsPanel(SelectableRows, wx.Panel):
                                    driver_return=old.driver_return, receiver_return=old.receiver_return,
                                    current_a=old.current_a)
             self._commit()
+
+    def on_bode(self, _):
+        """"Bode": sweep the selected paths, or every ticked one when none is selected (the window runs it as a job
+        and shows the responses in the Results tab). A form edit counts once it is in the list (Update selected):
+        the sweep runs on the settings."""
+        names = self._row_names(self.selected_rows()) or [n.name for n in self.nets if n.enabled]
+        if not names:
+            wx.MessageBox("Add a signal path first (or tick one).", "GroundTruth", wx.ICON_INFORMATION)
+            return
+        self._on_bode(list(dict.fromkeys(names)))
 
     def on_remove(self, _):
         """Remove the selected nets."""

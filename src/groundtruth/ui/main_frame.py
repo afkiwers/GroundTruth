@@ -537,7 +537,7 @@ class MainFrame(wx.Frame):
             ("nets", "Signal paths", lambda nb: NetsPanel(
                 nb, self.on_config_change, self._panel_job,
                 on_add_selection=self.on_add_selection if session.live else None,
-                on_show=self.on_nets_selected if session.live else None, in_steps=True)),
+                on_show=self.on_nets_selected if session.live else None, in_steps=True, on_bode=self.on_bode)),
             ("converters", "Converters", lambda nb: ConvertersPanel(
                 nb, self.on_config_change, self._panel_job,
                 on_show=self.on_stages_selected if session.live else None, in_steps=True)),
@@ -1989,6 +1989,42 @@ class MainFrame(wx.Frame):
                                f"{len(issues)} issue(s), {th.mesh.get('seconds', 0):.0f} s")
         self._start("thermal: building the model…", work, done, what="solve the temperatures", solver=True,
                     local=(lambda: self.on_thermal(local=True)) if server is not None else None)
+
+    def on_bode(self, names: list[str]):
+        """Signal paths tab, "Bode": sweep these paths' circuits with a sine (analysis/simulate.bode_paths: no plane
+        models, no field solve) as a job, and show one "Bode / poles and zeros" view per path in the Results tab,
+        replacing the paths' earlier Bode views (a Simulate's too) and keeping every other view. The user: "could
+        we add a frequency sweep of a sinusoidal signal to retrieve amplitude and phase plots as well as pole zero
+        plots?" (Simulate made them, only over the signal's harmonics' band)."""
+        if self._refuse_if_busy() or self.board is None or self.settings is None:
+            return
+        board, cfg = self.board, self.settings.config
+
+        def work(progress):
+            """(worker) The sweeps and their fits."""
+            from ..analysis.simulate import bode_paths
+            return bode_paths(board, cfg, names, progress)
+
+        def done(results):
+            """Show the new Bode views (and say which paths could not be swept, and why)."""
+            from types import SimpleNamespace
+            from ..analysis.transfer import bode_views
+            failed = [r for r in results if r.error]
+            views = bode_views(SimpleNamespace(routes=[r for r in results if not r.error], converters=[], pdn=[]))
+            if not views:
+                wx.MessageBox("\n".join(f"{r.net} → {r.receiver}: {r.error}" for r in failed) or "Nothing to sweep.",
+                              "GroundTruth: Bode", wx.ICON_WARNING)
+                return
+            swept = {v.owner for v in views}
+            self.routes = [r for r in self.routes if not (r.kind == "bode" and r.net in swept)] + views
+            self.results_panel.set_rules(cfg.rules)
+            self.results_panel.show(board, self.routes, self.issues)
+            self.results_panel.choice.SetSelection(len(self.routes) - len(views))
+            self.results_panel._route_changed()
+            self.notebook.SetSelection(self.notebook.FindPage(self.results_panel))
+            more = f"; not swept: {', '.join(f'{r.net} ({r.error})' for r in failed)}" if failed else ""
+            self.SetStatusText(f"Bode: {len(views)} path(s) swept{more}")
+        self._start("Bode: sweeping…", work, done, what="sweep the signal paths")
 
     def on_capacity(self, local: bool = False, fresh: bool = False):
         """Results tab, "Current capacity": per power stage of the last Simulate, the load current that brings

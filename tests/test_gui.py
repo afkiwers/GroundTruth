@@ -2053,6 +2053,29 @@ def test_the_signal_paths_tab_shows_each_chain_and_the_selected_path(app, frame)
     assert f.nets.nets[0].driver in f.nets.path_text.GetValue()
 
 
+def test_the_bode_button_sweeps_the_selected_path_over_its_own_range(app, frame):
+    """Signal paths tab: Sweep from / to / points in the form (Update selected keeps them in the settings), "Bode"
+    sweeps the selected path as a job (no Simulate) and the Results tab shows its Bode / poles and zeros view, the
+    gain tile first; a second sweep replaces that view."""
+    f = frame
+    run_steps(app, f, [])
+    f.nets.select_only(0)
+    run_steps(app, f, [])
+    f.nets.sweep_from.SetValue("10Hz")
+    f.nets.sweep_to.SetValue("1GHz")
+    f.nets.sweep_pts.SetValue("150")
+    f.nets.on_update(None)
+    n = f.settings.config.nets[0]
+    assert (n.sweep_from, n.sweep_to, n.sweep_points) == (10.0, 1e9, 150)
+    for _ in range(2):
+        f.nets.on_bode(None)
+        run_steps(app, f, [])
+    views = [r for r in f.routes if r.kind == "bode"]
+    assert len(views) == 1 and views[0].owner == n.name and len(views[0].responses[0].f) == 150
+    assert f.results_panel.current() is views[0] and f.results_panel.tile_text().startswith("gain ")
+    assert "swept" in f.status_text()
+
+
 def test_several_nets_picked_in_kicad_become_one_path_with_its_models_and_labels(app, tmp_path, monkeypatch):
     """One bit of each net of a path picked in KiCad (here handed to add_nets as the inbox would): one Signal paths
     row from U1 through R1, the op-amp U5 and R2 (Pass through) to U2, U5 modelled as the amplifier with its pins,

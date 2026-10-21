@@ -618,6 +618,9 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   capacitance `driver_pf`. The route is a **signal path**: a line per stretch between series parts, with the
   copper's and the dielectric's loss since 2026-10-19 (`PathLine.alpha`: R' from the skin depth for the strip and
   as much again for its plane [A36], G' = ωC'·tan δ with the microstrip filling factor, γ = α + jβ in the cascade;
+  since 2026-10-21 the full telegrapher line, `PathLine.rlgc` / `zc` / `gamma_l`: Zc = √((R' + jωL')/(G' + jωC'))
+  and γ = √((R' + jωL')(G' + jωC')), which is the low-loss line where R' ≪ ωL' and stays right towards DC, where the
+  low-loss form made an open 86 mm track ~10 kΩ to ground at 1 Hz;
   lossless, a quarter-wave stretch beside a capacitor's ESL resonated with an unbounded Q: refboard's ADC_I_RAIL_1
   moved 13 dB for a 7 % Z0 change, C304 carrying 4.5 × the input current; with the loss about 1 ×, the margin +30.1 dB,
   the SPI nets +0.3 dB; the plane's share from Johnson's spread, `plane_resistance`, since the next day: it read
@@ -1354,8 +1357,18 @@ paths, power-stage filters, PDN, control loop: M5), as Results views and in the 
   [[A, b], [c, d]] − s·[[I, 0], [0, −e]]. `fitted_response` leaves poles / zeros beyond 10x the band out of the lists
   (noted). `exact_response` for rational models (np.roots).
 - Owners: signal paths (`simulate.path_responses`: RouteSetup.response_fn, set where the path model is built, plain
-  `path_currents(..., ones).v_end` or `amplified_path` with the op-amps' linear models; amp_gains per stage; 300
-  log points from a hundredth of the first harmonic to the band's top); power stages (`power.stage_responses` in
+  `path_currents(..., ones).v_end` or `amplified_path` with the op-amps' linear models (`_amp_response`); amp_gains
+  per stage; `sweep_range`: the net's `sweep_from` / `sweep_to` / `sweep_points`, else 300 log points from a
+  hundredth of the first harmonic to the band's top). **Bode alone** (since 2026-10-21, the Signal paths tab's
+  "Bode", `groundtruth bode`): `simulate.bode_paths` traces each path and receiver (`route.find_route`), builds the
+  same circuit without plane models (`_source_load`, `_signal_harmonics`, `_amp_circuit` (split out of
+  `_amplified_route`, which uses it), else `find_shunts` + `path_elements`) and calls path_responses: a RouteResult
+  per path with `responses`, shown through `transfer.bode_views` (MainFrame.on_bode replaces the paths' earlier Bode
+  views). `transfer.gain_figures`: the gain at the sweep's low end, the −3 dB point ((|H_low|/|H|)² linear in f² to
+  2 between the samples around it: exact for one pole), peaking ≥ 0.5 dB; the Bode tiles' first ("gain"), the console
+  and HTML reports, `Response.summary()["gain"]`. An op-amp stage's output impedance (`amp_z_out_at`): `z_out` is the
+  open-loop R_O, divided by 1 + Aβ with A = GBW/jf, z_out·jf/(jf + f_c) [Franco 2015] (`PathSource.z`, `PathAmp.z_out`
+  callable); flat z_out before, which moved refboard's ADC filter corner from 451 to 303 Hz; power stages (`power.stage_responses` in
   finish_converter: `ringing_rational` (exact; snubbed_response in s) from setup.ringing_model, set in
   apply_ringing; the input transfer from cond's solves (fine's too only when it is the same build: a split input
   path's hot-loop model has no LISN branch; that bug failed three test_power tests before the check), order ≤ 10);

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
 import numpy as np
 
@@ -79,10 +79,44 @@ class PathLine:
         g = 2 * np.pi * f * math.sqrt(self.eeff) / (C0 * self.z0) * self.tan_d * fill
         return r / (2 * self.z0) + g * self.z0 / 2
 
-    def gamma_l(self, f: np.ndarray) -> np.ndarray:
-        """γ·l = (α + jβ)·l at f, β = ω√εeff / c."""
+    def rlgc(self, f: np.ndarray) -> tuple:
+        """The line's per-metre R'(f), L', G'(f), C' [Pozar 2012]: L' = Z0·√εeff/c and C' = √εeff/(c·Z0) from its
+        Z0 and εeff, R' the strip's and its planes' resistance (as in alpha: 2·Z0·α_c), G' = ωC'·tan δ·filling
+        factor; R' and G' zero for a lossless line (no width)."""
         f = np.asarray(f, float)
-        return (self.alpha(f) + 1j * 2 * np.pi * f * math.sqrt(self.eeff) / C0) * self.length_m
+        lp = self.z0 * math.sqrt(self.eeff) / C0
+        cp = math.sqrt(self.eeff) / (C0 * self.z0)
+        if self.width_m is None or self.width_m <= 0:
+            return np.zeros(len(f)), lp, np.zeros(len(f)), cp
+        er = self.er or self.eeff
+        fill = 1.0 if er - 1.0 < 1e-6 or self.eeff >= er else er * (self.eeff - 1.0) / (self.eeff * (er - 1.0))
+        g = 2 * np.pi * f * cp * self.tan_d * fill
+        r = 2 * self.z0 * (self.alpha(f) - g * self.z0 / 2)          # alpha's conductor part, back to R'
+        return r, lp, g, cp
+
+    def zc(self, f: np.ndarray) -> np.ndarray:
+        """The characteristic impedance at f, √((R' + jωL')/(G' + jωC')) [Pozar 2012]: Z0 where the line is low
+        loss (R' ≪ ωL'), larger and capacitive towards DC, where the strip's resistance dominates. The low-loss form
+        (Z0 real, α = R'/2Z0 + G'Z0/2) used before 2026-10-21 made an open 86 mm track look like ~10 kΩ to ground
+        at 1 Hz (Z0 / αl): a Bode sweep of refboard's ADC path read −4.6 dB at DC."""
+        f = np.asarray(f, float)
+        r, lp, g, cp = self.rlgc(f)
+        if not np.any(r) and not np.any(g):
+            return np.full(len(f), complex(self.z0))
+        w = 2 * np.pi * np.maximum(f, 1e-12)
+        return np.sqrt((r + 1j * w * lp) / (g + 1j * w * cp))
+
+    def gamma_l(self, f: np.ndarray) -> np.ndarray:
+        """γ·l at f, γ = √((R' + jωL')(G' + jωC')) [Pozar 2012] (its root with Re ≥ 0); a lossless line's jβ,
+        β = ω√εeff / c. Where the line is low loss, γ = α + jβ with alpha's α."""
+        f = np.asarray(f, float)
+        r, lp, g, cp = self.rlgc(f)
+        w = 2 * np.pi * f
+        if not np.any(r) and not np.any(g):
+            return 1j * w * math.sqrt(self.eeff) / C0 * self.length_m
+        gam = np.sqrt((r + 1j * w * lp) * (g + 1j * w * cp))
+        gam = np.where(gam.real < 0, -gam, gam)
+        return gam * self.length_m
 
 
 def plane_resistance(w: float, h: float) -> float:
@@ -112,10 +146,12 @@ class PathShunt:
 
 @dataclass
 class PathSource:
-    """A Thevenin source: R + jωL in series, an optional capacitance from its output to the return."""
+    """A Thevenin source: R + jωL in series, an optional capacitance from its output to the return. z: an
+    impedance z(f) instead of R + jωL (an op-amp stage's closed-loop output, PathAmp.z_out)."""
     r: float
     l: float = 0.0
     c: float = 0.0
+    z: Optional[Callable[[float], complex]] = None
 
 
 @dataclass
@@ -181,10 +217,11 @@ def path_currents(freqs, v_source, elements: list, source: PathSource, load: Pat
     for k in range(len(elements) - 1, -1, -1):
         e = elements[k]
         if isinstance(e, PathLine):
-            # a line transforms the impedance behind it: Z_in = Z0 (Z + Z0 tanh γl) / (Z0 + Z tanh γl) [Pozar 2012]
-            # (lossless, γl = jβl: tanh = j tan βl, the form used before); Z0 kept real (the low-loss line)
+            # a line transforms the impedance behind it: Z_in = Zc (Z + Zc tanh γl) / (Zc + Z tanh γl) [Pozar 2012]
+            # (lossless, γl = jβl: tanh = j tan βl); Zc and γ the full line's (zc, gamma_l): down to DC
             t = np.tanh(e.gamma_l(f))
-            z = e.z0 * (z + e.z0 * t) / (e.z0 + z * t)
+            zc = e.zc(f)
+            z = zc * (z + zc * t) / (zc + z * t)
         elif isinstance(e, PathShunt):
             zp = _series_z(e, f)
             parts_z[k] = zp
@@ -195,7 +232,8 @@ def path_currents(freqs, v_source, elements: list, source: PathSource, load: Pat
             z = z + zp                              # a series part adds its impedance
         z_in[k] = z
     z_path = z
-    zs = source.r + 1j * w * source.l
+    zs = (np.array([complex(source.z(float(fk))) for fk in f]) if source.z is not None
+          else source.r + 1j * w * source.l)
     z_node = z_path if source.c <= 0 else 1.0 / (1.0 / z_path + 1j * w * source.c)
     v = np.asarray(v_source, complex) * z_node / (zs + z_node)      # at the source's output
     i = v / z_path                                                   # into the path
@@ -223,12 +261,13 @@ def path_currents(freqs, v_source, elements: list, source: PathSource, load: Pat
             x = np.where(np.abs(gl) > 1e-12, gl, 1e-12)
             # the line's mean current, the integral of I(z) = I1 cosh γz - (V1/Z0) sinh γz over its length (lossless:
             # γ = jβ, spectrum.line_current's form), then its ABCD matrix carries v and i to its end:
-            # V2 = V1 cosh γl - Z0 I1 sinh γl,  I2 = I1 cosh γl - (V1 / Z0) sinh γl  [Pozar 2012]
+            # V2 = V1 cosh γl - Zc I1 sinh γl,  I2 = I1 cosh γl - (V1 / Zc) sinh γl  [Pozar 2012]
             ch, sh = np.cosh(gl), np.sinh(gl)
-            i_avg = i * np.sinh(x) / x - (v / e.z0) * (np.cosh(x) - 1) / x
+            zc = e.zc(f)
+            i_avg = i * np.sinh(x) / x - (v / zc) * (np.cosh(x) - 1) / x
             acc += e.length_m * i_avg
             g_acc = g_acc + e.length_m * i_avg
-            v, i = v * ch - i * e.z0 * sh, i * ch - (v / e.z0) * sh
+            v, i = v * ch - i * zc * sh, i * ch - (v / zc) * sh
         else:
             # a series part: the same current through it, the voltage drops by I Z
             acc += e.length_m * i
@@ -245,11 +284,12 @@ def path_currents(freqs, v_source, elements: list, source: PathSource, load: Pat
 @dataclass
 class PathAmp:
     """An op-amp stage between two stretches of a path: gain(f) (V/V, complex), the input's impedance z_in(f)
-    (the load of the stage before), the output's impedance z_out (the source of the stage after)."""
+    (the load of the stage before), the output's impedance z_out (the source of the stage after: ohms, or z(f), the
+    closed-loop output of ComponentModel.amp_z_out_at)."""
     name: str
     gain: Callable[[float], complex]
     z_in: Callable[[float], complex]
-    z_out: float
+    z_out: Union[float, Callable[[float], complex]]
     slew: Optional[float] = None      # V/s: each output harmonic is capped at slew / 2πf (amplified_path)
 
 
@@ -278,5 +318,5 @@ def amplified_path(freqs, v_source, stages: list[list], amps: list[PathAmp], sou
                 cap = a.slew / (2 * np.pi * np.maximum(f, 1.0))
                 mag = np.abs(v)
                 v = np.where(mag > cap, v * cap / np.maximum(mag, 1e-300), v)
-            src = PathSource(a.z_out)
+            src = PathSource(0.0, z=a.z_out) if callable(a.z_out) else PathSource(a.z_out)
     return out
