@@ -26,7 +26,7 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
     2.5`), conv2's ground return: pin 2's vias 0.811 / 0.755 / 0.548 → 0.571 / 0.545 / 0.471 A, pin 4 / 6's up
     (0.564 → 0.641 A, now the busiest), the vias around Q304 0.31-0.81 → 0.26-0.64 A; the hot loop's pin-2 via
     0.266 → 0.188 A; the switch node's vias within 1 %; T_max 125.4 °C unchanged. Branch and worktree deleted.
-    **Open:** rerun the three GUI timing tests alone (the `electrothermal` entry).
+    The three GUI timing tests, rerun alone: 3 passed.
 - **Branch `density-pcb` (2026-10-21, from `main` 62fde1e, commit 3ce1d5e; into `main` at the user's "yes", a
   fast-forward, branch deleted; packages `out/dist/groundtruth-0.1.42214-3ce1d5e-pcm.zip` and the server's, signed
   with the laptop's key; `electrothermal` will need `main` merged in):** the user, with a
@@ -75,7 +75,7 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
     failed, all GUI timing checks just over their limits while three heavy jobs shared the machine
     (`test_the_heatmap_tab_scrolls_through_full_width_plots` 0.11 s / 0.1, `test_thermal_button_adds_a_temperature_
     view_and_its_issues` 0.51 s / 0.5, the bridges tab's 0.71 s / 0.5): **rerun those three alone** on a quiet
-    machine (the Thermal one runs this feature's code path).
+    machine (the Thermal one runs this feature's code path). Rerun alone on `main` c738689: 3 passed.
   - The first kraft check (conv1 + conv2, `out/electrothermal/old_board/`): coupling off T_max 125.5 °C on F.Cu at
     (139.34, 83.69); coupling on refused, "the DC model is not Simulate's": correct, the user had saved flux-2 at
     14:53 while that Simulate (from 14:33) ran (5.43 → 6.01 MB; 8 cells per layer differ, between Q302's / Q304's
