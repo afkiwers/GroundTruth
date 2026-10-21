@@ -175,7 +175,8 @@ def keep_run(keep: dict, res, cfg, progress):
                         solver=res.solver, cell_mm=cell_mm_of(pitches, cfg.analysis.resolution))
         text = formats.to_json(keep["path"], sort_issues(res.issues), res.routes,
                                {"mode": keep["mode"], "version": __version__}, res.converters, res.bridges,
-                               list(getattr(res, "dc_loads", ())), list(getattr(res, "pdn", ())))
+                               list(getattr(res, "dc_loads", ())), list(getattr(res, "pdn", ())),
+                               capacitors=list(getattr(res, "cap_bias", ())))
         return keep["history"].record(keep["board"], keep["settings"](), text, meta)
     except (OSError, HistoryError, ValueError) as e:
         return f"{type(e).__name__}: {e}"

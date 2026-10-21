@@ -7,6 +7,37 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `dc-bias` (2026-10-22, from `main` f12cacd; into `main` at the user's "commit and merge", a fast-forward,
+  branch deleted; the full suite was still running at the merge: its result in the next entry):** the user, of InvenTree part 60 (100 nF
+  100 V X7R 0603, Cbias 75nF "estimate at 50% of rated voltage") used 33 times on kraft: "cbias is saved as a single
+  value, this is probably not ideal as it will be used with different DC voltages. We should find a more generic way
+  for caps", then "i like this approach -> (Give the field its voltage ...)", "rather than having a real value we
+  could use an array like this (90nF@10V 75nF@50V, 20nF@70V)", unknown nets "The max of C304 will be the Opamps
+  input voltage. Worst case the opamp is a rail-to-rail IC so in this case it would be 3.3 V. Why can't you use
+  that?", half the rated voltage without a voltage, a help section "Cbias" with a chart of a made-up curve, 3-4
+  points, the InvenTree string and the min / max number of points; also "this should be called out in the help"
+  (a FET's fields are stage parameters, not the Parts table's). Plan: `C:\Users\iwers\.claude\plans\composed-juggling-tide.md`.
+  - `components/bias.py` (the curve: one point C0/(1+(V/V1)²) [A56], 2-12 points PCHIP [Fritsch 1980], percent
+    points, the limits), `analysis/bias.py` (`cap_voltages`: safety.voltage_model + an IC's supply ≤ 18 V for its
+    pins + a resistor's far side, bounded nets 0…bound [A58]; `part_bias`, `at_dc` per run in simulate, bode_paths,
+    suggest_fixes; half the rating for one value without a voltage [A57]), `ComponentModel.bias` (text under the
+    YAML key C_bias; old numbers load and are written back as numbers), fields `Cbias Curve` / `Cbias Voltage` /
+    `Dielectric`, the Parts tab's C at bias (the curve's text) and C in circuit (background `cap_voltages`), the
+    report's "Capacitors at their DC bias" table and JSON `capacitors_at_bias`, help section `cbias` with an inline
+    SVG drawn from `c_at` (wx's classic view: a table) and the Parts section's FET note. ARCHITECTURE "Capacitance at
+    DC bias", README, REFERENCES (Johnson 1962, Fritsch 1980, A56-A58; A54 corrected).
+  - Found on kraft and fixed before it shipped: the IC-supply bound gave U303's (LTC7890, VIN 55 V) soft-start
+    capacitor C314 6 nF instead of 100 nF: the bound is only for ICs supplied at ≤ 18 V (op-amps, MCUs).
+  - Kraft (flux-2, the user's settings, read only), main vs branch: the ADC paths' −3 dB 451 → 339 Hz (C304 / C342
+    99.9 nF at 3.3 V), the step's rise 775 µs → 1.03 ms; conv1 conducted −25.9 → −26.2 dB, conv2 −14.2 → −15.0 dB,
+    single harmonics up to ±4 dB; conv1's loop 11.2 → 13.2 kHz, PM 77 → 84°, GM 22.8 → 19.6 dB (its 22 µF output
+    ceramics at 28 V: 9.25 µF from their half-rating point); the fix advisor's filter values follow. 6 capacitors at
+    an unknown voltage (U303's SS, ITH, DRVCC), 80 taken at half their rating: the user's InvenTree parts can get
+    a Cbias Curve (their posted datasheet chart gives ~42 nF at 50 V for part 60, not 75 nF).
+  - Asked meanwhile, next on its own branch: the Issues tab sortable by its columns, a filter of the checks shown
+    (one or more; the #numbers kept), and a click zooming KiCad to the copper for every check (the user:
+    clearance_voltage, cap_voltage, conducted_emission "and others seem not zoom in"). Also offered: the Parts tab's
+    Schematic column naming where a FET's fields went ("◆ conv1: rds_on, …").
 - **Branch `bode-legend` (2026-10-22, from `main` e1f1131; into `main` at the user's "merge", a fast-forward,
   branch deleted):** the user, of a Bode plot's blue ×: "some form of legend would help", then "when hovering over
   the poles and zeros with the mouse can you show a hover-over note like a tooltip?". `plots.draw_bode`'s legend

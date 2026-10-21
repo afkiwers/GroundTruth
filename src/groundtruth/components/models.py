@@ -58,6 +58,10 @@ class ComponentModel:
                                                     # has more: a current-sense IC's IP+ / IP-; empty = all its pads
     from_schematic: list[str] = field(default_factory=list)   # params taken from the symbol's fields (fields.py):
                                                               # refreshed from them, the others are set here
+    # a capacitor's DC-bias curve as text (components/bias.py: "75nF@50V", "95nF@10V, 39nF@50V", "75nF"), stored
+    # under the settings' C_bias key; params["C_bias"] is the capacitance at the part's own DC voltage, set per run
+    # (analysis/bias.at_dc), which capacitance() and every solver read
+    bias: str = ""
 
     def __post_init__(self):
         """Refuse an unknown kind at once (a typo in the settings file), with the valid ones in the message."""
@@ -74,9 +78,43 @@ class ComponentModel:
         return [p for p in MODEL_PARAMS[self.kind] if self.params.get(p) is None and p not in OPTIONAL_PARAMS]
 
     def capacitance(self) -> float:
-        """A capacitor's capacitance in the circuit: at its DC bias where given, else the nominal C."""
+        """A capacitor's capacitance in the circuit: at its own DC voltage (params C_bias, set for a run by
+        analysis/bias.at_dc), else a single bias value without a voltage (taken as it is), else the nominal C."""
         c = self.params.get("C_bias")
-        return float(c) if c is not None and c > 0 else self.get("C")
+        if c is not None and c > 0:
+            return float(c)
+        flat = self.flat_bias()
+        return flat if flat is not None else self.get("C")
+
+    def flat_bias(self) -> Optional[float]:
+        """The bias curve's value when it is one capacitance without a voltage ("75nF", as Cbias always was), else
+        None (a curve needs the part's voltage: analysis/bias.at_dc)."""
+        if not self.bias:
+            return None
+        from .bias import parse_bias
+        points, _ = parse_bias(self.bias)
+        if len(points) == 1 and points[0].v is None and points[0].c is not None:
+            return points[0].c
+        return None
+
+    def value_of(self, key: str):
+        """A parameter as the settings and the schematic sync see it: the bias curve's text for C_bias (a cap),
+        else the number (None when not set)."""
+        if key == "C_bias" and self.kind == "cap":
+            return self.bias or None
+        return self.params.get(key)
+
+    def set_value(self, key: str, value) -> None:
+        """Set (or, with None, clear) a parameter as value_of reads it: C_bias as its curve text."""
+        if key == "C_bias" and self.kind == "cap":
+            from .bias import bias_text, parse_bias
+            points, _ = parse_bias(value)
+            self.bias = bias_text(points) if points else ""
+            self.params.pop("C_bias", None)
+        elif value is None:
+            self.params.pop(key, None)
+        else:
+            self.params[key] = float(value)
 
     def impedance(self, f: float) -> Optional[complex]:
         """Complex impedance at frequency f (Hz). None means open circuit."""
@@ -154,7 +192,11 @@ class ComponentModel:
         from_schematic, note}; only what is set appears."""
         d: dict = {"model": self.kind}
         for p in MODEL_PARAMS[self.kind]:
-            if p in self.params:
+            if p == "C_bias" and self.kind == "cap" and self.bias:
+                # the curve as text; one value without a voltage as the number old files hold (they stay as written)
+                flat = self.flat_bias()
+                d[p] = _tidy(flat) if flat is not None else self.bias
+            elif p in self.params:
                 d[p] = _tidy(self.params[p])
         if self.pins:
             d["pins"] = list(self.pins)
@@ -172,9 +214,16 @@ class ComponentModel:
         kind = str(d.get("model", "open"))
         if kind not in MODEL_KINDS:
             raise ValueError(f"unknown model {kind!r}; choose one of {', '.join(MODEL_KINDS)}")
-        params = {}
+        params, bias = {}, ""
         for p in MODEL_PARAMS[kind]:
-            if d.get(p) is not None:
+            if p == "C_bias" and kind == "cap":
+                if d.get(p) is not None:            # a number (old files) or a curve's text (components/bias.py)
+                    from .bias import bias_text, parse_bias
+                    points, problems = parse_bias(d[p])
+                    if problems:
+                        raise ValueError("C_bias: " + "; ".join(problems))
+                    bias = bias_text(points)
+            elif d.get(p) is not None:
                 params[p] = float(d[p])
         pins = d.get("pins") or []
         if isinstance(pins, str):
@@ -185,7 +234,7 @@ class ComponentModel:
         if isinstance(linked, str):
             linked = [p.strip() for p in linked.split(",") if p.strip()]
         return cls(kind, params, str(d.get("note", "") or ""), [str(p) for p in pins],
-                   [str(p) for p in linked if str(p) in MODEL_PARAMS[kind]])
+                   [str(p) for p in linked if str(p) in MODEL_PARAMS[kind]], bias)
 
 
 def model_pads(fp, model: Optional[ComponentModel]) -> list:

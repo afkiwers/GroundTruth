@@ -180,6 +180,7 @@ class SimulationResult:
     pdn_setups: list = field(default_factory=list)
     solver: dict = field(default_factory=dict)              # gpu.Run.summary(): device, GPU fallbacks
     notes: list[str] = field(default_factory=list)          # about the whole run (a stack's placement)
+    cap_bias: list = field(default_factory=list)            # bias.CapBias per capacitor with a DC-bias curve
     groups: int = 1                         # model groups solved one after the other (solve_groups: memory)
     # a split Simulate's part (simulate(part=)): its issues by origin, not yet deduplicated/sorted, for merge_parts:
     # {"issues", "route_issues", "stage_issues", "checks": whether its result.checks are the whole job's}
@@ -1695,8 +1696,9 @@ def bode_paths(board: Board, config: Config, nets: Optional[list[str]] = None,
     nets: these paths only (switched off ones too, when named); else every enabled path. `progress` is called
     between paths (the window's raises to cancel)."""
     from types import SimpleNamespace
+    from .bias import at_dc
     from .route import RouteError, find_route
-    active = config.active(nets)
+    active, _, _ = at_dc(board, config.active(nets))     # each capacitor at its own DC voltage (analysis/bias.py)
     specs = [s for s in active.nets if not nets or s.name in nets]
     model = BoardModel(board, active)
     jobs = [(s, rx) for s in specs for rx in s.receivers]
@@ -3126,11 +3128,15 @@ def simulate(board: Board, config: Config, nets: Optional[list[str]] = None,
     (combine_dc; each stage's paths are kept portable instead, compact_dc_branch) and the issues' final
     dedupe/waivers/sort; see `SimulationResult.part`."""
     full = config
-    config = config.active(nets)
+    # every capacitor with a DC-bias curve at its own DC voltage (analysis/bias.py), for every solver below
+    from .bias import at_dc
+    config, cap_bias, bias_notes = at_dc(board, config.active(nets))
     with gpu.use(getattr(config.analysis, "gpu", "auto")) as run:
         result = _simulate(board, config, nets, progress, copper, model, keep_factorisations, part,
                            full if part is not None else None)
     result.solver = run.summary()
+    result.cap_bias = cap_bias
+    result.notes += bias_notes
     return result
 
 

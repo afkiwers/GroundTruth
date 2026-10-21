@@ -167,6 +167,8 @@ class Circuit:
             return
         chain = []
         if kind == "cap":
+            # the capacitance in the circuit (analog_net passes ComponentModel.capacitance() as C: the part at its DC
+            # voltage in a run, analysis/bias.py); a C_bias in hand-made values wins, as the model's rule
             c = values.get("C_bias") or values.get("C") or 0.0
             if c <= 0:
                 return

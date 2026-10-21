@@ -41,7 +41,10 @@ KiCad (IPC) ─kipy_source──┘        + settings file        └── anal
 - `components/models.py`: `ComponentModel`, the two-terminal model a part is replaced with (`MODEL_KINDS` short,
   open, resistor, cap, inductor, ferrite; `MODEL_PARAMS` per kind, also the Parts tab's columns and the YAML keys).
   `impedance(f)` (None = open; a short is `SHORT_OHMS` 1 mΩ; a cap ESR + j(ωESL − 1/ωC), C from `capacitance()`:
-  the optional `C_bias`, its capacitance at the DC voltage, else C; `OPTIONAL_PARAMS` are never "missing"),
+  `params["C_bias"]` (the capacitance at the part's own DC voltage, set per run by `analysis/bias.at_dc`), else a
+  single bias value without a voltage, else C; the DC-bias curve itself is `bias`, text, stored under the YAML key
+  `C_bias` (a number in old files); `value_of` / `set_value` read and write it as the schematic sync and the Parts
+  tab see it; `OPTIONAL_PARAMS` are never "missing"),
   `passes_signal` (short,
   ferrite, inductor, resistor ≤ `SERIES_PATH_MAX_OHMS` 1 kΩ), `pins` (the two pins a multi-pin part's model joins,
   e.g. a current-sense IC's IP+/IP−; `model_pads` / `model_nets`), `to_dict` / `from_dict`.
@@ -944,7 +947,7 @@ for a boost; duty = the high-side conduction time). The inductor current is cont
     113–187 % of the plating's capacity before (audit, session 7).
   - Every power stage notes its ceramic capacitors of 1 µF and up still at their nominal C on a rail of
     `NOMINAL_BIAS_V` (10 V) or more (`nominal_ceramics`; electrolytics by `defaults.is_electrolytic`), pointing to
-    the Parts tab's C at bias.
+    the Parts tab's C at bias (a DC-bias curve: "Capacitance at DC bias").
   - Solve rows (`_stage_row`) carry X_ohm; below the capacitors' self-resonance the loop is capacitive and
     L_nH is None (it read −1829 nH at 10 kHz). A stage whose rail is another buck's output (`feeding_stage`)
     says it is cascaded instead of blaming series switches for the missing input path.
@@ -1392,6 +1395,38 @@ paths, power-stage filters, PDN, control loop: M5), as Results views and in the 
   `plots.draw_pdn` has the ports' phase below |Z| (the phase was already in the ports). Tests:
   test_fix_advisor (the curves equal filter_transfer, z_out's peak middlebrook's, −V²/P at 180°, the split views),
   test_pdn (the bare rail's −90°, the one-cap rail's sign change).
+
+## Capacitance at DC bias (`components/bias.py`, `analysis/bias.py`, branch `dc-bias`)
+
+The user: "cbias is saved as a single value, this is probably not ideal as it will be used with different DC
+voltages", then the curve as points ("90nF@10V 75nF@50V, 20nF@70V"), the unknown nets' worst case ("Worst case the
+opamp is a rail-to-rail IC so in this case it would be 3.3 V"), half the rating without a voltage, and a help
+section with a worked chart.
+
+- `components/bias.py` (KiCad-independent): `parse_bias` (one value, `C@V`, a list, percent points; 1 to
+  `BIAS_POINTS_MAX` 12; problems listed), `bias_text` (the canonical text the settings and the Parts tab write),
+  `c_at(points, c0, v)`: one point C0 / (1 + (V/V1)²) [A56]; several a PCHIP through (0, C0) and them [Fritsch 1980],
+  above the last the one-point curve through it (continuous); `resolve` (a value without a voltage at the default
+  voltage, else flat).
+- `ComponentModel.bias` holds the curve's text (YAML key `C_bias`: old files' numbers load as a one-value curve and
+  are written back as numbers); `params["C_bias"]` is the run's capacitance at the part's own voltage, which
+  `capacitance()` and so every solver reads. `value_of` / `set_value` give the schematic sync (`fields._sync`,
+  `differences`, `same` compares curves point by point) and the Parts tab the text.
+- `fields.bias_reading`: `Cbias Curve` (text) over `Cbias`; a single value takes `Cbias Voltage`. `Dielectric`
+  C0G / NP0 (or the value / description) means class I.
+- `analysis/bias.cap_voltages`: `safety.voltage_model` plus `bounds` (an IC's supply ≤ `IC_SUPPLY_MAX` 18 V for
+  its other pins, then a resistor's known far side; a bounded net 0 … bound, so `Volts.dv` gives the worst case)
+  [A58]; `part_bias` one capacitor (CapBias), `at_dc(board, config)` the run's copy of the settings with every
+  curve applied, the table and the notes (unknown voltages, half-rating defaults). Called by `simulate`,
+  `bode_paths` and `suggest_fixes` after `Config.active`; idempotent (a derated copy gives the same copy).
+  `SimulationResult.cap_bias` carries the table to the JSON (`capacitors_at_bias`), the HTML report (`_cap_bias`)
+  and `merge_parts`. The Parts tab works out `cap_voltages` in a `LatestOnly` worker when it loads (~10 ms on kraft)
+  for its C in circuit column.
+- Kraft (2026-10-22): C304 / C342 at 3.3 V (U1102's +3V3) keep 99.9 nF, so the ADC corner goes back to ~339 Hz from
+  the flat 75 nF's 451 Hz; the 55 V input ceramics take their one-value Cbias at half their rating; U303's soft-start,
+  compensation and DRVCC capacitors are unknown (nominal) under the 18 V rule (the bound gave the soft-start 6 nF).
+- Help: section "cbias" (`help.py` `cbias_svg`: an inline SVG drawn from `c_at` with the page's CSS colours; wx's
+  simple view `cbias_table`). Tests: `tests/test_bias.py`, the Parts tab GUI test.
 
 ## Analog circuits: any op-amp topology (`emi/mna.py`, `analysis/analog_net.py`, `analysis/symbolic.py`, branch `analog-ac`)
 

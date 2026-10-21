@@ -1151,7 +1151,7 @@ def nominal_ceramics(board: Board, config: Config, refs: list[str], v: Optional[
     out = []
     for ref in refs:
         m, fp = config.model_for(ref), board.footprint(ref)
-        if m is None or m.kind != "cap" or fp is None or m.params.get("C_bias") or m.get("C") < 1e-6:
+        if m is None or m.kind != "cap" or fp is None or m.params.get("C_bias") or m.bias or m.get("C") < 1e-6:
             continue
         if not is_electrolytic(fp):
             out.append(ref)

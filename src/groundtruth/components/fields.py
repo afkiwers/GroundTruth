@@ -86,8 +86,16 @@ PARAMS = (
           "ripple sharing, conducted emission, capacitor losses"),
     Param("ESL", "capacitor", "the capacitor model's ESL", "H", 1e-9, "nH", 0.0, 1e-6, "0.4nH",
           "hot-loop inductance, high-frequency sharing"),
-    Param("Cbias", "capacitor", "the capacitor model's C_bias (its capacitance at its DC voltage)", "F", 1e-6, "µF",
-          1e-13, 1.0, "4.2uF", "replaces C: ripple, conducted emission"),
+    Param("Cbias", "capacitor", "the capacitor model's C_bias, its capacitance at DC bias: one value, a point or a "
+          "curve of up to 12 (see Cbias in the help)", "F", 1e-6, "µF", 1e-13, 1.0, "75nF@50V",
+          "replaces C at each capacitor's own DC voltage: ripple, conducted emission, filters, PDN"),
+    Param("Cbias Voltage", "capacitor", "the voltage a single Cbias value holds at (else half the Rated Voltage)",
+          "V", 1.0, "V", 0.1, 20000.0, "50V", "places the one Cbias value on the DC-bias curve"),
+    Param("Cbias Curve", "capacitor", "the DC-bias curve as text (an InvenTree text parameter; wins over Cbias)",
+          "F", 1e-6, "µF", 1e-13, 1.0, "95nF@10V, 66nF@30V, 39nF@50V, 20nF@80V",
+          "the capacitance at each capacitor's own DC voltage, interpolated"),
+    Param("Dielectric", "capacitor", "the ceramic's class: C0G / NP0 keep their capacitance (no DC-bias curve)",
+          "text", 1.0, "", 0.0, 0.0, "X7R", "C0G / NP0: the DC-bias curve is not applied"),
     Param("Capacitance", "capacitor", "the capacitor model's C (else the Value field)", "F", 1.0, "F", 1e-13, 1.0,
           "10uF", "every solve"),
     Param("Inductance", "inductor", "the inductor model's L (else the Value field)", "H", 1.0, "H", 1e-10, 1.0,
@@ -123,6 +131,7 @@ PARAMS = (
           "deg", 1.0, "°", 10.0, 90.0, "60", "signal paths: the op-amp's loop, its phase margin"),
 )
 BY_FIELD = {p.field.lower(): p for p in PARAMS}
+BIAS_CURVE = "Cbias Curve"      # a capacitor's DC-bias curve as text (bias_reading)
 # component model parameter -> field, per model kind
 MODEL_FIELDS = {"cap": {"C": "Capacitance", "ESR": "ESR", "ESL": "ESL", "C_bias": "Cbias"},
                 "inductor": {"L": "Inductance", "R": "DCR"},
@@ -319,11 +328,35 @@ def _controller_dead_times(board, spec) -> dict[str, Reading]:
     return out
 
 
+def bias_reading(fp) -> Optional[Reading]:
+    """A capacitor's DC-bias curve from its fields (components/bias.py), as a Reading whose value is the curve's
+    text: `Cbias Curve` (a text field, InvenTree's text template) first, else `Cbias` (one value, a point or a
+    list); a single value without a voltage takes `Cbias Voltage` when the part has one. None without either
+    field; value None (with the problems as its note) when the text can't be read."""
+    from .bias import BiasPoint, bias_text, parse_bias
+    name, text = BIAS_CURVE, field_text(fp, BIAS_CURVE)
+    if text is None or not text.strip():
+        name, text = "Cbias", field_text(fp, "Cbias")
+    if text is None or not text.strip():
+        return None
+    source = f"{fp.reference} {name} {text.strip()}"
+    points, problems = parse_bias(text)
+    if problems:
+        return Reading(None, text, source, "; ".join(problems))
+    if len(points) == 1 and points[0].v is None:
+        r = read(fp, "Cbias Voltage")
+        if r is not None and r.value is not None and r.value > 0:
+            points = [BiasPoint(points[0].c, points[0].pct, r.value)]
+            source += f", {r.source.split(' ', 1)[1]}"
+    return Reading(bias_text(points), text, source)
+
+
 def model_values(fp, kind: str) -> tuple[dict[str, Reading], list[str]]:
-    """{model parameter: Reading} a part's model takes from its fields (MODEL_FIELDS), and notes."""
+    """{model parameter: Reading} a part's model takes from its fields (MODEL_FIELDS), and notes. A capacitor's
+    C_bias is its DC-bias curve's text (bias_reading)."""
     out, notes = {}, []
     for param, name in MODEL_FIELDS.get(kind, {}).items():
-        r = read(fp, name)
+        r = bias_reading(fp) if (kind, param) == ("cap", "C_bias") else read(fp, name)
         if r is None:
             continue
         if r.value is None:
@@ -333,9 +366,20 @@ def model_values(fp, kind: str) -> tuple[dict[str, Reading], list[str]]:
     return out, notes
 
 
-def same(a: Optional[float], b: Optional[float]) -> bool:
-    """Two values are the same to within REL_TOL (format_si's rounding when a value went through the form)."""
-    return a is not None and b is not None and abs(a - b) <= REL_TOL * max(abs(a), abs(b), 1e-30)
+def same(a, b) -> bool:
+    """Two values are the same to within REL_TOL (format_si's rounding when a value went through the form); a
+    capacitor's DC-bias curve (text, components/bias.py) the same when its points are, each to within REL_TOL."""
+    if a is None or b is None:
+        return False
+    if isinstance(a, str) or isinstance(b, str):
+        from .bias import parse_bias
+        pa, pb = parse_bias(a)[0], parse_bias(b)[0]
+        return bool(pa) and len(pa) == len(pb) and all(
+            (x.v is None) == (y.v is None) and (x.pct is None) == (y.pct is None)
+            and same(x.v or 0.0, y.v or 0.0) and same(x.pct if x.pct is not None else x.c,
+                                                     y.pct if y.pct is not None else y.c)
+            for x, y in zip(pa, pb))
+    return abs(a - b) <= REL_TOL * max(abs(a), abs(b), 1e-30)
 
 
 STAGE_KEYS = {"converter": ("rds_on", "rds_on_low", "c_oss", "q_oss", "diode_vf", "dcr", "v_sd", "q_rr",
@@ -354,10 +398,16 @@ class Difference:
     schematic: Reading  # what the fields say
 
     def message(self) -> str:
-        """The difference as the issue's message: both values with their units and the field's source."""
+        """The difference as the issue's message: both values with their units (a DC-bias curve as its text) and
+        the field's source."""
         unit = _KEY_UNITS.get(self.key, "")
-        return (f"{self.name}: {self.key} {format_si(self.ours, unit)} set in GroundTruth, the schematic says "
-                f"{format_si(self.schematic.value, unit)} ({self.schematic.source})")
+        return (f"{self.name}: {self.key} {show_value(self.ours, unit)} set in GroundTruth, the schematic says "
+                f"{show_value(self.schematic.value, unit)} ({self.schematic.source})")
+
+
+def show_value(v, unit: str = "") -> str:
+    """A parameter's value for a message or a cell: a number with its SI prefix, a DC-bias curve as its text."""
+    return v if isinstance(v, str) else format_si(v, unit)
 
 
 _KEY_UNITS = {"rds_on": "Ω", "rds_on_low": "Ω", "dcr": "Ω", "ESR": "Ω", "R": "Ω", "c_oss": "F", "C": "F",
@@ -472,10 +522,8 @@ def apply_fields(config, board) -> dict[str, list[str]]:
         values, notes = model_values(fp, m.kind)
         done["notes"] += [f"{ref}: {n}" for n in notes]
         plain = suggest_model(fp, fields=False)        # the part without its fields: what a value falls back to
-        if _sync(lambda k: m.params.get(k), lambda k, v: (m.params.pop(k, None) if v is None
-                                                              else m.params.__setitem__(k, v)),
-                 m.from_schematic, values, list(MODEL_FIELDS[m.kind]),
-                 default=lambda k: plain.params.get(k) if plain.kind == m.kind else None):
+        if _sync(m.value_of, m.set_value, m.from_schematic, values, list(MODEL_FIELDS[m.kind]),
+                 default=lambda k: plain.value_of(k) if plain.kind == m.kind else None):
             done["parts"].append(ref)
     return done
 
@@ -497,7 +545,7 @@ def differences(config, board) -> list[Difference]:
             continue
         values, _ = model_values(fp, m.kind)
         for key, r in values.items():
-            cur = m.params.get(key)
+            cur = m.value_of(key)
             if key not in m.from_schematic and cur is not None and not same(cur, r.value):
                 out.append(Difference("part", ref, key, cur, r))
     return out
