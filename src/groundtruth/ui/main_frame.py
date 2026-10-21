@@ -282,11 +282,12 @@ class Session:
             return None, str(e)
 
     @_kicad_call
-    def refill(self):
-        """Refill every zone in KiCad (live only)."""
+    def refill(self, progress=None):
+        """Refill every zone in KiCad (live only), waiting until KiCad has finished (kipy_sink.refill_zones: minutes
+        on a complex board), saying how long through progress(text, fraction)."""
         if self.live:
             from ..adapters.kipy_sink import refill_zones
-            refill_zones(self.kb)
+            refill_zones(self.kb, progress)
 
     @_kicad_call
     def draw_issues(self, issues, layer, hidden=frozenset()):
@@ -1223,7 +1224,7 @@ class MainFrame(wx.Frame):
 
     def on_refill(self, _=None):
         """Refill zones in KiCad, then read the board again."""
-        self._start("refilling zones…", lambda progress: self.session.refill(), lambda _: self.on_reload(),
+        self._start("refilling zones…", lambda progress: self.session.refill(progress), lambda _: self.on_reload(),
                     what="refill the zones", cancellable=False, kicad=True)
 
     def on_config_change(self):
