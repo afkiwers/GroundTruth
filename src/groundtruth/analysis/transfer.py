@@ -176,6 +176,32 @@ def normal_form(poles, zeros, k: complex, f_max: Optional[float] = None) -> dict
     return {"k": kval, "m": m, "poles": ps, "zeros": zs, "beyond": more, "text": text, "latex": latex}
 
 
+BW_TOL = 0.01                  # a bandwidth this much above its limit is a bandwidth_limit issue (numerics: 1 %)
+
+
+def upper_3db(f, h) -> Optional[float]:
+    """A response's bandwidth: the first frequency above its passband peak (|H|'s largest value in the sweep) where
+    |H| has fallen 3 dB below that peak, (|H_peak|/|H|)² interpolated linearly in f² to 2 between the samples around
+    it (exact for one pole, as gain_figures). None when it does not fall that far above the peak within the sweep (a
+    high-pass, or a band reaching past the sweep's top)."""
+    f = np.asarray(f, float)
+    a = np.abs(np.asarray(h, complex))
+    if len(f) < 2:
+        return None
+    k0 = int(np.argmax(a))
+    peak = float(a[k0])
+    if peak <= 0:
+        return None
+    below = np.nonzero(a[k0:] < peak / math.sqrt(2))[0]
+    if not len(below):
+        return None
+    k = k0 + int(below[0])
+    y0, y1 = (peak / max(a[k - 1], 1e-300)) ** 2, (peak / max(a[k], 1e-300)) ** 2
+    u0, u1 = float(f[k - 1]) ** 2, float(f[k]) ** 2
+    t = (2.0 - y0) / (y1 - y0) if y1 != y0 else 0.0
+    return math.sqrt(u0 + min(max(t, 0.0), 1.0) * (u1 - u0))
+
+
 PM_WARN = 45.0                 # degrees: a loop with less phase margin rings (a warning); below PM_ERROR it is close
 PM_ERROR = 20.0                # to oscillating (an error)
 

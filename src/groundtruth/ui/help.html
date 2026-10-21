@@ -965,7 +965,8 @@ L and C; the load each receiver's capacitance and the Load R.</p>
 <p>An <b>op-amp</b> is its datasheet's small-signal model: open-loop gain <b>Aol</b> (default 100 dB) with its pole
 at <b>GBW</b>/Aol, an optional second pole (<b>Fp2</b>, or from the phase margin <b>PM</b> at unity gain), the
 open-loop output resistance <b>Zout</b> (the datasheet's R_O, default 100 Ω), each input's capacitance to ground
-(<b>Cin</b>, 2 pF) and <b>Rin</b> between the inputs. Its gain, bandwidth and output impedance in the circuit then
+(<b>Cin</b>, 2 pF) and <b>Rin</b> between the inputs; <b>PM</b> sets the second pole at GBW·sin(PM)·tan(PM), which
+gives a follower exactly that margin. Its gain, bandwidth and output impedance in the circuit then
 follow from the resistors and capacitors around it; a part with a <b>Gain</b> field stays a fixed gain block (for
 an amplifier GroundTruth can't see inside, such as an instrumentation-amplifier IC), as does an op-amp whose
 inverting input can't be told. The pins are found by their schematic names (+IN, IN+, INP, +, −IN, IN−, INN, −,
@@ -981,6 +982,15 @@ are exact (the circuit's eigenvalues, each track as its lumped π section; a not
 exact); a pole and a zero within 0.1 % of each other cancel. Each op-amp's <b>loop gain</b> is computed by breaking
 its loop at its output: its crossover frequency and <b>phase margin</b> (amber below 45°: the circuit rings; red
 below 20°: close to oscillating). Simulate's emission estimate takes the path's currents from the same circuit.</p>
+<p><b>Limits.</b> A path's <b>Max bandwidth</b> (Signal paths tab; <code>max_bandwidth</code>, e.g. 1 kHz for an
+ADC input's anti-alias filter) is checked at its receiver: its bandwidth, where it has fallen 3 dB below its passband
+peak, above the limit is a <b>bandwidth_limit</b> issue (also when it does not fall 3 dB within the sweep while the
+sweep reaches above the limit). On an op-amp solved in its circuit (no Gain field), its <b>Bandwidth</b> field is
+its stage's limit: the stage's own transfer, from the previous op-amp's output (or the driver pin) to its output, so
+an upstream filter does not count against it; a filter after the op-amp is not part of its stage (use the path's
+Max bandwidth for it). A loop with less than 45° of phase margin is an <b>opamp_stability</b> warning, below 20° an
+error; give the op-amp <b>PM</b> (its datasheet's phase margin at unity gain) or <b>Fp2</b>: with one pole the
+margin is always near 90°. With the Bode button the findings are notes and a tile; Simulate makes them issues.</p>
 
 <hr><a name="prefs"></a><h3>Preferences</h3>
 <p><b>Preferences…</b> (top bar, next to Help) holds your settings on this computer, for every board (a board's

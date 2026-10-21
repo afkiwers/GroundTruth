@@ -248,7 +248,7 @@ A part's parameters can come from its symbol's fields instead of being typed in:
 | `ESR`, `ESL`, `Cbias` | capacitor | the model's ESR, ESL, C_bias | mΩ, nH, µF | `5milliohm`, `0.4nH`, `4.2uF` |
 | `Capacitance`, `Inductance`, `Resistance` | C, L, R | the model's C, L, R (else the Value field) | F, H, Ω | `10uF` |
 | `Gain` | op-amp stage | the amplifier's gain (a Gain field makes the part an amplifier); `20dB` = 10 | V/V | `10`, `-2`, `20dB` |
-| `GBW`, `Bandwidth` | op-amp | the gain's roll-off: one pole at Bandwidth, else at GBW / \|gain\| | MHz | `10MHz` |
+| `GBW`, `Bandwidth` | op-amp | GBW: the gain-bandwidth (the circuit model's dominant pole at GBW/Aol). Bandwidth: a gain block's (a part with `Gain`) one pole, else at GBW / \|gain\|; on an op-amp solved in its circuit, **its stage's bandwidth limit**: a stage wider than it is a `bandwidth_limit` issue | MHz | `10MHz` |
 | `Zout`, `Cin`, `Rin` | op-amp | the open-loop output impedance (the datasheet's R_O / Z_O; with GBW or Bandwidth the stage's output is Zout·jf/(jf + f_c), divided by the loop below its bandwidth f_c; without, Zout as given; none: 1 Ω), input C and R (load of the input side) | Ω, pF, Ω | `2.3kohm`, `3pF` |
 | `Slew Rate` | op-amp | caps each output harmonic at SR / 2πf | V/µs | `20V/us` |
 | `Aol`, `Fp2`, `PM` | op-amp | open-loop gain, a second open-loop pole or the phase margin at unity gain (the circuit model) | dB, Hz, ° | `110dB`, `20MHz`, `60` |
@@ -312,6 +312,7 @@ A `nets:` entry:
 | `driver_ohms`, `load_pf` | `analysis` | Driver output resistance, input capacitance per receiver. |
 | `driver_nh`, `driver_pf`, `fall_time` | none, none, `rise_time` | The source: its series inductance (nH), its output capacitance (pF), a falling edge of its own. |
 | `load_ohms` | none | A resistance at the receivers (a parallel termination). |
+| `max_bandwidth` | none | The path's bandwidth limit (`1kHz`: an ADC input's anti-alias filter): its −3 dB frequency at the receiver (3 dB below the passband peak) above it is a `bandwidth_limit` issue; also when the response does not fall 3 dB within the sweep while the sweep reaches above the limit. |
 | `sweep_from`, `sweep_to`, `sweep_points` | f/100, the band's top, 300 | The path's Bode sweep (`1Hz`, `10MHz`; from 10 mHz; 20 to 5000 points): Simulate and `groundtruth bode` / the Signal paths tab's **Bode** sweep the path's circuit over it. A sensor or ADC input wants `sweep_from: 1Hz`: the gain at the sweep's start is shown as the DC gain. |
 | `through` | | Parts the signal path may run through although they don't pass a signal by default (an AC-coupling capacitor, a resistor above 1 kΩ). The path from `driver` to the receivers runs through series parts into other nets, each part with its impedance. |
 | `driver_return`, `receiver_return` | | The return pin (`REF.PAD`). Default: the nearest reference-net pad of the same part, else of any part within 10 mm; without one the route gets `return_path_broken`. |
@@ -353,6 +354,8 @@ rules above decide.
 | `return_path_broken` | error | The solver finds no return: no reference-net pin near a driver or receiver, no plane copper near the route or a return pin, or no copper connection between the return pins (a split plane). |
 | `return_detour` | warning / error | Loop inductance over `detour_warning` / `detour_error` × the ideal. |
 | `plane_resonance` | warning | A plane-pair resonance raises a route's or hot loop's moment by `resonance_db` or more. |
+| `bandwidth_limit` | warning | A signal path's bandwidth at its receiver above its `max_bandwidth`, or an op-amp stage's (from its input to its output, solved in its circuit) above its `Bandwidth` field (1 % tolerance). |
+| `opamp_stability` | warning / error | An op-amp's loop has less than 45° of phase margin (it rings); below 20° an error (close to oscillating). Give the op-amp `PM` or `Fp2` for its second pole: with one pole the margin is always near 90°. |
 | `emi_margin` | warning / error | Radiated estimate within `emi_margin_db` of the limit / over it (routes and hot loops). |
 | `band_unsolved` | warning | A solve did not converge and the band above the last solved frequency is held at its value there, not computed: a plane resonance in it would be missed. Simulate again at another resolution. |
 | `hot_loop` | warning / error | Switch-node overshoot over `overshoot_warning` / `overshoot_error`. |

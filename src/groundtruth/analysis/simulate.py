@@ -1420,12 +1420,15 @@ def cancel_doublets(poles, zeros) -> tuple[list, list, int]:
 
 
 def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str, f: np.ndarray,
-                      cache=None) -> tuple[list, list[str]]:
+                      cache=None) -> tuple[list, list[str], list[dict]]:
     """The path's responses from its whole circuit (analysis/analog_net: every op-amp and part on its nets, any
     topology; docs/ANALOG_AC.md): the receiver per volt of the source, swept with every track a line; its poles and
     zeros exact, from the circuit with each track as its π section (emi/mna.Circuit.poles_zeros), up to POLE_SPAN
     times the sweep's top; the numeric normal form (transfer.normal_form) and the ideal circuit's H(s) in its part
-    names (analysis/symbolic.py); each op-amp's output as a response of its own. (responses, notes)."""
+    names (analysis/symbolic.py); each op-amp's output as a response of its own; each op-amp's loop gain. Findings:
+    the path's bandwidth above its max_bandwidth, an op-amp stage's above its Bandwidth field (bandwidth_limit), a
+    loop's phase margin below 45° (opamp_stability; below 20°: an error). (responses, notes, findings: [{check,
+    severity, message, at (x, y mm)}])."""
     from .analog_net import analog_network
     from .symbolic import symbolic_transfer
     from .transfer import Response, normal_form
@@ -1469,7 +1472,78 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
     kinds = ", ".join(f"{n} ({k})" for n, k in net.opamps)
     notes.insert(0, f"circuit: {len(net.nets)} net(s), {len(net.parts)} part(s), {net.tracks} track segment(s)"
                  + (f", op-amps {kinds}" if kinds else ""))
-    return out, notes
+    return out, notes, _bandwidth_and_stability(board, config, spec, receiver, net, f, out)
+
+
+def _bandwidth_and_stability(board: Board, config: Config, spec: NetSpec, receiver: str, net, f: np.ndarray,
+                             responses: list) -> list[dict]:
+    """The findings of a path's circuit (network_responses): its bandwidth at the receiver against the net's
+    max_bandwidth, each op-amp stage solved as a circuit against its Bandwidth field (the stage's own transfer, from
+    the previous op-amp's output or the driver pin to its output: an upstream filter does not count against it),
+    each loop's phase margin (without a route to order the op-amps by, an unrouted board: each from the driver pin).
+    A bandwidth is transfer.upper_3db (3 dB below the passband peak, above it); a limit is
+    exceeded by more than BW_TOL, or the response does not fall that far within the sweep while the sweep reaches
+    above the limit (then the bandwidth is at least the sweep's top)."""
+    from .route import RouteError, find_route
+    from .transfer import BW_TOL, PM_ERROR, PM_WARN, fmt_hz, upper_3db
+    out = []
+    rx = board.find_pin(receiver)
+    rx_at = rx.position if rx is not None else (0.0, 0.0)
+
+    def over(bw, limit) -> Optional[str]:
+        """The bandwidth's text when it is above the limit, else None."""
+        if bw is None:
+            return f"above {fmt_hz(float(f[-1]))} (it does not fall 3 dB within the sweep)" if f[-1] > limit else None
+        return fmt_hz(bw) if bw > limit * (1 + BW_TOL) else None
+    if getattr(spec, "max_bandwidth", None) and responses:
+        main = responses[0]
+        text = over(upper_3db(main.f, main.h), spec.max_bandwidth)
+        if text:
+            out.append({"check": "bandwidth_limit", "severity": None, "at": rx_at,
+                        "message": f"{spec.name}: its bandwidth at {receiver} is {text}, above its max_bandwidth "
+                                   f"{fmt_hz(spec.max_bandwidth)}"})
+    # the op-amp stages in the path's order, each one's input: the previous stage's output, else the driver pin
+    refs = []
+    try:
+        route = find_route(board, config, spec.name, spec.driver, receiver, spec.through)
+        refs = [ref for _, ref, _, _ in (_stage_routes(route, config) or []) if ref]
+    except RouteError:
+        pass
+    ordered = bool(refs)
+    if not ordered:           # no route to order them by (an unrouted board): each from the driver pin
+        refs = [name for name, _ in net.opamps]
+    kinds = dict(net.opamps)
+    prev = net.node_of.get(spec.driver)
+    for ref in refs:
+        name = next((c for c in net.amp_out if c == ref), None) or next((c for c in net.amp_out
+                                                                          if c.startswith(ref)), None)
+        if name is None:
+            continue
+        node = net.amp_out[name]
+        limit = net.amp_params.get(name, {}).get("bandwidth")
+        if limit and kinds.get(name) == "macromodel" and prev in net.circuit.nodes and node in net.circuit.nodes:
+            h_in = net.circuit.transfer(f, prev)
+            h = net.circuit.transfer(f, node) / np.where(np.abs(h_in) > 0, h_in, 1e-300)
+            text = over(upper_3db(f, h), limit)
+            fp = board.footprint(ref)
+            if text:
+                out.append({"check": "bandwidth_limit", "severity": None,
+                            "at": fp.position if fp is not None else rx_at,
+                            "message": f"{name}: its stage's bandwidth is {text}, above its Bandwidth field "
+                                       f"{fmt_hz(limit)}"})
+        if ordered:
+            prev = node
+    for r in responses:
+        m = getattr(r, "margin", None)
+        if r.quantity != "loop gain" or not m or m["pm"] >= PM_WARN:
+            continue
+        name = r.name.split(":")[0]
+        fp = board.footprint(name) or board.footprint(name.rstrip("ABCD"))
+        out.append({"check": "opamp_stability", "severity": "error" if m["pm"] < PM_ERROR else None,
+                    "at": fp.position if fp is not None else rx_at,
+                    "message": f"{name}: its loop's phase margin is {m['pm']:.0f}° at {fmt_hz(m['f_c'])}: "
+                               + ("close to oscillating" if m["pm"] < PM_ERROR else "it rings")})
+    return out
 
 
 def path_responses(setup, net: str, model: Optional["BoardModel"] = None) -> list:
@@ -1483,9 +1557,15 @@ def path_responses(setup, net: str, model: Optional["BoardModel"] = None) -> lis
     f = sweep_range(setup.spec, setup.harmonics)
     if model is not None:
         try:
-            out, notes = network_responses(model.board, model.config, setup.spec, setup.res.receiver, f,
-                                           line_cache(model))
+            out, notes, findings = network_responses(model.board, model.config, setup.spec, setup.res.receiver, f,
+                                                     line_cache(model))
             setup.res.notes += [f"Bode: {n}" for n in notes]
+            for fd in findings:
+                if hasattr(setup, "issue"):          # Simulate: an issue; the Bode button: its note
+                    setup.issue(model.config.rules, fd["check"], fd["message"], fd["at"], fd["severity"])
+                setup.res.notes.append(f"{fd['check']}: {fd['message']}")
+                if out:                              # and on the path's response: the Bode view lists it
+                    out[0].notes.append(f"{fd['check']}: {fd['message']}")
             if out:
                 return out
         except (ValueError, SolverError, KeyError, ZeroDivisionError, np.linalg.LinAlgError) as e:
