@@ -150,9 +150,18 @@ On the real board: kraft's two ADC paths (unchanged), and test boards for the fi
   inverting amplifier's gain and its pole GBW·β + GBW/A0 to 1e-6; non-inverting ×2 at 5 MHz; a follower; Sallen-Key
   and MFB f0 and Q to 0.1 %; an integrator; a three-op-amp instrumentation amplifier, gain 21; a follower's second
   pole, Q 1 and +1.25 dB peaking; a line two-port open at its end = its capacitance).
-- Next: the netlist (`analysis/analog_net.py`: the network from a path's nets, pin roles per channel, tracks as
-  two-ports / π sections), then the transfer function's normal form and the symbolic form, the loop gain, the Bode
-  integration, Simulate's emission estimate, UI and docs.
+- **Step 2, the circuit from the board** (f2ee51c): `analysis/analog_net.py` (the network from a path's nets out
+  to AC ground: `ac_ground_nets`; `opamp_channels` / `pin_role`: per channel from the pin names, or the GT labels
+  amp_in / **amp_inv** (new) / amp_out; tracks as line two-ports or π sections (`lumped=True`), vias R + L,
+  unrouted nets joined as the netlist says with a note; the macromodel, or the gain block for a part with a Gain
+  field), `route.copper_graph` split out of find_route; mna.py: sparse solve (kraft's ADC path, 97 track
+  segments: 0.17 s for 300 frequencies), the normal form H(s) = K·s^m·Π(1 − s/z)/Π(1 − s/p). tests/test_analog_net.py:
+  4 pass (an inverting amplifier and a Sallen-Key read from generated boards, `boardgen.opamp_circuit_board`;
+  pin roles; a dual op-amp's channels). Kraft's /CPU/ADC_I_RAIL_1: U301 as the macromodel (its IN− from the pin
+  name "−"), 451 Hz from the circuit, the follower's pole at 686 kHz.
+- Next: the transfer function shown (normal-form text; the symbolic form needs sympy: the user to confirm the
+  dependency), the loop gain and phase margin, the Bode integration (`bode_paths`, Simulate's responses), Simulate's
+  emission estimate, the Parts tab's new values (Aol, Fp2, PM) and the schematic fields, UI and docs.
 
 Estimate: three to four sessions (the solver and the closed-form tests; the netlist, pin roles and macromodel
 fields; the loop gain; integration, UI, docs and kraft).
