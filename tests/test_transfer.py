@@ -85,6 +85,36 @@ def test_the_bode_legend_names_the_curves_and_the_markers_it_shows():
     assert labels([flat]) == ["U1: output"]
 
 
+def test_hovering_a_pole_or_zero_names_it():
+    """The plugin's tooltip over a Bode plot's or the pole-zero map's marker (the user: "when hovering over the
+    poles and zeros with the mouse can you show a hover-over note like a tooltip?"): plots.mark_at at the marker's
+    pixel gives whose pole or zero it is, its frequency, a pair's Q and ζ; away from the markers nothing."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+    from groundtruth.analysis.transfer import BodeView
+    from groundtruth.report.plots import draw_bode, draw_pz, mark_at
+    rc = 1e3 * 10e-9                                         # a real pole at 15.9 kHz
+    w0, q = 2 * math.pi * 1e6, 2.0                           # and a pair at 1 MHz, Q 2
+    rc_resp = exact_response("net: receiver / source", "net", "voltage gain", F, [1.0], [rc, 1.0])
+    pair = exact_response("U1: output", "net", "voltage gain", F, [w0 ** 2], [1.0, w0 / q, w0 ** 2])
+
+    def tips(draw):
+        """{text: pixel} of every recorded marker, and the figure (rendered, so its transforms hold)."""
+        fig = Figure(figsize=(9.5, 5.0))
+        draw(fig, BodeView("net", [rc_resp, pair]))
+        FigureCanvasAgg(fig).draw()
+        ax, marks = next(iter(fig._gt_marks.items()))
+        return fig, ax, {m[3]: ax.transData.transform((m[0], m[1])) for m in marks}
+
+    for draw in (draw_bode, draw_pz):
+        fig, ax, at = tips(draw)
+        assert "receiver / source: real pole at 15.9 kHz" in at
+        assert "U1: output: pole pair at 1 MHz, Q 2 (ζ 0.25)" in at
+        x, y = at["receiver / source: real pole at 15.9 kHz"]
+        assert mark_at(fig, ax, x + 3, y - 2) == "receiver / source: real pole at 15.9 kHz"
+        assert mark_at(fig, ax, x + 40, y + 40) == ""
+
+
 def test_the_response_curves_and_summary():
     """Magnitude in dB (a ratio) or Ω (an impedance), the phase unwrapped (a delay's phase keeps falling), the JSON
     summary decimated."""

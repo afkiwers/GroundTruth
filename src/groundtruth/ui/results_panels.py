@@ -492,6 +492,7 @@ class ResultsPanel(wx.Panel):
         self.canvas3.mpl_connect("motion_notify_event", self._hover)
         self.fig2 = Figure(figsize=(8, 2.4))
         self.canvas2 = PrerenderedCanvas(self.page, -1, self.fig2)
+        self.canvas2.mpl_connect("motion_notify_event", self._hover)     # the pole-zero map's markers (draw_pz)
         s = wx.BoxSizer(wx.VERTICAL)
         s.Add(top, 0, wx.EXPAND | wx.ALL, 6)
         s.Add(self.tiles, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 4)
@@ -597,16 +598,19 @@ class ResultsPanel(wx.Panel):
 
     def _hover(self, event):
         """The value under the mouse (draw_heatmap records each map's grid and values on its figure); over an
-        issue's circle or a via's or part's marker, what it is (also as the map's tooltip, in full)."""
+        issue's circle or a via's or part's marker, what it is (also as the map's tooltip, in full); over a Bode or
+        pole-zero plot's × or ○, which pole or zero it is (draw_bode / draw_pz record them, plots.pz_tip)."""
         text, mark = "", ""
         maps = getattr(event.canvas.figure, "_gt_maps", None) or {}
         hit = maps.get(event.inaxes) if event.inaxes is not None else None
-        if hit is not None and event.xdata is not None:
+        if event.inaxes is not None and event.xdata is not None:
             from ..report.plots import map_value, mark_at
             mark = mark_at(event.canvas.figure, event.inaxes, event.x, event.y)
             text = mark if len(mark) <= READOUT_CHARS else mark[:READOUT_CHARS - 1] + "…"
-            text = text or map_value(hit, event.xdata, event.ydata)
-        tip = mark + ("\n(click: show it in KiCad)" if mark and self.on_mark is not None else "")
+            if hit is not None:
+                text = text or map_value(hit, event.xdata, event.ydata)
+        # only a map's marker is shown in KiCad by a click (_press); a pole's or zero's tooltip has no such line
+        tip = mark + ("\n(click: show it in KiCad)" if mark and hit is not None and self.on_mark is not None else "")
         if event.canvas.GetToolTipText() != tip:
             event.canvas.SetToolTip(tip)
         sec = (getattr(event.canvas.figure, "_gt_section", None) or {}).get(event.inaxes) \

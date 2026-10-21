@@ -1416,6 +1416,7 @@ def draw_bode(fig: Figure, view) -> None:
     ax_p = fig.add_subplot(gs[1], sharex=ax_m)
     ohms = all(r.quantity == "impedance" for r in resp)
     f_all, marked = [], set()
+    marks = fig._gt_marks = {}          # for the plugin's hover (results_panels._hover, mark_at): what each marker is
     for k, r in enumerate(resp):
         c = PDN_COLOURS[k % len(PDN_COLOURS)]
         f = np.asarray(r.f) / 1e6
@@ -1427,9 +1428,13 @@ def draw_bode(fig: Figure, view) -> None:
             rows = _pz_in_band(roots, r.f)
             if rows:                    # one artist for all of them (one each made the PDN views slow to draw)
                 f0 = np.array([row["f0"] for row in rows])
-                ax_m.plot(f0 / 1e6, np.interp(np.log(f0), np.log(r.f), mag), marker, ls="none", color=c, ms=6,
-                          mfc="none", mew=1.4)
+                y0 = np.interp(np.log(f0), np.log(r.f), mag)
+                ax_m.plot(f0 / 1e6, y0, marker, ls="none", color=c, ms=6, mfc="none", mew=1.4)
                 marked.add(marker)
+                name = response_label(r, view.owner)
+                marks.setdefault(ax_m, []).extend(
+                    (x, y, 0, pz_tip(name, "pole" if marker == "x" else "zero", row))
+                    for x, y, row in zip(f0 / 1e6, y0, rows))
     # the markers' key in the legend, after the curves' (the user: "some form of legend would help"): grey, as each
     # marker takes its curve's colour; only the kinds the plot shows
     for marker, what in (("x", "pole"), ("o", "zero")):
@@ -1518,6 +1523,20 @@ def draw_step(fig: Figure, view) -> None:
     _adjust(fig, left_in, right_in, 0.10 + 2 * _lh(FS_TICK) + 0.08, header + 0.06, wspace=0.25)
 
 
+def pz_tip(curve: str, kind: str, row: dict) -> str:
+    """A pole's or zero's hover text (the user: "when hovering over the poles and zeros with the mouse can you show
+    a hover-over note like a tooltip?"): whose it is, its natural frequency and, for a complex pair, its Q and
+    damping ratio ζ = 1 / 2Q [Ogata 2010]; one in the right half-plane said so (a pole there: unstable; a zero: the
+    response starts the wrong way). `row` as transfer.pz_rows gives it."""
+    from ..analysis.transfer import fmt_hz
+    f0 = fmt_hz(row["f0"])
+    if row["re"] > 0:
+        return f"{curve}: {kind} at {f0}, in the right half-plane"
+    if row["q"]:
+        return f"{curve}: {kind} pair at {f0}, Q {row['q']:.3g} (ζ {1 / (2 * row['q']):.3g})"
+    return f"{curve}: real {kind} at {f0}"
+
+
 def _pz_in_band(roots, f) -> list[dict]:
     """The pole / zero rows (transfer.pz_rows) whose f0 lies within the curve's frequencies."""
     from ..analysis.transfer import pz_rows
@@ -1533,6 +1552,8 @@ def draw_pz(fig: Figure, view) -> None:
     fig.clear()
     ax = fig.add_subplot(111)
     pts = []
+    from ..analysis.transfer import pz_rows
+    tips = []                           # the plugin's hover (results_panels._hover): each marker's text, pz_tip
     for k, r in enumerate(view.responses):
         c = PDN_COLOURS[k % len(PDN_COLOURS)]
         for roots, marker in ((r.poles, "x"), (r.zeros, "o")):
@@ -1542,6 +1563,11 @@ def draw_pz(fig: Figure, view) -> None:
                 ax.plot(xs, ys, marker, color=c, ms=7, mfc="none", mew=1.5,
                         label=response_label(r, view.owner) if marker == "x" else None)
                 pts += [abs(v) for v in xs + ys if v]
+                kind = "pole" if marker == "x" else "zero"
+                for s, x, y in zip(roots, xs, ys):       # both members of a pair: pz_rows reads the upper one
+                    row = pz_rows([complex(complex(s).real, abs(complex(s).imag))])[0]
+                    tips.append((x, y, 0, pz_tip(response_label(r, view.owner), kind, row)))
+    fig._gt_marks = {ax: tips}
     if not pts:
         ax.text(0.5, 0.5, "no poles or zeros", ha="center", va="center", transform=ax.transAxes, fontsize=FS_TEXT)
         ax.set_axis_off()
@@ -1551,7 +1577,7 @@ def draw_pz(fig: Figure, view) -> None:
     ax.set_yscale("symlog", linthresh=lin)
     ax.axhline(0, color="#888", lw=0.8)
     ax.axvline(0, color="#888", lw=0.8)
-    from ..analysis.transfer import fmt_root, pz_rows
+    from ..analysis.transfer import fmt_root
     for k, r in enumerate(view.responses):
         for row in pz_rows(r.poles)[:4]:             # the lowest natural frequencies: the dominant poles
             text = fmt_root(row)

@@ -2697,6 +2697,16 @@ def test_a_routes_bode_view_draws_its_curves_and_poles(app, frame):
     assert any("Bode" in t for t in titles), titles
     titles2 = [ax.get_title(loc="left") for ax in f.results_panel.canvas2.figure.axes]
     assert any("poles" in t for t in titles2), titles2
+    # the mouse over a pole's or zero's marker, on the Bode plot and the pole-zero map: its tooltip and the readout
+    # name it, without the map markers' "click: show it in KiCad" (the user: "... show a hover-over note like a
+    # tooltip?")
+    from matplotlib.backend_bases import MouseEvent
+    for canvas in (f.results_panel.canvas, f.results_panel.canvas2):
+        ax, marks = next((a, m) for a, m in canvas.figure._gt_marks.items() if m)
+        x, y = ax.transData.transform((marks[0][0], marks[0][1]))
+        f.results_panel._hover(MouseEvent("motion_notify_event", canvas, x, y))
+        assert canvas.GetToolTipText() == marks[0][3] and " at " in marks[0][3] and "KiCad" not in marks[0][3]
+        assert f.results_panel.readout.GetLabel() == marks[0][3]
 
 
 def test_a_selection_is_shown_in_kicad_once_it_settles(app):
