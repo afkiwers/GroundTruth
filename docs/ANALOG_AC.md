@@ -1,6 +1,6 @@
 # Plan: a generic small-signal model of op-amp circuits (any topology)
 
-Status: **in progress** on branch `analog-ac` (2026-10-21). Asked by the user, of kraft_flux_mini_2's ADC path (ZXCT1107 → R304 →
+Status: **steps 1-5 done** on branch `analog-ac` (2026-10-21); the step response is the next branch. Asked by the user, of kraft_flux_mini_2's ADC path (ZXCT1107 → R304 →
 TLV6001 follower → R303 / C304 → ADC): "Are we currently considering the Opamp circuit and it's amplification etc.
 If I were to build an active lowpass filter, would that simulate it as one?", then "yes plan it", "present the
 plan", and: **"I want a generic model that can calculate any circuit made from an OPA"**. Builds on `bode-sweep`
@@ -159,9 +159,28 @@ On the real board: kraft's two ADC paths (unchanged), and test boards for the fi
   4 pass (an inverting amplifier and a Sallen-Key read from generated boards, `boardgen.opamp_circuit_board`;
   pin roles; a dual op-amp's channels). Kraft's /CPU/ADC_I_RAIL_1: U301 as the macromodel (its IN− from the pin
   name "−"), 451 Hz from the circuit, the follower's pole at 686 kHz.
-- Next: the transfer function shown (normal-form text; the symbolic form needs sympy: the user to confirm the
-  dependency), the loop gain and phase margin, the Bode integration (`bode_paths`, Simulate's responses), Simulate's
-  emission estimate, the Parts tab's new values (Aol, Fp2, PM) and the schematic fields, UI and docs.
+- **Step 3, the transfer function written out** (ab320dc, 10f5eed; the user: "add sympy make sure to list it under
+  the used libs": pyproject, plugin/requirements.txt, the help's licence list with mpmath): `analysis/symbolic.py`
+  (the ideal circuit's H(s) in part names: text, LaTeX, MathML), `transfer.normal_form` (the full circuit's exact
+  poles and zeros as factors with f and Q), `simulate.network_responses` (every path's Bode responses from its
+  circuit: the receiver, each op-amp's output; doublets cancelled), the Bode plot's math-text line, the report's
+  MathML. Kraft ADC_I_RAIL_1: `H(s) = 1 / (C304·R303·s + 1)`. Two model fixes on the way: an op-amp's c_in to ground
+  (between the inputs it made an undamped 5.88 MHz notch with R_O), pads joined through tracks are not "unrouted".
+- **Step 4, loop gain and phase margin** (488e151): `Circuit.loop_gain` (broken at the op-amp's ideal internal
+  output [Middlebrook 1975]), `transfer.phase_margin`, a loop-gain response per op-amp and a "phase margin" tile.
+  Kraft's U301: crossover 671 kHz, 89°.
+- **T-junctions** (383d0e6): a track another track ends on is split there (copper_graph's joins from the junction
+  to its ends had doubled its copper); kraft's ADC path 35 track pieces, not 97.
+- **Step 5, Simulate's emission from the circuit** (`simulate.NetworkPath`): per stage a PathResult from the MNA
+  solution (each track piece's exact mean current, shunts' currents, the share past each), the loops and field
+  solves unchanged; the cascade where the circuit can't be made. test_path's termination comparison within 15 dB
+  of the peak (the stub lines move a 2.45 GHz notch).
+- **Docs**: help (section "Op-amp circuits and the transfer function", the Signal paths and Bode passages), README
+  (the same, the amplifier model's aol / fp2 / pm, the fields Aol / Fp2 / PM, the amp_inv label), ARCHITECTURE
+  ("Analog circuits"), REFERENCES (Golub 2013, Middlebrook 1975, Franco 2015; A52 the macromodel, A53 the circuit,
+  A54 the symbolic form).
+- **Left**: the schematic fields Aol / Fp2 / PM (components/fields.py) and the Parts tab showing them; the full
+  suite; HANDOFF; the step response (a second branch, as decided).
 
 Estimate: three to four sessions (the solver and the closed-form tests; the netlist, pin roles and macromodel
 fields; the loop gain; integration, UI, docs and kraft).

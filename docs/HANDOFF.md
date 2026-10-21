@@ -1,12 +1,36 @@
 # GroundTruth handover
 
-## Current state (2026-10-21, `bode-sweep`, `pin-shares`, `electrothermal`, `density-pcb`, `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-21, branch `analog-ac` open; `bode-sweep`, `pin-shares`, `electrothermal`, `density-pcb`, `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `analog-ac` (2026-10-21, from `main` ad8f333/e9b2c7d; OPEN, committed step by step, not merged):** the
+  user, of kraft's ADC path: "Are we currently considering the Opamp circuit and it's amplification etc. If I were
+  to build an active lowpass filter, would that simulate it as one?" (no: a gain block), "yes plan it", "I want a
+  generic model that can calculate any circuit made from an OPA", "i want the transfer function to be shown in the
+  results as well", tracks inside a circuit "no, do it now" (not ideal wires), loop gain now and step response in a
+  second branch "Yes", Simulate's emission from it "yes", "add sympy make sure to list it under the used libs".
+  Plan, decisions and progress: [ANALOG_AC.md](ANALOG_AC.md); the code: ARCHITECTURE "Analog circuits".
+  - `emi/mna.py` (modified nodal analysis: any circuit; exact poles and zeros by generalised eigenvalues; the op-amp
+    macromodel; line two-ports; loop gain), `analysis/analog_net.py` (the circuit from the board: nets out to AC
+    ground, op-amp channels by pin names or GT labels incl. the new `amp_inv`, every track a line split at
+    T-junctions, vias R + L, unrouted nets joined by the netlist; `route.copper_graph` split out of find_route),
+    `analysis/symbolic.py` (H(s) in part names, SymPy: a new dependency, listed in the help with mpmath),
+    `transfer.normal_form` / `phase_margin`, `simulate.network_responses` (every path's Bode responses from its
+    circuit, Simulate and Bode alike) and `NetworkPath` (Simulate's emission currents from it).
+  - Kraft /CPU/ADC_I_RAIL_1 (flux-2 with the user's settings, read only): `H(s) = 1 / (C304·R303·s + 1)`; numerically
+    K 0.9975, poles 451 Hz (R303 / C304 at bias), 686 kHz (the follower), 31.3 MHz, 338 MHz (Q 160), zero pair
+    24.4 MHz (C304's ESL); U301's loop: crossover 671 kHz, 89° (one pole: no Fp2 / PM field on it).
+  - Fixed on the way: an op-amp's Cin to ground (between the inputs: an undamped 5.88 MHz notch with R_O); a
+    T-junction doubled its track's copper (97 → 35 pieces on kraft); pads joined through tracks were taken as
+    unrouted. test_path's termination comparison within 15 dB of the peak (the circuit's stub lines move a notch).
+  - Tests: test_mna (10), test_analog_net (5), test_symbolic (4), test_transfer / test_bode updated (the op-amp's
+    response is "U5: output"; path responses exact). Full suite: see the entry's last line.
+  - **Left**: the schematic fields Aol / Fp2 / PM (components/fields.py); show the user and ask before merging; the
+    step response (second branch).
 - **Branch `bode-sweep` (2026-10-21, from `main` dc810f5, 2fe38f5; into `main` at the user's "merge", a fast-forward, branch deleted):** the user, with the Signal
   paths tab: "could we add a frequency sweep of a sinusoidal signal to retrieve amplitude and phase plots as well as
   pole zero plots?" Simulate already made Bode / poles and zeros views per path, but only over the signal's band

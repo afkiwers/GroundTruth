@@ -14,7 +14,7 @@ its admittance Y(f) at each frequency (frequency-dependent and not rational: `Ci
   input does not reach or the output does not see cancel against a zero at the same place and are dropped, as are
   the infinite eigenvalues of the singular C. The matrices are equilibrated (row and column scaling) and s is
   scaled to a reference frequency first, so parts from pF to MΩ stay well conditioned.
-- **The op-amp** (`Circuit.opamp`): a linear macromodel from datasheet values [Franco 2015]: Rin ∥ Cin between the
+- **The op-amp** (`Circuit.opamp`): a linear macromodel from datasheet values [Franco 2015] [A52]: Rin ∥ Cin between the
   inputs, Cin_cm from each input to ground, the open-loop gain A(s) = A0 / ((1 + s/ω1)(1 + s/ω2)) as a
   transconductance into R1 ∥ C1 (ω1 = 2π·GBW/A0) and an optional second stage R2 ∥ C2 (ω2), a unity-gain buffer and
   the open-loop output resistance R_O. Small signal only: no rails, saturation or slew.

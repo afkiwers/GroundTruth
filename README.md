@@ -228,7 +228,7 @@ report: {title: "EMI and power analysis", company: ACME, author: J. Smith, docum
 
 The plugin's **Preferences…** are not in this file: they belong to the computer, not the board (see "Preferences" below). Simulate's resolution (`analysis.resolution`, the plugin's Resolution or the CLI's `--resolution`) is never written to it.
 
-Available part models are `short`, `open`, `resistor (R)`, `cap (C, ESR, ESL, optional C_bias)`, `inductor (L, R)`, `ferrite (R, L)` and `amplifier` (an op-amp stage in a signal path: `gain` in V/V, negative = inverting; optional `gbw`, `bandwidth`, `z_out` (1 Ω), `c_in` (2 pF), `r_in`, `slew`, `cmrr`; `pins: [in, out]` for a dual or quad op-amp). `C_bias` is a ceramic capacitor's capacitance at its DC voltage, from the maker's DC-bias curve, and replaces C in every solve: a class II ceramic (X7R, X5R) keeps only 30–60 % of its nominal C at half its voltage rating, which raises a converter's ripple and conducted emission. A power stage's results name its ceramic capacitors of 1 µF and up that are still at their nominal C on a rail of 10 V or more. They are used in two places:
+Available part models are `short`, `open`, `resistor (R)`, `cap (C, ESR, ESL, optional C_bias)`, `inductor (L, R)`, `ferrite (R, L)` and `amplifier` (an op-amp in a signal path: `gbw`, optional `aol` (open-loop gain, dB, 100), `fp2` (a second open-loop pole) or `pm` (its phase margin at unity gain, degrees), `z_out` (the open-loop output resistance R_O, 100 Ω), `c_in` (each input to ground, 2 pF), `r_in`, `slew`, `cmrr`; `pins: [in, out]` for a dual or quad op-amp; with these the circuit around it decides its gain (see [Op-amp circuits](#op-amp-circuits-and-the-transfer-function)); `gain` in V/V, negative = inverting, makes it a fixed gain block instead). `C_bias` is a ceramic capacitor's capacitance at its DC voltage, from the maker's DC-bias curve, and replaces C in every solve: a class II ceramic (X7R, X5R) keeps only 30–60 % of its nominal C at half its voltage rating, which raises a converter's ripple and conducted emission. A power stage's results name its ceramic capacitors of 1 µF and up that are still at their nominal C on a rail of 10 V or more. They are used in two places:
 - **Signal route:** a route runs through a part whose model passes a signal, such as a 0R, a termination resistor (≤ 1 kΩ) or a ferrite.
 - **Plane connections:** caps, 0R and ferrites that bridge plane islands, for example decaps between GND and +3V3, become lumped branches in the solver.
 
@@ -251,6 +251,7 @@ A part's parameters can come from its symbol's fields instead of being typed in:
 | `GBW`, `Bandwidth` | op-amp | the gain's roll-off: one pole at Bandwidth, else at GBW / \|gain\| | MHz | `10MHz` |
 | `Zout`, `Cin`, `Rin` | op-amp | the open-loop output impedance (the datasheet's R_O / Z_O; with GBW or Bandwidth the stage's output is Zout·jf/(jf + f_c), divided by the loop below its bandwidth f_c; without, Zout as given; none: 1 Ω), input C and R (load of the input side) | Ω, pF, Ω | `2.3kohm`, `3pF` |
 | `Slew Rate` | op-amp | caps each output harmonic at SR / 2πf | V/µs | `20V/us` |
+| `Aol`, `Fp2`, `PM` | op-amp | open-loop gain, a second open-loop pole or the phase margin at unity gain (the circuit model) | dB, Hz, ° | `110dB`, `20MHz`, `60` |
 | `CMRR` | op-amp | shown only: the path model is single-ended | dB | `90dB` |
 
 - **Values:** read with units as InvenTree sends them (`3.8milliohm`, `616 picofarad`, `6.9 mΩ`) or in datasheet notation (`3.8m`, `616p`, `4m7`); a bare number is in the unit above. A value of the wrong kind (`100V` for Rds(on)) is not used, and the stage's or part's note says why; a value outside the usual range is used as written, with a note. Parallel parts whose fields disagree give no value.
@@ -609,6 +610,7 @@ optional, change no net name, and boards without them are detected as before.
 | `sig:9`, `sig:PA3` | the net on that pin (pad number or pin name) is a signal, even with a supply-like name |
 | `sig_drv:5` / `sig_rx:9` | ... and this pin drives / receives it (Detect's driver and receivers are replaced) |
 | `amp_in:3, amp_out:1` | an op-amp stage's input and output pin: the part becomes an `amplifier` the signal path runs through |
+| `amp_inv:2` | its inverting input, where the schematic pin names don't say (+IN / −IN / OUT, +INA … are read by themselves) |
 
 - **Which stage**: an id between the kind and the role ties parts together: `conv1_hs`, `conv1_ls`, `conv1_L`,
   `conv2_hs`, … (letters or digits: `conv5V_hs`); `conv_out_1` (id after the role) works too. A bridge leg's id is
@@ -814,6 +816,12 @@ or Suggest fixes ends with "solved on GPU <name>" when the GPU did the work; a s
 its memory, say) is done on the CPU and counted there.
 
 **Drain and source.** A power stage's heatmaps mark its switches' power pads: D (drain, cyan) and S (source, green) on a FET, K / A on a diode, VIN / SW / GND on an integrated stage, told from the pads' nets. The pads are outlined on their own layer; the letters and the part's name show on every layer, so you can see where a switch sits above an inner plane.
+
+## Op-amp circuits and the transfer function
+
+A signal path is solved as the circuit it is on the board (`analysis/analog_net.py`, `emi/mna.py`): every part with a model and every op-amp channel on its nets and beyond, up to ground and the supply rails, in any topology (inverting, non-inverting, differential, integrators, transimpedance stages, Sallen-Key / MFB / state-variable filters, instrumentation amplifiers, several op-amps with feedback between them). Every track is a transmission line of its own, every via R + L; an unrouted net is joined as the netlist says. An op-amp is its datasheet's small-signal model (Aol, GBW, a second pole or PM, R_O, Cin, Rin; pins from their names or GT labels); a `Gain` field keeps the old fixed gain block.
+
+The Bode views (Simulate, the Signal paths tab's **Bode**, `groundtruth bode`) show the path's response, each op-amp's output and each op-amp's loop gain with its crossover and phase margin (a tile: amber below 45°, red below 20°), the exact poles and zeros, and the **transfer function**: in the part names for the ideal circuit (SymPy; e.g. a Sallen-Key's `1 / (C1·C2·R1·R2·s² + C2·(R1 + R2)·s + 1)`), and numerically for the full circuit in the normal form `K · Π(1 + s/ω) · Π(1 + s/(Q·ω) + s²/ω²) / […]` with each frequency and Q. The JSON report's responses carry `transfer_function` (`numeric`, `symbolic`) and a loop gain's `phase_margin`. Simulate's emission estimate takes the path's currents from the same circuit. On kraft_flux_mini_2's ADC path (ZXCT1107 → TLV6001 follower → 4.7 kΩ / 100 nF → ADC): `H(s) = 1 / (C304·R303·s + 1)`, numerically K 0.9975, poles 451 Hz (the filter), 686 kHz (the follower), the loop's crossover 671 kHz with 89° of margin.
 
 ## Temperatures (thermal solve)
 

@@ -21,6 +21,7 @@ next one).</p>
 <li><a href="#safety">Voltage-aware safety checks</a></li>
 <li><a href="#fields">Part parameters from the schematic (InvenTree fields)</a></li>
 <li><a href="#thermal">Thermal and Current capacity</a></li>
+<li><a href="#analog">Op-amp circuits and the transfer function</a></li>
 <li><a href="#prefs">Preferences</a></li>
 <li><a href="#export">Export report</a></li>
 <li><a href="#drawing">Drawing on the board</a></li>
@@ -211,15 +212,13 @@ in the schematic: see <a href="#siglabels">Labelling a signal path</a>.</p>
 <li><b>Bode</b> sweeps the selected paths (every ticked one when none is selected) with a sine, from
   <b>Sweep from</b> to <b>Sweep to</b> on <b>Sweep points</b> log-spaced frequencies (empty: a hundredth of the
   frequency to the top of its harmonics' band, 300 points; Update selected keeps them in the settings as
-  <code>sweep_from</code>, <code>sweep_to</code>, <code>sweep_points</code>). It solves the path's circuit as
-  Simulate does (the driver's source, each stretch of track as a line with its copper and dielectric loss, series
-  parts, the parts across it to ground, op-amp stages with their gain, bandwidth and output impedance, the
-  receivers' load), without the plane models: seconds. The Results tab gets one <b>Bode / poles and zeros</b> view
-  per path (replacing its earlier one): the receiver's voltage per volt of the driver as magnitude and phase, the
-  poles and zeros, and the tiles: <b>gain</b> (at the sweep's start: the DC gain when it starts low enough, e.g.
-  1 Hz for a sensor or ADC input; its −3 dB frequency, the bandwidth; a peak above it), then the dominant poles.
-  An op-amp's <b>Zout</b> field is its open-loop output impedance: below the stage's bandwidth the feedback divides
-  it down (a TLV6001's 2.3 kΩ is about 1 Ω at 400 Hz in a follower). The command line has
+  <code>sweep_from</code>, <code>sweep_to</code>, <code>sweep_points</code>). It solves the path's whole circuit
+  as Simulate does (see <a href="#analog">Op-amp circuits and the transfer function</a>), without the plane models:
+  seconds. The Results tab gets one <b>Bode / poles and zeros</b> view per path (replacing its earlier one): the
+  receiver's voltage per volt of the driver, each op-amp's output and its loop gain, as magnitude and phase, the
+  poles and zeros, the transfer function written out, and the tiles: <b>gain</b> (at the sweep's start: the DC gain
+  when it starts low enough, e.g. 1 Hz for a sensor or ADC input; its −3 dB frequency, the bandwidth; a peak above
+  it), <b>phase margin</b> (the op-amps' loops), then the dominant poles. The command line has
   <code>groundtruth bode</code> (<code>--from</code>, <code>--to</code>, <code>--points</code>, <code>--json</code>,
   <code>--plots</code>).</li>
 <li><b>Add KiCad selection</b> (or KiCad's toolbar button <b>Add selected net to GroundTruth</b>) adds the net
@@ -704,8 +703,10 @@ their state for next time. How vias and parts are marked is set in <a href="#pre
   signal path's also from the Signal paths tab's <b>Bode</b>, without a Simulate): the
   frequency response's magnitude and phase on top (× poles and ○ zeros marked at their frequencies), the poles and
   zeros in the s-plane below (in Hz, on symmetric log axes; the dominant ones labelled with their frequency and Q).
-  A signal path: the voltage at the receivers per volt of the driver, through its lines, parts, filters and op-amp
-  stages (each op-amp stage's own gain too). A power stage: the hot loop's ringing (node current per A of the load
+  A signal path: the voltage at the receivers per volt of the driver through its whole circuit (every part and
+  op-amp on its nets, any topology: see <a href="#analog">Op-amp circuits</a>), each op-amp's output, and each
+  op-amp's loop gain with its crossover and phase margin; the transfer function written out above the plot (in its
+  part names) and in the summary line (the numeric form). A power stage: the hot loop's ringing (node current per A of the load
   pulse: exact poles from L, C_oss, the damping and a snubber), the input transfer (the current reaching the
   LISN per A of loop current: the input filter's effect), and when the fixes propose an input filter, its
   attenuation; its output impedance and the converter's input impedance −V²/P (Middlebrook: the first must stay
@@ -951,6 +952,35 @@ Current capacity keeps the 20 °C current pattern (only the heat follows the tem
 <p>
 Current capacity adds one view per stage or bridge at its capacity (replacing earlier capacity views), and the
 status line lists each one's capacity and what limits it.</p>
+
+<hr><a name="analog"></a><h3>Op-amp circuits and the transfer function</h3>
+<p>A signal path is solved as the circuit it is on the board: every part with a model and every op-amp channel on
+its nets and on the nets beyond them, up to ground and the supply rails, whatever the topology: inverting,
+non-inverting, differential and summing stages, integrators, transimpedance stages, Sallen-Key, multiple-feedback
+and state-variable filters, instrumentation amplifiers, several op-amps with feedback between them. The parts as
+modelled on the Parts tab (a capacitor with its ESR, ESL and DC-bias capacitance), every track as a transmission
+line of its own (its width, layer and the stackup), every via with its resistance and inductance; a net the copper
+does not join (unrouted) is joined as the netlist says, with a note. The source is the driver behind its Source R,
+L and C; the load each receiver's capacitance and the Load R.</p>
+<p>An <b>op-amp</b> is its datasheet's small-signal model: open-loop gain <b>Aol</b> (default 100 dB) with its pole
+at <b>GBW</b>/Aol, an optional second pole (<b>Fp2</b>, or from the phase margin <b>PM</b> at unity gain), the
+open-loop output resistance <b>Zout</b> (the datasheet's R_O, default 100 Ω), each input's capacitance to ground
+(<b>Cin</b>, 2 pF) and <b>Rin</b> between the inputs. Its gain, bandwidth and output impedance in the circuit then
+follow from the resistors and capacitors around it; a part with a <b>Gain</b> field stays a fixed gain block (for
+an amplifier GroundTruth can't see inside, such as an instrumentation-amplifier IC), as does an op-amp whose
+inverting input can't be told. The pins are found by their schematic names (+IN, IN+, INP, +, −IN, IN−, INN, −,
+OUT, VOUT, and per channel of a dual or quad: +INA, −INB, OUTA, IN1+ …), else by the GT labels
+<code>amp_in</code>, <code>amp_inv</code> (the inverting input) and <code>amp_out</code>. Small signal only: no
+output swing, saturation or slew in the sweep.</p>
+<p>The <b>transfer function</b> is shown two ways: in the part names, for the ideal circuit (ideal op-amps, the
+parts at their design values without parasitics, an ideal source, no load), e.g. a Sallen-Key's
+H(s) = 1 / (C1·C2·R1·R2·s² + C2·(R1 + R2)·s + 1), over the Bode plot and in the report (up to 15 parts); and
+numerically, for the full circuit, in the engineering normal form K · Π(1 + s/ω) · Π(1 + s/(Q·ω) + s²/ω²) / [ … ]
+with every pole's and zero's frequency and Q (K the DC gain), in the summary line and the report. The poles and zeros
+are exact (the circuit's eigenvalues, each track as its lumped π section; a note says up to which frequency that is
+exact); a pole and a zero within 0.1 % of each other cancel. Each op-amp's <b>loop gain</b> is computed by breaking
+its loop at its output: its crossover frequency and <b>phase margin</b> (amber below 45°: the circuit rings; red
+below 20°: close to oscillating). Simulate's emission estimate takes the path's currents from the same circuit.</p>
 
 <hr><a name="prefs"></a><h3>Preferences</h3>
 <p><b>Preferences…</b> (top bar, next to Help) holds your settings on this computer, for every board (a board's
