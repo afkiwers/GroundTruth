@@ -99,10 +99,10 @@ h4 { font-size:13px; text-transform:uppercase; letter-spacing:.07em; color:var(-
 .findings .fcheck code { font-size:11.5px; color:var(--muted); }
 .findings .fworst { color:var(--ink2); font-size:12.5px; margin-top:2px; }
 .tablewrap.narrow { max-width:620px; }
-#issues td.finding { min-width:380px; }
-#issues td.netc { min-width:120px; max-width:240px; }
-#issues td.where { white-space:nowrap; }
-#issues code.fp { font-size:11px; color:var(--muted); }
+#issue-table td.finding { min-width:380px; }
+#issue-table td.netc { min-width:120px; max-width:240px; }
+#issue-table td.where { white-space:nowrap; }
+#issue-table code.fp { font-size:11px; color:var(--muted); }
 .pill { display:inline-block; padding:1px 9px; border-radius:999px; font-size:11.5px; font-weight:650;
         letter-spacing:.02em; white-space:nowrap; text-transform:capitalize; }
 .pill.error { color:var(--err); background:var(--err-bg); } .pill.warning { color:var(--warn); background:var(--warn-bg); }
@@ -241,7 +241,7 @@ _JS = """
   const btns = [...document.querySelectorAll('button.f[data-sev]')];
   const chks = [...document.querySelectorAll('button.f[data-check]')];
   const allChk = document.querySelector('button.f[data-check-all]');
-  const rows = [...document.querySelectorAll('#issues tbody tr')];
+  const rows = [...document.querySelectorAll('#issue-table tbody tr')];
   let sev = 'all';
   const apply = () => {
     const picked = new Set(chks.filter(b => b.classList.contains('on')).map(b => b.dataset.check));
@@ -259,7 +259,7 @@ _JS = """
     if (allChk) allChk.classList.toggle('on', picked.size === 0);
     const out = document.getElementById('issues-shown');
     if (out) out.textContent = shown === rows.length ? '' : `${shown} of ${rows.length} shown`;
-    const table = document.getElementById('issues');
+    const table = document.getElementById('issue-table');   // (the section around it is #issues)
     if (table) paginate(table, 0);
   };
   btns.forEach(b => b.addEventListener('click', () => {
@@ -764,7 +764,7 @@ def _issues(issues: list[Issue]) -> str:
                               f"{e(c)} <span class='cn'>{counts[c]}</span></button>" for c in sorted(counts))
                     + "<span class='note' id='issues-shown'></span></div>")
     return filters + _table(["#Nr", "Severity", "Check", "Net", "Finding", "Where (mm, layer)", "Fingerprint"],
-                            rows, tid="issues", paged=True)
+                            rows, tid="issue-table", paged=True)
 
 
 # --------------------------------------------------------------------------------------------- signal nets
