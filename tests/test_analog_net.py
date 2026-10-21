@@ -99,3 +99,18 @@ def test_op_amp_pin_names_and_labels_give_each_channels_roles(tmp_path):
     chans = opamp_channels(board.footprint("U3"), cfg.model_for("U3"))
     assert [(c.name, c.inp.number, c.inn.number, c.out.number) for c in chans] == [("U3A", "3", "2", "1"),
                                                                                   ("U3B", "5", "6", "7")]
+
+
+def test_a_t_junction_splits_the_track_instead_of_doubling_it(tmp_path):
+    """The RC board's stub to C9 ends on the middle of the SIG_B track: the circuit's lines add up to the board's
+    track length exactly (the route search's joins from the junction to the track's ends are not copper), and the
+    SIG_B track is two lines meeting at the junction."""
+    from boardgen import rc_lowpass_board
+    from groundtruth.analysis.analog_net import analog_network
+    spec = NetSpec("SIG_A", "U1.1", ["U2.1"], 1e6, 10e-9)
+    board, sc, _ = make(tmp_path, rc_lowpass_board(), "tj", nets=(spec,))
+    net = analog_network(board, sc.config, spec, "U2.1")
+    copper = sum(math.dist(t.start, t.end) for t in board.tracks if t.net in net.nets)
+    assert sum(x["line"].length_m for x in net.lines) * 1e3 == pytest.approx(copper, rel=1e-9)
+    sig_b = [x for x in net.lines if x["net"] == "SIG_B" and x["pa"][1] == x["pb"][1] == 10.0]
+    assert len(sig_b) == 2 and {x["pa"][0] for x in sig_b} | {x["pb"][0] for x in sig_b} >= {24.5}
