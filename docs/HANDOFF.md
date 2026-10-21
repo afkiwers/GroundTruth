@@ -1,12 +1,13 @@
 # GroundTruth handover
 
-## Current state (2026-10-21, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-21, branch `refill-wait` open; `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `refill-wait` (2026-10-21, from `main` afde324, not merged):** the user, with a screenshot of "KiCad is busy and does not accept requests: close any open dialog …": "on complex boards, pressing refill zones causes this error". kipy's `refill_zones(block=True)` waits for the first Ping answered, which can be while the fill runs (and its 30 s limit never counts: `sleeps` is not incremented); the reload after it then met AS_BUSY past `when_ready`'s 5 s. `kipy_sink.refill_zones` now starts the fill without that wait and asks the board (`get_copper_layer_count`) until it answers, through AS_BUSY and transport timeouts, for up to `REFILL_WAIT_S` (10 min), the status line counting; past it, "KiCad is still filling the zones". Tests: test_kipy_adapter (a fake filling board). Not tried on a live complex board here.
 - **Branches `issue-clusters` and `report-pages` (2026-10-21, from `main` 66e119e, the second on the first;
   merged into `main` at the user's "MERGE"):**
   - `issue-clusters`, the user of a thermal map with a ring per hot part: "the heatmap is cluttered with circles. we
