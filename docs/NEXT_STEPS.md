@@ -16,9 +16,12 @@ the three GUI timing tests passed alone; left: a new plugin package (the one in 
 the user wants it.
 
 `bode-sweep` is in `main` (the signal paths' Bode sweeps alone, a sweep range per net, the gain and −3 dB tiles, the full
-telegrapher line, the op-amp's closed-loop output impedance): see its HANDOFF entry. **Planned next, awaiting the
-user's answers to its open questions:** a generic small-signal model of any op-amp circuit (any topology, feedback across op-amps, active
-filters) by modified nodal analysis: [ANALOG_AC.md](ANALOG_AC.md).
+telegrapher line, the op-amp's closed-loop output impedance): see its HANDOFF entry. `analog-ac` is in `main` too:
+a generic small-signal model of any op-amp circuit (any topology, feedback across op-amps, active filters) by
+modified nodal analysis, the transfer function in part names and numerically, loop gain and phase margin, the
+emission estimate from it, bandwidth limits ([ANALOG_AC.md](ANALOG_AC.md), its HANDOFF entry). **Next, when the
+user wants it:** the step response (a second branch, as decided); a new plugin package (the one in `out/dist` has
+none of today's branches).
 
 ## Done (2026-10-20): audit round 6
 

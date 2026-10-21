@@ -1,13 +1,14 @@
 # GroundTruth handover
 
-## Current state (2026-10-21, branch `analog-ac` open; `bode-sweep`, `pin-shares`, `electrothermal`, `density-pcb`, `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-21, `analog-ac`, `bode-sweep`, `pin-shares`, `electrothermal`, `density-pcb`, `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `analog-ac` (2026-10-21, from `main` ad8f333/e9b2c7d; OPEN, committed step by step, not merged):** the
+- **Branch `analog-ac` (2026-10-21, from `main` e9b2c7d, 56fb575; into `main` at the user's "commit and merge", a
+  fast-forward, branch deleted; the full suite was still running at the merge: its result below):** the
   user, of kraft's ADC path: "Are we currently considering the Opamp circuit and it's amplification etc. If I were
   to build an active lowpass filter, would that simulate it as one?" (no: a gain block), "yes plan it", "I want a
   generic model that can calculate any circuit made from an OPA", "i want the transfer function to be shown in the
@@ -27,10 +28,14 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
   - Fixed on the way: an op-amp's Cin to ground (between the inputs: an undamped 5.88 MHz notch with R_O); a
     T-junction doubled its track's copper (97 → 35 pieces on kraft); pads joined through tracks were taken as
     unrouted. test_path's termination comparison within 15 dB of the peak (the circuit's stub lines move a notch).
-  - Tests: test_mna (10), test_analog_net (5), test_symbolic (4), test_transfer / test_bode updated (the op-amp's
+  - Tests: test_mna (10), test_analog_net (11), test_symbolic (4), test_transfer / test_bode updated (the op-amp's
     response is "U5: output"; path responses exact). Full suite: see the entry's last line.
-  - **Left**: the schematic fields Aol / Fp2 / PM (components/fields.py); show the user and ask before merging; the
-    step response (second branch).
+  - Then, at the user's "can we use bandwidth to limit filters ...", "add this (a max_bandwidth setting on the
+    signal path)" (Gain left as it is): `max_bandwidth` per path and an op-amp stage's Bandwidth field as limits
+    (`bandwidth_limit`), `opamp_stability` (phase margin below 45° / 20°), the fields Aol / Fp2 / PM (PM → fp2 =
+    GBW·sin(PM)·tan(PM), exact), A55; every equation cites its source in the code ("make sure you add references").
+  - **Left**: the step response (a second branch, as decided). Full suite at the merge: running
+    (`out/analog/full_suite.log`); its result to be added here.
 - **Branch `bode-sweep` (2026-10-21, from `main` dc810f5, 2fe38f5; into `main` at the user's "merge", a fast-forward, branch deleted):** the user, with the Signal
   paths tab: "could we add a frequency sweep of a sinusoidal signal to retrieve amplitude and phase plots as well as
   pole zero plots?" Simulate already made Bode / poles and zeros views per path, but only over the signal's band
