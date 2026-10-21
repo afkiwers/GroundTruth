@@ -1125,7 +1125,7 @@ class NetworkPath:
         """A stage's PathResult from the circuit's solution x (see results)."""
         from ..emi.path import PathResult
         n = len(f)
-        pieces = []                                    # (segment index, place along it 0..1, length m, current)
+        pieces = []         # (segment index, place along it 0..1, length m, mean current, current entering it)
         parts = iter(sr.parts)
         part_z = {}
         last = np.zeros(n, complex)
@@ -1142,19 +1142,20 @@ class NetworkPath:
                     v2 = self._node_v(x, self._pad_node(pb if first is pa else pa))
                     last = (v1 - v2) / zf
                     part_z[ref] = np.abs(zf)
-                pieces.append((si, 0.5, seg.length * 1e-3, last))
+                pieces.append((si, 0.5, seg.length * 1e-3, last, last))
                 continue
             own = [ln for ln in lines if seg.kind == "track" and ln["uuid"] == seg.uuid
                    and _on_segment(ln["pa"], seg) and _on_segment(ln["pb"], seg)]
             if not own:                               # a pour, a pad: the current of the copper before it
-                pieces.append((si, 0.5, seg.length * 1e-3, last))
+                pieces.append((si, 0.5, seg.length * 1e-3, last, last))
                 continue
             d = (seg.end[0] - seg.start[0], seg.end[1] - seg.start[1])
             for ln in own:
                 fwd = (ln["pb"][0] - ln["pa"][0]) * d[0] + (ln["pb"][1] - ln["pa"][1]) * d[1] >= 0
                 cur = ln["mean_ab"] if fwd else ln["mean_ba"]
+                entry = ln["i_a"] if fwd else ln["i_b"]   # the current entering it at its start along the route
                 mid = ((ln["pa"][0] + ln["pb"][0]) / 2, (ln["pa"][1] + ln["pb"][1]) / 2)
-                pieces.append((si, _seg_place(mid, seg), ln["line"].length_m, cur))
+                pieces.append((si, _seg_place(mid, seg), ln["line"].length_m, cur, entry))
                 last = cur
         # groups between the shunts (their places along the route), as the cascade's path_elements makes them
         marks = sorted(shunts, key=lambda sh: (sh["seg"], sh["t"]))
@@ -1169,7 +1170,7 @@ class NetworkPath:
         acc, length, j = np.zeros(n, complex), 0.0, 0
         before = np.zeros(n, complex)
         order = sorted(pieces, key=lambda p: (p[0], p[1]))
-        for si, t, ln_m, cur in order:
+        for si, t, ln_m, cur, _entry in order:
             while j < len(marks) and (si, t) > (marks[j]["seg"], marks[j]["t"]):
                 sh = marks[j]
                 groups.append(acc / length if length > 0 else before)
@@ -1193,7 +1194,9 @@ class NetworkPath:
         g_len.append(length)
         total = sum(p[2] for p in order)
         i_mean = sum(p[2] * p[3] for p in order) / total if total > 0 else before
-        i_in = order[0][3] if order else np.zeros(n, complex)
+        # the current into the stage: what enters its first piece (a line's mean current along it differs from it,
+        # 4 % on SP-9's 30 mm microstrip at 450 MHz)
+        i_in = order[0][4] if order else np.zeros(n, complex)
         v_end = self._node_v(x, self._pad_node(sr.receiver))
         return PathResult(f, i_mean, i_in, v_end, part_z, groups, shunt_i, g_len, split)
 
