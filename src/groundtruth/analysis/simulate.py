@@ -1458,6 +1458,7 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
         poles, zeros, n_doublets = cancel_doublets(poles, zeros)
         r = Response(title, spec.name, "voltage gain", np.asarray(f, float), h, keep(poles), keep(zeros), exact=True)
         r.normal = normal_form(poles, zeros, k, f_max=f_max)
+        r.step = _step_of(lumped, lnode, keep(poles), r.normal, f)
         if n_doublets:
             r.notes.append(f"{n_doublets} pole-zero pair(s) within {DOUBLET:.1%} of each other cancelled (doublets: "
                            "a load the output hardly sees)")
@@ -1483,6 +1484,26 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
     notes.insert(0, f"circuit: {len(net.nets)} net(s), {len(net.parts)} part(s), {net.tracks} track segment(s)"
                  + (f", op-amps {kinds}" if kinds else ""))
     return out, notes, _bandwidth_and_stability(board, config, spec, receiver, net, f, out)
+
+
+def _step_of(lumped, node: str, poles: list, normal: dict, f: np.ndarray) -> Optional[dict]:
+    """A response's step response (emi/mna.Circuit.step on the lumped circuit [Gear 1971]): STEP_POINTS steps over
+    STEP_SPAN time constants of its slowest pole (|σ| of the lowest-frequency pole listed; without one, of the
+    sweep's lowest frequency), its figures (transfer.step_metrics) with the DC gain as the final value. None for a
+    response with a pole at the origin (an integrator: no final value) or when it can't be stepped."""
+    from .transfer import STEP_POINTS, STEP_SPAN, step_metrics
+    if normal.get("m", 0) < 0:
+        return None
+    sig = [abs(p.real) for p in poles if p != 0 and abs(p.real) > 0]
+    tau = 1.0 / min(sig) if sig else 1.0 / (2 * math.pi * float(f[0]))
+    t = np.linspace(0.0, STEP_SPAN * tau, STEP_POINTS)
+    try:
+        y = lumped.circuit.step(node, t)
+    except (ValueError, RuntimeError, np.linalg.LinAlgError):
+        return None
+    k = normal.get("k")
+    final = (k.real if isinstance(k, complex) else float(k)) if normal.get("m", 0) == 0 and k is not None else None
+    return {"t": t, "y": y, "metrics": step_metrics(t, y, final)}
 
 
 def _bandwidth_and_stability(board: Board, config: Config, spec: NetSpec, receiver: str, net, f: np.ndarray,

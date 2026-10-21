@@ -1062,6 +1062,14 @@ def _responses(owner: str, responses, figs) -> str:
                         f"{name}: magnitude and phase; × poles and ○ zeros at their natural frequencies"))
     out.append(_img(figs.png(f"{owner} poles and zeros", draw_pz, BodeView(owner, responses), size=(9.5, 4.0)),
                     f"{owner}: poles and zeros in the s-plane (Hz; symmetric log axes)"))
+    from .plots import STEP_IN, draw_step, has_step
+    view = BodeView(owner, responses)
+    if has_step(view):          # the step responses (emi/mna.Circuit.step) and their figures
+        from ..analysis.transfer import step_text
+        out.append(_img(figs.png(f"{owner} step", draw_step, view, size=(9.5, STEP_IN)),
+                        f"{owner}: the response to a 1 V step at the driver"))
+        out.append("<ul>" + "".join(f"<li>{e(r.name.split(': ', 1)[-1])}: {e(step_text(r.step['metrics']))}</li>"
+                                    for r in responses if getattr(r, "step", None)) + "</ul>")
     out.append(_table(["Response", "Gain, bandwidth", "Model", "Poles (f0, Q)", "Zeros (f0, Q)"], rows, sort=False))
     # the transfer functions written out: in part names (the ideal circuit, MathML: browsers render it), and the
     # full circuit's numeric normal form

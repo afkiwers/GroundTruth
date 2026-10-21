@@ -1455,6 +1455,62 @@ def draw_bode(fig: Figure, view) -> None:
     _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TICK) + 0.08, header + 0.06 + extra, hspace=0.08)
 
 
+STEP_IN = 3.4                  # inches: the step response's figure height (the Results tab, the report)
+
+
+def has_step(view) -> bool:
+    """Whether a Bode view has a step response to draw (draw_step)."""
+    return any(getattr(r, "step", None) for r in getattr(view, "responses", ()))
+
+
+def draw_step(fig: Figure, view) -> None:
+    """The step responses of a view's responses (transfer.Response.step: each its circuit's response to a 1 V step at
+    the driver, emi/mna.Circuit.step): each in its colour against time, its final value dashed with the ±2 % band,
+    the 10-90 % rise and the settling time marked; each response on its own time scale (a filter's milliseconds beside
+    an op-amp's nanoseconds) when they differ by more than ten times, the slowest's otherwise."""
+    from ..analysis.transfer import SETTLE_BAND, response_label
+    fig.clear()
+    resp = [r for r in view.responses if getattr(r, "step", None)]
+    if not resp:
+        ax = fig.add_subplot(111)
+        ax.text(0.5, 0.5, "no step response", ha="center", va="center", transform=ax.transAxes, fontsize=FS_TEXT)
+        ax.set_axis_off()
+        return
+    spans = [float(r.step["t"][-1]) for r in resp]
+    apart = max(spans) / max(min(spans), 1e-300) > 10
+    groups = [[r] for r in resp] if apart else [resp]
+    axes = [fig.add_subplot(1, len(groups), k + 1) for k in range(len(groups))]
+    for ax, group in zip(axes, groups):
+        t_end = max(float(r.step["t"][-1]) for r in group)
+        scale, unit = next(((k, u) for k, u in ((1.0, "s"), (1e-3, "ms"), (1e-6, "µs"), (1e-9, "ns"))
+                            if t_end >= 2 * k), (1e-12, "ps"))
+        for r in group:
+            c = PDN_COLOURS[resp.index(r) % len(PDN_COLOURS)]
+            t, y, m = np.asarray(r.step["t"]) / scale, np.asarray(r.step["y"]), r.step["metrics"]
+            ax.plot(t, y, color=c, lw=1.3, label=response_label(r, view.owner))
+            fin = m.get("final")
+            if fin and m.get("rise") is not None:
+                ax.axhline(fin, color=c, lw=0.7, ls="--")
+                ax.axhspan(fin * (1 - SETTLE_BAND), fin * (1 + SETTLE_BAND), color=c, alpha=0.08, lw=0)
+                if m.get("settling") is not None:
+                    ax.axvline(m["settling"] / scale, color=c, lw=0.7, ls=":")
+        ax.set_xlabel(f"time ({unit})", fontsize=FS_TEXT)
+        ax.tick_params(labelsize=FS_TICK)
+        ax.grid(True, alpha=0.3)
+        if len(groups) > 1:
+            ax.set_title(response_label(group[0], view.owner), fontsize=FS_TEXT)
+    axes[0].set_ylabel("V per V step", fontsize=FS_TEXT)
+    w_in, h_in = fig.get_size_inches()
+    left_in, right_in = _lh(FS_TEXT) + _width_in("-1000", FS_TICK) + 0.24, 0.25
+    title = f"{view.owner}: step response (1 V at the driver; dashed: final value, ±2 %; dotted: settled)"
+    if len(groups) == 1:                # one time scale: the title and the legend over it
+        header = _title_and_key(axes[0], title, w_in - left_in - right_in)
+    else:                               # a panel per response, each named over it: the title on its own line above
+        fig.text(left_in / w_in, 1 - 0.06 / h_in, title, ha="left", va="top", fontsize=FS_TITLE)
+        header = _lh(FS_TITLE) + _lh(FS_TEXT) + 0.10
+    _adjust(fig, left_in, right_in, 0.10 + 2 * _lh(FS_TICK) + 0.08, header + 0.06, wspace=0.25)
+
+
 def _pz_in_band(roots, f) -> list[dict]:
     """The pole / zero rows (transfer.pz_rows) whose f0 lies within the curve's frequencies."""
     from ..analysis.transfer import pz_rows

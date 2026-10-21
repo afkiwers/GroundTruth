@@ -982,6 +982,14 @@ are exact (the circuit's eigenvalues, each track as its lumped π section; a not
 exact); a pole and a zero within 0.1 % of each other cancel. Each op-amp's <b>loop gain</b> is computed by breaking
 its loop at its output: its crossover frequency and <b>phase margin</b> (amber below 45°: the circuit rings; red
 below 20°: close to oscillating). Simulate's emission estimate takes the path's currents from the same circuit.</p>
+<p>The <b>step response</b>: the path's (and each op-amp output's) response to a 1 V step at the driver, from rest,
+on the plot under the Bode plot: the final value (the DC gain) dashed with its ±2 % band, the settling time dotted;
+a filter's milliseconds and an op-amp's nanoseconds each on a panel of their own. The <b>step</b> tile gives the
+overshoot (amber from 20 %), the 10-90 % rise time and the settling time into ±2 %; an undershoot (the first move
+the wrong way: a right-half-plane zero) is named in the summary line and the report. It is computed from the same
+circuit in the time domain (the second-order backward differentiation formula, as SPICE does for stiff circuits,
+over 12 time constants of the slowest pole), so it is exact for the circuit, not a fit. A path with an integrator
+(a pole at the origin) has no final value and no step response.</p>
 <p><b>Limits.</b> A path's <b>Max bandwidth</b> (Signal paths tab; <code>max_bandwidth</code>, e.g. 1 kHz for an
 ADC input's anti-alias filter) is checked at its receiver: its bandwidth, where it has fallen 3 dB below its passband
 peak, above the limit is a <b>bandwidth_limit</b> issue (also when it does not fall 3 dB within the sweep while the

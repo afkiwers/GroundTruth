@@ -417,8 +417,8 @@ def _keep_run(args, board, sc, cfg, issues, routes, converters, bridges, thermal
 def cmd_bode(args) -> int:
     """`groundtruth bode`: the signal paths' Bode sweeps alone (analysis/simulate.bode_paths: each path's circuit
     with a sine from its sweep_from to sweep_to, no field solve): per path and receiver the gain at the sweep's low
-    end, the −3 dB frequency, the poles and zeros; --json writes groundtruth-bode.json, --plots a Bode and a
-    pole-zero PNG per path into --out-dir. --from / --to / --points override the nets' sweep settings."""
+    end, the −3 dB frequency, the poles and zeros; --json writes groundtruth-bode.json, --plots a Bode, a
+    pole-zero and a step-response PNG per path into --out-dir. --from / --to / --points override the nets' sweep settings."""
     import json
     from dataclasses import replace
     from .analysis.simulate import bode_paths
@@ -463,10 +463,13 @@ def cmd_bode(args) -> int:
         from types import SimpleNamespace
         from matplotlib.backends.backend_agg import FigureCanvasAgg
         from matplotlib.figure import Figure
-        from .report.plots import draw_bode, draw_pz
+        from .report.plots import STEP_IN, draw_bode, draw_pz, draw_step, has_step
         for v in bode_views(SimpleNamespace(routes=[r for r in results if not r.error], converters=[], pdn=[])):
             stem = "".join(c if c.isalnum() or c in "-_" else "_" for c in v.owner).strip("_")
-            for what, draw, size in (("bode", draw_bode, (9.5, 5.0)), ("pz", draw_pz, (9.5, 4.0))):
+            plots = [("bode", draw_bode, (9.5, 5.0)), ("pz", draw_pz, (9.5, 4.0))]
+            if has_step(v):
+                plots.append(("step", draw_step, (9.5, STEP_IN)))
+            for what, draw, size in plots:
                 fig = Figure(figsize=size, dpi=110)
                 FigureCanvasAgg(fig)
                 draw(fig, v)

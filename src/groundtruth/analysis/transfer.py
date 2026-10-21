@@ -54,6 +54,7 @@ class Response:
     normal: Optional[dict] = None
     symbolic: Optional[dict] = None
     margin: Optional[dict] = None          # a loop gain's crossover and phase margin (phase_margin)
+    step: Optional[dict] = None            # the step response: {"t", "y" (arrays), "metrics" (step_metrics)}
 
     @property
     def unit(self) -> str:
@@ -76,6 +77,7 @@ class Response:
         return {"name": self.name, "owner": self.owner, "quantity": self.quantity, "exact": self.exact,
                 "fit_error_db": self.fit_error_db, "notes": list(self.notes), "gain": gain_figures(self),
                 "phase_margin": getattr(self, "margin", None),
+                "step": _plain_step(getattr(self, "step", None)),
                 "transfer_function": {"numeric": _plain_normal(getattr(self, "normal", None)),
                                       "symbolic": {k: v for k, v in (getattr(self, "symbolic", None) or {}).items()
                                                    if k in ("text", "latex")} or None},
@@ -88,6 +90,15 @@ def response_label(r, owner: str) -> str:
     """A response's short name in a view of `owner`'s: its name without the owner's prefix ("receiver / source"), a
     response of another part kept whole ("U301: output")."""
     return r.name[len(owner) + 2:] if r.name.startswith(owner + ": ") else r.name
+
+
+def _plain_step(st: Optional[dict], points: int = 400) -> Optional[dict]:
+    """A step response as JSON data: its figures and the curve decimated to `points`."""
+    if not st:
+        return None
+    t, y = np.asarray(st["t"]), np.asarray(st["y"])
+    k = np.unique(np.linspace(0, len(t) - 1, min(points, len(t))).astype(int))
+    return {"metrics": st["metrics"], "t": [float(t[i]) for i in k], "y": [float(y[i]) for i in k]}
 
 
 def _plain_normal(nf: Optional[dict]) -> Optional[dict]:
@@ -175,6 +186,74 @@ def normal_form(poles, zeros, k: complex, f_max: Optional[float] = None) -> dict
     if more:
         text += f";  {more} more above"
     return {"k": kval, "m": m, "poles": ps, "zeros": zs, "beyond": more, "text": text, "latex": latex}
+
+
+SETTLE_BAND = 0.02             # the step response's settling band: ±2 % of its final value [Ogata 2010]
+STEP_SPAN = 12.0               # a step is simulated for this many of its slowest pole's time constants 1/|σ|
+STEP_POINTS = 3000             # time steps of a step response (BDF2: its error ~ (h/τ)², ~1e-5 here)
+
+
+def step_metrics(t, y, final: Optional[float] = None) -> dict:
+    """A step response's figures [Ogata 2010]: its final value (the DC gain `final` where it is known, else the last
+    sample), the 10-90 % rise time, the overshoot and the undershoot (the first move the wrong way: a right-half-plane
+    zero) in % of the final value, the peak and its time, and the settling time into ±SETTLE_BAND of the final value
+    (None when it has not settled within the window). Crossing times interpolated linearly between samples. A
+    response without a final value (|final| below 1e-6 of its peak: AC-coupled, a high-pass) gives its peak only."""
+    t = np.asarray(t, float)
+    y = np.asarray(y, float)
+    fin = float(final) if final is not None else float(y[-1])
+    k = int(np.argmax(np.abs(y)))
+    out = {"final": fin, "peak": float(y[k]), "t_peak": float(t[k]), "rise": None, "overshoot_pct": None,
+           "undershoot_pct": None, "settling": None}
+    if abs(fin) <= 1e-6 * max(float(np.max(np.abs(y))), 1e-300):
+        return out
+    u = y / fin                                    # normalised: rises from 0 to 1
+    out["overshoot_pct"] = max(float(np.max(u)) - 1.0, 0.0) * 100
+
+    def cross(level):
+        """The first time u reaches `level`, interpolated (None when it never does)."""
+        idx = np.nonzero(u >= level)[0]
+        if not len(idx):
+            return None
+        i = int(idx[0])
+        if i == 0:
+            return float(t[0])
+        return float(t[i - 1] + (level - u[i - 1]) / (u[i] - u[i - 1]) * (t[i] - t[i - 1]))
+    t10, t90 = cross(0.1), cross(0.9)
+    out["rise"] = t90 - t10 if t10 is not None and t90 is not None else None
+    first = np.nonzero(np.abs(u) > 0.01)[0]
+    if len(first) and u[first[0]] < 0:
+        out["undershoot_pct"] = float(-np.min(u[: max(int(np.argmax(u > 0)), 1)])) * 100
+    outside = np.nonzero(np.abs(u - 1.0) > SETTLE_BAND)[0]
+    if not len(outside):
+        out["settling"] = float(t[0])
+    elif outside[-1] < len(t) - 1:
+        i = int(outside[-1])
+        a, b_ = abs(u[i] - 1.0), abs(u[i + 1] - 1.0)
+        out["settling"] = float(t[i] + (a - SETTLE_BAND) / (a - b_) * (t[i + 1] - t[i])) if a != b_ else float(t[i + 1])
+    return out
+
+
+def fmt_s(x: Optional[float]) -> str:
+    """A time with an SI prefix and three significant digits: '2.2 ms', '35.1 µs'; '—' for None."""
+    if x is None:
+        return "—"
+    for unit, k in (("s", 1.0), ("ms", 1e-3), ("µs", 1e-6), ("ns", 1e-9)):
+        if abs(x) >= k * 0.9995:
+            return f"{x / k:.3g} {unit}"
+    return f"{x / 1e-12:.3g} ps"
+
+
+def step_text(m: dict) -> str:
+    """step_metrics as one line: 'final 0.998, rise 1.62 ms, overshoot 4.3 %, settles (±2 %) in 2.91 ms'."""
+    if m.get("rise") is None and m.get("overshoot_pct") is None:
+        return f"no final value (AC-coupled): peak {m['peak']:.3g} at {fmt_s(m['t_peak'])}"
+    parts = [f"final {m['final']:.4g}", f"rise {fmt_s(m['rise'])}", f"overshoot {m['overshoot_pct']:.1f} %"]
+    if m.get("undershoot_pct"):
+        parts.append(f"undershoot {m['undershoot_pct']:.1f} %")
+    parts.append(f"settles (±{SETTLE_BAND:.0%}) in {fmt_s(m['settling'])}" if m["settling"] is not None
+                 else "not settled in the window")
+    return ", ".join(parts)
 
 
 BW_TOL = 0.01                  # a bandwidth this much above its limit is a bandwidth_limit issue (numerics: 1 %) [A55]

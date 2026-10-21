@@ -1434,6 +1434,7 @@ tracks modelled ("no, do it now"), the loop gain, Simulate's emission from it ("
   each op-amp's loop gain with `transfer.phase_margin` (crossover by |T| in dB linear in log f, PM = 180° + ∠T),
   `Response.margin`, a "phase margin" tile (PM_WARN 45°, PM_ERROR 20°). The path model (cascade with op-amps as gain
   blocks, vector fitting) when the circuit can't be made, with a note.
+- **Step response** (branch `step-response`): `mna.Circuit.step(out, t)`: C·x' + G·x = b·u from rest, BDF2 [Gear 1971] (first step backward Euler), (3C/2h + G) factored once; refuses two-ports (the lumped circuit). `simulate._step_of`: STEP_SPAN = 12 time constants of the slowest pole listed, STEP_POINTS = 3000, the final value the normal form's K (m = 0; an integrator, m < 0: none); `transfer.step_metrics` / `step_text` / `fmt_s`; `Response.step` {t, y, metrics} (`summary()['step']` decimated); `plots.draw_step` (a panel per time scale) on the Results tab's third canvas for a Bode view (`section_shown`, STEP_IN), the report and `--plots`; a `step` tile. Tests: test_step (RC, Q 2 RLC, a Sallen-Key's 4.32 %, an all-pass's undershoot).
 - **Emission** (`simulate.NetworkPath`, `network_path`): built in `prepare_route` (plain paths) and
   `_amplified_route` (op-amp paths) when the circuit can be made; `results(f, v_source)` gives one `PathResult` per
   stage with the cascade's meaning from the MNA solution: route segments mapped to the circuit's line pieces by track
