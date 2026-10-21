@@ -1,14 +1,14 @@
 # GroundTruth handover
 
-## Current state (2026-10-21, branches `issue-clusters`, `report-pages` open; `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-21, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branches `issue-clusters` and `report-pages` (2026-10-21, from `main` 66e119e, the second on the first; not
-  merged):**
+- **Branches `issue-clusters` and `report-pages` (2026-10-21, from `main` 66e119e, the second on the first;
+  merged into `main` at the user's "MERGE"):**
   - `issue-clusters`, the user of a thermal map with a ring per hot part: "the heatmap is cluttered with circles. we
     need to find a better way", then "merge" (of merging the overlapping markers; the other offer, the hot parts'
     outlines on a temperature map, not done). Issues closer than 7 % of the view's span share one ring in the worst's
