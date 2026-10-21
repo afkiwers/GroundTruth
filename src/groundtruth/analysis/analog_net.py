@@ -146,6 +146,10 @@ class AnalogNetwork:
     tracks: int = 0
     notes: list = field(default_factory=list)
     node_of: dict = field(default_factory=dict)         # "REF.PAD" -> circuit node
+    # the ideal schematic in net terms (analysis/symbolic.py): parts [(ref, kind, net a, net b, values)], op-amps
+    # [(name, net in+, net in−, net out, gain or None: a nullor)], the input and output nets; AC ground is "0"
+    schematic: dict = field(default_factory=dict)
+    amp_out: dict = field(default_factory=dict)         # op-amp channel -> the circuit node of its output pin
 
 
 def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, lumped: bool = False,
@@ -215,17 +219,30 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
     for i, j, _, info in g.edges:
         if info[0] in ("pad", "join", "tht", "zone"):
             parent[find(i)] = find(j)
-    # a net whose pads the copper leaves apart (unrouted, or a gap): joined ideally, as the netlist says (a note)
+    # a net whose pads no copper joins (unrouted, or a gap): joined ideally, as the netlist says (a note). Joined
+    # means by any copper, tracks and vias too (a second union-find over every edge): pads at the two ends of a
+    # track stay apart in `parent`, the track's line between them
+    whole = list(range(len(g.pos)))
+
+    def find_all(i):
+        """The root of graph node i over every copper edge."""
+        while whole[i] != i:
+            whole[i] = whole[whole[i]]
+            i = whole[i]
+        return i
+    for i, j, _, _ in g.edges:
+        whole[find_all(i)] = find_all(j)
     unrouted = set()
     for net in nets:
-        roots = {}
+        islands = {}
         for p in pads_on.get(net, []):
             k = (p.layers[0], round(p.position[0] * 1000), round(p.position[1] * 1000)) if p.layers else None
             if k in g.keys:
-                roots.setdefault(find(g.keys[k]), g.keys[k])
-        ids = list(roots.values())
+                islands.setdefault(find_all(g.keys[k]), g.keys[k])
+        ids = list(islands.values())
         for i in ids[1:]:
             parent[find(i)] = find(ids[0])
+            whole[find_all(i)] = find_all(ids[0])
         if len(ids) > 1:
             unrouted.add(net)
     if unrouted:
@@ -279,8 +296,10 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
             vals.pop("C_bias", None)
         ckt.part(at(pa), at(pb), m.kind, vals, ref)
     opamps = []
+    amp_out = {}
     for nm, ch in amps.items():
         prm = ch.params
+        amp_out[nm] = at(ch.out)
         if prm.get("gain") is not None or ch.inn is None:
             # the gain block: out = gain·v(in+) with one pole (bandwidth, else gbw/|gain|), behind z_out
             _gain_block(ckt, nm, at(ch.inp), at(ch.out), prm)
@@ -292,10 +311,14 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
         if not prm.get("gbw"):
             notes.append(f"{nm}: no GBW, {AMP_GBW / 1e6:g} MHz assumed")
         fp2 = prm.get("fp2") or (gbw * math.tan(math.radians(prm["pm"])) if prm.get("pm") else None)
+        # c_in is each input's capacitance to ground (what it meant for the gain block: the load on the path), no
+        # capacitance between the inputs: with it, a follower's input fed its output past the amplifier and
+        # cancelled the output through R_O at √(2π·GBW/(C·R_O)), an undamped notch (5.88 MHz, −175 dB on refboard's
+        # TLV6001) a real output stage does not have
         ckt.opamp(nm, at(ch.inp), at(ch.inn), at(ch.out),
                   OpAmpParams(gbw=gbw, a0=10 ** (prm["aol"] / 20) if prm.get("aol") else 1e5, fp2=fp2,
                               r_out=prm.get("z_out") or AMP_R_O, r_in=prm.get("r_in") or 1e12,
-                              c_in=prm.get("c_in") or 2e-12))
+                              c_in=0.0, c_cm=prm.get("c_in") or 2e-12))
         opamps.append((nm, "macromodel"))
     # the source: 1 V behind the driver's R + jωL, its output C; the receivers' load
     d = at(drv)
@@ -321,7 +344,16 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
     # nodes no element reaches would make the matrix singular: tie each to ground through 1 TΩ (an open pin's leak)
     for n in list(ckt.nodes):
         ckt.r(n, ckt.ground, 1e12)
-    return AnalogNetwork(ckt, out, nets, opamps, sorted(parts), tracks, notes, node_of)
+    gnd = lambda net: "0" if net in ground or not net else net             # noqa: E731
+    schematic = {
+        "parts": [(ref, m.kind, gnd(pa.net), gnd(pb.net), dict(m.params, C=m.capacitance()) if m.kind == "cap"
+                   else dict(m.params)) for ref, (m, pa, pb) in sorted(parts.items())],
+        "opamps": [(nm, gnd(ch.inp.net), gnd(ch.inn.net) if ch.inn is not None else None, gnd(ch.out.net),
+                    None if (kind == "macromodel") else float(ch.params.get("gain") if ch.params.get("gain")
+                                                              is not None else 1.0))
+                   for (nm, kind), ch in zip(opamps, amps.values())],
+        "in": gnd(drv.net), "out": gnd(rcv.net)}
+    return AnalogNetwork(ckt, out, nets, opamps, sorted(parts), tracks, notes, node_of, schematic, amp_out)
 
 
 def _pi_section(ckt: Circuit, a: str, b: str, line, f_top: float, notes: list):

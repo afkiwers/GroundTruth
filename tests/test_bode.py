@@ -49,13 +49,13 @@ def test_an_rc_lowpass_sweeps_to_its_closed_form_without_a_field_solve(tmp_path,
 
 
 def test_an_opamp_stage_gives_its_gain_and_its_pole_at_gbw_over_gain(tmp_path):
-    """U5 with Gain 10 and GBW 10 MHz: +20 dB from 1 Hz, −3 dB at 1 MHz (2 %), the stage's own gain beside it."""
+    """U5 with Gain 10 and GBW 10 MHz: +20 dB from 1 Hz, −3 dB at 1 MHz (2 %), U5's output beside the path's."""
     from groundtruth.analysis.simulate import bode_paths
     from groundtruth.analysis.transfer import gain_figures
     board, sc, _ = make(tmp_path, opamp_path_board(Gain="10", GBW="10MHz"), "amp", nets=(_spec(**SWEEP),))
     (r,) = bode_paths(board, sc.config)
     names = [x.name for x in r.responses]
-    assert names == ["SIG_A: receiver / source", "U5: stage gain"]
+    assert names == ["SIG_A: receiver / source", "U5: output"]
     for resp in r.responses:
         g = gain_figures(resp)
         assert g["low_db"] == pytest.approx(20.0, abs=0.05) and g["f_3db"] == pytest.approx(1e6, rel=0.02)

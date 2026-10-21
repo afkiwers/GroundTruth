@@ -87,7 +87,7 @@ def test_a_signal_paths_rc_filter_pole_is_one_over_the_resistance_times_c(tmp_pa
     board, cfg = _shunt_setup(tmp_path, ("C9", "1n", "C", 20.0, "SIG_B"), "rc")
     rr = simulate(board, cfg).routes[0]
     (resp,) = rr.responses
-    assert resp.quantity == "voltage gain" and not resp.exact and resp.fit_error_db < 1.0
+    assert resp.quantity == "voltage gain" and resp.exact             # the circuit's exact poles (analog_net)
     first = pz_rows(resp.poles)[0]
     want = 1 / (2 * math.pi * (cfg.analysis.driver_ohms + 33.0) * 1e-9)
     assert first["q"] is None and first["f0"] == pytest.approx(want, rel=0.01)
@@ -96,18 +96,19 @@ def test_a_signal_paths_rc_filter_pole_is_one_over_the_resistance_times_c(tmp_pa
 
 
 def test_an_op_amp_stages_pole_is_its_gbw_over_its_gain(tmp_path):
-    """An op-amp stage of gain 10 with GBW 10 MHz: its stage gain has one pole at 1 MHz, and it is the whole
-    path's dominant pole too."""
+    """An op-amp stage of gain 10 with GBW 10 MHz (its Gain field: the gain block): its output per volt of the source
+    has its pole at 1 MHz (the 33 Ω and its input C add nothing below 10x the sweep), and it is the whole path's
+    dominant pole too."""
     from test_path import _opamp_setup
     from groundtruth.analysis.simulate import simulate
     board, cfg = _opamp_setup(tmp_path, Gain="10", GBW="10MHz")
     rr = simulate(board, cfg).routes[0]
     path, stage = rr.responses
-    assert stage.name == "U5: stage gain"
-    (p,) = pz_rows(stage.poles)
+    assert stage.name == "U5: output"
+    p = pz_rows(stage.poles)[0]
     assert p["f0"] == pytest.approx(1e6, rel=1e-3)
     f = stage.f[0]                                  # the sweep starts at 200 kHz: already 0.17 dB down
-    assert stage.magnitude()[0] == pytest.approx(20 * math.log10(10 / math.hypot(1, f / 1e6)), abs=1e-6)
+    assert stage.magnitude()[0] == pytest.approx(20 * math.log10(10 / math.hypot(1, f / 1e6)), abs=1e-3)
     assert pz_rows(path.poles)[0]["f0"] == pytest.approx(1e6, rel=0.01)
 
 
