@@ -21,10 +21,12 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
     put three GND vias into pin 2's pads (y 76.9) and three more above: busiest 1.10 → 0.81 A (8.1 %). With the
     coupling on (main before this fix): settled in 2 rounds (30 %, 0.0009 %), T_max 125.4 °C unchanged, busiest
     via 0.811 A at 20 °C and 0.81 A at temperature (`out/electrothermal/on.log`).
-  - **Open:** the kraft Simulate with this fix (`out/electrothermal/off_pin.log`, `stages_pin.pickle`, from the
-    worktree) was running at the merge: `via_compare.py out/electrothermal/stages.pickle
-    out/electrothermal/stages_pin.pickle --stage conv2 --near 138.44,77.5 --radius 2.5` gives pin 2's vias before
-    / after; tell the user. Then rerun the three GUI timing tests alone (the `electrothermal` entry).
+  - Kraft with this fix (`out/electrothermal/off_pin.log`, `stages_pin.pickle`; `via_compare.py
+    out/electrothermal/stages.pickle out/electrothermal/stages_pin.pickle --stage conv2 --near 138.44,77.5 --radius
+    2.5`), conv2's ground return: pin 2's vias 0.811 / 0.755 / 0.548 → 0.571 / 0.545 / 0.471 A, pin 4 / 6's up
+    (0.564 → 0.641 A, now the busiest), the vias around Q304 0.31-0.81 → 0.26-0.64 A; the hot loop's pin-2 via
+    0.266 → 0.188 A; the switch node's vias within 1 %; T_max 125.4 °C unchanged. Branch and worktree deleted.
+    **Open:** rerun the three GUI timing tests alone (the `electrothermal` entry).
 - **Branch `density-pcb` (2026-10-21, from `main` 62fde1e, commit 3ce1d5e; into `main` at the user's "yes", a
   fast-forward, branch deleted; packages `out/dist/groundtruth-0.1.42214-3ce1d5e-pcm.zip` and the server's, signed
   with the laptop's key; `electrothermal` will need `main` merged in):** the user, with a

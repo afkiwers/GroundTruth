@@ -11,9 +11,9 @@ done, with the evidence in [VALIDATION_AUDIT.md](VALIDATION_AUDIT.md) "Round 4".
 
 The electro-thermal coupling (`thermal.electrothermal`; kraft: settled in 2 rounds, T_max unchanged) and the pin
 shares (a pin's copper counted once, [A51]) are in `main`. Still open, with the details in the top entries of
-[HANDOFF.md](HANDOFF.md): kraft before / after the pin-share fix (`tools/dev/via_compare.py` on
-`out/electrothermal/stages.pickle` and `stages_pin.pickle`), three GUI timing tests to rerun alone, and a new plugin
-package (the one in `out/dist`, 0.1.42214, has neither) once the user wants it.
+[HANDOFF.md](HANDOFF.md) (kraft with the pin-share fix: the busiest via by Q304 0.81 → 0.64 A, T_max unchanged):
+three GUI timing tests to rerun alone, and a new plugin package (the one in `out/dist`, 0.1.42214, has neither) once
+the user wants it.
 
 ## Done (2026-10-20): audit round 6
 
