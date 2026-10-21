@@ -1,13 +1,13 @@
 # GroundTruth handover
 
-## Current state (2026-10-21, branch `bode-sweep` open; `pin-shares`, `electrothermal`, `density-pcb`, `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-21, `bode-sweep`, `pin-shares`, `electrothermal`, `density-pcb`, `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `bode-sweep` (2026-10-21, from `main` dc810f5; OPEN, committed, not merged):** the user, with the Signal
+- **Branch `bode-sweep` (2026-10-21, from `main` dc810f5, 2fe38f5; into `main` at the user's "merge", a fast-forward, branch deleted):** the user, with the Signal
   paths tab: "could we add a frequency sweep of a sinusoidal signal to retrieve amplitude and phase plots as well as
   pole zero plots?" Simulate already made Bode / poles and zeros views per path, but only over the signal's band
   (a hundredth of f to the band's top). The user chose "#3":
