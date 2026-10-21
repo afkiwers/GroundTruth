@@ -446,6 +446,12 @@ class ThermalSettings:
     max_c: float = 105.0
     theta_jb: dict = field(default_factory=dict)
     capacity_c: Optional[float] = None   # current capacity: the hottest copper/junction allowed (default max_c)
+    # electro-thermal coupling (analysis/electrothermal.py): the DC paths solved again with the copper at its
+    # temperature, then Thermal again, until no path's loss or via's current moves by more than the tolerance, at
+    # most `electrothermal_rounds` rounds (1-10)
+    electrothermal: bool = False
+    electrothermal_rounds: int = 3
+    electrothermal_tolerance: float = 0.01   # a share: 0.01 = 1 %
 
 
 @dataclass
@@ -673,6 +679,13 @@ def _refs(v: Any) -> list[str]:
     if isinstance(v, str):
         return [r.strip() for r in v.split(",") if r.strip()]
     return [str(r) for r in v]
+
+
+def _share(v: Any, what: str) -> float:
+    """A share as written in the settings: "1%" or "1 %" (per cent), or a plain fraction (0.01)."""
+    if isinstance(v, str) and v.strip().endswith("%"):
+        return _num(v.strip()[:-1].strip(), what) / 100.0
+    return _num(v, what)
 
 
 def _opt(v: Any, what: str, unit: str = "") -> Optional[float]:
@@ -1217,13 +1230,21 @@ def config_from_data(data: Any) -> Config:
             max_c=_num(t.get("max_c", 105.0), "thermal.max_c", "C"),
             theta_jb={str(k): _num(v, f"thermal.theta_jb.{k}") for k, v in (t.get("theta_jb") or {}).items()},
             capacity_c=(_num(t["capacity_c"], "thermal.capacity_c", "C") if t.get("capacity_c") is not None
-                        else None))
+                        else None),
+            electrothermal=bool(t.get("electrothermal", False)),
+            electrothermal_rounds=int(_num(t.get("electrothermal_rounds", 3), "thermal.electrothermal_rounds")),
+            electrothermal_tolerance=_share(t.get("electrothermal_tolerance", 0.01),
+                                            "thermal.electrothermal_tolerance"))
         if cfg.thermal.orientation not in ("horizontal", "vertical"):
             errors.append("thermal.orientation must be horizontal or vertical")
         if cfg.thermal.convection not in ("natural", "forced", "fixed"):
             errors.append("thermal.convection must be natural, forced or fixed")
         if cfg.thermal.quality not in ("draft", "normal", "fine"):
             errors.append("thermal.quality must be draft, normal or fine")
+        if not 1 <= cfg.thermal.electrothermal_rounds <= 10:
+            errors.append("thermal.electrothermal_rounds must be 1 to 10 (the most rounds before it stops)")
+        if not 0.001 <= cfg.thermal.electrothermal_tolerance <= 0.5:
+            errors.append("thermal.electrothermal_tolerance must be 0.1 % to 50 % (e.g. 1% or 0.01)")
     except ConfigError as e:
         errors.extend(e.messages)
 

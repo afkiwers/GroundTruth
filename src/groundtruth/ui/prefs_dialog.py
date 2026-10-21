@@ -17,6 +17,11 @@ FROM_FILE = "From the settings file"
 THREADS = (FROM_FILE, "auto", "1", "2", "4", "8", "16", "32")
 GPU = (FROM_FILE, "auto", "on", "off")
 QUALITY = (FROM_FILE, "draft", "normal", "fine")
+# the electro-thermal coupling (analysis/electrothermal.py): on or off, its most rounds and its tolerance, each from the
+# settings file (thermal.electrothermal, _rounds, _tolerance) unless set here for this computer
+ELECTROTHERMAL = (FROM_FILE, "off", "on")
+ET_ROUNDS = (FROM_FILE,) + tuple(str(n) for n in range(1, 11))
+ET_TOLERANCE = (FROM_FILE, "0.5 %", "1 %", "2 %", "5 %")
 GAP = 6                  # the dialog's spacing unit (DIP): rows and labels one apart, groups and margins two
 MIN_PANE_DIP = 200       # the scrolled pane of groups is never shorter (the dialog's minimum height)
 
@@ -91,6 +96,10 @@ def defaults(prefs: dict) -> dict:
             "gpu": prefs.get("gpu") if prefs.get("gpu") in GPU else FROM_FILE,
             "all_cores": bool(prefs.get("all_cores", False)),
             "thermal_quality": prefs.get("thermal_quality") if prefs.get("thermal_quality") in QUALITY else FROM_FILE,
+            "electrothermal": prefs.get("electrothermal") if prefs.get("electrothermal") in ELECTROTHERMAL
+            else FROM_FILE,
+            "et_rounds": prefs.get("et_rounds") if prefs.get("et_rounds") in ET_ROUNDS else FROM_FILE,
+            "et_tolerance": prefs.get("et_tolerance") if prefs.get("et_tolerance") in ET_TOLERANCE else FROM_FILE,
             "via_markers": bool(prefs.get("via_markers", True)),
             "max_vias": vias if isinstance(vias, int) and vias > 0 else None,
             "outlines": bool(prefs.get("outlines", False)),
@@ -439,6 +448,23 @@ class PreferencesDialog(wx.Dialog):
         row(therm, "Quality", self.thermal_quality,
             "the thermal mesh: draft is quick, fine is detailed and needs more memory (the solve stops with a "
             "message above 60 % of this computer's memory). From the settings file: its thermal.quality.")
+        self.electrothermal = wx.Choice(self, choices=list(ELECTROTHERMAL))
+        self.electrothermal.SetStringSelection(p["electrothermal"])
+        row(therm, "Electro-thermal", self.electrothermal,
+            "on: after the first thermal solve the DC paths are solved again with the copper at its temperature "
+            "(a hotter via or track is more resistive and gives current to cooler ones), then Thermal again, round "
+            "after round until no path's loss or via's current moves by more than the tolerance; off: the copper at "
+            "20 °C. From the settings file: its thermal.electrothermal (off unless set).")
+        self.et_rounds = wx.Choice(self, choices=list(ET_ROUNDS))
+        self.et_rounds.SetStringSelection(p["et_rounds"])
+        row(therm, "Rounds at most", self.et_rounds,
+            "the electro-thermal rounds before it stops, settled or not (each: one DC solve and one thermal solve). "
+            "From the settings file: its thermal.electrothermal_rounds (3).")
+        self.et_tolerance = wx.Choice(self, choices=list(ET_TOLERANCE))
+        self.et_tolerance.SetStringSelection(p["et_tolerance"])
+        row(therm, "Settled within", self.et_tolerance,
+            "settled when no path's loss and no via's current (of its path's) moved more than this in a round. From "
+            "the settings file: its thermal.electrothermal_tolerance (1 %).")
 
         maps = group("Heatmaps", "right")
         self.via_markers = wx.CheckBox(self, label="Mark the vias carrying the current (▲)")
@@ -549,6 +575,9 @@ class PreferencesDialog(wx.Dialog):
                 "gpu": self.gpu.GetStringSelection(),
                 "all_cores": self.all_cores.GetValue(),
                 "thermal_quality": self.thermal_quality.GetStringSelection(),
+                "electrothermal": self.electrothermal.GetStringSelection(),
+                "et_rounds": self.et_rounds.GetStringSelection(),
+                "et_tolerance": self.et_tolerance.GetStringSelection(),
                 "author": self.author.GetValue().strip(),
                 "company": self.company.GetValue().strip(),
                 "history": self.history.GetValue(),

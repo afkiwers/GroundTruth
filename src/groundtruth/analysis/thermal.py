@@ -81,6 +81,9 @@ class ThermalResult(RouteResult):
     heat_unit: str = "°C"
     heat_scale: str = "linear"
     dc_hot: list = field(default_factory=list)            # the DC paths at these temperatures (dc_at_temperature)
+    # the electro-thermal coupling's rounds (analysis/electrothermal.couple; {} when it was off): rounds, settled,
+    # changes, the busiest vias at temperature
+    electrothermal: dict = field(default_factory=dict)
 
     def summary(self) -> dict:
         """The result as plain data for the JSON report (the 20 hottest parts; no temperature maps)."""
@@ -89,7 +92,7 @@ class ThermalResult(RouteResult):
                 "copper_w": self.copper_w, "parts_w": self.parts_w, "heat_out": self.heat_out,
                 "parts": self.parts[:20], "losses": self.losses, "mesh": self.mesh, "notes": self.notes,
                 "capacity": self.capacity, "dc_at_temperature": getattr(self, "dc_hot", []),   # (older pickles: none)
-                "error": self.error}
+                "electrothermal": getattr(self, "electrothermal", {}), "error": self.error}
 
     def label(self) -> str:
         """The view's name in the Results list and the reports."""
@@ -560,6 +563,14 @@ def run_thermal(board: Board, config: Config, converters, progress: Optional[Pro
     if inputs is None:
         return _empty(config, NO_STAGES), []
     res, issues = solve_thermal(board, config, *inputs, progress, cancel)
+    if config.thermal.electrothermal:           # rounds of DC paths at temperature and Thermal (electrothermal.py)
+        from .electrothermal import couple
+
+        def again(results):
+            """Thermal of the results of a round."""
+            return solve_thermal(board, config, *thermal_inputs(board, config, results), progress, cancel)
+        res, issues, _ = couple(board, config, converters, res, issues, again, progress, cancel)
+        return res, issues
     return with_dc_at_temperature(res, board, converters), issues
 
 

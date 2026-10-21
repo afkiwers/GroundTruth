@@ -1359,6 +1359,7 @@ def _thermal(board, thermal, capacity, issues, figs) -> str:
                     [f"<tr><td>{e(p['ref'])}</td>{_num(p['t_c'], '{:.1f} °C')}"
                      + (_num(p.get('t_junction'), '{:.1f} °C') if junction else "")
                      + f"{_num(p.get('power_w'), '{:.2f} W')}<td>{e(p.get('why', ''))}</td></tr>" for p in shown]))
+            body.append(_electrothermal(t))
             body.append(_notes(t.notes))
     if capacity:
         rows = []
@@ -1377,6 +1378,29 @@ def _thermal(board, thermal, capacity, issues, figs) -> str:
 
 
 # --------------------------------------------------------------------------------------------- fixes, appendix
+def _electrothermal(t) -> str:
+    """The electro-thermal coupling of a thermal result (analysis/electrothermal.py): whether it settled, in how
+    many rounds, and the vias most loaded at temperature beside their 20 °C figures (nothing when it was off)."""
+    et = getattr(t, "electrothermal", None) or {}
+    if not et:
+        return ""
+    ch = ", ".join(f"{c * 100:.2g} %" for c in et.get("changes", [])) or "none"
+    head = (f"<p>The DC paths were solved again with the copper at its temperature (a hotter via or track is more "
+            f"resistive and gives current to cooler ones), then Thermal again: "
+            + (f"<b>settled</b> in {et['rounds']} round(s)" if et.get("settled") else
+               f"<b>not settled</b> after {et['rounds']} round(s) of at most {et['max_rounds']}")
+            + f" (the largest change each round: {e(ch)}; tolerance {et['tolerance'] * 100:g} %)"
+            + (f"; {e(et['stopped'])}" if et.get("stopped") else "") + ".</p>")
+    rows = [f"<tr><td>{e(v['via'])}</td><td>{e(v['stage'])}: {e(v['path'])}</td>"
+            f"{_num(v.get('current20_a'), '{:.3g} A')}{_num(v['current_a'], '{:.3g} A')}"
+            f"{_num(v.get('load20_pct'), '{:.0f} %')}{_num(v.get('load_pct'), '{:.0f} %')}</tr>"
+            for v in et.get("vias", [])]
+    table = ("<h4>Busiest vias at temperature</h4>" + _table(
+        ["Via", "Path", "#At 20 °C", "#At temperature", "#Load at 20 °C", "#Load at temperature"], rows)
+             if rows else "")
+    return "<h4>Electro-thermal coupling</h4>" + head + table
+
+
 def _suggestions_section(res) -> str:
     """The fix search part: every suggestion with its predicted effect, and the verification's comparison."""
     rows = []

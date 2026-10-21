@@ -353,6 +353,17 @@ def _thermal(t, rules) -> list[Kpi]:
     for p in hottest:
         out.append(("hottest part", f"{p['t_c']:.1f} °C", f"{p['ref']}, {p['power_w']:.2f} W",
                     _level(p["t_c"], t.warn_c, t.max_c), "board temperature under the part's pads"))
+    et = getattr(t, "electrothermal", None) or {}
+    if et:              # the electro-thermal coupling (analysis/electrothermal.py)
+        top = (et.get("vias") or [None])[0]
+        sub = (f"busiest via {top['current20_a']:.3g} → {top['current_a']:.3g} A" if top and
+               top.get("current20_a") is not None else (et.get("stopped") or ""))
+        out.append(("electro-thermal", "settled" if et.get("settled") else "not settled",
+                    f"{et.get('rounds', 0)} of at most {et.get('max_rounds', 0)} rounds; {sub}",
+                    "" if et.get("settled") else "warn",
+                    "the DC paths solved again with the copper at its temperature, then Thermal again, until no "
+                    f"path's loss or via's current moved more than {et.get('tolerance', 0) * 100:g} %; the busiest via's "
+                    "current at 20 °C and at temperature (the notes and the report list the vias)"))
     return out
 
 

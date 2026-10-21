@@ -852,8 +852,20 @@ Motor bridges heat the board with their RMS currents and their parts' losses (se
   leaves that loss out, with a note (the dead time and V_SD take their defaults, also with a note). The `thermal:` settings section: `ambient_c` (25), `orientation`
   (horizontal / vertical), `convection` (natural / forced with `airspeed`, 1 m/s / fixed with `h_top` and
   `h_bottom`, 10 and 5 W/m²K), `radiation` (true), `quality` (draft / normal / fine; default normal), the limits
-  `warn_c` (85) and `max_c` (105), `capacity_c` (see "Current capacity" below), and `theta_jb` (part → K/W) for
-  junction estimates.
+  `warn_c` (85) and `max_c` (105), `capacity_c` (see "Current capacity" below), `theta_jb` (part → K/W) for
+  junction estimates, and the electro-thermal coupling below (`electrothermal`, `electrothermal_rounds`,
+  `electrothermal_tolerance`).
+- **Electro-thermal coupling** (`thermal.electrothermal: true`, or Preferences… → Electro-thermal; off by default):
+  hot copper is more resistive (+0.393 %/K), so a hot via or track hands current to cooler ones beside it. Off,
+  the DC paths keep their 20 °C current pattern and only the heat follows ρ(T). On, after the first thermal solve
+  every power stage's and DC load's DC paths are solved again on the whole-board DC model with each copper cell and
+  via barrel at its solved temperature, then Thermal again, until no path's loss and no via's share of its path's
+  current moves by more than `electrothermal_tolerance` (1 %; also `"2%"`) in a round, for at most
+  `electrothermal_rounds` rounds (3; 1-10, never more than 10). A round that changes more than the one before ends
+  it with the round before kept; Cancel stops it. The notes say whether it settled and in how many rounds; the
+  result (JSON `electrothermal`, the report's "Busiest vias at temperature", the plugin's tile) gives the busiest
+  vias' currents at 20 °C and at temperature. Bridges' RMS currents are not re-solved, and Current capacity
+  keeps the 20 °C current pattern.
 - **Results:** a "Thermal: copper temperature" view in the Results tab (one map per copper layer, × the hot
   spot, tiles: hottest copper, total loss, hottest part), the hottest parts as bars against the limits, issues
   `thermal_hotspot` and `part_temperature` (parts without losses of their own are listed together, past

@@ -2,14 +2,17 @@
 
     .venv/Scripts/python tools/dev/thermal_check.py BOARD SETTINGS [--only SW1,SW2] [--rds-on 4m] [--dcr 5m]
         [--quality draft|normal|fine] [--ambient 25] [--png DIR] [--capacity [--limit 105]] [--cache FILE]
-        [--theta Q301=2,Q303=2] [--linear]
+        [--theta Q301=2,Q303=2] [--linear] [--electrothermal ROUNDS [--et-tol 0.01]]
 
 Simulates the chosen power stages (their DC paths drive the thermal model), then solves the temperatures. The
 loss parameters given here override the settings file for this run only (nothing is written). --png saves the
 hottest layer's temperature map. --capacity also searches each stage's current capacity (to --limit °C, default
 the settings' max_c) and checks it with a fresh solve at that current. --cache FILE keeps Simulate's power-stage
 results between runs (pickled; delete the file after changing the board, the stages or the loss parameters).
---linear makes the problem linear for checks (copper α = 0, fixed h_top / h_bottom, no radiation)."""
+--linear makes the problem linear for checks (copper α = 0, fixed h_top / h_bottom, no radiation).
+--electrothermal ROUNDS turns the electro-thermal coupling on (analysis/electrothermal.py; at most ROUNDS rounds,
+settled within --et-tol) and prints its rounds and the busiest vias at 20 °C and at temperature; the cache must come
+from a Simulate that kept its DC excitations (a cache made before 2026-10-21 has none: delete it)."""
 import argparse
 import pickle
 import sys
@@ -37,6 +40,8 @@ def main() -> int:
     ap.add_argument("--cache")
     ap.add_argument("--theta", help="theta_jb per part, e.g. Q301=2,Q303=2 (K/W)")
     ap.add_argument("--linear", action="store_true")
+    ap.add_argument("--electrothermal", type=int, metavar="ROUNDS")
+    ap.add_argument("--et-tol", type=float, default=0.01)
     args = ap.parse_args()
     from dataclasses import replace
     from groundtruth.adapters.file_source import load_board
@@ -68,6 +73,9 @@ def main() -> int:
         th_over.update(convection="fixed", radiation=False)
         from groundtruth.thermal import materials
         materials.COPPER = replace(materials.COPPER, alpha=0.0)
+    if args.electrothermal:
+        th_over.update(electrothermal=True, electrothermal_rounds=args.electrothermal,
+                       electrothermal_tolerance=args.et_tol)
     if th_over:
         cfg = replace(cfg, thermal=replace(cfg.thermal, **th_over))
     print(f"{len(keep)} power stage(s): {', '.join(c.name for c in keep)}; " + ", ".join(f"{k} {v:g}" for k, v in over.items()))
@@ -99,6 +107,12 @@ def main() -> int:
         print(f"  part {p['ref']:8s} {p['t_c']:6.1f} °C  {p['power_w']:.3f} W")
     for n in th.notes:
         print("  note:", n)
+    if th.electrothermal:
+        e = th.electrothermal
+        print(f"electro-thermal: {e['rounds']} round(s) of at most {e['max_rounds']}, settled {e['settled']}, "
+              f"changes {['%.3g %%' % (c * 100) for c in e['changes']]}{'; ' + e['stopped'] if e['stopped'] else ''}")
+        for v in e["vias"][:8]:
+            print(f"  via {v['name']:28s} {v['path'][:34]:34s} {v['current20_a'] or 0:7.3f} -> {v['current_a']:7.3f} A")
     for i in issues:
         print(f"  {i.severity:8s} {i.check:18s} {i.message}")
     if args.png:
