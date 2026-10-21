@@ -7,13 +7,12 @@ read [../CLAUDE.md](../CLAUDE.md) (environment of this machine, rules, commands)
 bigger machine and audit items 1-5, then 6-7) is in git history (`git log -p docs/NEXT_STEPS.md`); all of it is
 done, with the evidence in [VALIDATION_AUDIT.md](VALIDATION_AUDIT.md) "Round 4".
 
-## In progress (2026-10-21): branch `electrothermal`, not committed
+## Open (2026-10-21): after the electro-thermal merge
 
-The electro-thermal coupling (`thermal.electrothermal`, a capped number of rounds), asked for by the user ("Do it").
-Code, tests (8 pass) and docs are written in the working tree of branch `electrothermal`; nothing is committed. What
-is left (rerun the related suites, the kraft check on conv1 + conv2 with the coupling off and on, a GUI check, commit,
-show the user, ask before merging) is in the top entry of [HANDOFF.md](HANDOFF.md), with the commands. Do that
-before starting anything else.
+The electro-thermal coupling (`thermal.electrothermal`) is in `main`. Still open, with the details in the
+`electrothermal` entry of [HANDOFF.md](HANDOFF.md): the kraft check on the board as the user saved it (coupling off
+and on: rounds, T_max, busiest vias 20 °C → hot), three GUI timing tests to rerun alone, and, awaiting the user's go,
+a pad-share fix (each pin's copper counted once: EPC2306 pin 2 gets 42 % of the FET's current instead of 34 %).
 
 ## Done (2026-10-20): audit round 6
 
