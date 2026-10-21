@@ -2,7 +2,7 @@
 on the nets beyond them, as one linear circuit for emi/mna.py (docs/ANALOG_AC.md). The user: "I want a generic
 model that can calculate any circuit made from an OPA".
 
-- **The network** (`analog_network`): from the path's nets, every two-pin part with a model (resistor, capacitor,
+- **The network** (`analog_network`, [A53]): from the path's nets, every two-pin part with a model (resistor, capacitor,
   inductor, ferrite, 0R) and every op-amp channel with a pin on a net of it, and the nets on their other pins, until
   AC ground: the reference nets and the supply rails (`ac_ground_nets`). At most MAX_NETS nets (a note when it
   stops there). An IC that is not an op-amp is open on the network (its pins draw nothing), except the path's

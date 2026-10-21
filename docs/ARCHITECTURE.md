@@ -1393,6 +1393,59 @@ paths, power-stage filters, PDN, control loop: M5), as Results views and in the 
   test_fix_advisor (the curves equal filter_transfer, z_out's peak middlebrook's, −V²/P at 180°, the split views),
   test_pdn (the bare rail's −90°, the one-cap rail's sign change).
 
+## Analog circuits: any op-amp topology (`emi/mna.py`, `analysis/analog_net.py`, `analysis/symbolic.py`, branch `analog-ac`)
+
+The user: "I want a generic model that can calculate any circuit made from an OPA", the transfer function shown,
+tracks modelled ("no, do it now"), the loop gain, Simulate's emission from it ("yes"). Plan and decisions:
+[ANALOG_AC.md](ANALOG_AC.md).
+
+- **Solver** (`emi/mna.Circuit`): modified nodal analysis [Ho 1975], (G + sC)·x = b. Stamps: R, C, L (its current an
+  unknown, −L in C), `part` (a model's series R-L-C [A24] with internal nodes), the input `vsource` (1 V), VCVS,
+  VCCS, `opamp` (the macromodel [A52]: gm = 1 A/V into R1 = A0 ∥ C1 = 1/(2π·GBW) for the dominant pole, optionally
+  1 A/V into 1 Ω ∥ C2 for fp2, a unity VCVS buffer behind R_O; `opamps[name]` keeps its buffer row for the loop
+  gain), `y2` (a two-port by Y(f), vectorised over frequencies: `line_y` from a PathLine's Zc and γ). `solve`: a
+  sparse LU per frequency (refboard's ADC path, 35 track pieces, 300 frequencies: 0.17 s). `poles_zeros`: the finite
+  generalised eigenvalues of (G, −C) and of the bordered system matrix [[G + sC, −b], [cᵀ, 0]] (the transmission
+  zeros [Rosenbrock 1970]) [Golub 2013], rows and columns equilibrated and s scaled to 2π·1 kHz first, coinciding
+  pairs (1e-6) dropped, roots within 1e-6·ω_ref of 0 set to 0; K of the normal form H = K·s^m·Π(1 − s/z)/Π(1 − s/p)
+  from H at a test point, its products as summed logarithms (hundreds of roots). Refuses a circuit with two-ports
+  (not rational). `loop_gain(name, f)`: the op-amp's buffer row replaced by v(oi) = 1 V (an ideal source: the break
+  loads nothing) [Middlebrook 1975], the input source at 0 V, T = −A(s)·(v₊ − v₋).
+- **Circuit from the board** (`analysis/analog_net.analog_network(board, config, spec, receiver, lumped, f_top,
+  cache)`): nets grown from `route.signal_nets` through modelled two-pin parts (PASSIVE) and op-amp channels
+  (`opamp_channels`: GT labels amp_in / amp_inv / amp_out, else the model's `pins` plus the lone pin named as an
+  inverting input, else `pin_role` of every pin grouped by channel letter / digit), stopping at `ac_ground_nets`
+  (reference nets, supply pins by pin type or name, rail names), at most MAX_NETS. Copper: `route.copper_graph`
+  (split out of `find_route`: tracks, vias, pads, T-junctions, pours), union-find over the ideal joins (pad, join,
+  tht, zone); a second union-find over all copper finds unrouted pads and joins them (a note). Tracks: each track's
+  points (ends, an arc's chords) plus the T-junctions on it (another track's end on its middle: copper_graph's joins
+  from it to the track's ends are dropped, they lay beside the track), one PathLine per piece (`_line_of` /
+  `_line_loss`, the cross-sections) as `y2`, or with `lumped` its π section (R at DC, L, C/2 at each end). Vias: R + L
+  from `peec.via_impedance` [A3]. Parts: `part` with their model (C at its bias). Op-amps: the macromodel, or
+  `_gain_block` for a part with `gain` (or no IN−). Source: 1 V behind driver_ohms (+ driver_nh, driver_pf); load:
+  load_pf per receiver, load_ohms. Every node tied to ground by 1 TΩ (an isolated node would make G singular).
+  Records `schematic` (parts and op-amps in net terms, for the symbolic solve), `amp_out`, `lines`, `part_nodes`.
+- **Responses** (`simulate.network_responses`, used by `path_responses` with the model: Simulate and `bode_paths`):
+  the lines circuit swept over `sweep_range`, the lumped circuit's exact poles and zeros (`cancel_doublets` at 0.1 %,
+  kept up to POLE_SPAN = 10 × the sweep's top), `transfer.normal_form` (K, first- and second-order factors with f and
+  Q, NORMAL_ROOTS written, the rest counted), the receiver's response and each op-amp's output; `symbolic_transfer`
+  on the schematic (ideal circuit, nullors, SymPy `LUsolve`, numerator and denominator by powers of s with factored
+  coefficients; text, LaTeX for matplotlib's math text over the Bode plot, MathML for the report; ≤ MAX_PARTS = 15);
+  each op-amp's loop gain with `transfer.phase_margin` (crossover by |T| in dB linear in log f, PM = 180° + ∠T),
+  `Response.margin`, a "phase margin" tile (PM_WARN 45°, PM_ERROR 20°). The path model (cascade with op-amps as gain
+  blocks, vector fitting) when the circuit can't be made, with a note.
+- **Emission** (`simulate.NetworkPath`, `network_path`): built in `prepare_route` (plain paths) and
+  `_amplified_route` (op-amp paths) when the circuit can be made; `results(f, v_source)` gives one `PathResult` per
+  stage with the cascade's meaning from the MNA solution: route segments mapped to the circuit's line pieces by track
+  uuid and position (`_on_segment`), each piece's exact mean current I₁ sinh(γl)/γl − (V₁/Zc)(cosh γl − 1)/γl in the
+  route's direction, series parts' currents from their nodes, groups between the shunts (`find_shunts` places),
+  each shunt's current from its nodes, the share passing it, the stage's input current and end voltage. The loops
+  (their geometry, the field solves, `loop_currents`, SHUNT_MIN_SHARE) and the slew cap stay the cascade's.
+- **Tests**: test_mna (closed forms: RC, RLC, ESL notch, inverting / non-inverting / follower, Sallen-Key and MFB f0
+  and Q, integrator, instrumentation amplifier, a second pole's Q and peaking, a line open at its end, loop gains:
+  90° at GBW, 51.8° at 0.786 GBW, GBW/11), test_analog_net (circuits read from `boardgen.opamp_circuit_board`, pin
+  roles, a dual op-amp, the T-junction), test_symbolic (closed forms; values against the numeric solve to 1e-6).
+
 ## Signal integrity (`solver/xsection.py`, `analysis/si.py`, `ui/si_panel.py`, M3, branch `signal-integrity`)
 The plan's M3, at the user's "Merge and continue with M3" (2026-10-17).
 - **Cross-section solver** (`solver/xsection.py`): Laplace ∇·(εr∇φ) = 0 by finite volumes on a rectilinear grid,
