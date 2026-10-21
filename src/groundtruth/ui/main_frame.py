@@ -1758,15 +1758,18 @@ class MainFrame(wx.Frame):
 
         def work():
             """(highlight thread) Work out the marker's copper and show it in KiCad."""
-            from ..analysis.highlight import Highlight, _finish, issue_highlight, point_highlight
+            from ..analysis.highlight import Highlight, _finish, area_highlight, issue_highlight, point_highlight
             fp = board.footprint(what.get("name", "")) if kind == "part" else None
             if fp is not None:              # a part carrying current: its footprint
                 h = _finish(Highlight(focus=[fp.uuid], text=f"{fp.reference} ({fp.value})"), board, config, set())
+            elif kind == "point":           # a density tile's hot spot: the copper around it, the view zoomed there
+                h = area_highlight(board, config, x, y, layer, text=short)
             else:                           # the copper right at the marker: on the map's layer (a via: any)
                 h = point_highlight(board, config, x, y, layer if kind != "via" else "", text=short)
                 if h.empty and kind == "issue":
                     h = issue_highlight(what, board, config, routes)
-            result = session.show_issue(h, zoom=zoom, nets=nets)
+            # a tile clicked to zoom to its spot zooms KiCad too, whatever the Issues tab's "Zoom to it" says
+            result = session.show_issue(h, zoom=zoom or kind == "point", nets=nets)
             wx.CallAfter(self._mark_shown, short, h, result)
         self._highlighter.submit(work)
 

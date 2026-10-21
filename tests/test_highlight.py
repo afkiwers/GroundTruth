@@ -239,3 +239,22 @@ def test_a_clicked_heatmap_marker_shows_the_copper_right_there(tmp_path):
     h = point_highlight(board, cfg, *pad.position, "F.Cu", text="error · something")
     assert h.focus == [pad.uuid] and h.text == "error · something"
     assert point_highlight(board, cfg, 38.0, 2.0).empty
+
+
+def test_a_hot_spot_in_a_pour_zooms_to_the_copper_around_it(tmp_path):
+    """A density tile's hot spot (area_highlight; the user: "clicking on RMS current density only zooms into the
+    heatmap. I need it to zoom into the PCB as well"): inside an inner pour, no item at the spot itself, so KiCad
+    zooms to the small copper of the pour's net in the square around it (the GND via, not the SIG one beside it),
+    with the pour selected after the zoom; nothing small around: the item at the spot, else the pour."""
+    from groundtruth.analysis.highlight import area_highlight, point_highlight
+    board, sc, _ = make(tmp_path, layer_change_board(3.0), "spot")
+    cfg = sc.config
+    pour = next(z for z in board.zones if "In1.Cu" in z.layers)
+    gnd = next(v for v in board.vias if v.net == "GND" and v.position == (20.0, 13.0))
+    assert point_highlight(board, cfg, 21.0, 12.0, "In1.Cu").empty           # what the tile found before
+    h = area_highlight(board, cfg, 21.0, 12.0, "In1.Cu", text="hot")
+    assert h.focus == [gnd.uuid] and h.context == [pour.uuid] and h.layer == "In1.Cu" and h.text == "hot"
+    assert h.lit == [] and h.area is not None and h.zoom_out == 2               # GND is never lit; a small focus
+    track = next(t for t in board.tracks if t.layer == "F.Cu")                 # 15 mm: not wholly in the square
+    assert area_highlight(board, cfg, 12.0, 10.0, "F.Cu").focus == [track.uuid]
+    assert area_highlight(board, cfg, 28.0, 5.0, "In1.Cu").focus == [pour.uuid]

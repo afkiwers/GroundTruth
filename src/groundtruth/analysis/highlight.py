@@ -147,6 +147,47 @@ def point_highlight(board: Board, config: Config, x: float, y: float, layer: str
     return _finish(h, board, config, {net} if net else set())
 
 
+def area_highlight(board: Board, config: Config, x: float, y: float, layer: str = "", half: float = 3.0,
+                   text: str = "") -> Highlight:
+    """The copper around a spot of a heatmap (a current-density tile's hot spot), for KiCad to zoom to: the view can
+    only be zoomed to selected items (zoomFitSelection; the API has no "show this point"), and a hot spot inside a
+    pour has no item of its own (point_highlight finds none on an inner plane: the user, "clicking on RMS current
+    density only zooms into the heatmap. I need it to zoom into the PCB as well"). So the focus is the small copper
+    wholly inside the 2·half square around the spot: vias, pads on `layer`, track segments on `layer` with both
+    ends inside; those of the spot's own net (the pour or item at the spot) when it has any there, else every net.
+    The item right at the spot comes first and its net is lit (never a reference net); the pour at the spot is
+    selected after the zoom (context), so it shows without pulling the view out to all of it. With nothing small in
+    the square, the item at the spot alone (its own extent), else the pour (its extent). `text`: the status line."""
+    from shapely.geometry import Point, box
+    from ..geometry.shapes import pad_shape
+    at = Point(x, y)
+    square = box(x - half, y - half, x + half, y + half)
+    here = point_highlight(board, config, x, y, layer, text=text)
+    pours = [z for z in board.zones if not z.is_rule_area and (not layer or layer in z.filled)
+             and any(_shape(p).covers(at) for L, polys in z.filled.items() if not layer or L == layer
+                     for p in polys)]
+    net_of = {t.uuid: t.net for t in board.tracks} | {v.uuid: v.net for v in board.vias} | \
+        {p.uuid: p.net for p in board.pads() if p.uuid}
+    net = next((net_of[u] for u in here.focus if u in net_of), None) or (pours[0].net if pours else None)
+
+    def inside_track(t):
+        """A track segment on the layer with both ends (and an arc's middle) inside the square."""
+        ends = [t.start, t.end] + ([t.mid] if t.mid is not None else [])
+        return (not layer or t.layer == layer) and all(square.covers(Point(p)) for p in ends)
+    small = [(v.uuid, v.net) for v in board.vias if square.covers(Point(v.position))]
+    small += [(p.uuid, p.net) for p in board.pads() if p.uuid and (not layer or layer in p.layers)
+              and (s := pad_shape(p)) is not None and square.covers(s)]
+    small += [(t.uuid, t.net) for t in board.tracks if inside_track(t)]
+    own = [u for u, n in small if net and n == net]
+    focus = own or [u for u, _ in small]
+    focus = [u for u in here.focus if u in focus] + [u for u in focus if u not in here.focus]   # the spot's first
+    if not focus:
+        focus = here.focus or [z.uuid for z in pours[:1]]
+    h = Highlight(focus=focus, context=[z.uuid for z in pours if z.uuid not in focus], layer=layer,
+                  text=text or (here.text if not here.empty else f"the copper around ({x:.2f}, {y:.2f})"))
+    return _finish(h, board, config, {net} if net else set())
+
+
 def stages_highlight(names: Sequence[str], board: Board, config: Config, routes: Sequence = ()) -> Highlight:
     """Power stages picked in the Converters tab: their switches and hot-loop capacitors (as the hot-loop issue
     shows them), and the copper of their whole power flow, all lit: input path, rail, switch node, the inductor's
