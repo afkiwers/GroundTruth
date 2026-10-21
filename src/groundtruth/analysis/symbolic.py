@@ -44,8 +44,9 @@ class SymbolicTF:
 
 
 def symbolic_transfer(schematic: dict) -> Optional[SymbolicTF]:
-    """The ideal circuit's H(s) = v(out) / v(in) in its part names (see the module docstring); None (with nothing to
-    say) without a schematic, or when it has more than MAX_PARTS parts or the solve finds no unique answer."""
+    """The ideal circuit's H(s) = v(out) / v(in) in its part names [A54]: its modified nodal equations [Ho 1975]
+    with each op-amp a nullor [Franco 2015], solved in s (see the module docstring); None (with nothing to say)
+    without a schematic, or when it has more than MAX_PARTS parts or the solve finds no unique answer."""
     import sympy as sp
     if not schematic or not schematic.get("parts") and not schematic.get("opamps"):
         return None

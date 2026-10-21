@@ -85,27 +85,30 @@ class Circuit:
         return self._extra - 1
 
     def r(self, a: str, b: str, ohms: float):
-        """A resistor between a and b (Ω > 0)."""
+        """A resistor between a and b (Ω > 0): its conductance stamped into G [Ho 1975]."""
         self._admit(self.node(a), self.node(b), 1.0 / ohms, self._g)
 
     def c(self, a: str, b: str, farads: float):
-        """A capacitor between a and b (F)."""
+        """A capacitor between a and b (F): its capacitance stamped into C (admittance sC) [Ho 1975]."""
         self._admit(self.node(a), self.node(b), farads, self._c)
 
     def l(self, a: str, b: str, henries: float, name: str = "L"):
-        """An inductor between a and b: its current an unknown, v_a − v_b − sL·i = 0."""
+        """An inductor between a and b: its current an unknown, v_a − v_b − sL·i = 0 (MNA's branch stamp)
+        [Ho 1975]."""
         k = ("x", self._branch("L", name))
         self._stamp_branch(self.node(a), self.node(b), k)
         self._c.append((k, k, -henries))
 
     def vsource(self, p: str, n: str, name: str = "Vin") -> None:
-        """The input: an ideal voltage source from n to p of 1 V (the response is per volt of it). One only."""
+        """The input: an ideal voltage source from n to p of 1 V (the response is per volt of it), its current an
+        unknown [Ho 1975]. One only."""
         k = ("x", self._branch("V", name))
         self._stamp_branch(self.node(p), self.node(n), k)
         self._input = k[1]
 
     def vcvs(self, p: str, n: str, cp: str, cn: str, gain: float, name: str = "E"):
-        """A voltage-controlled voltage source: v_p − v_n = gain·(v_cp − v_cn)."""
+        """A voltage-controlled voltage source: v_p − v_n = gain·(v_cp − v_cn), its current an unknown
+        [Ho 1975]."""
         k = ("x", self._branch("E", name))
         self._stamp_branch(self.node(p), self.node(n), k)
         for node, sign in ((self.node(cp), -gain), (self.node(cn), gain)):
@@ -114,7 +117,7 @@ class Circuit:
 
     def vccs(self, p: str, n: str, cp: str, cn: str, gm: float):
         """A voltage-controlled current source: a current gm·(v_cp − v_cn) taken out of node p and driven into
-        node n (through the source)."""
+        node n (through the source), stamped into G [Ho 1975]."""
         for row, rs in ((self.node(p), 1.0), (self.node(n), -1.0)):
             if row < 0:
                 continue
@@ -123,7 +126,8 @@ class Circuit:
                     self._g.append((("v", row), ("v", col), rs * cs * gm))
 
     def opamp(self, name: str, inp: str, inn: str, out: str, prm: OpAmpParams):
-        """An op-amp channel (see the module docstring): inputs inp / inn, output out, its supplies AC ground."""
+        """An op-amp channel: its linear macromodel [Franco 2015] [A52] (see the module docstring): inputs inp / inn,
+        output out, its supplies AC ground; A(s) = A0 / ((1 + s/ω1)(1 + s/ω2)), ω1 = 2π·GBW/A0."""
         if prm.r_in and prm.r_in < 1e15:
             self.r(inp, inn, prm.r_in)
         if prm.c_in:
@@ -177,8 +181,8 @@ class Circuit:
             {"R": self.r, "C": self.c}.get(k, lambda x_, y_, v_: self.l(x_, y_, v_, name))(x, y, v)
 
     def y2(self, a1: str, b1: str, a2: str, b2: str, y: Callable[[float], np.ndarray]):
-        """A two-port by its admittance matrix Y(f) (2x2, port 1 from a1 to b1, port 2 from a2 to b2): a line,
-        `line_y`. Frequency-dependent: such a circuit has no exact poles (poles_zeros refuses it)."""
+        """A two-port by its admittance matrix Y(f) (2x2, port 1 from a1 to b1, port 2 from a2 to b2) [Pozar 2012]: a
+        line, `line_y`. Frequency-dependent: such a circuit has no exact poles (poles_zeros refuses it)."""
         self._y2.append((self.node(a1), self.node(b1), self.node(a2), self.node(b2), y))
 
     # ------------------------------------------------------------------ internals
@@ -261,7 +265,7 @@ class Circuit:
 
     def solve(self, f) -> np.ndarray:
         """x at each frequency (rows: frequencies), the input source at 1 V: a sparse LU per frequency of
-        G + j2πf·C (+ the two-ports' Y(f))."""
+        G + j2πf·C (+ the two-ports' Y(f)) [Ho 1975] [Golub 2013]."""
         import scipy.sparse as sp
         import scipy.sparse.linalg as spl
         g, c, b = self._sparse()
@@ -321,7 +325,8 @@ class Circuit:
         return self.transfer(f, node)
 
     def poles_zeros(self, out: str, ref: Optional[str] = None) -> tuple[np.ndarray, np.ndarray, complex]:
-        """(poles, zeros, k) in rad/s, exact (see the module docstring), in the normal form
+        """(poles, zeros, k) in rad/s, exact: the poles the finite generalised eigenvalues of (G, −C), the zeros those
+        of the bordered system matrix [Rosenbrock 1970] [Golub 2013] (see the module docstring), in the normal form
         H(s) = k · s^m · Π(1 − s/z) / Π(1 − s/p) over the roots away from the origin, m the zeros at the origin less
         the poles there (roots at the origin are returned as 0): k is the gain at DC where m = 0. k from H at a
         test point away from every root, its products summed as logarithms (hundreds of roots stay finite). Raises
@@ -353,8 +358,9 @@ class Circuit:
 
 
 def _finite_eigs(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """The finite generalised eigenvalues λ of a·x = λ·b·x (the pencil's infinite ones, b singular, left out), the
-    pencil equilibrated first (rows and columns scaled to comparable norms: eigenvalues unchanged)."""
+    """The finite generalised eigenvalues λ of a·x = λ·b·x by the QZ algorithm (the pencil's infinite ones, b
+    singular, left out), the pencil equilibrated first (rows and columns scaled to comparable norms: eigenvalues
+    unchanged) [Golub 2013]."""
     import scipy.linalg as sl
     m = np.abs(a) + np.abs(b)
     r = 1.0 / np.maximum(m.max(axis=1), 1e-300)
@@ -370,7 +376,8 @@ def _finite_eigs(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 def _cancel(poles: np.ndarray, zeros: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Poles and zeros with the coinciding pairs removed (relative distance below CANCEL, or both within CANCEL of
-    the origin's scale): a mode the input does not reach or the output does not see."""
+    the origin's scale): a mode the input does not reach or the output does not see (an uncontrollable or
+    unobservable mode cancels in the transfer function [Rosenbrock 1970])."""
     p, z = list(poles), list(zeros)
     for zi in list(z):
         for pi in p:
