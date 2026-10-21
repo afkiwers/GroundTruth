@@ -401,7 +401,8 @@ def test_schematic_fields_fill_the_forms_and_a_value_set_here_is_flagged(app, tm
         parts.refresh()
         row = parts.rows.index("C1")
         got["parts_differs"] = parts.grid.GetCellValue(row, SCHEMATIC_COL)
-        got["esr_cell"] = parts.grid.GetCellBackgroundColour(row, 8)
+        from groundtruth.ui.parts_panel import PARAM_COL
+        got["esr_cell"] = parts.grid.GetCellBackgroundColour(row, PARAM_COL["ESR"])
     try:
         run_steps(app, f, [check])
     finally:

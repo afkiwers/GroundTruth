@@ -334,7 +334,7 @@ def _run(args, simulate: bool) -> int:
     mode = ("simulate (Tier 1 + Tier 2)" if simulate else "check (Tier 1)") + (" with what-if edits" if args.what_if else "")
     if simulate and args.history:
         _keep_run(args, board, sc, cfg, issues, routes, converters, bridges, thermal, capacity, solver, mode, edits,
-                  time.time() - t0, combined, dc_loads)
+                  time.time() - t0, combined, dc_loads, cap_bias)
     for fmt in fmts:
         if fmt == "text":
             if not args.quiet:
@@ -385,8 +385,9 @@ def _run(args, simulate: bool) -> int:
 
 
 def _keep_run(args, board, sc, cfg, issues, routes, converters, bridges, thermal, capacity, solver, mode, edits,
-              seconds, combined=None, dc_loads=()):
-    """simulate --history: this run in the board's history folder (report/history.py), with its report page."""
+              seconds, combined=None, dc_loads=(), cap_bias=()):
+    """simulate --history: this run in the board's history folder (report/history.py), with its report page;
+    cap_bias: each capacitor at its DC voltage (SimulationResult.cap_bias), for the JSON."""
     from .report import formats
     from .report.history import HistoryError, cell_mm_of, edit_texts, history_for, run_meta
     from .report.html import render_html

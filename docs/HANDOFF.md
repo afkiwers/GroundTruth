@@ -8,7 +8,10 @@
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
 - **Branch `dc-bias` (2026-10-22, from `main` f12cacd; into `main` at the user's "commit and merge", a fast-forward,
-  branch deleted; the full suite was still running at the merge: its result in the next entry):** the user, of InvenTree part 60 (100 nF
+  branch deleted; the full suite was still running at the merge):** its full suite: 1107 passed, 1 skipped, 2 failed,
+  both fixed on `dc-bias-fixes` (merged right after): `simulate --history` used the run's capacitor table where
+  `_keep_run` had none (a NameError; now passed in), and a GUI test read the Parts tab's ESR cell by its old column
+  number (C in circuit moved it; now `PARAM_COL["ESR"]`). the user, of InvenTree part 60 (100 nF
   100 V X7R 0603, Cbias 75nF "estimate at 50% of rated voltage") used 33 times on kraft: "cbias is saved as a single
   value, this is probably not ideal as it will be used with different DC voltages. We should find a more generic way
   for caps", then "i like this approach -> (Give the field its voltage ...)", "rather than having a real value we
