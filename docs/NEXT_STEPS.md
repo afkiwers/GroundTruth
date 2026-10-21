@@ -20,7 +20,7 @@ telegrapher line, the op-amp's closed-loop output impedance): see its HANDOFF en
 a generic small-signal model of any op-amp circuit (any topology, feedback across op-amps, active filters) by
 modified nodal analysis, the transfer function in part names and numerically, loop gain and phase margin, the
 emission estimate from it, bandwidth limits ([ANALOG_AC.md](ANALOG_AC.md), its HANDOFF entry). **Next, when the
-user wants it:** the step response (a second branch, as decided); a new plugin package (the one in `out/dist` has
+user wants it:** nothing planned (the step response is merged too); a new plugin package (the one in `out/dist` has
 none of today's branches).
 
 ## Done (2026-10-20): audit round 6

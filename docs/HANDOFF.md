@@ -1,13 +1,14 @@
 # GroundTruth handover
 
-## Current state (2026-10-21, branch `step-response` open; `analog-ac`, `bode-sweep`, `pin-shares`, `electrothermal`, `density-pcb`, `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-21, `step-response`, `analog-ac`, `bode-sweep`, `pin-shares`, `electrothermal`, `density-pcb`, `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `step-response` (2026-10-21, from `main` 1de736c; OPEN, committed, not merged):** the user: "let's do it
+- **Branch `step-response` (2026-10-21, from `main` 1de736c, c5448dc; into `main` after its full suite, at the user's
+  "yes run it", a fast-forward, branch deleted):** the user: "let's do it
   now -> Step response" (the plan's second branch, ANALOG_AC.md). Each signal-path response (the receiver, each
   op-amp output) gets its step response: `emi/mna.Circuit.step` (BDF2 [Gear 1971] on the lumped circuit, from rest,
   one factorisation), `simulate._step_of` (12 time constants of the slowest pole, 3000 steps, the DC gain as the
@@ -26,8 +27,11 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
     bode` from them: −3 dB at 451 / 452 Hz (within the limit), rise 775 µs, settling 1.38 ms, U301 / U305 loops 89°
     (one pole: the board's symbols don't have the Aol / Fp2 / PM fields the user added in InvenTree yet: Update
     symbols from library, then Update PCB from Schematic). "forget about it" for the PCB-EMI folder and CE2264's FET
-    fields (dropped). Full suite on the branch: running (`out/step/full_suite.log`), then merge (the user: "yes run
-    it").
+    fields (dropped). Full suite on the branch: 1095 passed, 1 skipped, 1 failed (the bridges tab's GUI timing check,
+    0.71 s / 0.5 under load: passes alone; `out/step/full_suite.log`). After the user updated the schematic and
+    board (22:08: U301 / U305 Aol 110 dB, PM 65°): their loops 638 kHz, 71° (the 2.3 kΩ R_O into R303 lowers the
+    crossover: more margin than the datasheet's unloaded 65°), the followers' poles 1.14 MHz Q 0.6, 0.8 % overshoot
+    at their outputs; the paths 451 / 452 Hz, no overshoot, within max_bandwidth.
 - **Branch `analog-ac` (2026-10-21, from `main` e9b2c7d, 56fb575; into `main` at the user's "commit and merge", a
   fast-forward, branch deleted; the full suite was still running at the merge: its result below):** the
   user, of kraft's ADC path: "Are we currently considering the Opamp circuit and it's amplification etc. If I were
