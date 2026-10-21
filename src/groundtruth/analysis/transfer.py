@@ -49,6 +49,10 @@ class Response:
     exact: bool = False
     fit_error_db: Optional[float] = None
     notes: list = field(default_factory=list)
+    # the transfer function written out: `normal` the numeric normal form (normal_form: k, m, poles, zeros, text,
+    # latex), `symbolic` the ideal circuit's H(s) in its part names (analysis/symbolic.py: text, latex, mathml)
+    normal: Optional[dict] = None
+    symbolic: Optional[dict] = None
 
     @property
     def unit(self) -> str:
@@ -70,9 +74,21 @@ class Response:
         k = np.unique(np.linspace(0, len(self.f) - 1, min(points, len(self.f))).astype(int)) if len(self.f) else []
         return {"name": self.name, "owner": self.owner, "quantity": self.quantity, "exact": self.exact,
                 "fit_error_db": self.fit_error_db, "notes": list(self.notes), "gain": gain_figures(self),
+                "transfer_function": {"numeric": _plain_normal(getattr(self, "normal", None)),
+                                      "symbolic": {k: v for k, v in (getattr(self, "symbolic", None) or {}).items()
+                                                   if k in ("text", "latex")} or None},
                 "poles": pz_rows(self.poles), "zeros": pz_rows(self.zeros),
                 "f": [float(self.f[i]) for i in k], "magnitude": [float(self.magnitude()[i]) for i in k],
                 "phase_deg": [float(self.phase_deg()[i]) for i in k]}
+
+
+def _plain_normal(nf: Optional[dict]) -> Optional[dict]:
+    """A normal form as JSON data (its K as a number or [re, im])."""
+    if not nf:
+        return None
+    k = nf["k"]
+    return {"k": [k.real, k.imag] if isinstance(k, complex) else k, "m": nf["m"], "poles": nf["poles"],
+            "zeros": nf["zeros"], "text": nf["text"], "latex": nf["latex"]}
 
 
 def pz_rows(roots) -> list[dict]:
@@ -88,6 +104,68 @@ def pz_rows(roots) -> list[dict]:
         q = None if real or s.real == 0 else w / (-2 * s.real)
         rows.append({"f0": w / (2 * math.pi), "q": q, "re": s.real, "im": s.imag})
     return sorted(rows, key=lambda r: r["f0"])
+
+
+NORMAL_ROOTS = 8               # poles (and zeros) written out in the normal form; the rest summed up in a note
+
+
+def normal_form(poles, zeros, k: complex, f_max: Optional[float] = None) -> dict:
+    """The numeric transfer function in the engineering normal form [Franco 2015]:
+
+        H(s) = K · s^m · Π(1 + s/ω_z) · Π(1 + s/(Q_z·ω_z) + s²/ω_z²) / [Π(1 + s/ω_p) · Π(1 + s/(Q_p·ω_p) + s²/ω_p²)]
+
+    from exact poles and zeros (rad/s, a pair once by its upper member) and the constant k of H = k·s^m·Π(1 − s/z)/
+    Π(1 − s/p) (emi/mna.Circuit.poles_zeros): real roots as first-order factors, conjugate pairs as second-order
+    ones with f0 and Q; m the zeros at the origin less the poles there. Roots above f_max (Hz: ten times the sweep's
+    top, say) are left out of the factors (counted in `beyond`); at most NORMAL_ROOTS of each kind are written.
+    {"k", "m", "poles": [{"f", "q"}], "zeros": [...], "beyond", "text", "latex"}."""
+    def rows(roots):
+        """The roots as factor rows (f Hz, Q or None, its sign: a right-half-plane root), lowest first."""
+        out = []
+        for r in pz_rows([x for x in roots if x != 0]):
+            # a right-half-plane root's factor carries the minus sign: its Q is shown as |Q|
+            out.append({"f": r["f0"], "q": abs(r["q"]) if r["q"] is not None else None, "rhp": r["re"] > 0})
+        return out
+    m = int(sum(1 for z in zeros if z == 0) - sum(1 for p in poles if p == 0))
+    ps, zs = rows(poles), rows(zeros)
+    beyond = 0
+    if f_max:
+        beyond = sum(1 for r in ps + zs if r["f"] > f_max)
+        ps, zs = [r for r in ps if r["f"] <= f_max], [r for r in zs if r["f"] <= f_max]
+    kk = complex(k)
+    kval = kk.real if abs(kk.imag) <= 1e-6 * max(abs(kk), 1e-300) else kk     # numerical residue: real
+
+    def factor(r, i, kind):
+        """One factor's text and LaTeX, its frequency named ω_{kind}{i}."""
+        name = f"ω{kind}{i}"
+        lname = rf"\omega_{{{kind}{i}}}"
+        sign = "−" if r["rhp"] else "+"
+        lsign = "-" if r["rhp"] else "+"
+        if r["q"] is None:
+            return f"(1 {sign} s/{name})", rf"\left(1 {lsign} \frac{{s}}{{{lname}}}\right)"
+        return (f"(1 {sign} s/(Q{kind}{i}·{name}) + s²/{name}²)",
+                rf"\left(1 {lsign} \frac{{s}}{{Q_{{{kind}{i}}} {lname}}} + \frac{{s^2}}{{{lname}^2}}\right)")
+    num = [factor(r, i + 1, "z") for i, r in enumerate(zs[:NORMAL_ROOTS])]
+    den = [factor(r, i + 1, "p") for i, r in enumerate(ps[:NORMAL_ROOTS])]
+    sm = "" if m == 0 else ("s" if m == 1 else f"s^{m}" if m > 0 else "")
+    ktext = f"{kval:.4g}" if not isinstance(kval, complex) else f"{kval:.3g}"
+    head = " · ".join(x for x in [ktext, sm] + [t for t, _ in num] if x)
+    tail = "".join(t for t, _ in den) + ("" if m >= 0 else ("·s" if m == -1 else f"·s^{-m}"))
+    text = "H(s) = " + head + (f" / [{tail}]" if tail else "")
+    lhead = " ".join(x for x in [ktext.replace("e", r"\times 10^{") + ("}" if "e" in ktext else ""),
+                                 "s" if m == 1 else (f"s^{{{m}}}" if m > 1 else "")] + [l for _, l in num] if x)
+    ltail = " ".join(l for _, l in den) + ("" if m >= 0 else (" s" if m == -1 else f" s^{{{-m}}}"))
+    latex = "H(s) = " + (rf"\frac{{{lhead}}}{{{ltail}}}" if ltail else lhead)
+    values = [f"f{kind}{i + 1} = {fmt_hz(r['f'])}" + (f", Q{kind}{i + 1} = {r['q']:.3g}" if r["q"] else "")
+              + (" (RHP)" if r["rhp"] else "")
+              for kind, group in (("p", ps), ("z", zs)) for i, r in enumerate(group[:NORMAL_ROOTS])]
+    more = (len(ps) - NORMAL_ROOTS if len(ps) > NORMAL_ROOTS else 0) + (len(zs) - NORMAL_ROOTS
+                                                                       if len(zs) > NORMAL_ROOTS else 0) + beyond
+    if values:
+        text += ";  " + ", ".join(values)
+    if more:
+        text += f";  {more} more above"
+    return {"k": kval, "m": m, "poles": ps, "zeros": zs, "beyond": more, "text": text, "latex": latex}
 
 
 PEAKING_DB = 0.5               # a gain this far above its low-frequency value is reported as peaking

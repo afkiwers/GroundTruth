@@ -15,6 +15,7 @@ dependencies = [
     "shapely>=2.0",
     "ruamel.yaml>=0.18",
     "matplotlib>=3.8",
+    "sympy>=1.12",          # the symbolic transfer function of an op-amp circuit (analysis/symbolic.py)
 ]
 
 [project.optional-dependencies]

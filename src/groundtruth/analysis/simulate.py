@@ -1227,13 +1227,82 @@ def sweep_range(spec: NetSpec, harmonics) -> np.ndarray:
     return np.geomspace(lo, hi, getattr(spec, "sweep_points", None) or PATH_SWEEP)
 
 
-def path_responses(setup, net: str) -> list:
-    """The signal path's Bode responses (analysis/transfer.py): v_receiver / v_source of its circuit (source, lines,
-    series parts, shunts, op-amp stages without their slew limit, the receivers' load) over the net's sweep
-    (sweep_range: by default a hundredth of its first harmonic to the top of its band), with poles and zeros by
-    vector fitting; each op-amp stage's gain too."""
+POLE_SPAN = 10.0               # poles and zeros up to this many times the sweep's top are listed and written out
+DOUBLET = 1e-3                 # a pole and a zero this close (relative) cancel in the lists and the written-out H(s)
+
+
+def cancel_doublets(poles, zeros) -> tuple[list, list, int]:
+    """Poles and zeros without the pairs closer than DOUBLET (relative): a pole-zero doublet changes |H| by less
+    than that fraction anywhere, but writing it out doubles the transfer function's length (kraft's TLV6001 output:
+    451 Hz twice, 0.02 % apart: the R303 / C304 load its closed loop hardly sees). (poles, zeros, pairs removed)."""
+    p, z, n = list(poles), list(zeros), 0
+    for zi in list(z):
+        best = min(p, key=lambda pi: abs(pi - zi), default=None)
+        if best is not None and abs(best - zi) <= DOUBLET * max(abs(best), abs(zi), 1e-12):
+            p.remove(best)
+            z.remove(zi)
+            n += 1
+    return p, z, n
+
+
+def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str, f: np.ndarray,
+                      cache=None) -> tuple[list, list[str]]:
+    """The path's responses from its whole circuit (analysis/analog_net: every op-amp and part on its nets, any
+    topology; docs/ANALOG_AC.md): the receiver per volt of the source, swept with every track a line; its poles and
+    zeros exact, from the circuit with each track as its π section (emi/mna.Circuit.poles_zeros), up to POLE_SPAN
+    times the sweep's top; the numeric normal form (transfer.normal_form) and the ideal circuit's H(s) in its part
+    names (analysis/symbolic.py); each op-amp's output as a response of its own. (responses, notes)."""
+    from .analog_net import analog_network
+    from .symbolic import symbolic_transfer
+    from .transfer import Response, normal_form
+    net = analog_network(board, config, spec, receiver, cache=cache)
+    lumped = analog_network(board, config, spec, receiver, lumped=True, f_top=float(f[-1]), cache=cache)
+    f_max = POLE_SPAN * float(f[-1])
+    keep = lambda roots: [r for r in roots if r == 0 or abs(r) / (2 * math.pi) <= f_max]     # noqa: E731
+    outs = [(f"{spec.name}: receiver / source", net.out_node, lumped.out_node)]
+    for name, _kind in net.opamps:              # each op-amp channel's output (not one on AC ground)
+        node, lnode = net.amp_out.get(name), lumped.amp_out.get(name)
+        if node in net.circuit.nodes and lnode in lumped.circuit.nodes and node != net.out_node:
+            outs.append((f"{name}: output", node, lnode))
+    out = []
+    for title, node, lnode in outs:
+        h = net.circuit.transfer(f, node)
+        poles, zeros, k = lumped.circuit.poles_zeros(lnode)
+        poles, zeros, n_doublets = cancel_doublets(poles, zeros)
+        r = Response(title, spec.name, "voltage gain", np.asarray(f, float), h, keep(poles), keep(zeros), exact=True)
+        r.normal = normal_form(poles, zeros, k, f_max=f_max)
+        if n_doublets:
+            r.notes.append(f"{n_doublets} pole-zero pair(s) within {DOUBLET:.1%} of each other cancelled (doublets: "
+                           "a load the output hardly sees)")
+        out.append(r)
+    sym = symbolic_transfer(net.schematic)
+    if sym is not None and out:
+        out[0].symbolic = {"text": sym.text, "latex": sym.latex, "mathml": sym.mathml}
+    notes = list(dict.fromkeys(net.notes + lumped.notes))
+    kinds = ", ".join(f"{n} ({k})" for n, k in net.opamps)
+    notes.insert(0, f"circuit: {len(net.nets)} net(s), {len(net.parts)} part(s), {net.tracks} track segment(s)"
+                 + (f", op-amps {kinds}" if kinds else ""))
+    return out, notes
+
+
+def path_responses(setup, net: str, model: Optional["BoardModel"] = None) -> list:
+    """The signal path's Bode responses (analysis/transfer.py) over the net's sweep (sweep_range: by default a
+    hundredth of its first harmonic to the top of its band). With the board's `model`: from the path's whole circuit
+    (network_responses: any op-amp topology, exact poles and zeros, the transfer function written out); without
+    one, or when that circuit can't be made (a note says why): the path model's v_receiver / v_source (source, lines,
+    series parts, shunts, op-amp stages as gain blocks) with poles and zeros by vector fitting, each op-amp stage's
+    gain too."""
     from .transfer import fitted_response
     f = sweep_range(setup.spec, setup.harmonics)
+    if model is not None:
+        try:
+            out, notes = network_responses(model.board, model.config, setup.spec, setup.res.receiver, f,
+                                           line_cache(model))
+            setup.res.notes += [f"Bode: {n}" for n in notes]
+            if out:
+                return out
+        except (ValueError, SolverError, KeyError, ZeroDivisionError, np.linalg.LinAlgError) as e:
+            setup.res.notes.append(f"Bode: the path's circuit could not be solved ({e}): the path model instead")
     out = []
     try:
         out.append(fitted_response(f"{net}: receiver / source", net, "voltage gain", f, setup.response_fn(f)))
@@ -1361,7 +1430,7 @@ def bode_paths(board: Board, config: Config, nets: Optional[list[str]] = None,
         res.notes += notes
         freqs, _, _ = _signal_harmonics(active, spec)
         sweep = SimpleNamespace(spec=spec, harmonics=freqs, response_fn=response_fn, amp_gains=amp_gains, res=res)
-        res.responses = path_responses(sweep, spec.name)
+        res.responses = path_responses(sweep, spec.name, model)
     if progress is not None:
         progress("Bode: done", 1.0)
     return out
@@ -1691,7 +1760,7 @@ def finish_route(model: BoardModel, setup: RouteSetup) -> RouteResult:
     if setup.path is not None:
         res.path = path_summary(*setup.path, res.worst["f"] if res.worst else float(freqs[0]))
     if setup.response_fn is not None:
-        res.responses = path_responses(setup, res.net)
+        res.responses = path_responses(setup, res.net, model)
 
     # Plane resonance: strongest rise of the loop moment over its low-frequency value
     if setup.cavity is not None and len(fs) > 1:

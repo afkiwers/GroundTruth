@@ -1620,6 +1620,8 @@ the ones the plugin's <code>requirements.txt</code> names.</p>
   (PSF-based, BSD-compatible)</td><td>matplotlib.org</td></tr>
 <tr><td>contourpy</td><td>the contour lines (Draw contours on board)</td><td>BSD-3-Clause</td>
   <td>github.com/contourpy/contourpy</td></tr>
+<tr><td>SymPy</td><td>an op-amp circuit's transfer function in its part names (the Bode view, the report)</td>
+  <td>BSD-3-Clause</td><td>sympy.org</td></tr>
 <tr><td>wxPython</td><td>the plugin's window (with wxWidgets inside)</td><td>wxWindows Library Licence (LGPL-2.0
   with an exception for binaries)</td><td>wxpython.org</td></tr>
 <tr><td>Numba</td><td>compiling the thermal solver's kernels and the field solver's multiply-add</td>
@@ -1644,6 +1646,7 @@ the ones the plugin's <code>requirements.txt</code> names.</p>
 <tr><td>pyparsing</td><td>Matplotlib</td><td>MIT</td></tr>
 <tr><td>python-dateutil</td><td>Matplotlib</td><td>Apache-2.0 or BSD-3-Clause</td></tr>
 <tr><td>six</td><td>python-dateutil</td><td>MIT</td></tr>
+<tr><td>mpmath</td><td>SymPy (its arbitrary-precision numbers)</td><td>BSD-3-Clause</td></tr>
 </table>
 
 <p><b>Only with the GPU install</b> (<code>tools/install_gpu.py</code>, on a machine with a big GPU):</p>
@@ -1654,7 +1657,7 @@ the ones the plugin's <code>requirements.txt</code> names.</p>
 <tr><td>NVIDIA CUDA libraries (in PyTorch's CUDA builds) / AMD ROCm (in its ROCm builds)</td><td>PyTorch</td>
   <td>NVIDIA Software License Agreement / AMD ROCm's licences (mostly MIT, BSD)</td></tr>
 <tr><td>triton</td><td>PyTorch's CUDA builds on Linux</td><td>MIT</td></tr>
-<tr><td>sympy, mpmath, networkx, fsspec</td><td>PyTorch</td><td>BSD-3-Clause</td></tr>
+<tr><td>networkx, fsspec (and SymPy, mpmath: listed above)</td><td>PyTorch</td><td>BSD-3-Clause</td></tr>
 <tr><td>Jinja2, MarkupSafe</td><td>PyTorch</td><td>BSD-3-Clause</td></tr>
 <tr><td>filelock, setuptools</td><td>PyTorch</td><td>MIT</td></tr>
 </table>
