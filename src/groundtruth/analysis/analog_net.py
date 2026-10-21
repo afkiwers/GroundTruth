@@ -150,6 +150,10 @@ class AnalogNetwork:
     # [(name, net in+, net in−, net out, gain or None: a nullor)], the input and output nets; AC ground is "0"
     schematic: dict = field(default_factory=dict)
     amp_out: dict = field(default_factory=dict)         # op-amp channel -> the circuit node of its output pin
+    # each track piece as a line element: {"a", "b" (nodes), "line" (PathLine), "uuid", "pa", "pb" (its ends, mm),
+    # "layer", "net"}; each passive part's nodes and model: {ref: (node a, node b, model, pad a, pad b)}
+    lines: list = field(default_factory=list)
+    part_nodes: dict = field(default_factory=dict)
 
 
 def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, lumped: bool = False,
@@ -255,22 +259,60 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
     from .route import RouteSegment
     zs = {l.name: l.z for l in board.stackup.copper}
     tracks = 0
-    for i, j, length, info in g.edges:
-        kind = info[0]
-        if kind == "track":
-            t = info[1]
-            (pa, la), (pb, _) = g.pos[i], g.pos[j]
+    # tracks: each track's own copper as lines between its points (its ends, an arc's chord points) and the
+    # T-junctions on it (another track ending on its middle). copper_graph joins such an end to both ends of the
+    # track it meets (for the route search); as circuit elements those joins would lie beside the track's own line
+    # and double its copper, so the track is split at the junction instead
+    from ..geometry.shapes import arc_points
+    track_of: dict[int, object] = {}
+    juncs: dict[int, set] = {}
+    own: dict[int, list] = {}
+    for i, j, _, info in g.edges:
+        if info[0] != "track":
+            continue
+        t = info[1]
+        if id(t) not in own:
+            pts = arc_points(t.start, t.mid, t.end) if t.is_arc else [t.start, t.end]
+            own[id(t)] = [g.keys[(t.layer, round(p[0] * 1000), round(p[1] * 1000))] for p in pts]
+            track_of[id(t)] = t
+            juncs[id(t)] = set()
+        ids = set(own[id(t)])
+        if i not in ids or j not in ids:                  # a junction: the end that is not one of the track's own
+            juncs[id(t)].add(j if i in ids else i)
+    lines: list[dict] = []
+    for key, t in track_of.items():
+        ids = own[key]
+        pts = [g.pos[n][0] for n in ids]
+        cum = [0.0]
+        for p, q in zip(pts, pts[1:]):
+            cum.append(cum[-1] + math.dist(p, q))
+        stops = [(c, n) for c, n in zip(cum, ids)]
+        for n in juncs[key]:                              # each junction at its place along the track's chords
+            x = g.pos[n][0]
+            best = min(range(len(pts) - 1), key=lambda m: _seg_dist(x, pts[m], pts[m + 1])) if len(pts) > 1 else 0
+            u = _seg_t(x, pts[best], pts[best + 1]) if len(pts) > 1 else 0.0
+            stops.append((cum[best] + u * (cum[best + 1] - cum[best]) if len(pts) > 1 else 0.0, n))
+        stops.sort(key=lambda s_: s_[0])
+        la = t.layer
+        neigh = board.stackup.neighbours(la)
+        ref = neigh[0] if neigh else la
+        for (s0, i), (s1, j) in zip(stops, stops[1:]):
+            if find(i) == find(j) and s1 - s0 < 1e-6:
+                continue
+            pa, pb = g.pos[i][0], g.pos[j][0]
             seg = [RouteSegment(pa, pb, la, t.width, "track", t.uuid, t.line, t.net)]
-            neigh = board.stackup.neighbours(la)
-            ref = neigh[0] if neigh else la
             z0, eeff = _line_of(board, seg, ref, cache)
-            line = PathLine(z0, eeff, max(length, 1e-4) * 1e-3, **_line_loss(board, seg, ref))
+            line = PathLine(z0, eeff, max(s1 - s0, 1e-4) * 1e-3, **_line_loss(board, seg, ref))
             if lumped:
                 _pi_section(ckt, name(i), name(j), line, f_top, notes)
             else:
                 ckt.y2(name(i), ckt.ground, name(j), ckt.ground, line_y(line.zc, line.gamma_l))
+            lines.append({"a": name(i), "b": name(j), "line": line, "uuid": t.uuid, "pa": pa, "pb": pb,
+                          "layer": la, "net": t.net})
             tracks += 1
-        elif kind == "via":
+    for i, j, length, info in g.edges:
+        kind = info[0]
+        if kind == "via":
             v, la, lb = info[1], info[2], info[3]
             zf = via_impedance(abs(zs[la] - zs[lb]) * 1e-3, (v.drill or 0.3) * 1e-3)
             r_, l_ = zf(0.0).real, zf(1e6).imag / (2 * math.pi * 1e6)
@@ -289,7 +331,9 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
         n = name(g.keys[k]) if k in g.keys else f"pad {p.footprint}.{p.number}"
         node_of[f"{p.footprint}.{p.number}"] = n
         return n
+    part_nodes = {}
     for ref, (m, pa, pb) in parts.items():
+        part_nodes[ref] = (at(pa), at(pb), m, pa, pb)
         vals = dict(m.params)
         if m.kind == "cap":
             vals["C"] = m.capacitance()
@@ -353,7 +397,21 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
                                                               is not None else 1.0))
                    for (nm, kind), ch in zip(opamps, amps.values())],
         "in": gnd(drv.net), "out": gnd(rcv.net)}
-    return AnalogNetwork(ckt, out, nets, opamps, sorted(parts), tracks, notes, node_of, schematic, amp_out)
+    return AnalogNetwork(ckt, out, nets, opamps, sorted(parts), tracks, notes, node_of, schematic, amp_out, lines,
+                         part_nodes)
+
+
+def _seg_t(p, a, b) -> float:
+    """Where point p projects onto segment a-b, as its fraction (0 at a, 1 at b)."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    ll = dx * dx + dy * dy
+    return 0.0 if ll == 0 else min(max(((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / ll, 0.0), 1.0)
+
+
+def _seg_dist(p, a, b) -> float:
+    """Distance from point p to segment a-b (mm)."""
+    t = _seg_t(p, a, b)
+    return math.dist(p, (a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])))
 
 
 def _pi_section(ckt: Circuit, a: str, b: str, line, f_top: float, notes: list):
