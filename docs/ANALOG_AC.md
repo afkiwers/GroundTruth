@@ -67,6 +67,21 @@ For each path (input: its driver, output: its receivers), and on request between
   frequency and phase margin: a stage that oscillates or rings is flagged (an issue below 45°);
 - the **step response** from the exact poles and residues (inverse Laplace of H(s)/s): overshoot and settling, for
   a filter or an ADC driver.
+- the **transfer function itself, shown in the results** (the user: "i want the transfer function to be shown in
+  the results as well"):
+  - **numeric, exact**: H(s) from the exact poles, zeros and gain, in the engineering normal form
+    H(s) = K · Π(1 + s/ω_z) · Π(1 + s/(Q_z·ω_z) + s²/ω_z²) / [Π(1 + s/ω_p) · Π(1 + s/(Q_p·ω_p) + s²/ω_p²)]
+    (K the DC gain, real roots as first-order factors, conjugate pairs as second-order factors with their f0 and
+    Q, a pole or zero at the origin as s·…), and the expanded N(s)/D(s) coefficients; with lines in the network,
+    the fitted rational function with its error;
+  - **symbolic, in the part names** (option): H(s) for the ideal circuit (ideal op-amps, A → ∞; R, C, L without
+    parasitics), e.g. a Sallen-Key's H(s) = 1 / (1 + s·C2·(R1 + R2) + s²·R1·R2·C1·C2), an inverting stage's
+    −(R2/R1) / (1 + s·R2·C2), by solving the MNA system symbolically (sympy, BSD licence: a new dependency) for
+    circuits up to about 15 parts (beyond: a note, the numeric form only); checked by substituting the values
+    against the numeric ideal-op-amp solve;
+  - **where**: the Results tab's Bode view (the expression over the plot in matplotlib's math text, the full
+    factor list in the readout and tooltip), the HTML report (typeset, with the factor table), the console report,
+    `groundtruth bode` and the JSON (`transfer_function`: K, the factors, N and D, the symbolic text).
 
 ## How it fits in
 
@@ -120,6 +135,8 @@ On the real board: refboard's two ADC paths (unchanged), and test boards for the
 2. Tracks inside an op-amp circuit as ideal wires at first, their parasitic C later: fine?
 3. The step response and the loop gain: in the first branch, or a second one? (Recommended: loop gain in the
    first, it flags circuits that would oscillate; step response in the second.)
+
+4. The symbolic transfer function (in the part names, ideal circuit, sympy as a new dependency): wanted, or the numeric exact form only? (Recommended: both; the symbolic one is what a filter design is checked against.)
 
 Estimate: three to four sessions (the solver and the closed-form tests; the netlist, pin roles and macromodel
 fields; the loop gain; integration, UI, docs and refboard).
