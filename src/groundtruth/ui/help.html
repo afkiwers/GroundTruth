@@ -52,7 +52,7 @@ next one).</p>
 <p>Every edit on the tabs is saved to the settings file at once (<b>Save settings</b> writes it
 immediately). The board itself is never changed, except when you place suggested vias or draw on the board.</p>
 <p><b>The top bar</b>, left to right: <b>Reload board</b> reads the board again (after you changed it in KiCad);
-<b>Refill zones</b> has KiCad refill every zone and then reloads; <b>Run checks</b>, <b>Simulate</b>,
+<b>Refill zones</b> has KiCad refill every zone, waits until it has finished (on a complex board minutes: the status line counts them; KiCad answers nothing meanwhile) and then reloads; <b>Run checks</b>, <b>Simulate</b>,
 <b>Thermal</b> and <b>Export report…</b> (below); <b>with what-if edits</b>; <b>Cancel</b> stops the running job;
 <b>Save settings</b>; <b>Clear EMI layers</b> removes what GroundTruth drew. On the right, <b>Preferences…</b> and
 <b>Help</b>. Refill zones and Clear EMI layers are there only when GroundTruth was started from KiCad's toolbar
