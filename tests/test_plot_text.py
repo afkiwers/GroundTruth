@@ -285,7 +285,9 @@ def test_hovering_a_marker_says_what_it_is(route):
     assert via[1][3] == "via GND @(30.00, 10.00): 40 % of the current"
     ax, (x, y, _, text) = issue
     worst = next(i for i in issues if i.location == (x, y))
-    assert text.startswith(f"{worst.severity} · {worst.check}: ")
+    # one issue's circle names it; issues sharing a circle (report/plots.cluster_issues) are counted, the worst named
+    assert (text.startswith(f"{worst.severity} · {worst.check}: ")
+            or (" issues here (" in text and f"the worst: {worst.severity} · {worst.check}: " in text))
     px, py = ax.transData.transform((x, y))
     assert mark_at(fig, ax, px + 60, py + 60) == ""
     # what a click on a marker refers to (the plugin shows it in KiCad): the issue itself, the via's transfer
