@@ -51,6 +51,7 @@ Rules this list follows:
 | Haykin 2001 | S. Haykin, *Communication Systems*, 4th ed. New York: Wiley, 2001. | Sinusoidal FM: line amplitudes as Bessel functions J_n(β) (the spread receiver's check). |
 | Hardin 1994 | K. B. Hardin, J. T. Fessler, D. R. Bush, "Spread spectrum clock generation for the reduction of radiated emissions," *Proc. IEEE Int. Symp. EMC*, 1994, pp. 227–231. | Spread-spectrum modulation of a clock or switching frequency and what it does to a receiver's reading. |
 | Papoulis 2002 | A. Papoulis, S. U. Pillai, *Probability, Random Variables and Stochastic Processes*, 4th ed. New York: McGraw-Hill, 2002. | The envelope of a complex Gaussian signal is Rayleigh distributed; the largest of N such samples grows as σ·√(2 ln N). |
+| Middlebrook 1975 | R. D. Middlebrook, "Measurement of loop gain in feedback systems," *International Journal of Electronics*, vol. 38, no. 4, pp. 485–512, 1975. | A feedback loop's gain T measured by breaking it with an injected test voltage; at a point driven by an ideal source (zero impedance) the break is exact. |
 | Middlebrook 1976 | R. D. Middlebrook, "Input filter considerations in design and application of switching regulators," *Proc. IEEE Industry Applications Society Annual Meeting*, 1976, pp. 366–382. | Input-filter stability: the filter's output impedance against the converter's negative input impedance. |
 
 ### Power electronics
