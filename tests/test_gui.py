@@ -2785,3 +2785,27 @@ def test_the_busiest_via_tile_zooms_to_it_and_shows_it_in_kicad(app, tmp_path, m
         run_steps(app, f, [lambda: None])                     # the zoomed maps render
     finally:
         close_window(f)
+
+
+def test_clicking_a_bridge_leg_shows_that_leg_alone_in_kicad(app):
+    """The user: "clicking on a leg does not highlight the leg on the PCB". Picking a leg in the Bridges tab's leg
+    table shows that leg's stage ("bridge J1 B": its switches, hot loop and switch node) in KiCad, once the
+    selection settles, instead of the whole bridge the row click showed."""
+    from groundtruth.config.settings import BridgeSpec, LegSpec
+    from groundtruth.ui.bridges_panel import BridgesPanel
+    shown = []
+    top = wx.Frame(None)
+    p = BridgesPanel(top, lambda *a: None, on_show=lambda names, zoom: shown.append(names))
+    top.Show()
+    try:
+        legs = [LegSpec(ph, f"PH_{ph}", [f"Q{k}"], [f"Q{k + 1}"]) for ph, k in (("A", 1), ("B", 3), ("C", 5))]
+        p.bridges = [BridgeSpec("bridge J1", "VBUS", "GND", legs)]
+        p.refresh()
+        p.list.Select(0)
+        wait_for(app, lambda: shown == [["bridge J1"]], timeout=5)     # the row: the whole bridge
+        assert p.leg_list.GetItemCount() == 3
+        p.leg_list.Select(1)
+        wait_for(app, lambda: len(shown) == 2, timeout=5)
+        assert shown[-1] == ["bridge J1 B"] and p.leg_high.GetValue() == "Q3"
+    finally:
+        top.Destroy()

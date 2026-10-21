@@ -365,7 +365,7 @@ class BridgesPanel(SelectableRows, wx.Panel):
             mark.show(*marks.get(key, ("", "")))
 
     def on_leg_select(self, evt):
-        """A leg was selected: fill the Selected leg fields with it."""
+        """A leg was selected: fill the Selected leg fields with it, and show that leg alone in KiCad (live mode)."""
         k = evt.GetIndex()
         if 0 <= k < len(self.legs):
             leg = self.legs[k]
@@ -374,6 +374,19 @@ class BridgesPanel(SelectableRows, wx.Panel):
             self.leg_high.SetValue(", ".join(leg.high_side))
             self.leg_low.SetValue(", ".join(leg.low_side))
             self.leg_out.SetValue(leg.output)
+            self._selection_changed(lambda: self._leg_names(leg.phase))
+
+    def _leg_names(self, phase: str) -> list[str]:
+        """The stage name ("bridge J2 A") of the selected bridge's leg of this phase, as KiCad shows it; the stored
+        leg, since the form's legs count only after Update. Nothing when no single bridge with that leg is selected
+        (a new bridge, or a leg added in the form): the bridges selected are shown then."""
+        rows = self.selected_rows()
+        if len(rows) == 1 and rows[0] < len(self.bridges):
+            b = self.bridges[rows[0]]
+            for leg in b.legs:
+                if leg.phase == phase:
+                    return [b.leg_name(leg)]
+        return self._row_names(rows)
 
     def _leg_form(self) -> Optional[LegSpec]:
         """The Selected leg fields as a LegSpec (phase numbered when empty), or None when the switch node or a side

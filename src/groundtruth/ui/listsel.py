@@ -16,6 +16,7 @@ class SelectableRows:
         """Call after creating self.list. Creates self.zoom (shown only with on_show), to add to the layout."""
         self.on_show = on_show
         self._show_later = None             # the pending show (wx.CallLater), restarted by every change
+        self._show_names = None             # what that show shows instead of the selected rows (_selection_changed)
         self.list.Bind(wx.EVT_LIST_KEY_DOWN, self.on_key)
         self.list.Bind(wx.EVT_LIST_ITEM_SELECTED, lambda e: (self._selection_changed(), e.Skip()))
         self.list.Bind(wx.EVT_LIST_ITEM_DESELECTED, lambda e: (self._selection_changed(), e.Skip()))
@@ -100,14 +101,16 @@ class SelectableRows:
         else:
             evt.Skip()
 
-    def _selection_changed(self):
+    def _selection_changed(self, names=None):
         """The selection changed: the selected rows go to on_show once it has not changed for SHOW_SETTLE_MS (a
         Shift-click sends one event per row; clicking or arrowing down a table sends one burst per row). Showing a
         stage in KiCad selects, highlights and zooms to its copper there: done for every row passed over, it kept
         KiCad and the highlight thread busy and the window lagged (the user, clicking through the Converters tab).
-        Each change restarts the wait, so only the row the user stops on is shown."""
+        Each change restarts the wait, so only the row the user stops on is shown. names: a function giving what
+        to show instead of the selected rows (a bridge's leg picked in its second table); the latest call wins."""
         if self.on_show is None:
             return
+        self._show_names = names
         if self._show_later is not None and self._show_later.IsRunning():
             self._show_later.Restart(SHOW_SETTLE_MS)
             return
@@ -115,5 +118,6 @@ class SelectableRows:
         def show():
             """The selection has settled: hand it to on_show (the window may have closed meanwhile)."""
             if self:
-                self.on_show(self._row_names(self.selected_rows()), self.zoom.GetValue())
+                pick = self._show_names
+                self.on_show(pick() if pick else self._row_names(self.selected_rows()), self.zoom.GetValue())
         self._show_later = wx.CallLater(SHOW_SETTLE_MS, show)
