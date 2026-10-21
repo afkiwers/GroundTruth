@@ -2292,6 +2292,22 @@ def test_clicking_a_map_marker_shows_it_in_kicad(app, frame):
     h.on_mark = f.on_map_mark
     f.on_map_mark(*seen[0])
     assert "open GroundTruth from KiCad" in f.GetStatusBar().GetStatusText(0)
+    # a density tile's hot spot inside the In1.Cu pour (no item right there): KiCad gets the copper around it to
+    # zoom to, zoomed even with the Issues tab's "Zoom to it" off (the user: "I need it to zoom into the PCB as well")
+    shown, live = [], f.session
+    f.session = SimpleNamespace(live=True, show_issue=lambda hl, zoom, nets: (
+        shown.append((hl, zoom)), {"selected": len(hl.focus), "focus": len(hl.focus), "lit": False,
+                                   "previous_layer": None, "notes": []})[1])
+    try:
+        f.issues_panel.zoom.SetValue(False)
+        f.on_map_mark("point", {"x": 6.0, "y": 12.5}, "the highest sustained current density", "In1.Cu")
+        deadline = time.perf_counter() + 30
+        while not shown and time.perf_counter() < deadline:
+            wx.Yield()
+            time.sleep(0.02)
+        assert shown and shown[0][1] is True and shown[0][0].focus and shown[0][0].layer == "In1.Cu"
+    finally:
+        f.session, f._highlighted = live, False
 
 
 def test_simulate_on_a_compute_server_and_here_when_it_is_gone(app, frame, tmp_path, monkeypatch):
