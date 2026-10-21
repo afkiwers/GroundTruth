@@ -225,23 +225,52 @@ class Circuit:
         return c
 
     # ------------------------------------------------------------------ analyses
+    def _sparse(self) -> tuple:
+        """(G, C) as scipy sparse matrices and b."""
+        import scipy.sparse as sp
+        n = self.size
+        mats = []
+        for stamps in (self._g, self._c):
+            rows = [self._index(r) for r, _, _ in stamps]
+            cols = [self._index(c) for _, c, _ in stamps]
+            mats.append(sp.coo_matrix(([v for _, _, v in stamps], (rows, cols)), shape=(n, n)).tocsc())
+        if self._input is None:
+            raise ValueError("the circuit has no input source (vsource)")
+        b = np.zeros(n, complex)
+        b[len(self.nodes) + self._input] = 1.0
+        return mats[0], mats[1], b
+
+    def _y2_stamps(self, f: np.ndarray) -> tuple:
+        """The two-ports' stamps at every frequency: (rows, cols, values[frequency, stamp])."""
+        rows, cols, vals = [], [], []
+        for a1, b1, a2, b2, y in self._y2:
+            m = np.asarray(y(f), complex).reshape(len(f), 2, 2)       # Y(f) for all frequencies at once
+            ports = ((a1, b1), (a2, b2))
+            for i in range(2):
+                for j in range(2):
+                    for ni, si in ((ports[i][0], 1.0), (ports[i][1], -1.0)):
+                        for nj, sj in ((ports[j][0], 1.0), (ports[j][1], -1.0)):
+                            if ni >= 0 and nj >= 0:
+                                rows.append(ni)
+                                cols.append(nj)
+                                vals.append(si * sj * m[:, i, j])
+        return rows, cols, (np.array(vals).T if vals else np.zeros((len(f), 0)))
+
     def solve(self, f) -> np.ndarray:
-        """x at each frequency (rows: frequencies), the input source at 1 V."""
-        g, c, b = self.matrices()
+        """x at each frequency (rows: frequencies), the input source at 1 V: a sparse LU per frequency of
+        G + j2πf·C (+ the two-ports' Y(f))."""
+        import scipy.sparse as sp
+        import scipy.sparse.linalg as spl
+        g, c, b = self._sparse()
         f = np.atleast_1d(np.asarray(f, float))
-        out = np.empty((len(f), self.size), complex)
+        rows, cols, vals = self._y2_stamps(f)
+        n = self.size
+        out = np.empty((len(f), n), complex)
         for k, fk in enumerate(f):
-            a = g + 2j * math.pi * fk * c
-            for a1, b1, a2, b2, y in self._y2:
-                m = np.asarray(y(float(fk)), complex)
-                ports = ((a1, b1), (a2, b2))
-                for i in range(2):
-                    for j in range(2):
-                        for (ni, si) in ((ports[i][0], 1.0), (ports[i][1], -1.0)):
-                            for (nj, sj) in ((ports[j][0], 1.0), (ports[j][1], -1.0)):
-                                if ni >= 0 and nj >= 0:
-                                    a[ni, nj] += si * sj * m[i, j]
-            out[k] = np.linalg.solve(a, b)
+            a = g + (2j * math.pi * fk) * c
+            if rows:
+                a = a + sp.coo_matrix((vals[k], (rows, cols)), shape=(n, n)).tocsc()
+            out[k] = spl.splu(a.tocsc()).solve(b)
         return out
 
     def transfer(self, f, out: str, ref: Optional[str] = None) -> np.ndarray:
@@ -253,8 +282,11 @@ class Circuit:
         return self.transfer(f, node)
 
     def poles_zeros(self, out: str, ref: Optional[str] = None) -> tuple[np.ndarray, np.ndarray, complex]:
-        """(poles, zeros, k) of H(s) = k·Π(s − z)/Π(s − p) in rad/s, exact (see the module docstring); k from H at
-        a frequency away from every root. Raises ValueError for a circuit with two-ports (not rational)."""
+        """(poles, zeros, k) in rad/s, exact (see the module docstring), in the normal form
+        H(s) = k · s^m · Π(1 − s/z) / Π(1 − s/p) over the roots away from the origin, m the zeros at the origin less
+        the poles there (roots at the origin are returned as 0): k is the gain at DC where m = 0. k from H at a
+        test point away from every root, its products summed as logarithms (hundreds of roots stay finite). Raises
+        ValueError for a circuit with two-ports (not rational)."""
         if self._y2:
             raise ValueError("a circuit with frequency-dependent two-ports (lines) has no exact poles: fit its sweep")
         import scipy.linalg as sl
@@ -269,12 +301,16 @@ class Circuit:
         cz[:n, :n] = c
         zeros = _finite_eigs(gz, -cz * w0) * w0
         poles, zeros = _cancel(poles, zeros)
-        # the constant k: H at a test point s0 over the roots' product there
+        origin = 1e-6 * w0                        # a root this close to 0 is at the origin (numerical residue)
+        poles = np.where(np.abs(poles) < origin, 0.0, poles)
+        zeros = np.where(np.abs(zeros) < origin, 0.0, zeros)
+        # the constant k: H at a test point s0 over the normal form's factors there, as a sum of logarithms
         s0 = 1j * w0 * 0.7071 + 0.3 * w0
-        a = g + s0 * c
-        h = complex(cv @ sl.solve(a, b.astype(complex)))
-        k = h * np.prod(s0 - poles) / np.prod(s0 - zeros) if len(zeros) or len(poles) else h
-        return poles, zeros, k
+        h = complex(cv @ sl.solve(g + s0 * c, b.astype(complex)))
+        pz, zz = poles[poles != 0], zeros[zeros != 0]
+        m = int(np.sum(zeros == 0) - np.sum(poles == 0))
+        log_k = (np.log(h) - m * np.log(s0) + np.sum(np.log(1 - s0 / pz)) - np.sum(np.log(1 - s0 / zz)))
+        return poles, zeros, complex(np.exp(log_k))
 
 
 def _finite_eigs(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -307,14 +343,15 @@ def _cancel(poles: np.ndarray, zeros: np.ndarray) -> tuple[np.ndarray, np.ndarra
     return np.array(p, complex), np.array(z, complex)
 
 
-def line_y(zc: Callable, gamma_l: Callable) -> Callable[[float], np.ndarray]:
+def line_y(zc: Callable, gamma_l: Callable) -> Callable[[np.ndarray], np.ndarray]:
     """A transmission line's admittance matrix Y(f) = [[coth γl, −csch γl], [−csch γl, coth γl]] / Zc [Pozar 2012]
-    from its Zc(f) and γl(f) (emi/path.PathLine.zc / gamma_l: arrays)."""
-    def y(f: float) -> np.ndarray:
-        """Y at f (2x2)."""
-        z = complex(zc(np.array([f]))[0])
-        gl = complex(gamma_l(np.array([f]))[0])
-        gl = gl if abs(gl) > 1e-15 else 1e-15
+    from its Zc(f) and γl(f) (emi/path.PathLine.zc / gamma_l), for an array of frequencies: (n, 2, 2)."""
+    def y(f) -> np.ndarray:
+        """Y at the frequencies f, shape (len(f), 2, 2)."""
+        f = np.atleast_1d(np.asarray(f, float))
+        z = np.asarray(zc(f), complex)
+        gl = np.asarray(gamma_l(f), complex)
+        gl = np.where(np.abs(gl) > 1e-15, gl, 1e-15)
         coth, csch = 1.0 / np.tanh(gl), 1.0 / np.sinh(gl)
-        return np.array([[coth, -csch], [-csch, coth]]) / z
+        return np.stack([np.stack([coth, -csch], -1), np.stack([-csch, coth], -1)], -2) / z[:, None, None]
     return y

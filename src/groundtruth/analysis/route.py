@@ -187,17 +187,12 @@ class _Graph:
             self.edges.append((a, b, max(w, 1e-6), info))
 
 
-def find_route(board: Board, config: Config, net: str, driver_pin: str, receiver_pin: str, through=()) -> Route:
-    """The signal path from the driver pin to the receiver pin, through series parts into other nets (the parts
-    in `through` too: emi/path.py models each part's impedance)."""
-    driver = board.find_pin(driver_pin)
-    receiver = board.find_pin(receiver_pin)
-    if driver is None or receiver is None:
-        raise RouteError(f"pin {driver_pin if driver is None else receiver_pin!r} not found")
-    through = set(through)
-    reach = signal_nets(board, config, net, through)
-    nets = reach | ({driver.net, receiver.net} - set(config.reference_nets))
-
+def copper_graph(board: Board, nets: set) -> "_Graph":
+    """The copper of these nets as a _Graph: nodes at (layer, point) places, edges for the tracks (arcs as chords),
+    the vias and through-hole pads between layers, a track's end joined to the via, pad or track it touches
+    (T-junctions), and every pair of pads, vias and track ends on the same filled pour (a "zone" edge with the
+    pour's effective width). Shared by find_route (the signal path) and analysis/analog_net (the circuit around
+    op-amps); the parts between nets are not in it."""
     g = _Graph()
     tracks = [t for t in board.tracks if t.net in nets]
     vias = [v for v in board.vias if v.net in nets]
@@ -280,6 +275,22 @@ def find_route(board: Board, config: Config, net: str, driver_pin: str, receiver
                 for (a, pa), (b, pb) in combinations(ports.items(), 2):
                     length = math.dist(pa, pb)
                     g.edge(a, b, length, ("zone", z, layer, min(area / max(length, 0.5), 10.0)))
+
+    return g
+
+
+def find_route(board: Board, config: Config, net: str, driver_pin: str, receiver_pin: str, through=()) -> Route:
+    """The signal path from the driver pin to the receiver pin, through series parts into other nets (the parts
+    in `through` too: emi/path.py models each part's impedance)."""
+    driver = board.find_pin(driver_pin)
+    receiver = board.find_pin(receiver_pin)
+    if driver is None or receiver is None:
+        raise RouteError(f"pin {driver_pin if driver is None else receiver_pin!r} not found")
+    through = set(through)
+    reach = signal_nets(board, config, net, through)
+    nets = reach | ({driver.net, receiver.net} - set(config.reference_nets))
+
+    g = copper_graph(board, nets)
 
     # Series parts that pass the signal (0R, termination R, ferrite): pad-to-pad edge.
     for fp in board.footprints:

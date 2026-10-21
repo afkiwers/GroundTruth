@@ -15,7 +15,8 @@ ADC_I_RAIL_1), or one whose driver it guesses wrong, is marked on a symbol:
 
 An op-amp stage in a signal path (part model `amplifier`, its gain from a Gain field or the Parts tab):
 
-    GT = amp_in:3, amp_out:1     the stage's input and output pins (a dual op-amp: amp_in:5, amp_out:7)
+    GT = amp_in:3, amp_out:1     the stage's input and output pins (a dual op-amp: amp_in:5, amp_out:7);
+                                 amp_inv:2 its inverting input where the pin names don't say (analysis/analog_net)
 
 A converter's dead times (its dead_rise / dead_fall, components/fields.stage_values), on the controller IC (the one
 with the stage's SW pin):
@@ -50,7 +51,7 @@ ROLES = {"conv": ("hs", "ls", "sw", "l", "in", "out"), "hb": ("hs", "ls", "in", 
 CONNECTOR_ROLES = ("in", "out")                                          # shared by the stages they name
 TAG = re.compile(r"^(conv|hb)([a-z0-9.+]*)_([a-z]+)(?:_([a-z0-9.+]+))?$", re.I)   # conv1_out or conv_out_1
 SIG = re.compile(r"^sig(?:_(drv|rx))?(?::(.+))?$", re.I)                         # sig, sig:9, sig_drv:PA3
-AMP = re.compile(r"^amp_(in|out):(.+)$", re.I)                                    # amp_in:3, amp_out:OUTA
+AMP = re.compile(r"^amp_(in|inv|out):(.+)$", re.I)                                # amp_in:3, amp_inv:2, amp_out:OUTA
 # a controller's dead time (the converter's dead_rise / dead_fall): dead:20ns (every stage it controls, both edges),
 # dead1:20ns (the stage on its SW1 pin), conv1_dead:20ns (the stage labelled conv1); _rise / _fall: one edge only
 DEAD = re.compile(r"^(?:conv([a-z0-9.+]*)_)?dead(\d*)(?:_(rise|fall))?\s*[:=]\s*(.+)$", re.I)
@@ -122,6 +123,7 @@ HELP = {
         "  sig_rx:9     ... and pin 9 receives it\n"
         "  amp_in:3, amp_out:1   an op-amp stage's input and output pins: the path runs through it (gain from a "
         "Gain field or the Parts tab)\n"
+        "  amp_inv:2    its inverting input (where the pin names don't say): the circuit around it is solved\n"
         "Label the driving pin, each op-amp and the receiving pin; leave the resistors and capacitors between them "
         "unlabelled. Several labels are separated by commas. Then Update PCB from Schematic, Reload board and "
         "Detect…. A name with ADC, SENSE, MON or FB counts as a signal anyway. Help (F1) › Labelling a signal path "
@@ -326,6 +328,12 @@ def stage_ident(board: Board, refs: list[str]) -> str:
     return next((st.ident for st in board_tags(board).of("conv") if want & set(st.refs(*st.roles))), "")
 
 
+def amp_label_roles(fp: Footprint) -> dict[str, str]:
+    """A part's GT amp labels by role: {"in": pin, "inv": pin, "out": pin} (those it has)."""
+    tags, _, _ = parse(tag_text(fp), fp.reference)
+    return {t.role: t.ident for t in tags if t.kind == "amp"}
+
+
 def amp_label_pins(fp: Footprint) -> Optional[tuple[str, str]]:
     """(input pin, output pin) a part's GT amp_in / amp_out labels name, or None without both."""
     tags, _, _ = parse(tag_text(fp), fp.reference)
@@ -391,7 +399,7 @@ def _pin_problems(fp: Footprint, tags: list[Tag]) -> list[str]:
     line shows them (otherwise the label is just skipped and its path silently missing): a pin the part doesn't
     have, or an op-amp with amp_in but no amp_out (or the other way round)."""
     out = [_no_pin(t) for t in tags if t.kind in ("sig", "amp") and t.ident and _label_pad(fp, t.ident) is None]
-    roles = {t.role for t in tags if t.kind == "amp"}
+    roles = {t.role for t in tags if t.kind == "amp"} - {"inv"}
     if len(roles) == 1:
         have = roles.pop()
         out.append(f"{fp.reference}: GT amp_{have} needs amp_{'out' if have == 'in' else 'in'} too: "
