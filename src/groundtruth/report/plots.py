@@ -468,6 +468,43 @@ def mark_at(fig, ax, x_px: float, y_px: float, tol_px: float = 9.0) -> str:
     return min(near)[2] if near else ""
 
 
+ISSUE_CLUSTER = 0.07        # issues closer than this share of the view's span share one ring (about two rings' width)
+_SEV_ORDER = {"error": 0, "warning": 1, "info": 2}
+
+
+def cluster_issues(issues, radius: float) -> list[list]:
+    """The issues in groups whose rings would overlap: the most severe issue not yet taken (errors first, then in the
+    list's order) gathers every other one within `radius` (mm) of it; each group starts with that issue (its ring's
+    place, colour and the issue a click shows). Greedy and order-stable: the same issues and view give the same
+    groups."""
+    left = sorted(issues, key=lambda i: _SEV_ORDER.get(i.severity, 3))
+    groups = []
+    while left:
+        top, rest = left[0], left[1:]
+        x, y = top.location
+        near = [i for i in rest if math.hypot(i.location[0] - x, i.location[1] - y) <= radius]
+        groups.append([top] + near)
+        taken = {id(i) for i in near}
+        left = [i for i in rest if id(i) not in taken]
+    return groups
+
+
+def cluster_text(group: list) -> str:
+    """A ring's hover text: its issue's, or for several their count by severity, the most severe one's message and
+    the others' checks (zoom in to part them)."""
+    top = group[0]
+    if len(group) == 1:
+        return f"{top.severity} · {top.check}: {top.message}"
+    counts = ", ".join(f"{n} {s}{'s' if n > 1 and s != 'info' else ''}" for s in ("error", "warning", "info")
+                       if (n := sum(1 for i in group if i.severity == s)))
+    others = {}
+    for i in group[1:]:
+        others[i.check] = others.get(i.check, 0) + 1
+    rest = ", ".join(f"{c} ×{n}" if n > 1 else c for c, n in others.items())
+    return (f"{len(group)} issues here ({counts}); the worst: {top.severity} · {top.check}: {top.message}; also "
+            f"{rest} (zoom in to part them)")
+
+
 def view_issues(rr, issues) -> list:
     """The issues a view's maps mark: its own net's (or power stage's), and of a power stage only those about what
     the view shows. A DC path's view (view_of: "input J101.2 → Q301") marks that path's current-density and via
@@ -678,17 +715,27 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
         _switch_pins(ax, rr, lname, labels)
         carried = _carriers(ax, board, rr, lname, max_vias, labels)
         mine = view_issues(rr, issues or [])
-        for sev, colour in SEV_COLOURS.items():
-            pts = [i.location for i in mine if i.severity == sev]
-            if pts:
-                ax.plot(*zip(*pts), linestyle="none", marker="o", ms=8, mfc="none", mec=colour, mew=1.8)
+        # issues whose rings would overlap at this view's scale are one ring, in the worst one's colour, with their
+        # count beside it (zooming in parts them again). The user, of a thermal map with a ring per hot part (dozens
+        # on top of each other, on every layer): "the heatmap is cluttered with circles. we need to find a better way"
+        x0, x1, y0, y1 = view if view is not None else g.extent
+        groups = cluster_issues(mine, ISSUE_CLUSTER * max(abs(x1 - x0), abs(y1 - y0)))
+        for grp in groups:
+            top = grp[0]
+            colour = SEV_COLOURS.get(top.severity, "k")
+            ax.plot(*top.location, linestyle="none", marker="o", ms=8 if len(grp) == 1 else 10, mfc="none",
+                    mec=colour, mew=1.8, zorder=4.6)
+            if len(grp) > 1:
+                ax.annotate(str(len(grp)), top.location, textcoords="offset points", xytext=(6, 4), fontsize=FS_MARK,
+                            fontweight="bold", color=colour, zorder=4.7,
+                            path_effects=[patheffects.withStroke(linewidth=2.2, foreground="#ffffff")])
         fig._gt_marks = getattr(fig, "_gt_marks", {})        # for the plugin's hover: what a marker is
-        fig._gt_marks[ax] = ([(i.location[0], i.location[1], 0, f"{i.severity} · {i.check}: {i.message}")
-                              for i in mine]
+        fig._gt_marks[ax] = ([(grp[0].location[0], grp[0].location[1], 0, cluster_text(grp)) for grp in groups]
                              + [(t["x"], t["y"], 1, carrier_text(t)) for t in carried])
-        # what each marker refers to, in the same order (for the plugin's click: show it in KiCad, mark_ref_at)
+        # what each marker refers to, in the same order (for the plugin's click: show it in KiCad, mark_ref_at): a
+        # group's most severe issue
         fig._gt_mark_refs = getattr(fig, "_gt_mark_refs", {})
-        fig._gt_mark_refs[ax] = ([("issue", i) for i in mine]
+        fig._gt_mark_refs[ax] = ([("issue", grp[0]) for grp in groups]
                                  + [("via" if t.get("kind") == "via" else "part", t) for t in carried])
         _outline(ax, board)
         x0, x1, y0, y1 = view if view is not None else g.extent
