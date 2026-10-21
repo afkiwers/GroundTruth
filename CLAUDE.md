@@ -186,6 +186,9 @@ build_package.cmd [--committed]                   # the user's console/double-cl
                                                   # which accepts newer f-string syntax); tests/test_py311.py runs it
 .venv/Scripts/python tools/dev/ast_same.py        # changed files vs HEAD with docstrings stripped: a docs/comments-only
                                                   # change must print "only comments and docstrings changed"
+.venv/Scripts/python tools/dev/licenses.py [--check]   # every Python package GroundTruth installs, its version and
+                                                  # licence (metadata); --check: those the help's licence section
+                                                  # does not name (tests/test_licenses.py runs it): add a dependency there
 .venv/Scripts/python tools/dev/undocumented.py FILES   # functions and methods without a docstring (0 in src/groundtruth;
                                                   # new code keeps it so)
 .venv/Scripts/python tools/dev/result_diff.py A.json B.json   # two simulate JSON reports number by number (speed work
