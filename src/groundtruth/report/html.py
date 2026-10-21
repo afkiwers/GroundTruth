@@ -1063,6 +1063,19 @@ def _responses(owner: str, responses, figs) -> str:
     out.append(_img(figs.png(f"{owner} poles and zeros", draw_pz, BodeView(owner, responses), size=(9.5, 4.0)),
                     f"{owner}: poles and zeros in the s-plane (Hz; symmetric log axes)"))
     out.append(_table(["Response", "Gain, bandwidth", "Model", "Poles (f0, Q)", "Zeros (f0, Q)"], rows, sort=False))
+    # the transfer functions written out: in part names (the ideal circuit, MathML: browsers render it), and the
+    # full circuit's numeric normal form
+    for r in responses:
+        sym, nf = getattr(r, "symbolic", None), getattr(r, "normal", None)
+        if not sym and not nf:
+            continue
+        out.append(f"<p><b>{e(r.name.split(': ', 1)[-1])}</b></p>")
+        if sym:
+            out.append(f"<div class='tf'>{sym['mathml']}</div><p class='note'>The ideal circuit in its part names "
+                       "(ideal op-amps, parts without their parasitics, an ideal source).</p>")
+        if nf:
+            out.append(f"<p class='note'>The full circuit (tracks, parasitics, the op-amp model): "
+                       f"<code>{e(nf['text'])}</code></p>")
     return "".join(out)
 
 
