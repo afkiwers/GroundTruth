@@ -720,7 +720,9 @@ their state for next time. How vias and parts are marked is set in <a href="#pre
   close together are written apart (with a thin line to their via where they had to move). <b>Click the busiest
   via tile</b> to zoom the maps to it; opened from KiCad, it is selected there too.</li>
 <li><b>Hover</b> over a map for the value under the mouse; over a red / orange issue circle for the issue
-  (severity, check and message, in full as a tooltip); over a via's ▲ or a part's ■ for its name, its share of the
+  (severity, check and message, in full as a tooltip). Issues whose circles would overlap at the shown zoom share
+  one circle, in the worst one's colour, with their number beside it: its tooltip counts them and names the worst,
+  a click shows the worst in KiCad, and zooming in parts them; over a via's ▲ or a part's ■ for its name, its share of the
   current and, on a DC path, a DC load or a bridge's RMS map, its current in amperes. The green ring around a ▲ is the via's own pad, not an issue. Each view marks its own issues: a power
   stage's DC path view (input, switch node, output, ground) only that path's current-density and via issues, the
   hot-loop view the stage's other issues.</li>
