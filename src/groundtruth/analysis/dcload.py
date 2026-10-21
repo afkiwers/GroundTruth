@@ -230,6 +230,9 @@ def finish_dc_load(model: BoardModel, setup: DcLoadSetup):
     if isinstance(run.build, StackBuild):       # the vias' currents, kept for Thermal's via heat [A43]
         db = dc_board_of(run.build)
         res.dc_via = {name: (db, db.via_currents(np.asarray(sol.I_branch).real * total))}
+        # how it is excited, to solve it again with the copper at its temperature (thermal.electrothermal)
+        res.dc_plan = {"fingerprint": db.fingerprint, "inj": list(run.exc.extra),
+                       "feeds": {k: list(v) for k, v in setup.feeds.items()}}
     # each load's voltage: potentials are per A of the rail (sol.V), so x total; supply side and return side
     v_src = _potential(sol, setup.feeds[spec.source]) * total
     v_ret = _potential(sol, setup.feeds[spec.source_return]) * total if spec.source_return else None

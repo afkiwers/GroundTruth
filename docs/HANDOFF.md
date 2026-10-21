@@ -1,12 +1,63 @@
 # GroundTruth handover
 
-## Current state (2026-10-21, `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-21, branch `electrothermal` open, uncommitted; `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `density-pcb` (2026-10-21, from `main` 62fde1e, commit 3ce1d5e; into `main` at the user's "yes", a
+  fast-forward, branch deleted; packages `out/dist/groundtruth-0.1.42214-3ce1d5e-pcm.zip` and the server's, signed
+  with the laptop's key; `electrothermal` will need `main` merged in):** the user, with a
+  screenshot of a bridge's RMS tiles: "clicking on RMS current density only zooms into the heatmap. I need it to zoom
+  into the PCB as well". The tile sent KiCad the item right at the hot spot (`point_highlight`); a spot inside a pour
+  (In1.Cu) has none, so nothing was selected and KiCad (which can only zoom to a selection: zoomFitSelection, no
+  "show this point" in the API) stayed put. `highlight.area_highlight`: the small copper of the spot's net wholly
+  inside a 6 mm square (vias, pads, short tracks; else any net's; else the item at the spot; else the pour), the
+  pour as context; `on_map_mark` uses it for kind "point" and zooms whatever "Zoom to it" says. Tests: test_highlight
+  `test_a_hot_spot_in_a_pour_zooms_to_the_copper_around_it`, test_gui `test_clicking_a_map_marker_shows_it_in_kicad`
+  (a fake live session). Made in a worktree (the electrothermal work is uncommitted in the main one). Not tried in
+  live KiCad yet (the user installs the package).
+- **Branch `electrothermal` (2026-10-21, from `main` 62fde1e; OPEN, NOT COMMITTED yet, paused at the user's "have a
+  break here"):** the user: "When computing the most loaded via, is heat considered? rising heat will increase via
+  resistance which will force other vias to carry more load", then "can we add this as a settable option, with a
+  user settable max for rounds before considered settled ... I don't want it to get stuck in the loop", then "Do it".
+  - Before: the DC paths are solved once at 20 °C; Thermal scales only the heat by ρ(T) (A15) and
+    `dc_at_temperature` rescales each path's R, drop and loss, the current pattern unchanged.
+  - Now, `thermal.electrothermal: true` (off by default; Preferences → Thermal: Electro-thermal, Rounds at most,
+    Settled within; `electrothermal_rounds` 3, 1-10, `MAX_ROUNDS` 10 whatever is set; `electrothermal_tolerance`
+    1 %, "2%" or 0.02, 0.001-0.5): `analysis/electrothermal.py couple` re-solves every power stage's and DC load's DC
+    paths on the whole-board DC model with each strip and via barrel at 1 + α(T − 20) (`resistance_scales`;
+    `PlaneStack.set_resistance_scale` in solver/peec.py, reset in a `finally`), then Thermal again, until no path's
+    loss and no via's share of its path's current moves more than the tolerance; a round changing more than 1.5x
+    the one before ends it with the round before kept (`DIVERGE`); Cancel raises between solves. Simulate keeps the
+    excitations for it (`ConverterResult.dc_plan`: fingerprint, injection tuples `exc.extra`, currents;
+    `power._dc_plan`, `dcload.finish_dc_load`); a cached Simulate without plans gets a note, no coupling. Bridges are
+    left out (their RMS currents are not re-solved). Simulate's results stay at 20 °C; the coupled ones are
+    `ThermalResult.electrothermal` (rounds, changes, settled, stopped, busiest vias 20 °C → hot) and `dc_hot`. Shown
+    in a KPI tile (kpi.py), the report's "Busiest vias at temperature" (html.py `_electrothermal`) and the notes.
+    Runs in `run_thermal` (CLI) and `thermal_proc.run_in_process` (plugin: thermal in the child or on the server, the
+    DC re-solves in the job thread; `Cancelled` wrapped as `ThermalCancelled`). A50 in REFERENCES, A15 updated.
+  - Tests: tests/test_electrothermal.py, 8 pass (70 s): a uniform factor scales Z exactly with the same currents;
+    two equal parallel tracks, one 30 % more resistive, split 1 : 1.3 within 1.5 % (parallel resistors); 70 °C maps
+    give 1 + α·50 K on strips and vias, 1 on other branches; on the discrete buck (8 A) it settles (smoke: 2 rounds,
+    changes 54 % then 0.0011 %, T_max 213.38 → 213.37 °C, the second via 2.43 → 2.42 A: small, as A15 expected),
+    the round cap (2 rounds, tolerance 1e-15: not settled, said), the divergence guard, Cancel, the settings.
+    py311_check, undocumented (0) and ref_keys (0 unknown) pass. Docs: help (Thermal, Preferences), README,
+    ARCHITECTURE, REFERENCES (A50).
+  - `tools/dev/thermal_check.py --electrothermal ROUNDS [--et-tol 0.01]`: the coupling on, prints its rounds and the
+    busiest vias 20 °C → hot (needs a fresh Simulate: caches made before today have no `dc_plan`). Not run yet.
+  - **Left to do:** (1) the related suites were running in the background at the pause (test_thermal, test_power,
+    test_dcload, test_settings, test_solver, test_fields, test_cli, test_report_*, test_gui, test_electrothermal;
+    no failure so far): run them again; (2) the kraft check, conv1 + conv2 on flux-2
+    (`C:\Users\iwers\OneDrive\Dokumente\github\flux-2\flux-2.kicad_pcb`, settings
+    `out/dead_time/kraft_dt20.groundtruth.yaml`, normal quality; reference without coupling:
+    `out/dead_time/thermal_dt20_fields.log`, T_max 127.1 °C): `thermal_check.py BOARD SETTINGS --only conv1,conv2
+    --cache out/electrothermal/stages.pickle`, then the same with `--electrothermal 3`, in the background (a
+    Simulate plus 2-4 thermal solves of ~100 s); (3) a GUI check (the Preferences rows, the tile; `gui_probe.py
+    --thermal` on a board copy); (4) commit on `electrothermal` (only these files), show the user the kraft numbers,
+    ask before merging.
 - **Branch `kelvin-rtn` (2026-10-21, from `main` 75be1dd, `main` merged in at 3f83a74; into `main` at the user's "merge", a fast-forward):** the
   user's CE2264 hybrid generator board (`C:\Users\andre\Documents\gitlab\ce2264-hybrid-generator`, a Currawong
   project: the BLDC starter-generator bridge, EPC2302 GaN pairs, NCP51810 drivers, motor Plettenberg ORBIT SG1).

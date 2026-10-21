@@ -150,6 +150,10 @@ class ConverterResult(RouteResult):
     # via barrels' Joule heat for Thermal [A43]; path name -> (DcBoard, A at its vias), signed / RMS amplitude
     dc_via: dict = field(default_factory=dict)
     dc_ripple_via: dict = field(default_factory=dict)
+    # how its DC paths were excited on the whole-board DC model, to solve them again with the copper at its temperature
+    # (thermal.electrothermal): {fingerprint, runs: [{name, current, inj, ripple, extra}], hot} (_dc_plan; None when
+    # a path was solved on a model of its own). Not in the summary
+    dc_plan: Optional[dict] = None
     switch_pins: list = field(default_factory=list)     # the switches' D/S (A/K, VIN/SW/GND) pads, for the heatmaps
     location: tuple = (0.0, 0.0)
     layer: str = ""
@@ -176,6 +180,7 @@ class ConverterResult(RouteResult):
         d.pop("dc_ripple_branch", None)
         d.pop("dc_via", None)
         d.pop("dc_ripple_via", None)
+        d.pop("dc_plan", None)
         d.pop("switch_pins", None)
         d["kind"] = "converter"
         return d
@@ -2397,7 +2402,37 @@ def dc_analysis(model: BoardModel, setup: "ConverterSetup") -> tuple[list[dict],
                 setup.res.dc_ripple_via[name] = (db, db.via_currents(np.asarray(sol.I_branch).real * i_rms))
             notes.append(f"{name}: {i_rms:.3g} A RMS from the rail capacitors through the switches ({setup.res.duty:.2f}"
                          f" duty), {summary['loss_w'] * 1e3:.1f} mW in the copper: heats it with the DC paths")
+    setup.res.dc_plan = _dc_plan(model, setup)
     return paths, maps, grids, notes
+
+
+def _dc_plan(model: BoardModel, setup: "ConverterSetup") -> Optional[dict]:
+    """How the stage's DC paths are excited on the whole-board DC model, kept so they can be solved again with the
+    copper at its temperature (thermal.electrothermal): the model's fingerprint (dc_board_of: the same board and
+    settings build the same model in another process), and per path its current, its injections [((layer, i, j), A
+    per A)] (RouteExcitation.extra: the model's grid positions, the same in a model built alike),
+    its switching share's (k, injections) and its current's variance; the hot loop's switching current likewise.
+    None when any path was solved on a model of its own (no whole-board model): those can't be redone apart."""
+    dst = getattr(model, "_dc_board", None)
+    if dst is None:
+        return None
+    runs = []
+    for name, current, run in setup.dc_runs:
+        if run.build is not dst or getattr(run, "exc", None) is None:     # (electrothermal's re-solves: no exc)
+            return None
+        rip = setup.dc_ripple.get(name)
+        if rip is not None and rip[1].build is not dst:
+            return None
+        runs.append({"name": name, "current": float(current), "inj": list(run.exc.extra),
+                     "ripple": (float(rip[0]), list(rip[1].exc.extra)) if rip is not None else None,
+                     "extra": float(setup.dc_extra.get(name, 0.0))})
+    hot = None
+    if setup.dc_hot is not None:
+        name, i_rms, run = setup.dc_hot
+        if run.build is not dst:
+            return None
+        hot = {"name": name, "current": float(i_rms), "inj": list(run.exc.extra)}
+    return {"fingerprint": dc_board_of(dst).fingerprint, "runs": runs, "hot": hot}
 
 
 def input_filter_advice(rows: list[dict], margin_db: float) -> Optional[dict]:

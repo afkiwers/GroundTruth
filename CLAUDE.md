@@ -121,6 +121,8 @@ build_package.cmd [--committed]                   # the user's console/double-cl
 .venv/Scripts/python tools/dev/thermal_check.py BOARD SETTINGS --only SW1,SW2 --rds-on 4m --dcr 5m --quality draft
                                                   # thermal solve of power stages with test loss values
             [--capacity] [--cache out/m3/stages.pickle]   # current capacity (+ a fresh-solve check); cache Simulate
+            [--electrothermal 3 [--et-tol 0.01]]   # the electro-thermal coupling on: its rounds, busiest vias
+                                                  # 20 °C -> hot (a cache from before 2026-10-21 has no dc_plan)
 .venv/Scripts/python tools/dev/bridge_check.py BOARD SETTINGS --v-bus 48 --f-pwm 20k --i-phase 100 --speed 3000
             --motor 10m,30u,8,7,star [--rds-on 0.7m --c-oss 2n --q-oss 170n --dead 47n --bridge NAME]
                                                   # one motor bridge at an operating point and motor (--help; --budgets
@@ -295,7 +297,8 @@ in `tools/dev/`, never only in the scratchpad.
 - The plugin's help (`src/groundtruth/ui/help.html`, top bar **Help** / F1) explains every tab and how the
   analyses fit together; the user asked for it. A feature that changes what a tab does or what Simulate computes
   updates it in the same branch.
-- The user's per-computer choices (Preferences…: resolution, solver threads, GPU, thermal quality, via markers,
+- The user's per-computer choices (Preferences…: resolution, solver threads, GPU, thermal quality, electro-thermal
+  (on/off, rounds, tolerance; "From the settings file" keeps `thermal.electrothermal*`), via markers,
   vias shown, part outlines, report author and company, simulation history on/off, theme; and the toggles' state: current arrows, log scale,
   cross-section, issue zoom/highlight) live in `%LOCALAPPDATA%\GroundTruth\ui.json`, never in a board's
   settings file. `tests/conftest.py` points LOCALAPPDATA at a private folder for every test (its ui.json turns the

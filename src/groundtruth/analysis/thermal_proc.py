@@ -75,12 +75,26 @@ def run_in_process(board, config, converters, progress: Optional[Progress] = Non
     inputs = thermal_inputs(board, config, converters, progress)
     if inputs is None:
         return _empty(config, NO_STAGES), []
-    if server is not None:
-        res, issues = server.run("thermal", (board, config, inputs), progress)
-        return with_dc_at_temperature(res, board, converters), issues
-    (res, issues), peak = _run_child(("solve", board, config, inputs), progress, cancel, poll_s, limits)
-    if peak:
-        res.mesh["memory_mb"] = round(peak)
+
+    def solve(inputs):
+        """One thermal solve of these inputs, on the compute server or in the child."""
+        if server is not None:
+            return server.run("thermal", (board, config, inputs), progress)
+        (res, issues), peak = _run_child(("solve", board, config, inputs), progress, cancel, poll_s, limits)
+        if peak:
+            res.mesh["memory_mb"] = round(peak)
+        return res, issues
+    res, issues = solve(inputs)
+    if config.thermal.electrothermal:
+        # rounds of DC paths at temperature (solved here, where the stages' excitations are) and Thermal (there)
+        from ..thermal.solver.common import Cancelled
+        from .electrothermal import couple
+        try:
+            res, issues, _ = couple(board, config, converters, res, issues,
+                                    lambda results: solve(thermal_inputs(board, config, results)), progress, cancel)
+        except Cancelled as e:          # Cancel between the rounds: as a cancelled thermal solve
+            raise ThermalCancelled("thermal solve cancelled") from e
+        return res, issues
     return with_dc_at_temperature(res, board, converters), issues
 
 

@@ -2206,7 +2206,24 @@ a History tab with a comparison (and the CLI).
   maps are: `run_thermal`, and `thermal_proc.run_in_process` for the plugin's child process or a compute server)
   gives every DC path its R, drop and loss at the solved temperature, R₂₀ times the mean of 1 + α(T − 20) over the
   path's own heat read from the result's maps (`ThermalResult.dc_hot`, a note, the JSON report's
-  `dc_at_temperature`; ISSUE-23). Validation (tests/test_thermal.py): a
+  `dc_at_temperature`; ISSUE-23). **Electro-thermal coupling** (`thermal.electrothermal`, off by default; since
+  2026-10-21, `analysis/electrothermal.py`, [A50]): Simulate keeps each stage's and DC load's DC excitations on the
+  whole-board DC model (`ConverterResult.dc_plan`: the model's fingerprint, each run's injection tuples and current,
+  the ripple and extra runs, the hot loop's; `power._dc_plan`, `dcload.finish_dc_load`). `couple` then rebuilds that
+  model (`dc_board_build`, the fingerprint checked), sets per-strip and per-via-barrel resistance factors
+  1 + α(T − 20) from the thermal maps (`resistance_scales`; `PlaneStack.set_resistance_scale` multiplies the strips'
+  R and the branches' real part in `_impedances` and drops the operator caches, the uniform-strip preconditioner
+  shortcut off), solves every kept excitation again, runs `dc_analysis` / `finish_dc_load` on copies of the results
+  (`_hot_stage`, `_hot_load`: Simulate's results untouched) and Thermal again with them, until `change` (the largest
+  relative move of a path's loss or a via's share of its path's current) is within the tolerance, the round cap
+  (`electrothermal_rounds`, `MAX_ROUNDS` 10) is reached, a round changes more than `DIVERGE` (1.5) times the one
+  before (the round before kept), or Cancel; the factors are reset in a `finally`. `ThermalResult.electrothermal`
+  holds rounds, changes, settled, why it stopped and the busiest vias at 20 °C and at temperature (`busiest_vias`);
+  `dc_hot` comes from the coupled solve. The same loop runs in `run_thermal` (CLI) and `thermal_proc.run_in_process`
+  (the plugin: its thermal solves in the child process or on the server, the DC re-solves in the plugin's worker
+  thread). Validation (tests/test_electrothermal.py): a uniform factor scales Z exactly with the same currents, two
+  parallel tracks with one 30 % hotter-resistive split 1 : 1.3 (1.5 %), the loop settles, caps, guards, cancels.
+  Validation (tests/test_thermal.py): a
   50 × 4 mm strip at 5 A: 0.1539 W = analytic I²R; peak rise 9.09 K vs 8.94 K from PCB Thermal's own electrical
   model (1.7 %); energy balance. Plugin: the "Thermal" job solves in a child process
   (`analysis/thermal_proc.py`: `python -m groundtruth.analysis.thermal_proc IN OUT`, pickled inputs and result,

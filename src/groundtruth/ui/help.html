@@ -915,6 +915,19 @@ heat in every via barrel the current passes. One convection coefficient per face
 A long, narrow, hot track can use up the normal quality's mesh budget part-way along it (a note says so): the rest
 of it reads a few per cent cool there, and a track narrower than the finest cell (0.05 mm on normal) a few per cent
 cool too; Thermal <b>Quality</b> fine resolves both.</p>
+<p><b>Electro-thermal</b> (off by default; <a href="#prefs">Preferences</a> or the settings'
+<code>thermal.electrothermal</code>): hot copper is more resistive (0.39 % per kelvin), so a hot via or track hands
+current to cooler ones beside it. Off, the DC paths keep their 20 °C currents and only the heat follows the
+temperature. On, after the first thermal solve every converter's and DC load's DC paths are solved again with each
+copper cell and via barrel at its own temperature, and Thermal again with those currents, round after round until no
+path's loss and no via's share of its path's current moves by more than the tolerance (<b>Settled within</b>,
+1 %), and never more than <b>Rounds at most</b> (3; 10 at the very most, whatever is set), so it cannot run on. A
+round that changes more than the one before ends it with the round before kept; <b>Cancel</b> stops it between
+solves. Copper's resistance rising with temperature makes the rounds converge: one or two usually settle it. The
+result's notes and the electro-thermal tile say whether it settled, in how many rounds, and how the busiest via's
+current moved (at 20 °C → at temperature); the report lists the busiest vias both ways. Each round costs one DC
+solve and one thermal solve. Simulate's own DC tables stay at 20 °C. Bridges' RMS currents are not re-solved, and
+Current capacity keeps the 20 °C current pattern (only the heat follows the temperature there).</p>
 <p>
 Current capacity adds one view per stage or bridge at its capacity (replacing earlier capacity views), and the
 status line lists each one's capacity and what limits it.</p>
@@ -959,6 +972,11 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
 <tr><td valign="top"><b>Thermal: Quality</b></td><td>draft, normal or fine: the thermal mesh, speed against
   detail and memory (the solve stops with a message above 60 % of this computer's memory). <i>From the settings
   file</i> keeps <code>thermal.quality</code>.</td></tr>
+<tr><td valign="top"><b>Thermal: Electro-thermal</b>, <b>Rounds at most</b>, <b>Settled within</b></td><td>
+  whether Thermal re-solves the DC paths with the copper at its temperature (see <a href="#thermal">Thermal</a>),
+  how many rounds at most (1 to 10) and the change at which it counts as settled (0.5, 1, 2 or 5 %). <i>From the
+  settings file</i> keeps <code>thermal.electrothermal</code>, <code>electrothermal_rounds</code> (3) and
+  <code>electrothermal_tolerance</code> (1 %).</td></tr>
 <tr><td valign="top"><b>Via markers</b>, <b>Vias shown</b></td><td>whether the maps mark the vias carrying the
   current, and how many at most (All, 5, 10, 20, 50, the busiest first; greyed while Via markers is unticked; see
   <a href="#results">Results</a>).</td></tr>

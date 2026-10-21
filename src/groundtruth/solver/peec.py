@@ -1807,13 +1807,38 @@ class PlaneStack:
         # of width along the strip in series: _widths)
         R_strip = (np.concatenate([rs[self.xa[:, 0]], rs[self.ya[:, 0]]]) / self.r_width if self.ns
                    else np.zeros(0))
+        scale = getattr(self, "r_scale", None)            # the copper at its temperature (set_resistance_scale)
+        if scale is not None and self.ns:
+            R_strip = R_strip * scale
         if self.ncap:   # Y = jωC(1 - j·tanδ): susceptance plus dielectric-loss conductance [Pozar 2012]
             C, tand = self.cap[:, 4], self.cap[:, 5]
             z_cap = 1.0 / (w * C * tand + 1j * w * C) if w > 0 else np.full(self.ncap, 1e18 + 0j)
         else:
             z_cap = np.zeros(0, complex)
         z_br = np.array([complex(b.z(f)) for b in self.branches], complex)
+        bscale = getattr(self, "branch_scale", None)
+        if bscale is not None and len(z_br):             # a branch's resistance only (its inductance stays)
+            z_br = z_br.real * bscale + 1j * z_br.imag
         return w, R_strip, np.concatenate([z_cap, z_br])
+
+    def set_resistance_scale(self, strips: Optional[np.ndarray] = None, branches: Optional[np.ndarray] = None):
+        """Scale the strips' resistances (`strips`, one factor per strip in the unknowns' order: x strips then y
+        strips) and the branches' (`branches`, one per branch: their real part), e.g. by 1 + α(T − 20 °C) for copper
+        at its temperature [IEC 60028] (analysis/thermal.electrothermal); None: as built. Every factorisation made
+        before is dropped (they were of the old resistances), and the preconditioner no longer takes every strip's
+        resistance as alike. Not while other threads solve on this stack."""
+        with self._lock:
+            self.r_scale = None if strips is None else np.asarray(strips, float)
+            self.branch_scale = None if branches is None else np.asarray(branches, float)
+            if self.r_scale is not None and len(self.r_scale) != self.ns:
+                raise ValueError(f"{len(self.r_scale)} strip factors for {self.ns} strips")
+            if self.branch_scale is not None and len(self.branch_scale) != len(self.branches):
+                raise ValueError(f"{len(self.branch_scale)} branch factors for {len(self.branches)} branches")
+            self.r_uniform = not np.any(self.r_width != 1.0) and self.r_scale is None
+            self._ops.clear()
+            self._made.clear()
+            self._plan.clear()
+            self._building.clear()
 
     def next_round(self):
         """A new round of solves starts (analysis.simulate.solve_setups calls it between rounds): the

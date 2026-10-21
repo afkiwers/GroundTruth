@@ -1912,9 +1912,19 @@ class MainFrame(wx.Frame):
         # they were ignored), the DC paths and losses as simulated (unchanged: _stale_reason above)
         if self.settings is not None:
             cfg = replace(cfg, thermal=self.settings.config.thermal)
-        quality = defaults(theme.prefs())["thermal_quality"]
-        if quality != FROM_FILE:
-            cfg = replace(cfg, thermal=replace(cfg.thermal, quality=quality))
+        p = defaults(theme.prefs())
+        if p["thermal_quality"] != FROM_FILE:
+            cfg = replace(cfg, thermal=replace(cfg.thermal, quality=p["thermal_quality"]))
+        # the electro-thermal coupling as Preferences set it for this computer, else as the settings file has it
+        et = {}
+        if p["electrothermal"] != FROM_FILE:
+            et["electrothermal"] = p["electrothermal"] == "on"
+        if p["et_rounds"] != FROM_FILE:
+            et["electrothermal_rounds"] = int(p["et_rounds"])
+        if p["et_tolerance"] != FROM_FILE:
+            et["electrothermal_tolerance"] = float(p["et_tolerance"].rstrip(" %")) / 100.0
+        if et:
+            cfg = replace(cfg, thermal=replace(cfg.thermal, **et))
         return stages, board, cfg
 
     def _show_thermal_views(self, keep, new: list, cfg, board):

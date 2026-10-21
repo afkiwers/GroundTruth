@@ -7,6 +7,14 @@ read [../CLAUDE.md](../CLAUDE.md) (environment of this machine, rules, commands)
 bigger machine and audit items 1-5, then 6-7) is in git history (`git log -p docs/NEXT_STEPS.md`); all of it is
 done, with the evidence in [VALIDATION_AUDIT.md](VALIDATION_AUDIT.md) "Round 4".
 
+## In progress (2026-10-21): branch `electrothermal`, not committed
+
+The electro-thermal coupling (`thermal.electrothermal`, a capped number of rounds), asked for by the user ("Do it").
+Code, tests (8 pass) and docs are written in the working tree of branch `electrothermal`; nothing is committed. What
+is left (rerun the related suites, the kraft check on conv1 + conv2 with the coupling off and on, a GUI check, commit,
+show the user, ask before merging) is in the top entry of [HANDOFF.md](HANDOFF.md), with the commands. Do that
+before starting anything else.
+
 ## Done (2026-10-20): audit round 6
 
 The numerical audit (stopping tests, convergence against independent references, adversarial copper, metamorphic
