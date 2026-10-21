@@ -436,8 +436,9 @@ def switch_filaments(st: StackBuild, z_phys: dict, elements: list[Element]
     """Known currents through the switch packages, and the injections into the copper at their pads.
 
     Per element: from every `a` pad's grid node up to PACKAGE_H_MM, across to the package centre, across to above
-    every `b` pad and down to its node; each pad carries a share of the element's current by pad area. The
-    filaments start and end exactly at the injection nodes, so the loop (filaments + copper) is closed."""
+    every `b` pad and down to its node; each pad carries a share of the element's current by its pin's copper area
+    (pad_weights: overlapping pads of one pin count once [A51]). The filaments start and end exactly at the
+    injection nodes, so the loop (filaments + copper) is closed."""
     g0 = st.grids[0]
 
     def P(x, y, z):
@@ -455,7 +456,7 @@ def switch_filaments(st: StackBuild, z_phys: dict, elements: list[Element]
         cy = float(np.mean([p.position[1] for p in pads]))
         centre = P(cx, cy, z_top)
         for group, sign in ((el.a, -1.0), (el.b, 1.0)):
-            areas = np.array([max(p.size[0] * p.size[1], 1e-3) for p in group])
+            areas = np.array(pad_weights(group))
             for p, area in zip(group, areas):
                 n = _pad_node(st, p, side)
                 if n is None:
@@ -1490,16 +1491,56 @@ def _pad_nodes(st: StackBuild, pad: Pad, side: str) -> list[tuple]:
     return nodes or [n0]
 
 
+def _by_pin(pads: list[Pad]) -> dict[str, list[Pad]]:
+    """The pads grouped by their pin ("Q304.2"), in their order: a footprint can draw one pin from several
+    overlapping primitives (an EPC GaN FET's source pin: a bar and three tabs over it)."""
+    out: dict[str, list[Pad]] = {}
+    for p in pads:
+        out.setdefault(p.pin, []).append(p)
+    return out
+
+
+def pin_area(pads: list[Pad]) -> float:
+    """A pin's copper area (mm²): the union of its pads' outlines, so copper where they overlap counts once (summing
+    them gave EPC2306's pin 2 1.83 mm² for its 1.31 mm²), at least 1e-3; the sum of their sizes where a pad has no
+    outline."""
+    from shapely.ops import unary_union
+    from ..geometry.shapes import pad_shape
+    shapes = [pad_shape(p) for p in pads]
+    if any(s is None for s in shapes):
+        return max(sum(p.size[0] * p.size[1] for p in pads), 1e-3)
+    return max(float(unary_union(shapes).area), 1e-3)
+
+
+def pad_weights(pads: list[Pad]) -> list[float]:
+    """Each pad's weight for sharing a part's current by copper area [A51]: its pin's area (pin_area, overlaps once)
+    split over the pin's pads by their own sizes, so the pads of one pin add up to the pin's copper."""
+    out = {}
+    for ps in _by_pin(pads).values():
+        own = [max(p.size[0] * p.size[1], 1e-3) for p in ps]
+        whole = pin_area(ps)
+        for p, a_ in zip(ps, own):
+            out[id(p)] = whole * a_ / sum(own)
+    return [out[id(p)] for p in pads]
+
+
 def _area_shares(st: StackBuild, pads: list[Pad], side: str, total: float) -> list[tuple]:
-    """Injections spreading `total` A over pads by area, and over each pad's own grid nodes evenly (a pad is fed
-    over its whole area, like a lead frame)."""
-    areas = [max(p.size[0] * p.size[1], 1e-3) for p in pads]
+    """Injections spreading `total` A over the pads' pins by their copper area (pin_area: overlapping pads of one pin
+    count once [A51]) and over each pin's own grid nodes evenly, each node once (a pin is fed over its whole area,
+    like a lead frame). Summed per pad before 2026-10-21: EPC2306's pin 2 (a bar under three tabs) took 42 % of
+    the FET's source current for its 34 % of the copper, the overlap fed twice."""
+    pins = _by_pin(pads)
+    areas = {pin: pin_area(ps) for pin, ps in pins.items()}
     out = []
-    for p, a_ in zip(pads, areas):
-        nodes = _pad_nodes(st, p, side)
-        if not nodes:
-            raise SolverError(f"{p.pin}: no {p.net} copper at the pad")
-        share = total * a_ / sum(areas) / len(nodes)
+    for pin, ps in pins.items():
+        nodes: list[tuple] = []
+        for p in ps:
+            got = _pad_nodes(st, p, side)
+            if not got:
+                raise SolverError(f"{p.pin}: no {p.net} copper at the pad")
+            nodes += got
+        nodes = list(dict.fromkeys(nodes))          # a node under two of the pin's pads: fed once
+        share = total * areas[pin] / sum(areas.values()) / len(nodes)
         out += [(n, share) for n in nodes]
     merged: dict[tuple, float] = {}
     for n, amps in out:

@@ -112,7 +112,8 @@ def main() -> int:
         print(f"electro-thermal: {e['rounds']} round(s) of at most {e['max_rounds']}, settled {e['settled']}, "
               f"changes {['%.3g %%' % (c * 100) for c in e['changes']]}{'; ' + e['stopped'] if e['stopped'] else ''}")
         for v in e["vias"][:8]:
-            print(f"  via {v['name']:28s} {v['path'][:34]:34s} {v['current20_a'] or 0:7.3f} -> {v['current_a']:7.3f} A")
+            print(f"  {v['via']:30s} {v['stage']}, {v['path'][:34]:34s} {v['current20_a'] or 0:6.3f} -> "
+                  f"{v['current_a']:6.3f} A ({v['load20_pct'] or 0:.0f} -> {v['load_pct'] or 0:.0f} % of IPC-2221)")
     for i in issues:
         print(f"  {i.severity:8s} {i.check:18s} {i.message}")
     if args.png:
