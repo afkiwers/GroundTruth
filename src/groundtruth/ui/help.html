@@ -315,7 +315,10 @@ radiated spectra), and when the recovery snaps off it adds an overshoot I_rr·�
   The current-density and via-load checks run on this total, as issues of <i>all power stages</i>; the
   stages' own DC views still show what each stage alone puts where. The switch node carries the current from
   the high side for the duty D and from the low side for the rest: its densities, via currents and copper loss
-  are the RMS of the two (the arrows show the mean flow), and Thermal heats the copper with that.</li>
+  are the RMS of the two (the arrows show the mean flow), and Thermal heats the copper with that. A part's current
+  enters the copper at its pins by each pin's copper area, spread evenly over it; where a footprint draws one pin
+  from overlapping pads (an EPC GaN FET's source pin: a bar under three tabs) that copper counts once. A pin
+  without vias of its own sends its share through the nearest vias around it, which then carry the most.</li>
 <li><b>The input current</b> is not entered: it follows from the energy balance V_in·I_in = V_out·I_out + losses
   (a buck at 100 % efficiency would draw I_out·D). The losses are the ones Thermal uses: the switches' conduction
   (R_DS(on)), the hard edge (½·V·I·t_r·f_sw) and output charge (Q_oss·V·f_sw), a diode's V_f, the inductor's DCR,
