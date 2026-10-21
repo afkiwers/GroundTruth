@@ -7,12 +7,13 @@ read [../CLAUDE.md](../CLAUDE.md) (environment of this machine, rules, commands)
 bigger machine and audit items 1-5, then 6-7) is in git history (`git log -p docs/NEXT_STEPS.md`); all of it is
 done, with the evidence in [VALIDATION_AUDIT.md](VALIDATION_AUDIT.md) "Round 4".
 
-## Open (2026-10-21): after the electro-thermal merge
+## Open (2026-10-21): after the electro-thermal and pin-share merges
 
-The electro-thermal coupling (`thermal.electrothermal`) is in `main`. Still open, with the details in the
-`electrothermal` entry of [HANDOFF.md](HANDOFF.md): the kraft check on the board as the user saved it (coupling off
-and on: rounds, T_max, busiest vias 20 °C → hot), three GUI timing tests to rerun alone, and, awaiting the user's go,
-a pad-share fix (each pin's copper counted once: EPC2306 pin 2 gets 42 % of the FET's current instead of 34 %).
+The electro-thermal coupling (`thermal.electrothermal`; kraft: settled in 2 rounds, T_max unchanged) and the pin
+shares (a pin's copper counted once, [A51]) are in `main`. Still open, with the details in the top entries of
+[HANDOFF.md](HANDOFF.md): kraft before / after the pin-share fix (`tools/dev/via_compare.py` on
+`out/electrothermal/stages.pickle` and `stages_pin.pickle`), three GUI timing tests to rerun alone, and a new plugin
+package (the one in `out/dist`, 0.1.42214, has neither) once the user wants it.
 
 ## Done (2026-10-20): audit round 6
 

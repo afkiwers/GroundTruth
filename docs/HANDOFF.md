@@ -1,6 +1,6 @@
 # GroundTruth handover
 
-## Current state (2026-10-21, `electrothermal`, `density-pcb`, `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-21, `pin-shares`, `electrothermal`, `density-pcb`, `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
@@ -38,7 +38,8 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
   (a fake live session). Made in a worktree (the electrothermal work is uncommitted in the main one). Not tried in
   live KiCad yet (the user installs the package).
 - **Branch `electrothermal` (2026-10-21, from `main` 62fde1e, 02b4737, `main` merged in at fb5e97d; into `main` at
-  the user's "merge", a fast-forward, branch deleted; the kraft check and three GUI timing reruns still open, below):**
+  the user's "merge", a fast-forward, branch deleted; the kraft check done, three GUI timing reruns still open,
+  below):**
   the user: "When computing the most loaded via, is heat considered? rising heat will increase via
   resistance which will force other vias to carry more load", then "can we add this as a settable option, with a
   user settable max for rounds before considered settled ... I don't want it to get stuck in the loop", then "Do it".
@@ -77,10 +78,13 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
     (139.34, 83.69); coupling on refused, "the DC model is not Simulate's": correct, the user had saved flux-2 at
     14:53 while that Simulate (from 14:33) ran (5.43 → 6.01 MB; 8 cells per layer differ, between Q302's / Q304's
     pin 2 and pin 3). Simulate's DC model was checked to be repeatable (the same fingerprint fresh, in Simulate and
-    under other hash seeds; nothing writes into it after the build). **The rerun on the saved board** was running at
-    the merge: `out/electrothermal/off.log` / `on.log`, `stages.pickle` (thermal_check.py BOARD
-    out/dead_time/kraft_dt20.groundtruth.yaml --only conv1,conv2 --cache ..., then --electrothermal 3): report its
-    rounds, T_max and the busiest vias 20 °C → hot to the user.
+    under other hash seeds; nothing writes into it after the build). The rerun on the saved board
+    (`out/electrothermal/off.log` / `on.log`, `stages.pickle`; thermal_check.py BOARD
+    out/dead_time/kraft_dt20.groundtruth.yaml --only conv1,conv2 --cache ..., then --electrothermal 3; Simulate
+    1102 s, Thermal 145 s, with the coupling 371 s): settled in 2 rounds (changes 30 %, the losses at temperature
+    against 20 °C, then 0.0009 %), T_max 125.4 °C on F.Cu at (139.34, 83.69) with and without it, the busiest via
+    GND (138.60, 76.90) in conv2's ground return 0.811 A at 20 °C, 0.81 A at temperature: on kraft the coupling
+    moves the via currents by well under 1 %, as A15 / A50 expect at ~100 K rise in copper this wide.
   - The user's question on that busiest via ("it doesn't make much sense, why it that via carring the most load?",
     a GND via selected above Q304): on the board before the edit, conv2's ground return (10 A) put 1.10 A (11 %)
     through GND via (138.6, 75.8), 0.74 and 0.53 A through its two neighbours, 0.37-0.56 A through each of the ten
@@ -88,8 +92,7 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
     pads: its share leaves through those three 0.7 / 0.4 mm vias. Partly a model error: `power._area_shares` sums
     every pad primitive's area, and pin 2's three 0.37 x 0.76 tabs overlap its 2.1 x 0.47 bar, so pin 2 gets
     1.83 / 4.35 = 42 % of Q304's current where its copper (the union, 1.31 mm²) gives 34 %, and the overlap is fed
-    twice. Offered (not started, awaiting the user's go): count each pin's copper once (the union of its pads, its
-    nodes once), on its own branch with a test and kraft before / after (it moves every board with tabbed pads).
+    twice. Fixed on `pin-shares` (the entry above) at the user's "do it".
 - **Branch `kelvin-rtn` (2026-10-21, from `main` 75be1dd, `main` merged in at 3f83a74; into `main` at the user's "merge", a fast-forward):** the
   user's CE2264 hybrid generator board (`C:\Users\andre\Documents\gitlab\ce2264-hybrid-generator`, a Currawong
   project: the BLDC starter-generator bridge, EPC2302 GaN pairs, NCP51810 drivers, motor Plettenberg ORBIT SG1).
