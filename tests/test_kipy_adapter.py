@@ -178,6 +178,47 @@ def test_busy_kicad_gives_a_clear_error():
         clear(BusyGroups(), wait=0.3)          # every sink call retries, then explains
 
 
+class FillingBoard:
+    """A board whose zone fill keeps KiCad busy: refill_zones starts it (block must be False: kipy's own wait stops
+    at the first ping answered), then `busy` board requests are refused, one more times out in the transport."""
+
+    def __init__(self, busy: int):
+        """busy: the board requests refused (AS_BUSY) while the fill runs."""
+        self.busy, self.started, self.timeout, self.asked = busy, [], True, 0
+
+    def refill_zones(self, block=True):
+        """Start the fill (record how it was asked)."""
+        self.started.append(block)
+
+    def get_copper_layer_count(self):
+        """Refused while filling, one transport timeout, then answered."""
+        from kipy.errors import ApiError
+        from kipy.proto.common import ApiStatusCode
+        self.asked += 1
+        if self.busy > 0:
+            self.busy -= 1
+            raise ApiError("KiCad is busy", code=ApiStatusCode.AS_BUSY)
+        if self.timeout:
+            self.timeout = False
+            raise TimeoutError("no answer within the transport's timeout")
+        return 6
+
+
+def test_a_refill_waits_until_kicad_has_filled(monkeypatch):
+    """The user, on a complex board: "pressing refill zones causes this error" (KiCad busy: close any dialog). The
+    fill is started without kipy's ping wait, then the board is asked until it answers: busy and a transport timeout
+    are waited through, with progress said; past the wait, an error that says KiCad is still filling."""
+    from groundtruth.adapters import kipy_sink
+    from groundtruth.adapters.kipy_source import KiCadBusyError
+    monkeypatch.setattr(kipy_sink, "REFILL_POLL_S", 0.01)
+    board, said = FillingBoard(busy=400), []
+    kipy_sink.refill_zones(board, lambda text, frac: said.append(text))
+    assert board.started == [False] and board.asked == 402 and board.busy == 0
+    assert said and said[-1].startswith("KiCad is filling the zones…")
+    with pytest.raises(KiCadBusyError, match="still filling the zones"):
+        kipy_sink.refill_zones(FillingBoard(busy=10 ** 6), wait=0.2)
+
+
 def test_other_api_errors_are_not_retried():
     from kipy.errors import ApiError
     from groundtruth.adapters.kipy_source import when_ready

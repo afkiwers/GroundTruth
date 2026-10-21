@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import functools
 import math
+import time
 from typing import Any, Iterable, Optional, Union
 
 from ..core.issues import Issue
-from .kipy_source import when_ready
+from .kipy_source import KiCadBusyError, when_ready
 
 
 def _when_ready(fn):
@@ -175,10 +176,42 @@ def _commit_group(board: Any, items: list, name: str, message: str) -> int:
     return len(created)
 
 
-@_when_ready
-def refill_zones(board: Any) -> None:
-    """Refill all zones and wait for KiCad to finish."""
-    board.refill_zones(block=True)
+REFILL_WAIT_S = 600.0       # a refill may keep KiCad busy this long (a complex board's zones: minutes)
+REFILL_POLL_S = 0.5
+
+
+def refill_zones(board: Any, progress=None, wait: float = REFILL_WAIT_S) -> None:
+    """Refill all zones and wait until KiCad has finished: until a board request is answered again.
+
+    kipy's own wait (refill_zones(block=True)) pings KiCad and stops at the first ping answered, which can be while
+    the fill still runs: the board read after it then met AS_BUSY for longer than when_ready's few seconds and told
+    the user to close a dialog (the user, on a complex board: "pressing refill zones causes this error"). Here the
+    fill is started without that wait (itself retried while a tool or dialog holds KiCad), then a cheap board
+    request is retried while KiCad answers busy or the transport times out (KiCad's event loop fills), for up to
+    `wait` seconds, saying how long through progress(text, fraction)."""
+    from kipy.errors import ApiError
+    from kipy.proto.common import ApiStatusCode
+    when_ready(board.refill_zones, block=False)
+    start = time.monotonic()
+    said = 0.0
+    while True:
+        time.sleep(REFILL_POLL_S)
+        try:
+            board.get_copper_layer_count()
+            return
+        except ApiError as e:
+            if e.code != ApiStatusCode.AS_BUSY:
+                raise
+        except (IOError, TimeoutError):          # the transport timed out: KiCad's event loop is filling
+            pass
+        spent = time.monotonic() - start
+        if spent >= wait:
+            raise KiCadBusyError(f"KiCad is still filling the zones after {wait / 60:g} min: wait until it has "
+                                 "finished (its status bar), then press Reload board.")
+        if progress is not None and spent - said >= 2.0:
+            said = spent
+            progress(f"KiCad is filling the zones… {spent:.0f} s (a complex board takes minutes)",
+                     min(spent / wait, 0.99))
 
 
 @_when_ready
