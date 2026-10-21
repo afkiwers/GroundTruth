@@ -511,7 +511,11 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   layers where its own net's copper is (a GND via through a +3V3 area of In2 doesn't connect there).
   `via_impedance`: barrel R (25 µm plating) plus partial self-L.
 - Parts whose model isn't `open` and that sit between two plane nets (decaps, 0R, beads) are lumped branches
-  with model Z(f) + 0.3 nH mounting. Since 2026-10-13 a part is spread over the whole area of all its pads on each
+  with model Z(f) + 0.3 nH mounting. A power stage's or DC load's injections (`power._area_shares`) and the hot
+  loop's switch filaments (`switch_filaments`) share a part's current over its pins by each pin's copper area, the
+  union of its pads (`pin_area`, `pad_weights`, [A51]; since 2026-10-21: the pads' sizes were summed before, and an
+  EPC2306's source pin 2, a bar under three tabs, took 42 % of the source current for 34 % of the copper, so the GND
+  vias beside it read high), evenly over the pin's nodes, each once. Since 2026-10-13 a part is spread over the whole area of all its pads on each
   side (`simulate.part_pairs`): up to MAX_PART_BRANCHES = 8 nodes under the pads per side (farthest-point sampled),
   paired side by side across the part, each branch n·Z so the n in parallel are Z. Before, one branch joined the
   first pad's centre on each side, so a wide part (a FET's drain pad and fingers, an inductor's terminals, a

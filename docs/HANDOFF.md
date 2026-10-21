@@ -7,6 +7,24 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `pin-shares` (2026-10-21, from `main` 12b7d18; into `main` at the user's "merge", before its kraft
+  before / after finished):** the user, of the busiest via beside Q304's pin 2: "why it that via carring the most
+  load?", then "do it" (the offered fix). A part's current was shared over its pads by each pad primitive's size:
+  EPC2306's source pin 2 (SN_2, a 2.1 x 0.47 bar under three 0.37 x 0.76 tabs) took 1.83 / 4.35 = 42 % of the
+  source current for its 1.31 mm² of copper (34 %), and the overlap was fed twice. Now `power.pin_area` (the union
+  of a pin's pads), `pad_weights` and `_area_shares` (per pin, evenly over the pin's nodes, each once), also in the
+  hot loop's `switch_filaments`; A51 in REFERENCES. Test: tests/test_pin_shares.py (a pin drawn as a bar under a
+  tab against one pad of the same copper: 1 : 1; fails on the old code at 0.545). Power, bridge, DC load, dead
+  time, thermal, electro-thermal and the audits' suites: 317 passed. `tools/dev/via_compare.py`: two cached
+  Simulates' via currents side by side. `thermal_check.py --electrothermal` printed a wrong key (fixed).
+  - On kraft (flux-2 as the user saved it at 14:53, before this fix): conv2's ground return 10 A; the user's edit
+    put three GND vias into pin 2's pads (y 76.9) and three more above: busiest 1.10 → 0.81 A (8.1 %). With the
+    coupling on (main before this fix): settled in 2 rounds (30 %, 0.0009 %), T_max 125.4 °C unchanged, busiest
+    via 0.811 A at 20 °C and 0.81 A at temperature (`out/electrothermal/on.log`).
+  - **Open:** the kraft Simulate with this fix (`out/electrothermal/off_pin.log`, `stages_pin.pickle`, from the
+    worktree) was running at the merge: `via_compare.py out/electrothermal/stages.pickle
+    out/electrothermal/stages_pin.pickle --stage conv2 --near 138.44,77.5 --radius 2.5` gives pin 2's vias before
+    / after; tell the user. Then rerun the three GUI timing tests alone (the `electrothermal` entry).
 - **Branch `density-pcb` (2026-10-21, from `main` 62fde1e, commit 3ce1d5e; into `main` at the user's "yes", a
   fast-forward, branch deleted; packages `out/dist/groundtruth-0.1.42214-3ce1d5e-pcm.zip` and the server's, signed
   with the laptop's key; `electrothermal` will need `main` merged in):** the user, with a

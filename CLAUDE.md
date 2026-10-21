@@ -123,6 +123,9 @@ build_package.cmd [--committed]                   # the user's console/double-cl
             [--capacity] [--cache out/m3/stages.pickle]   # current capacity (+ a fresh-solve check); cache Simulate
             [--electrothermal 3 [--et-tol 0.01]]   # the electro-thermal coupling on: its rounds, busiest vias
                                                   # 20 °C -> hot (a cache from before 2026-10-21 has no dc_plan)
+.venv/Scripts/python tools/dev/via_compare.py A.pickle B.pickle [--stage conv2] [--near X,Y --radius 3.5]
+                                                  # two thermal_check --cache Simulates' via currents per DC path,
+                                                  # side by side (a model change, a board edit)
 .venv/Scripts/python tools/dev/bridge_check.py BOARD SETTINGS --v-bus 48 --f-pwm 20k --i-phase 100 --speed 3000
             --motor 10m,30u,8,7,star [--rds-on 0.7m --c-oss 2n --q-oss 170n --dead 47n --bridge NAME]
                                                   # one motor bridge at an operating point and motor (--help; --budgets
