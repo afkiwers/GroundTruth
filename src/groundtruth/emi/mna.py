@@ -61,6 +61,8 @@ class Circuit:
     _y2: list = field(default_factory=list)            # (node indices a1, b1, a2, b2, y(f) -> 2x2)
     _input: Optional[int] = None                       # the input source's unknown (an extra index)
     _counter: int = 0
+    # each op-amp channel: {"buf": its output buffer's extra index, "inp", "inn": its input nodes, "prm"} (loop_gain)
+    opamps: dict = field(default_factory=dict)
 
     # ------------------------------------------------------------------ building
     def node(self, name: str) -> int:
@@ -146,6 +148,7 @@ class Circuit:
         # the output: a buffer of the last stage behind R_O
         oi = self.internal(f"{name}.o")
         self.vcvs(oi, self.ground, last, self.ground, 1.0, f"{name}.buf")
+        self.opamps[name] = {"buf": self._extra - 1, "oi": oi, "inp": inp, "inn": inn, "prm": prm}
         self.r(oi, out, max(prm.r_out, 1e-6))
 
     def part(self, a: str, b: str, kind: str, values: dict, name: str = "part"):
@@ -276,6 +279,42 @@ class Circuit:
     def transfer(self, f, out: str, ref: Optional[str] = None) -> np.ndarray:
         """H(f) = (v(out) − v(ref)) per volt of the input, at each frequency."""
         return self.solve(f) @ self.output(out, ref)
+
+    def loop_gain(self, name: str, f) -> np.ndarray:
+        """The loop gain T(f) around op-amp channel `name` (opamp): its loop broken at its internal output, which
+        is an ideal source (the buffer before R_O), so driving it with 1 V instead loads nothing and the break is
+        exact [Middlebrook 1975]; with the input source at 0 V, what comes back across its inputs is
+        d = v₊ − v₋ = −β·1 V, and T = −A(s)·d, A(s) = A0 / ((1 + s/ω1)(1 + s/ω2)) its open-loop gain. Every other
+        op-amp keeps working (it is part of this loop's β). Positive and real at low frequency for negative
+        feedback; the phase margin is 180° + ∠T where |T| crosses 1 (transfer.phase_margin)."""
+        import scipy.sparse.linalg as spl
+        op = self.opamps[name]
+        g, c, b = self._sparse()
+        n_v = len(self.nodes)
+        row = n_v + op["buf"]
+        g = g.tolil()
+        g[row, :] = 0                            # the buffer's row becomes v(oi) = 1 V: its control dropped
+        g[row, self.node(op["oi"])] = 1.0
+        g = g.tocsc()
+        rhs = np.zeros(self.size, complex)
+        rhs[row] = 1.0                            # the test source; the input source's row stays at 0 V
+        f = np.atleast_1d(np.asarray(f, float))
+        rows, cols, vals = self._y2_stamps(f)
+        import scipy.sparse as sp
+        prm = op["prm"]
+        out = np.empty(len(f), complex)
+        ip, im = self.node(op["inp"]), self.node(op["inn"])
+        for k, fk in enumerate(f):
+            s_ = 2j * math.pi * fk
+            a = g + s_ * c
+            if rows:
+                a = a + sp.coo_matrix((vals[k], (rows, cols)), shape=a.shape).tocsc()
+            x = spl.splu(a.tocsc()).solve(rhs)
+            d = (x[ip] if ip >= 0 else 0.0) - (x[im] if im >= 0 else 0.0)
+            w1 = 2 * math.pi * prm.gbw / prm.a0
+            a_ol = prm.a0 / (1 + s_ / w1) / (1 + s_ / (2 * math.pi * prm.fp2) if prm.fp2 else 1.0)
+            out[k] = -a_ol * d
+        return out
 
     def voltage(self, f, node: str) -> np.ndarray:
         """A node's voltage per volt of the input."""

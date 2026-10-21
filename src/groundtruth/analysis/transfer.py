@@ -53,6 +53,7 @@ class Response:
     # latex), `symbolic` the ideal circuit's H(s) in its part names (analysis/symbolic.py: text, latex, mathml)
     normal: Optional[dict] = None
     symbolic: Optional[dict] = None
+    margin: Optional[dict] = None          # a loop gain's crossover and phase margin (phase_margin)
 
     @property
     def unit(self) -> str:
@@ -74,6 +75,7 @@ class Response:
         k = np.unique(np.linspace(0, len(self.f) - 1, min(points, len(self.f))).astype(int)) if len(self.f) else []
         return {"name": self.name, "owner": self.owner, "quantity": self.quantity, "exact": self.exact,
                 "fit_error_db": self.fit_error_db, "notes": list(self.notes), "gain": gain_figures(self),
+                "phase_margin": getattr(self, "margin", None),
                 "transfer_function": {"numeric": _plain_normal(getattr(self, "normal", None)),
                                       "symbolic": {k: v for k, v in (getattr(self, "symbolic", None) or {}).items()
                                                    if k in ("text", "latex")} or None},
@@ -172,6 +174,30 @@ def normal_form(poles, zeros, k: complex, f_max: Optional[float] = None) -> dict
     if more:
         text += f";  {more} more above"
     return {"k": kval, "m": m, "poles": ps, "zeros": zs, "beyond": more, "text": text, "latex": latex}
+
+
+PM_WARN = 45.0                 # degrees: a loop with less phase margin rings (a warning); below PM_ERROR it is close
+PM_ERROR = 20.0                # to oscillating (an error)
+
+
+def phase_margin(f, t) -> Optional[dict]:
+    """A loop gain's crossover and phase margin [Ogata 2010]: the first frequency where |T| falls through 1
+    (interpolated in log f, |T| in dB linear between the samples), and there 180° + ∠T, ∠T unwrapped from the
+    sweep's start (0° for negative feedback). {"f_c", "pm", "t_low_db"}; None when |T| never crosses 1 in the sweep
+    (or starts below it: no loop to speak of)."""
+    f = np.asarray(f, float)
+    t = np.asarray(t, complex)
+    mag = 20 * np.log10(np.maximum(np.abs(t), 1e-300))
+    ph = np.degrees(np.unwrap(np.angle(t)))
+    below = np.nonzero(mag < 0)[0]
+    if not len(below) or below[0] == 0:
+        return None
+    k = int(below[0])
+    x0, x1 = math.log(f[k - 1]), math.log(f[k])
+    u = mag[k - 1] / (mag[k - 1] - mag[k])
+    f_c = math.exp(x0 + u * (x1 - x0))
+    phase = ph[k - 1] + u * (ph[k] - ph[k - 1])
+    return {"f_c": f_c, "pm": 180.0 + phase, "t_low_db": float(mag[0])}
 
 
 PEAKING_DB = 0.5               # a gain this far above its low-frequency value is reported as peaking

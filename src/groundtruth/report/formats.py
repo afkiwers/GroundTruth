@@ -386,6 +386,12 @@ def response_lines(r) -> list[str]:
     how = "exact" if r.exact else (f"fitted, max error {r.fit_error_db:.2f} dB" if r.fit_error_db is not None
                                    else "no fit")
     g = gain_figures(r)
+    margin = getattr(r, "margin", None)
+    if r.quantity == "loop gain" and not len(r.poles) and not len(r.zeros):
+        # a loop gain (an op-amp's loop, emi/mna.Circuit.loop_gain): its crossover and phase margin
+        from ..analysis.transfer import fmt_hz
+        return [f"    {r.name}: " + (f"crossover {fmt_hz(margin['f_c'])}, phase margin {margin['pm']:.0f}°"
+                                     if margin else "no crossover in the sweep")]
     out = ([f"    {r.name}: gain {gain_text(g)}"] if g is not None else []) + \
         [f"    {r.name}: poles {roots(pz_rows(r.poles))}; zeros {roots(pz_rows(r.zeros))} ({how})"]
     sym, nf = getattr(r, "symbolic", None), getattr(r, "normal", None)
