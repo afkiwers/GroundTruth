@@ -1,12 +1,25 @@
 # GroundTruth handover
 
-## Current state (2026-10-21, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-21, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `kelvin-rtn` (2026-10-21, from `main` 75be1dd, `main` merged in at 3f83a74; into `main` at the user's "merge", a fast-forward):** the
+  user's CE2264 hybrid generator board (`C:\Users\andre\Documents\gitlab\ce2264-hybrid-generator`, a Currawong
+  project: the BLDC starter-generator bridge, EPC2302 GaN pairs, NCP51810 drivers, motor Plettenberg ORBIT SG1).
+  - The EPC symbols of the user's InvenTree library name the Kelvin source `RTN`: four nets, so `fet_terms` read no
+    transistor and the bridge had no legs. `detect.KELVIN_FN` takes `RTN`, `GR`, `G_RTN` too. Test: test_detect.
+  - At the user's "add the proper fields to the schematic to be recognised as a BLDC": GT labels set in that project
+    (`label_project.py`): the phase sheet's two high-side FET symbols `hb_hs`, two low-side `hb_ls` (one sheet used
+    three times: legs A Q1,Q5/Q2,Q6, B Q9,Q13/Q10,Q14, C Q15,Q17/Q16,Q18), J1 (battery, BATTERY+/GND) `hb_in`, J2
+    (motor + Halls) `hb_out`. Before: `out/ce2264_backup_2026-10-21/`. Detection: "bridge J2", 3 labelled legs, no
+    problems. The FETs' fields disagree (schematic Value EPC2305, board Value EPC2308, MPN EPC2302): asked the user.
+  - The user: "clicking on a leg does not highlight the leg on the PCB": a leg click in the Bridges tab shows that
+    leg's stage ("bridge J2 A", `stages_highlight`) through `SelectableRows._selection_changed(names)`. Test:
+    test_gui `test_clicking_a_bridge_leg_shows_that_leg_alone_in_kicad`. Not tried in live KiCad (no package here).
 - **Branch `refill-wait` (2026-10-21, from `main` afde324, merged into `main` at the user's "merge"):** the user, with a screenshot of "KiCad is busy and does not accept requests: close any open dialog …": "on complex boards, pressing refill zones causes this error". kipy's `refill_zones(block=True)` waits for the first Ping answered, which can be while the fill runs (and its 30 s limit never counts: `sleeps` is not incremented); the reload after it then met AS_BUSY past `when_ready`'s 5 s. `kipy_sink.refill_zones` now starts the fill without that wait and asks the board (`get_copper_layer_count`) until it answers, through AS_BUSY and transport timeouts, for up to `REFILL_WAIT_S` (10 min), the status line counting; past it, "KiCad is still filling the zones". Tests: test_kipy_adapter (a fake filling board). Not tried on a live complex board here.
 - **Branches `issue-clusters` and `report-pages` (2026-10-21, from `main` 66e119e, the second on the first;
   merged into `main` at the user's "MERGE"):**
