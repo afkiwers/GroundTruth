@@ -39,7 +39,7 @@ def test_the_table_has_a_chip_per_check_and_the_rows_their_check():
 PROBE = """<script>
 (() => {
   const click = q => document.querySelector(q).click();
-  const shown = () => [...document.querySelectorAll('#issues tbody tr')].filter(r => !r.classList.contains('hidden'))
+  const shown = () => [...document.querySelectorAll('#issue-table tbody tr')].filter(r => !r.classList.contains('hidden'))
     .map(r => r.dataset.check + ':' + r.dataset.sev).sort().join(',');
   const res = {};
   click("button.f[data-check='vds_rating']"); click("button.f[data-check='plane_resonance']");
@@ -59,7 +59,7 @@ LINK_PROBE = """<script>
 (() => {
   document.querySelector("button.f[data-sev='error']").click();
   document.querySelector("a[data-show-check='cap_voltage']").click();
-  const shown = [...document.querySelectorAll('#issues tbody tr')].filter(r => !r.classList.contains('hidden'))
+  const shown = [...document.querySelectorAll('#issue-table tbody tr')].filter(r => !r.classList.contains('hidden'))
     .map(r => r.dataset.check).sort().join(',');
   const on = [...document.querySelectorAll('button.f.on')].map(b => b.dataset.check || b.dataset.sev).join(',');
   const pre = document.createElement('pre'); pre.id = 'probe'; pre.textContent = shown + '|' + on;
@@ -70,8 +70,11 @@ LINK_PROBE = """<script>
 
 def _edge_probe(tmp_path, body: str, probe: str) -> str:
     """The text the probe script writes into the page after running in headless Edge."""
-    page = ("<!doctype html><html><head><style>" + html._CSS + "</style></head><body>" + body
-            + f"<script>{html._JS}</script>" + probe + "</body></html>")
+    # the table inside its part's section, as on the report (<section id='issues'>: the section and the table had
+    # one id, and the filters' pager refresh found the section: the user's "clicking on current density shows no
+    # items unless you toggle Show")
+    page = ("<!doctype html><html><head><style>" + html._CSS + "</style></head><body><section id='issues'>" + body
+            + f"</section><script>{html._JS}</script>" + probe + "</body></html>")
     f = tmp_path / "page.html"
     f.write_text(page, encoding="utf-8")
     run = subprocess.run([str(EDGE), "--headless=new", "--disable-gpu", f"--user-data-dir={tmp_path / 'edge'}",
@@ -83,7 +86,7 @@ def _edge_probe(tmp_path, body: str, probe: str) -> str:
 
 PAGER_PROBE = """<script>
 (() => {
-  const vis = () => [...document.querySelectorAll('#issues tbody tr')]
+  const vis = () => [...document.querySelectorAll('#issue-table tbody tr')]
     .filter(r => getComputedStyle(r).display !== 'none').length;
   const info = () => document.querySelector('.pager .pginfo').textContent;
   const res = {};
@@ -99,8 +102,11 @@ PAGER_PROBE = """<script>
   document.querySelector("button.f[data-sev='error']").click();
   res.errors = [vis(), info()];
   document.querySelector("button.f[data-sev='all']").click();
+  document.querySelector("button.f[data-check='late']").click();
+  res.late = [vis(), info()];
+  document.querySelector("button.f[data-check-all]").click();
   [...document.querySelectorAll('.pager button.pg')].find(b => b.textContent === '2').click();
-  document.querySelector('#issues th').click();
+  document.querySelector('#issue-table th').click();
   res.sorted = [vis(), info()];
   const pre = document.createElement('pre'); pre.id = 'probe'; pre.textContent = JSON.stringify(res);
   document.body.appendChild(pre);
@@ -117,15 +123,18 @@ def test_long_tables_are_paged_and_short_ones_not():
 
 @pytest.mark.skipif(not EDGE.exists(), reason="needs Microsoft Edge for a headless page")
 def test_the_pager_pages_the_issues_with_their_filters(tmp_path):
-    """60 issues (20 errors): 25 rows at first; page 2 the next 25; 50 rows; all (no page buttons); on page 3 the
-    Error filter goes back to the first page of its 20; a sort goes back to page 1."""
+    """61 issues (20 errors): 25 rows at first; page 2 the next 25; 50 rows; all (no page buttons); on page 3 the
+    Error filter goes back to the first page of its 20; a check whose one row is the last shows it (the page counted
+    again: inside the report's section it was not); a sort goes back to page 1."""
     import json
     issues = [Issue("cap_voltage" if k % 2 else "clearance_voltage", "error" if k % 3 == 0 else "warning", "+VDC",
                     f"m {k}", (float(k), 0.0), key=str(k)) for k in range(60)]
+    issues.append(Issue("late", "warning", "+VDC", "one check, after the first page", (99.0, 0.0), key="late"))
     res = json.loads(_edge_probe(tmp_path, html._issues(issues), PAGER_PROBE).replace("&quot;", '"'))
-    assert res["first"] == [25, "Rows 1–25 of 60"] and res["page2"] == [25, "Rows 26–50 of 60"]
-    assert res["fifty"] == [50, "Rows 1–50 of 60"] and res["all"] == [60, "Rows 1–60 of 60", 0]
-    assert res["errors"] == [20, "Rows 1–20 of 20"] and res["sorted"] == [25, "Rows 1–25 of 60"]
+    assert res["first"] == [25, "Rows 1–25 of 61"] and res["page2"] == [25, "Rows 26–50 of 61"]
+    assert res["fifty"] == [50, "Rows 1–50 of 61"] and res["all"] == [61, "Rows 1–61 of 61", 0]
+    assert res["errors"] == [20, "Rows 1–20 of 20"] and res["sorted"] == [25, "Rows 1–25 of 61"]
+    assert res["late"] == [1, "Rows 1–1 of 1"]          # a check whose only row was past the first page
 
 
 @pytest.mark.skipif(not EDGE.exists(), reason="needs Microsoft Edge for a headless page")
@@ -142,8 +151,8 @@ def test_clicking_checks_shows_only_them(tmp_path):
     """vds_rating and plane_resonance picked: their two rows; with Error: only vds_rating's, the chips counting
     errors; 'all' checks with Error: the two errors; back to All: all seven."""
     import json
-    page = ("<!doctype html><html><head><style>" + html._CSS + "</style></head><body>"
-            + html._issues(_issues()) + f"<script>{html._JS}</script>" + PROBE + "</body></html>")
+    page = ("<!doctype html><html><head><style>" + html._CSS + "</style></head><body><section id='issues'>"
+            + html._issues(_issues()) + f"</section><script>{html._JS}</script>" + PROBE + "</body></html>")
     f = tmp_path / "issues.html"
     f.write_text(page, encoding="utf-8")
     run = subprocess.run([str(EDGE), "--headless=new", "--disable-gpu", f"--user-data-dir={tmp_path / 'edge'}",
