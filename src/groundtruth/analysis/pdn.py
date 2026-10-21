@@ -578,7 +578,9 @@ def _decaps_near(model: BoardModel, setup: PdnSetup):
             mm = min(math.dist(cp.position, pp.position) for cp in cap_pads for pp in port["pads"])
             if mm <= 3 * spec.decap_mm:
                 near.append({"part": port["part"], "mm": round(mm, 2)})
-        rows.append({"ref": fp.reference, "value": fp.value, "C": m.get("C"), "near": sorted(near, key=lambda n: n["mm"])})
+        # C: nominal; C_dc: what the solve used, at the capacitor's DC voltage (analysis/bias.py)
+        rows.append({"ref": fp.reference, "value": fp.value, "C": m.get("C"), "C_dc": m.capacitance(),
+                     "near": sorted(near, key=lambda n: n["mm"])})
     res.decaps = sorted(rows, key=lambda r: r["ref"])
     pads = [(fp, [p for p in fp.pads if p.net == spec.rail]) for fp in caps]
     for port in setup.ports:

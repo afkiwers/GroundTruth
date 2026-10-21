@@ -2558,6 +2558,45 @@ def test_the_parts_tab_edits_through_hole_pin_values(app, tmp_path, monkeypatch)
         close_window(f)
 
 
+def test_the_parts_tab_shows_each_capacitor_at_its_dc_voltage(app, tmp_path, monkeypatch):
+    """The Parts tab's C at bias (a DC-bias curve's text) and C in circuit (the capacitance at the voltage across the
+    part, worked out in the background): C1 on +12V with 40nF@40V shows ~88 nF at 12 V; a curve typed in is
+    saved, text that is no curve refused with the formats shown. The user: "rather than having a real value we
+    could use an array like this (90nF@10V 75nF@50V, 20nF@70V)"."""
+    import wx.grid as gridlib
+    from test_bias import _voltage_board
+    from groundtruth.ui import main_frame
+    from groundtruth.ui.parts_panel import CIRCUIT_COL, PARAM_COL
+    told = []
+    monkeypatch.setattr(wx, "MessageBox", lambda text, *a, **k: told.append(text) or wx.OK)
+    _, _, path = make(tmp_path, _voltage_board(), "cbias", nets=())
+    f = main_frame.MainFrame(main_frame.Session(file_path=str(path)))
+    f.Show()
+    try:
+        run_steps(app, f, [])
+        g, row = f.parts.grid, f.parts.rows.index("C1")
+        wait_for(app, lambda: "at 12 V" in g.GetCellValue(row, CIRCUIT_COL))
+        assert g.GetCellValue(row, CIRCUIT_COL).startswith("88") and g.IsReadOnly(row, CIRCUIT_COL)
+        assert g.GetCellValue(row, PARAM_COL["C_bias"]) == "40nF@40V"
+        col = PARAM_COL["C_bias"]
+
+        def edit(text):
+            """Type into C1's C at bias cell, as the grid reports it."""
+            g.SetCellValue(row, col, text)
+            g.GetEventHandler().ProcessEvent(gridlib.GridEvent(g.GetId(), gridlib.wxEVT_GRID_CELL_CHANGED, g, row,
+                                                               col))
+        edit("95nF@10V, 66nF@30V, 39nF@50V")
+        assert f.settings.config.components["C1"].model.bias == "95nF@10V, 66nF@30V, 39nF@50V"
+        assert "C_bias" not in f.settings.config.components["C1"].model.from_schematic     # set here now
+        edit("75nF, 50nF")
+        assert told and "each needs its voltage" in told[-1] and "75nF@50V" in told[-1]
+        assert f.settings.config.components["C1"].model.bias == "95nF@10V, 66nF@30V, 39nF@50V"    # kept
+        wait_for(app, lambda: g.GetCellValue(row, col) == "95nF@10V, 66nF@30V, 39nF@50V"
+                 and "at 12 V" in g.GetCellValue(row, CIRCUIT_COL))
+    finally:
+        close_window(f)
+
+
 def test_preferences_list_the_servers_and_update_the_old_ones(app, frame, monkeypatch):
     """Preferences › Compute server › Servers (the user: "it will show the user which server is out of date and
     offers to update it through a button press"): the servers asked in the background, the out-of-date one marked;

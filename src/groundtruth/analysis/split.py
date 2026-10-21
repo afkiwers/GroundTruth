@@ -151,6 +151,8 @@ def merge_parts(config: Config, nets: Optional[list], parts: list[SimulationResu
     for text in [n for p in parts for n in p.notes] + list(notes or []):
         if text not in result.notes:
             result.notes.append(text)
+    # every part sets each capacitor at its DC voltage over the whole board (analysis/bias.py): one part's table
+    result.cap_bias = next((list(p.cap_bias) for p in parts if getattr(p, "cap_bias", None)), [])
     result.groups = max((p.groups for p in parts), default=1)
     devices = []
     for p in parts:

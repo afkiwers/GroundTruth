@@ -148,7 +148,7 @@ def _value(config, fp, kind: str) -> Optional[float]:
         if kind == "R" and m.kind == "resistor":
             return m.get("R", None) or None
         if kind == "C" and m.kind == "cap":
-            return (m.params.get("C_bias") or m.get("C", 0.0)) or None
+            return m.capacitance() or None          # at its DC voltage in a run (analysis/bias.py)
     # a part modelled 'open' (off every signal and power path: a compensation part): its value as written
     # ("2.2k", "22n", "22k0", "10uF"; a rating after it, "100n 50V", left out)
     token = (fp.value or "").split()[0] if fp.value else ""
@@ -375,7 +375,7 @@ def output_admittance(board, config, spec, load_ohm: float) -> tuple[Rat, list]:
             continue
         if not any(is_ground(n) for n in nets - outs):
             continue
-        c = m.params.get("C_bias") or m.get("C", 0.0)
+        c = m.capacitance()                         # at its DC voltage in a run (analysis/bias.py)
         esr = m.get("ESR", 0.0)
         if c:
             y = y + Rat([c, 0.0], [c * esr, 1.0])

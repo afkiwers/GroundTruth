@@ -52,7 +52,7 @@ def suggest_model(fp: Footprint, fields: bool = True) -> ComponentModel:
         from .fields import model_values
         values, _ = model_values(fp, model.kind)
         for param, reading in values.items():       # a field overrides the guess from value and footprint
-            model.params[param] = reading.value
+            model.set_value(param, reading.value)   # (a capacitor's C_bias: its DC-bias curve's text)
         model.from_schematic = list(values)
         # the main value came from a field: a "could not parse value" note about the Value text no longer applies
         if "C" in values or "L" in values or "R" in values:

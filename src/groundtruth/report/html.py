@@ -435,8 +435,10 @@ def render_html(board: Board, issues: list[Issue], routes: list, mode: str, sett
                 thermal=None, capacity: list = (), solver: Optional[dict] = None, config=None,
                 progress: Optional[Callable[[str, float], None]] = None, max_vias: Optional[int] = None,
                 outlines: bool = False, names: bool = False, dc_combined=None, sharper: list = (),
-                dc_loads: list = (), pdn: list = (), si=None) -> str:
-    """The report page. si: the signal-integrity figures (analysis/si.SiResult), their own part. converters: power-stage results (a motor bridge's legs are shown with their bridge);
+                dc_loads: list = (), pdn: list = (), si=None, capacitors: Optional[list] = None) -> str:
+    """The report page. si: the signal-integrity figures (analysis/si.SiResult), their own part. capacitors: each
+    capacitor with a DC-bias curve at its DC voltage (analysis/bias.CapBias; None: worked out here from the board
+    and `config`, as the run did). converters: power-stage results (a motor bridge's legs are shown with their bridge);
     dc_combined: every stage's DC paths together (SimulationResult.dc_combined, or its view), first under Power
     stages;
     bridges: BridgeResults; thermal: a ThermalResult; capacity: ThermalResults with `capacity`; solver: where the
@@ -522,6 +524,17 @@ def render_html(board: Board, issues: list[Issue], routes: list, mode: str, sett
              "differential pairs' impedance and skew, from cross-sections of the board solved in two dimensions "
              "(the stackup's dielectrics and solder mask, every net's copper in the cut); the strongest crosstalk "
              "into tracks running beside them, and the via stubs.", _si(si, figs))
+    if capacitors is None and config is not None:
+        from ..analysis.bias import at_dc
+        try:
+            _, capacitors, _ = at_dc(board, config.active())
+        except Exception:                   # noqa: BLE001 - a report without the table rather than none at all
+            capacitors = []
+    if capacitors:
+        part("capbias", "Capacitors at their DC bias", "Each ceramic capacitor with a DC-bias curve (its Cbias) at "
+             "the DC voltage across it, the capacitance every solve used for it: class II ceramics lose capacitance "
+             "as the voltage rises. The voltage is the worst case between its two nets (rails, power stages, an "
+             "IC's supply for its pins, a divider's top); see Cbias in the plugin's help.", _cap_bias(capacitors))
     if bridges:
         part("bridges", "Motor bridges", "Each bridge's six-step drive at its operating point, its legs' hot loops, "
              "the conducted emission of all legs at the input, the RMS currents in the copper, the parts' losses, "
@@ -1085,6 +1098,24 @@ def _responses(owner: str, responses, figs) -> str:
             out.append(f"<p class='note'>The full circuit (tracks, parasitics, the op-amp model): "
                        f"<code>{e(nf['text'])}</code></p>")
     return "".join(out)
+
+
+def _cap_bias(rows) -> str:
+    """The capacitors-at-DC-bias table: reference, nets, the voltage across and why, the nominal and the capacitance
+    used (and the change), the curve as written and how it was read."""
+    from ..components.values import format_si
+    how = {"curve": "its curve", "default voltage": "one value at half its rating [A57]", "flat": "one value, as given",
+           "class I": "class I: none", "tantalum": "tantalum: none", "electrolytic": "electrolytic: none"}
+    out = []
+    for r in sorted(rows, key=lambda r: r.ref):
+        change = 100 * (r.c / r.c0 - 1) if r.c0 else 0.0
+        out.append(f"<tr><td>{e(r.ref)}</td><td>{e(' – '.join(n.rsplit('/', 1)[-1] for n in r.nets))}</td>"
+                   + _num(r.volts, "{:.3g} V") + f"<td>{e(r.why)}</td>"
+                   + f"<td class='num' data-v='{r.c0}'>{format_si(float(f'{r.c0:.3g}'), 'F')}</td>"
+                   + f"<td class='num' data-v='{r.c}'>{format_si(float(f'{r.c:.3g}'), 'F')}</td>"
+                   + _num(change, "{:+.0f} %") + f"<td>{e(r.curve)}</td><td>{e(how.get(r.how, r.how))}</td></tr>")
+    return _table(["Part", "Nets", "#V across", "Where the voltage comes from", "#C nominal", "#C used", "#Change",
+                   "Cbias", "DC-bias loss"], out, paged=True)
 
 
 def _pdn(d, issues, figs) -> str:

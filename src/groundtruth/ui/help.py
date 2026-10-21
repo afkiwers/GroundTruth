@@ -29,13 +29,13 @@ SHELL = Path(__file__).with_name("help_shell.html")
 REFERENCES = (Path(__file__).resolve().parents[2] / "docs" / "REFERENCES.md",
               Path(__file__).resolve().parents[3] / "docs" / "REFERENCES.md")
 TOPICS = ("workflow", "together", "checks", "nets", "converters", "bridges", "dcloads", "pdn", "si", "safety", "parts",
-          "fields", "issues", "results", "fixes", "history", "thermal", "analog", "prefs", "export", "drawing", "labels",
+          "fields", "cbias", "issues", "results", "fixes", "history", "thermal", "analog", "prefs", "export", "drawing", "labels",
           "siglabels", "settings", "speed", "methods", "limits", "references", "licenses", "server")
 # the sidebar's groups, by section; a section not listed goes under "More"
 GROUPS = (("Getting started", ("workflow", "together", "checks")),
           ("The tabs", ("nets", "converters", "bridges", "dcloads", "pdn", "si", "parts", "issues", "results", "fixes",
                         "history")),
-          ("Analyses and output", ("fields", "safety", "thermal", "analog", "prefs", "export", "drawing")),
+          ("Analyses and output", ("fields", "cbias", "safety", "thermal", "analog", "prefs", "export", "drawing")),
           ("Labels and settings", ("labels", "siglabels", "settings")),
           ("Under the hood", ("speed", "server", "methods", "limits", "references", "licenses")))
 
@@ -46,9 +46,113 @@ def page() -> str:
     pal = theme.palette()
     text = PAGE.read_text(encoding="utf-8")
     for key, value in (("@BG@", pal.bg), ("@TEXT@", pal.text), ("@LINK@", pal.accent), ("@WARN@", pal.warn),
-                       ("@PART_FIELDS@", field_rows()), ("@REFERENCES@", references_html())):
+                       ("@PART_FIELDS@", field_rows()), ("@REFERENCES@", references_html()),
+                       ("@CBIAS_CHART@", cbias_table())):          # wx's simple view draws no SVG: the numbers
         text = text.replace(key, value)
     return text
+
+
+# The Cbias section's worked example (the user: "draw a chart with a fake curve and place 3-4 points that are used
+# for approximation. create the string that would go into inventree's parameter and draw some line in between that
+# show how the plugin would approximate it. Also mention what the min/max number of samples can be"): a made-up
+# datasheet curve of a 100 nF 100 V X7R with the shape of the one the user showed (−20 % at 20 V, −50 % at 40 V,
+# −85 % at 100 V, a little rise near 0 V), and the voltages its points are read at
+CBIAS_C0 = 100e-9
+CBIAS_AT = (10.0, 30.0, 50.0, 80.0)
+CBIAS_SPAN = (0.0, 100.0)               # the chart's volts
+
+
+def cbias_datasheet(v: float) -> float:
+    """The made-up datasheet curve: C / C0 at v volts (a small rise to ~+1 % at 3 V, then the fall)."""
+    import math
+    return (1 + 0.012 * (v / 3) * math.exp(1 - v / 3)) / (1 + (v / 40) ** 2.05)
+
+
+def cbias_example() -> tuple[str, str, list]:
+    """The worked example: (the Cbias Curve text for InvenTree, the same in percent, the curve as [(V, C)]), its
+    points the datasheet curve at CBIAS_AT rounded as one would read them (2 digits)."""
+    from ..components.bias import bias_text, parse_bias
+    pts = [(v, float(f"{CBIAS_C0 * cbias_datasheet(v):.2g}")) for v in CBIAS_AT]
+    text = ", ".join(f"{c * 1e9:g}nF@{v:g}V" for v, c in pts)
+    pct = ", ".join(f"{100 * (c / CBIAS_C0 - 1):+.0f}%@{v:g}V" for v, c in pts)
+    points, _ = parse_bias(text)
+    return bias_text(points), pct, pts
+
+
+def cbias_svg() -> str:
+    """The worked example as an inline SVG chart for the browser view: ΔC (%) against DC volts, the datasheet curve
+    (grey), its points (dots), GroundTruth's curve through them (components/bias.c_at: solid up to the last point,
+    dashed above it), the one-point curve from 50 V alone (dotted); the colours the page's CSS variables (light and
+    dark themes). Then the InvenTree text and the limits."""
+    from ..components.bias import BIAS_POINTS_MAX, c_at
+    text, pct, pts = cbias_example()
+    w, h, left, right, top, bottom = 600, 320, 52, 16, 14, 40
+    x = lambda v: left + (v - CBIAS_SPAN[0]) / (CBIAS_SPAN[1] - CBIAS_SPAN[0]) * (w - left - right)   # noqa: E731
+    y = lambda d: top + (10 - d) / 110 * (h - top - bottom)                                         # noqa: E731
+    out = [f'<svg class="chart" viewBox="0 0 {w} {h}" width="100%" style="max-width:{w}px" role="img" '
+           'aria-label="A DC-bias curve and how GroundTruth approximates it">']
+    for d in range(-100, 11, 20):           # the grid and the axes' labels
+        out.append(f'<line x1="{left}" x2="{w - right}" y1="{y(d):.1f}" y2="{y(d):.1f}" '
+                   'style="stroke:var(--border);stroke-width:1"/>')
+        out.append(f'<text x="{left - 6}" y="{y(d) + 4:.1f}" text-anchor="end" font-size="11" '
+                   f'style="fill:var(--muted)">{d:+d}%</text>' if d else
+                   f'<text x="{left - 6}" y="{y(d) + 4:.1f}" text-anchor="end" font-size="11" '
+                   'style="fill:var(--muted)">0%</text>')
+    for v in range(0, 101, 20):
+        out.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top}" y2="{h - bottom}" '
+                   'style="stroke:var(--border);stroke-width:1"/>')
+        out.append(f'<text x="{x(v):.1f}" y="{h - bottom + 16}" text-anchor="middle" font-size="11" '
+                   f'style="fill:var(--muted)">{v} V</text>')
+    out.append(f'<text x="{(left + w - right) / 2:.0f}" y="{h - 4}" text-anchor="middle" font-size="12" '
+               'style="fill:var(--text)">DC voltage across the capacitor</text>')
+
+    def line(vs, f, style, ident):
+        """A polyline of ΔC % = 100 (f(v) − 1) over vs."""
+        p = " ".join(f"{x(v):.2f},{y(100 * (f(v) - 1)):.2f}" for v in vs)
+        return f'<polyline id="{ident}" fill="none" points="{p}" style="{style}"/>'
+    n = 200
+    grid = [CBIAS_SPAN[0] + (CBIAS_SPAN[1] - CBIAS_SPAN[0]) * k / n for k in range(n + 1)]
+    v_last = pts[-1][0]
+    below = sorted({*(v for v in grid if v <= v_last), *(p[0] for p in pts)})   # the points are vertices
+    above = [v_last] + [v for v in grid if v > v_last]
+    fit = lambda v: c_at(pts, CBIAS_C0, v) / CBIAS_C0                                               # noqa: E731
+    out.append(line(grid, cbias_datasheet, "stroke:var(--muted);stroke-width:5;opacity:0.35", "cbias-datasheet"))
+    out.append(line(grid, lambda v: c_at([pts[2]], CBIAS_C0, v) / CBIAS_C0,
+                    "stroke:var(--text);stroke-width:1.2;stroke-dasharray:2 3", "cbias-one-point"))
+    out.append(line(below, fit, "stroke:var(--accent);stroke-width:2", "cbias-fit"))
+    out.append(line(above, fit, "stroke:var(--accent);stroke-width:2;stroke-dasharray:7 4", "cbias-tail"))
+    for v, c in pts:
+        out.append(f'<circle cx="{x(v):.2f}" cy="{y(100 * (c / CBIAS_C0 - 1)):.2f}" r="4.5" data-v="{v:g}" '
+                   f'data-c="{c:.4g}" style="fill:var(--accent);stroke:var(--card);stroke-width:1.5"/>')
+    keys = [("stroke:var(--muted);stroke-width:5;opacity:0.35", "datasheet (made up)"),
+            ("stroke:var(--accent);stroke-width:2", "GroundTruth through the points"),
+            ("stroke:var(--accent);stroke-width:2;stroke-dasharray:7 4", "above the last point"),
+            ("stroke:var(--text);stroke-width:1.2;stroke-dasharray:2 3", "one point (50 V) alone")]
+    for k, (style, label) in enumerate(keys):
+        yy = top + 12 + 16 * k
+        out.append(f'<line x1="{w - right - 190}" x2="{w - right - 166}" y1="{yy}" y2="{yy}" style="{style}"/>')
+        out.append(f'<text x="{w - right - 160}" y="{yy + 4}" font-size="11" style="fill:var(--text)">{label}</text>')
+    out.append("</svg>")
+    return ("".join(out) + f"<p>Cbias Curve for this part (InvenTree text parameter): <code>{text}</code><br>"
+            f"or as the change from the nominal: <code>{pct}</code><br>Points: at least 1 (one point: the formula), "
+            f"two or more interpolated, at most {BIAS_POINTS_MAX}.</p>")
+
+
+def cbias_table() -> str:
+    """The worked example for wx's simple HTML view (no SVG): the points with the InvenTree text, then the datasheet
+    and GroundTruth's curve side by side every 10 V (the one-point curve beside them)."""
+    from ..components.bias import BIAS_POINTS_MAX, c_at
+    text, pct, pts = cbias_example()
+    rows = ["<tr><th>DC voltage</th><th>datasheet (made up)</th><th>GroundTruth</th><th>one point (50 V)</th></tr>"]
+    for v in range(0, 101, 10):
+        rows.append(f"<tr><td>{v} V</td><td>{100 * (cbias_datasheet(v) - 1):+.0f} %</td>"
+                    f"<td>{100 * (c_at(pts, CBIAS_C0, v) / CBIAS_C0 - 1):+.0f} %"
+                    + (" (a point)" if any(p[0] == v for p in pts) else "") + "</td>"
+                    f"<td>{100 * (c_at([pts[2]], CBIAS_C0, v) / CBIAS_C0 - 1):+.0f} %</td></tr>")
+    return ("<table border='1' cellpadding='3' cellspacing='0'>" + "".join(rows) + "</table>"
+            f"<p>Cbias Curve for this part (InvenTree text parameter): <code>{text}</code><br>or as the change from "
+            f"the nominal: <code>{pct}</code><br>Points: at least 1 (one point: the formula), two or more "
+            f"interpolated, at most {BIAS_POINTS_MAX}.</p>")
 
 
 def references_path() -> Optional[Path]:
@@ -143,8 +247,9 @@ def field_rows() -> str:
     rows = []
     for p in PARAMS:
         sym = {"ohm": "Ω"}.get(p.quantity, p.quantity)
-        cells = (f"<b>{escape(p.field)}</b>", p.parts, p.keys, p.unit,
-                 f"{format_si(p.lo, sym)} … {format_si(p.hi, sym)}", f"<code>{escape(p.example)}</code>", p.feeds)
+        span = "text" if p.quantity == "text" else f"{format_si(p.lo, sym)} … {format_si(p.hi, sym)}"
+        cells = (f"<b>{escape(p.field)}</b>", p.parts, p.keys, p.unit, span, f"<code>{escape(p.example)}</code>",
+                 p.feeds)
         rows.append("<tr>" + "".join(f"<td valign='top'>{c}</td>" for c in cells) + "</tr>")
     return "\n".join(rows)
 
@@ -172,6 +277,7 @@ def sections() -> tuple[str, list[tuple[str, str, str]]]:
     its place)."""
     text = PAGE.read_text(encoding="utf-8").replace("@PART_FIELDS@", field_rows()).replace("@REFERENCES@",
                                                                                          references_html())
+    text = text.replace("@CBIAS_CHART@", cbias_svg())          # the browser view draws the chart
     body = re.search(r"<body[^>]*>(.*)</body>", text, re.S).group(1)
     head, _, rest = body.partition("<hr>")
     intro = re.sub(r"<p><b>Contents</b></p>.*$", "", head, flags=re.S)          # the old contents list

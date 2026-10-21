@@ -573,7 +573,8 @@ def suggest_fixes(board: Board, config: Config, nets: Optional[list[str]] = None
     """verify_all: simulate every route and power stage again to verify the selected fixes (default: only what
     they can change, verify_scope). The solves run on a GPU per `analysis.gpu`; `SuggestResult.solver` says
     where. Rows switched off (enabled: false) are left out unless named (Config.active)."""
-    config = config.active(nets)
+    from .bias import at_dc
+    config, _, _ = at_dc(board, config.active(nets))     # each capacitor at its own DC voltage (as simulate)
     with gpu.use(getattr(config.analysis, "gpu", "auto")) as run:
         out = _suggest_fixes(board, config, nets, progress, max_fixes, candidates, verify, baseline, verify_all)
     out.solver = run.summary()

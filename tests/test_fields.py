@@ -141,7 +141,8 @@ def test_linked_values_follow_the_schematic_and_overrides_are_kept_and_flagged(t
 def test_part_models_take_their_fields_and_keep_the_users_values(tmp_path):
     board, sc, _ = make(tmp_path, buck(**FIELDS), "parts", nets=())
     m = suggest_model(board.footprint("C1"))
-    assert m.params["ESR"] == pytest.approx(5e-3) and m.params["C_bias"] == pytest.approx(4.2e-6)
+    # Cbias is the DC-bias curve's text (components/bias.py); one value without a voltage is used as it is
+    assert m.params["ESR"] == pytest.approx(5e-3) and m.bias and m.capacitance() == pytest.approx(4.2e-6)
     assert m.from_schematic == ["ESR", "C_bias"]
     assert ComponentModel.from_dict(m.to_dict()).from_schematic == ["ESR", "C_bias"]
     assert sc.config.model_for("C1").params["ESR"] == pytest.approx(5e-3)      # a new settings file has it

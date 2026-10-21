@@ -2,8 +2,9 @@
 The user: "i want the transfer function to be shown in the results as well", then "add sympy".
 
 The circuit [A54] is analysis/analog_net's schematic in net terms (its parts, op-amps, input and output nets; AC ground
-"0"), idealised: resistors R, capacitors 1/(sC), inductors and ferrites sL (no ESR, ESL, DCR, C_bias: the design
-values' symbols), a 0R a wire; each op-amp with its feedback an ideal one, a nullor (v₊ = v₋, its output whatever
+"0"), idealised: resistors R, capacitors 1/(sC), inductors and ferrites sL (no ESR, ESL, DCR: the design values'
+symbols; a capacitor's symbol takes, where a value is put in, its capacitance at its DC voltage, analysis/bias.py),
+a 0R a wire; each op-amp with its feedback an ideal one, a nullor (v₊ = v₋, its output whatever
 the circuit needs) [Franco 2015], a gain block (a part with a Gain field) a VCVS of its gain; the input an ideal
 voltage source on the driver's net (the source's resistance and the receivers' load left out: the circuit as
 designed). Its modified nodal equations [Ho 1975] are solved in s by fraction-free elimination, and H(s) = N(s)/D(s)

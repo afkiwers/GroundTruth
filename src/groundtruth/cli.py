@@ -280,11 +280,12 @@ def _run(args, simulate: bool) -> int:
             print(f"  [{frac * 100:5.1f}%] {msg}", file=sys.stderr)
 
     converters, bridges, thermal, capacity, solver, combined, dc_loads = [], [], None, [], None, None, []
-    pdn, si = [], None
+    pdn, si, cap_bias = [], None, []
     if simulate:
         res = run_sim(board, cfg, nets, progress=progress if args.verbose else None)
         issues, routes, converters, bridges, solver = res.issues, res.routes, res.converters, res.bridges, res.solver
         combined, dc_loads = res.dc_combined, list(res.dc_loads)
+        cap_bias = list(getattr(res, "cap_bias", ()))       # each capacitor at its DC voltage (analysis/bias.py)
         pdn = list(getattr(res, "pdn", ()))
         si = getattr(getattr(res, "checks", None), "si", None)
         _say_solver(res.solver, args)
@@ -349,7 +350,7 @@ def _run(args, simulate: bool) -> int:
         target = out_dir / OUTPUT_NAMES[fmt]
         if fmt == "json":
             text = formats.to_json(args.board, issues, routes, {"mode": mode, "version": __version__}, converters,
-                                   bridges, dc_loads, pdn, si, thermal, capacity)
+                                   bridges, dc_loads, pdn, si, thermal, capacity, cap_bias)
         elif fmt == "junit":
             text = formats.to_junit(args.board, issues, analysed, checks, args.fail_on, analysed_conv)
         elif fmt == "gitlab-codequality":
@@ -358,7 +359,8 @@ def _run(args, simulate: bool) -> int:
             from .report.html import render_html
             text = render_html(board, issues, routes, mode, str(sc.path), converters=converters, view3d=simulate,
                                bridges=bridges, thermal=thermal, capacity=capacity, solver=solver, config=cfg,
-                               dc_combined=combined, dc_loads=dc_loads, pdn=pdn, si=si)
+                               dc_combined=combined, dc_loads=dc_loads, pdn=pdn, si=si,
+                               capacitors=cap_bias if simulate else None)
             if simulate:
                 _write_pngs(board, list(routes) + list(converters) + dc_loads + ([thermal] if thermal else [])
                             + capacity,
@@ -395,7 +397,7 @@ def _keep_run(args, board, sc, cfg, issues, routes, converters, bridges, thermal
         run = history.record(
             board_bytes, sc.dumps(),
             formats.to_json(args.board, issues, routes, {"mode": mode, "version": __version__}, converters, bridges,
-                            list(dc_loads), thermal=thermal, capacity=capacity),
+                            list(dc_loads), thermal=thermal, capacity=capacity, capacitors=cap_bias),
             run_meta(args.board, source, by="cli", resolution=cfg.analysis.resolution, what_if=args.what_if,
                      edits=edit_texts(edits), only=args.nets or [], seconds=seconds, solver=solver,
                      cell_mm=cell_mm_of([r.grid.d for r in list(routes) + list(converters)
