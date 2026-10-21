@@ -558,6 +558,9 @@ the last digit or two.
   signal that does not exist. Their real concern is susceptibility (victims.py). Detection now gives a net its
   driving op-amp's fastest full swing where the op-amp has the data [A37]: Net-(U301--) 5.28 µs at 48.2 kHz; the
   ADC paths start at the ZXCT1107 (no such data), so they keep 10 MHz / 2 ns until their signal is set by hand.
+  Set by hand on 2026-10-22: 1 kHz, 2 µs (the ZXCT1107's pulse response at R_GAIN 10 kΩ; 540 ns from its 650 kHz
+  bandwidth at 2.5 kΩ already ended the spectrum at 5.9 MHz), so they have no radiated worst case (CISPR starts at
+  30 MHz) and no plane-resonance warning.
 - **The GPU path on a small GPU (NEXT_STEPS 7).** All of it is complex128, which a GeForce card runs at 1/64 of
   its FP32 rate: the RTX 3050 Laptop GPU was 3.5 × slower than the CPU on a small board and > 6 × on kraft, and two
   processes on it (a split Simulate's workers) stalled each other for hours (`tools/dev/gpu_contention.py`). `auto`

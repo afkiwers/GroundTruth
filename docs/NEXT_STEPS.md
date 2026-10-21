@@ -67,12 +67,12 @@ All merged into `main`; the full suite on `main` after the last of them (cebe708
    laptop): `tools/make_pcm_package.py` would create a new key here, which the user's compute servers do not
    trust. Once the user has copied the key: `.venv\Scripts\python tools\make_pcm_package.py`, then Plugin and
    Content Manager > Install from File with `out/dist/groundtruth-<ver>-<commit>-pcm.zip`.
-2. **The analog nets in the user's kraft settings.** Detection's op-amp rule (item 8) applies to nets detected or
-   added from now on; the existing entries Net-(U301--), /CPU/ADC_I_RAIL_1 and _2 still say 10 MHz / 2 ns, so their
-   "emissions" at 310 MHz / 1.59 GHz describe a signal that does not exist (VALIDATION_AUDIT round 4). Re-detect
-   them or set the real signal (a few kHz, µs edges). The ADC paths start at the ZXCT1107s (U302, U304), modelled
-   `open`: give them `Gain` and `Bandwidth` fields to make them amplifier stages, and check that their pins are
-   recognised (`components.models.amplifier_pins`: else `amp_in` / `amp_out` GT labels, as on U301).
+2. **The analog nets in the user's kraft settings: done 2026-10-22** (the user: "Fix this"). /CPU/ADC_I_RAIL_1
+   and _2 in `flux-2/groundtruth/flux-2.groundtruth.yaml` now say `freq: 1kHz, rise_time: 2us` (the user's
+   1 kHz max_bandwidth; the ZXCT1107's pulse response at R_GAIN 10 kΩ as the edge), not 10 MHz / 2 ns;
+   Net-(U301--) is no longer in the file. Their spectrum ends below CISPR's 30 MHz (5.9 MHz already at 540 ns): no
+   radiated worst case, and the 1.59 GHz plane-resonance warning on ADC_I_RAIL_2 is gone (HANDOFF). The ZXCT1107s
+   stay `open`: Gain / Bandwidth fields would make them op-amp models with the rail as input (HANDOFF).
 
 ## Open, technical
 

@@ -264,7 +264,14 @@ in `tools/dev/`, never only in the scratchpad.
   conv2_dead_rise:20ns, conv2_dead_fall:20ns` (conv2 per edge, conv1 from dead:); before: `out/kraft_backup_2026-10-20b/`.
   Since 2026-10-21 (the user: "do that for me") the two ADC paths in the user's own settings (`flux-2/groundtruth/
   flux-2.groundtruth.yaml`) have `sweep_from: 1Hz, max_bandwidth: 1kHz` (Bode from DC; the R303 / C304 corner
-  451 Hz is within it); before: `out/kraft_backup_2026-10-21_settings/`.
+  451 Hz is within it); before: `out/kraft_backup_2026-10-21_settings/`. Since 2026-10-22 (the user: "Fix this")
+  their signal is `freq: 1kHz, rise_time: 2us` instead of detection's generic 10 MHz / 2 ns: the measured current
+  up to the user's 1 kHz limit, edged as the ZXCT1107's pulse plots at R_GAIN 10 kΩ (R304 / R334; DS35033 p. 8;
+  its 650 kHz bandwidth is at 2.5 kΩ: 540 ns, set first); before: `out/kraft_backup_2026-10-22_settings/` (10 MHz)
+  and `out/kraft_backup_2026-10-22b_settings/` (540 ns). Don't give the ZXCT1107s Gain / Bandwidth fields: either
+  makes them an op-amp model whose single-ended input is the rail (S+), and their gain is R_GAIN's (4 mA/V × 10 kΩ).
+  Their symbol pins (1 Vs+, 2 Vs−, 3 OUT) differ from the datasheet's numbers on purpose (the generic SOT-23
+  footprint): physically right.
   Power stages (all found by `groundtruth detect`), rail +VDC unless noted:
 
   | Stage | Controller | Switches | Switch node | Inductor |

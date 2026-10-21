@@ -7,6 +7,25 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Kraft's ADC signal (2026-10-22, on `main`, settings only):** the user: "Fix this" (NEXT_STEPS 2). The two ADC
+  paths in the user's `flux-2/groundtruth/flux-2.groundtruth.yaml` ran on detection's generic 10 MHz / 2 ns
+  (`detect` still proposes it: their driver, the ZXCT1107, is modelled `open`, and the TLV6001 further along does
+  not limit the driver's signal [A37]). Now `freq: 1kHz, rise_time: 2us`: the measured current up to the user's
+  1 kHz max_bandwidth; the edge first 540 ns (0.35 / 650 kHz, the ZXCT1107's bandwidth, DS35033 p. 3, which is at
+  R_GAIN 2.5 kΩ), then at the user's "yes" 2 µs, the datasheet's pulse plots at R_GAIN 10 kΩ (p. 8), kraft's R304 /
+  R334 (backup of the 540 ns file `out/kraft_backup_2026-10-22b_settings/`; the runs below are the 540 ns one, 2 µs
+  only narrows the band further). No Gain / Bandwidth fields on the ZXCT1107: either makes it an op-amp model whose
+  single-ended input is the rail on S+ (`amplifier_pins` wouldn't find its pins anyway), and its 40 V/V is R_GAIN's.
+  Its symbol's pins 1 Vs+, 2 Vs−, 3 OUT differ from the datasheet's numbers on purpose (the generic SOT-23
+  footprint, the user): physically right.
+  Only those two lines changed (CRLF kept); backup `out/kraft_backup_2026-10-22_settings/`. `groundtruth simulate
+  --nets` both, old vs new: the band ends at 5.9 MHz (was 1.6 GHz), so no harmonic reaches CISPR's 30 MHz start
+  (`worst: None`; was −149.5 dBµV/m at 290 MHz and −20.7 at 1270 MHz, indicative), the 1.59 GHz plane-resonance
+  warning on ADC_I_RAIL_2 is gone; loop L 39.0 / 32.8 nH (map at 1 MHz, was 10 MHz: 35.9 / 30.6); the Bode,
+  step and loop-gain figures unchanged (they don't use the signal); the layout issues the same 5 errors, 8
+  warnings (gap crossings, stitching). Pitfall: `MSYS_NO_PATHCONV=1` with an `/c/...` `--out-dir` makes Windows
+  Python write to `C:\c\...`: use `C:/...` paths there (the stray `C:\c\Users\...` folders are empty, the user
+  removes them).
 - **Branch `step-response` (2026-10-21, from `main` 1de736c, c5448dc; into `main` after its full suite, at the user's
   "yes run it", a fast-forward, branch deleted):** the user: "let's do it
   now -> Step response" (the plan's second branch, ANALOG_AC.md). Each signal-path response (the receiver, each
