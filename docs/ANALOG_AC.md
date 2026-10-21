@@ -1,6 +1,6 @@
 # Plan: a generic small-signal model of op-amp circuits (any topology)
 
-Status: **planned, not started** (2026-10-21). Asked by the user, of refboard's ADC path (ZXCT1107 → R304 →
+Status: **in progress** on branch `analog-ac` (2026-10-21). Asked by the user, of refboard's ADC path (ZXCT1107 → R304 →
 TLV6001 follower → R303 / C304 → ADC): "Are we currently considering the Opamp circuit and it's amplification etc.
 If I were to build an active lowpass filter, would that simulate it as one?", then "yes plan it", "present the
 plan", and: **"I want a generic model that can calculate any circuit made from an OPA"**. Builds on `bode-sweep`
@@ -128,15 +128,31 @@ For each path (input: its driver, output: its receivers), and on request between
 On the real board: refboard's two ADC paths (unchanged), and test boards for the filters and amplifiers above in
 `tests/boardgen.py`.
 
-## Still open
+## Decided (the user, 2026-10-21)
 
-1. Simulate's emission estimate from the network (step 4): now, or after the Bode side has been used for a while?
-   (Recommended: after.)
-2. Tracks inside an op-amp circuit as ideal wires at first, their parasitic C later: fine?
-3. The step response and the loop gain: in the first branch, or a second one? (Recommended: loop gain in the
-   first, it flags circuits that would oscillate; step response in the second.)
+1. **Simulate's emission estimate uses the circuit model too** ("yes"): step 4 is part of this milestone, after the
+   Bode side is validated (it moves emission figures: before / after on refboard).
+2. **Tracks inside an op-amp circuit are modelled now** ("no, do it now"), not ideal wires: every track segment of
+   the network's nets as a line two-port (its Zc and γ from its width and the stackup, as the route's stretches),
+   joined at their junctions and pads; where a circuit must stay rational (the exact poles and zeros, the symbolic
+   form) a short track (below λ/20 at the sweep's top) is its lumped π section (R, L, and C/2 at each end), a long
+   one (the route's own lines) leaves the response to the vector fit.
+3. **The loop gain (and phase margin) in the first branch, the step response in a second** ("Yes").
+4. The symbolic transfer function: not answered; planned as recommended (numeric exact and symbolic, sympy as a
+   new dependency): ask before adding the dependency.
 
-4. The symbolic transfer function (in the part names, ideal circuit, sympy as a new dependency): wanted, or the numeric exact form only? (Recommended: both; the symbolic one is what a filter design is checked against.)
+## Progress
+
+- **Branch `analog-ac`, step 2 first (the solver)**: `emi/mna.py` (Circuit: r, c, l, part (a model's series
+  R-L-C), vsource, vcvs, vccs, opamp (OpAmpParams: A0, GBW, a second pole, R_O, Rin, Cin, Cin_cm), y2 / line_y (a
+  line two-port); solve, transfer; poles_zeros exact by the generalised eigenvalues, equilibrated, with the
+  cancelling pairs dropped). tests/test_mna.py: 9 pass (RC; series RLC's f0 and Q; a capacitor's ESL notch; an
+  inverting amplifier's gain and its pole GBW·β + GBW/A0 to 1e-6; non-inverting ×2 at 5 MHz; a follower; Sallen-Key
+  and MFB f0 and Q to 0.1 %; an integrator; a three-op-amp instrumentation amplifier, gain 21; a follower's second
+  pole, Q 1 and +1.25 dB peaking; a line two-port open at its end = its capacitance).
+- Next: the netlist (`analysis/analog_net.py`: the network from a path's nets, pin roles per channel, tracks as
+  two-ports / π sections), then the transfer function's normal form and the symbolic form, the loop gain, the Bode
+  integration, Simulate's emission estimate, UI and docs.
 
 Estimate: three to four sessions (the solver and the closed-form tests; the netlist, pin roles and macromodel
 fields; the loop gain; integration, UI, docs and refboard).
