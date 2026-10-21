@@ -76,7 +76,10 @@ driver 527 / CUDA 12.0). The notes below were written on the old laptop (user `i
                                                   # need a display; GUI timing tests can fail on a loaded machine: rerun
                                                   # them alone). Fits in memory since 2026-10-10 (it ran out before)
 .venv/Scripts/python tools/dev/run_tests_split.py # the same, one file per process (~40 min)
-.venv/Scripts/groundtruth --help                       # init | detect | info | check | simulate | suggest | compare | history
+.venv/Scripts/groundtruth --help                       # init | detect | info | check | simulate | bode | suggest | compare | history
+.venv/Scripts/groundtruth bode BOARD --settings X [--nets N] --from 1Hz --to 10MHz --plots --out-dir D
+                                                  # signal paths' Bode sweeps alone (simulate.bode_paths, no field
+                                                  # solve): gain, -3 dB, poles/zeros; --json, --plots
 .venv/Scripts/groundtruth history BOARD [--compare 1 [2]]   # the runs kept in <board folder>/groundtruth/history/
                                                   # (every plugin Simulate; CLI: simulate --history)
 .venv/Scripts/groundtruth detect BOARD --settings X --write   # nets AND power stages (converters), unreviewed

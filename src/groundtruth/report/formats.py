@@ -382,9 +382,12 @@ def response_lines(r) -> list[str]:
         """'2.74 MHz, 401 MHz Q 740' (the first six)."""
         text = ", ".join(fmt_root(x) for x in rows[:6])
         return text + (" …" if len(rows) > 6 else "") if rows else "none"
+    from ..analysis.transfer import gain_figures, gain_text
     how = "exact" if r.exact else (f"fitted, max error {r.fit_error_db:.2f} dB" if r.fit_error_db is not None
                                    else "no fit")
-    return [f"    {r.name}: poles {roots(pz_rows(r.poles))}; zeros {roots(pz_rows(r.zeros))} ({how})"]
+    g = gain_figures(r)
+    return ([f"    {r.name}: gain {gain_text(g)}"] if g is not None else []) + \
+        [f"    {r.name}: poles {roots(pz_rows(r.poles))}; zeros {roots(pz_rows(r.zeros))} ({how})"]
 
 
 def si_text(si) -> list[str]:

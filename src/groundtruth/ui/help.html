@@ -208,6 +208,20 @@ in the schematic: see <a href="#siglabels">Labelling a signal path</a>.</p>
   <a href="#labels">labels</a>) are written into the open schematic where KiCad allows it. That needs
   KiCad 11 (<a href="#kicad11">see the note</a>): on KiCad 10 they are shown in a message to add by hand (Symbol
   Fields Table, a GT column; Ctrl+C copies the message). The path works in Simulate right away either way. Selected nets no part joins are added one by one.</li>
+<li><b>Bode</b> sweeps the selected paths (every ticked one when none is selected) with a sine, from
+  <b>Sweep from</b> to <b>Sweep to</b> on <b>Sweep points</b> log-spaced frequencies (empty: a hundredth of the
+  frequency to the top of its harmonics' band, 300 points; Update selected keeps them in the settings as
+  <code>sweep_from</code>, <code>sweep_to</code>, <code>sweep_points</code>). It solves the path's circuit as
+  Simulate does (the driver's source, each stretch of track as a line with its copper and dielectric loss, series
+  parts, the parts across it to ground, op-amp stages with their gain, bandwidth and output impedance, the
+  receivers' load), without the plane models: seconds. The Results tab gets one <b>Bode / poles and zeros</b> view
+  per path (replacing its earlier one): the receiver's voltage per volt of the driver as magnitude and phase, the
+  poles and zeros, and the tiles: <b>gain</b> (at the sweep's start: the DC gain when it starts low enough, e.g.
+  1 Hz for a sensor or ADC input; its −3 dB frequency, the bandwidth; a peak above it), then the dominant poles.
+  An op-amp's <b>Zout</b> field is its open-loop output impedance: below the stage's bandwidth the feedback divides
+  it down (a TLV6001's 2.3 kΩ is about 1 Ω at 400 Hz in a follower). The command line has
+  <code>groundtruth bode</code> (<code>--from</code>, <code>--to</code>, <code>--points</code>, <code>--json</code>,
+  <code>--plots</code>).</li>
 <li><b>Add KiCad selection</b> (or KiCad's toolbar button <b>Add selected net to GroundTruth</b>) adds the net
   of the track, via or pad selected in the PCB editor (click or right-click it there first), as an unreviewed
   suggestion with its driver and receivers from the pin types; the status line says what was added, and asks for
@@ -686,7 +700,8 @@ their state for next time. How vias and parts are marked is set in <a href="#pre
   (peak current, voltage, COT, internal), Vref, EA gm (or EA Gain / EA GBW), Vsense Max and ITH Range (or Current
   Sense Gain), Slope Compensation, Ramp (voltage mode): see <a href="#fields">Part parameters from the
   schematic</a>. Once a controller has a loop field, a field still missing is named in the stage's notes.</li>
-<li><b>Bode / poles and zeros</b> views (one per signal path, power stage and PDN rail, after the maps): the
+<li><b>Bode / poles and zeros</b> views (one per signal path, power stage and PDN rail, after the maps; a
+  signal path's also from the Signal paths tab's <b>Bode</b>, without a Simulate): the
   frequency response's magnitude and phase on top (× poles and ○ zeros marked at their frequencies), the poles and
   zeros in the s-plane below (in Hz, on symmetric log axes; the dominant ones labelled with their frequency and Q).
   A signal path: the voltage at the receivers per volt of the driver, through its lines, parts, filters and op-amp

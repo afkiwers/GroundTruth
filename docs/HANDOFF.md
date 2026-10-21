@@ -1,12 +1,44 @@
 # GroundTruth handover
 
-## Current state (2026-10-21, `pin-shares`, `electrothermal`, `density-pcb`, `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-21, branch `bode-sweep` open; `pin-shares`, `electrothermal`, `density-pcb`, `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `bode-sweep` (2026-10-21, from `main` dc810f5; OPEN, committed, not merged):** the user, with the Signal
+  paths tab: "could we add a frequency sweep of a sinusoidal signal to retrieve amplitude and phase plots as well as
+  pole zero plots?" Simulate already made Bode / poles and zeros views per path, but only over the signal's band
+  (a hundredth of f to the band's top). The user chose "#3":
+  - a sweep range per net: `sweep_from`, `sweep_to` (from 10 mHz), `sweep_points` (20-5000; settings, the Signal
+    paths form's Sweep from / to / points; `simulate.sweep_range`, default as before);
+  - a sweep alone, no field solve: `simulate.bode_paths` (route per receiver, the path's circuit without plane
+    models: `_source_load`, `_signal_harmonics`, `_amp_circuit` split out of `_amplified_route`), the Signal paths
+    tab's **Bode** (MainFrame.on_bode: selected paths, else the ticked; replaces their Bode views), and
+    `groundtruth bode BOARD [--nets] [--from --to --points] [--json] [--plots]`;
+  - the gain figures (`transfer.gain_figures` / `gain_text`: gain at the sweep's start, −3 dB by (|H_low|/|H|)²
+    linear in f², peaking): the Bode view's first tile "gain", the console and HTML reports, the JSON's "gain".
+  - Two model fixes the sweeps down to 1 Hz exposed on kraft's ADC paths (`flux-2` with the user's own settings,
+    read only): **the line** was the low-loss one (Z0 real, α = R'/2Z0): at 1 Hz an open 86 mm track looked like
+    ~10 kΩ to ground, the path −4.6 dB at DC; now the full telegrapher line (`PathLine.rlgc` / `zc` / `gamma_l`, A36
+    updated). **The op-amp's `Zout`** was flat; the user's TLV6001 field (2.3 kΩ) is the datasheet's open-loop R_O:
+    now divided by the loop, z_out·jf/(jf + f_c) (`ComponentModel.amp_z_out_at`, `PathSource.z`) [Franco 2015].
+    Kraft's /CPU/ADC_I_RAIL_1 and _2 (U302/U304 → R304 → TLV6001 follower → R303 4k7 / C304 75 nF at bias → ADC):
+    0.998× at 1 Hz, −3 dB at 451 Hz (= 1/(2π·4.7 kΩ·75 nF)), the follower's pole near 0.7 MHz, C304's ESL notch at
+    26 MHz. Before both fixes: −4.6 dB, 512 Hz.
+  - Tests: tests/test_bode.py (9: RC low-pass vs its closed form and no plane model built; an op-amp stage at
+    GBW/gain; Simulate's responses = bode_paths' to 1e-9; the default range; gain_figures; settings; the CLI; the
+    open lossy line = its capacitance at 1 Hz and the low-loss α at 100 MHz; the follower's Zout), test_gui
+    `test_the_bode_button_sweeps_the_selected_path_over_its_own_range`; `boardgen.rc_lowpass_board`. Full suite:
+    1067 passed, 1 skipped, 1 failed (`test_the_heatmap_tab_scrolls_through_full_width_plots`, a GUI timing check,
+    0.165 s / 0.1 under load: passes alone).
+  - The user then asked whether the op-amp's circuit (its feedback, an active filter) is simulated: no, the op-amp
+    is a gain block from its fields. **Planned next: [ANALOG_AC.md](ANALOG_AC.md)** (modified nodal analysis per
+    stage from the board's netlist, op-amp from IN+ / IN− / OUT, exact poles and zeros; three questions to the
+    user in it, unanswered).
+  - Also asked on the way: the green bar in a route's "return along the route" side view is a via / part carrying
+    the return between layers, with its share (plots.draw_section's CARRIER).
 - **Branch `pin-shares` (2026-10-21, from `main` 12b7d18; into `main` at the user's "merge", before its kraft
   before / after finished):** the user, of the busiest via beside Q304's pin 2: "why it that via carring the most
   load?", then "do it" (the offered fix). A part's current was shared over its pads by each pad primitive's size:

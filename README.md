@@ -249,7 +249,7 @@ A part's parameters can come from its symbol's fields instead of being typed in:
 | `Capacitance`, `Inductance`, `Resistance` | C, L, R | the model's C, L, R (else the Value field) | F, H, Ω | `10uF` |
 | `Gain` | op-amp stage | the amplifier's gain (a Gain field makes the part an amplifier); `20dB` = 10 | V/V | `10`, `-2`, `20dB` |
 | `GBW`, `Bandwidth` | op-amp | the gain's roll-off: one pole at Bandwidth, else at GBW / \|gain\| | MHz | `10MHz` |
-| `Zout`, `Cin`, `Rin` | op-amp | output impedance (source of the output side), input C and R (load of the input side) | Ω, pF, Ω | `1ohm`, `3pF` |
+| `Zout`, `Cin`, `Rin` | op-amp | the open-loop output impedance (the datasheet's R_O / Z_O; with GBW or Bandwidth the stage's output is Zout·jf/(jf + f_c), divided by the loop below its bandwidth f_c; without, Zout as given; none: 1 Ω), input C and R (load of the input side) | Ω, pF, Ω | `2.3kohm`, `3pF` |
 | `Slew Rate` | op-amp | caps each output harmonic at SR / 2πf | V/µs | `20V/us` |
 | `CMRR` | op-amp | shown only: the path model is single-ended | dB | `90dB` |
 
@@ -311,6 +311,7 @@ A `nets:` entry:
 | `driver_ohms`, `load_pf` | `analysis` | Driver output resistance, input capacitance per receiver. |
 | `driver_nh`, `driver_pf`, `fall_time` | none, none, `rise_time` | The source: its series inductance (nH), its output capacitance (pF), a falling edge of its own. |
 | `load_ohms` | none | A resistance at the receivers (a parallel termination). |
+| `sweep_from`, `sweep_to`, `sweep_points` | f/100, the band's top, 300 | The path's Bode sweep (`1Hz`, `10MHz`; from 10 mHz; 20 to 5000 points): Simulate and `groundtruth bode` / the Signal paths tab's **Bode** sweep the path's circuit over it. A sensor or ADC input wants `sweep_from: 1Hz`: the gain at the sweep's start is shown as the DC gain. |
 | `through` | | Parts the signal path may run through although they don't pass a signal by default (an AC-coupling capacitor, a resistor above 1 kΩ). The path from `driver` to the receivers runs through series parts into other nets, each part with its impedance. |
 | `driver_return`, `receiver_return` | | The return pin (`REF.PAD`). Default: the nearest reference-net pad of the same part, else of any part within 10 mm; without one the route gets `return_path_broken`. |
 | `source`, `reviewed`, `class` | `manual`, true | Set by detection: `auto`, unreviewed, and the signal class (information only). |
@@ -642,6 +643,9 @@ groundtruth suggest board.kicad_pcb --write      # propose, predict and verify f
 groundtruth compare board.kicad_pcb              # the board with and without the enabled what-if edits
 groundtruth simulate board.kicad_pcb --history   # also keep the run in groundtruth/history/
 groundtruth history board.kicad_pcb [--compare 1 [2]]   # the runs kept (1 = the newest), or two compared
+groundtruth bode board.kicad_pcb [--nets N ...] [--from 1Hz --to 10MHz --points 400] [--json] [--plots]
+                                  # the signal paths' Bode sweeps alone (seconds, no field solve): gain, -3 dB,
+                                  # poles and zeros; groundtruth-bode.json, a Bode and a pole-zero PNG per path
 ```
 
 Every command takes `--settings FILE` (default `groundtruth/<board>.groundtruth.yaml` next to the board); `groundtruth --version` prints the version.

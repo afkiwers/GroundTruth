@@ -15,6 +15,11 @@ shares (a pin's copper counted once, [A51]) are in `main`. Still open, with the 
 the three GUI timing tests passed alone; left: a new plugin package (the one in `out/dist`, 0.1.42214, has neither) once
 the user wants it.
 
+Branch `bode-sweep` (the signal paths' Bode sweeps alone, a sweep range per net, the gain and −3 dB tiles, the full
+telegrapher line, the op-amp's closed-loop output impedance): see its HANDOFF entry. **Planned next, awaiting the
+user's answers to its three questions:** small-signal AC analysis of analog stages (op-amp feedback networks, active
+filters) by modified nodal analysis: [ANALOG_AC.md](ANALOG_AC.md).
+
 ## Done (2026-10-20): audit round 6
 
 The numerical audit (stopping tests, convergence against independent references, adversarial copper, metamorphic

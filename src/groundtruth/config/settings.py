@@ -94,6 +94,15 @@ class NetSpec:
     reviewed: bool = True                 # auto suggestions start unreviewed
     signal_class: str = ""                # e.g. "SPI clock" (informational)
     enabled: bool = True                  # off: kept with its values, left out of checks and Simulate (Config.active)
+    # the Bode sweep of the path's circuit (analysis/simulate.path_responses): from / to (Hz) and its points; unset:
+    # a hundredth of the signal's frequency to the top of its harmonics' band, SWEEP_POINTS
+    sweep_from: Optional[float] = None
+    sweep_to: Optional[float] = None
+    sweep_points: Optional[int] = None
+
+
+SWEEP_MIN_HZ = 0.01                       # the lowest frequency a Bode sweep may start at (near DC, never 0: log axis)
+SWEEP_POINTS = (20, 5000)                 # the fewest and most points a sweep may have
 
 
 @dataclass
@@ -1052,6 +1061,14 @@ def net_problems(spec: NetSpec) -> list[str]:
             out.append(f"{key} must not be negative")
     if spec.load_ohms is not None and not spec.load_ohms > 0:
         out.append("load_ohms must be above 0 Ω (leave it out for no termination)")
+    for key in ("sweep_from", "sweep_to"):
+        v = getattr(spec, key)
+        if v is not None and not v >= SWEEP_MIN_HZ:
+            out.append(f"{key} must be at least {SWEEP_MIN_HZ:g} Hz (a log sweep cannot start at 0)")
+    if spec.sweep_from is not None and spec.sweep_to is not None and not spec.sweep_to > spec.sweep_from:
+        out.append("sweep_to must be above sweep_from")
+    if spec.sweep_points is not None and not SWEEP_POINTS[0] <= spec.sweep_points <= SWEEP_POINTS[1]:
+        out.append(f"sweep_points must be {SWEEP_POINTS[0]} to {SWEEP_POINTS[1]}")
     return out
 
 
@@ -1284,6 +1301,11 @@ def config_from_data(data: Any) -> Config:
                 driver_nh=None if n.get("driver_nh") is None else _num(n.get("driver_nh"), f"{where}.driver_nh", "nH"),
                 driver_pf=None if n.get("driver_pf") is None else _num(n.get("driver_pf"), f"{where}.driver_pf", "pF"),
                 load_ohms=None if n.get("load_ohms") is None else _num(n.get("load_ohms"), f"{where}.load_ohms", "ohm"),
+                sweep_from=None if n.get("sweep_from") is None else _num(n.get("sweep_from"), f"{where}.sweep_from",
+                                                                         "Hz"),
+                sweep_to=None if n.get("sweep_to") is None else _num(n.get("sweep_to"), f"{where}.sweep_to", "Hz"),
+                sweep_points=None if n.get("sweep_points") is None else int(_num(n.get("sweep_points"),
+                                                                                 f"{where}.sweep_points")),
                 through=[str(x) for x in ([n["through"]] if isinstance(n.get("through"), str)
                                           else (n.get("through") or []))],
                 driver_return=n.get("driver_return"), receiver_return=n.get("receiver_return"),
@@ -1766,6 +1788,11 @@ class SettingsFile:
                     d[key] = getattr(n, key)
             if n.fall_time is not None:
                 d["fall_time"] = format_si(n.fall_time, "s")
+            for key in ("sweep_from", "sweep_to"):            # the Bode sweep, with its unit ("1Hz", "10MHz")
+                if getattr(n, key) is not None:
+                    d[key] = format_si(getattr(n, key), "Hz")
+            if n.sweep_points is not None:
+                d["sweep_points"] = n.sweep_points
             if n.through:
                 d["through"] = list(n.through)
             for key in ("driver_return", "receiver_return"):

@@ -414,6 +414,67 @@ def _keep_run(args, board, sc, cfg, issues, routes, converters, bridges, thermal
         print(f"history: kept as {run.folder}", file=sys.stderr)
 
 
+def cmd_bode(args) -> int:
+    """`groundtruth bode`: the signal paths' Bode sweeps alone (analysis/simulate.bode_paths: each path's circuit
+    with a sine from its sweep_from to sweep_to, no field solve): per path and receiver the gain at the sweep's low
+    end, the −3 dB frequency, the poles and zeros; --json writes groundtruth-bode.json, --plots a Bode and a
+    pole-zero PNG per path into --out-dir. --from / --to / --points override the nets' sweep settings."""
+    import json
+    from dataclasses import replace
+    from .analysis.simulate import bode_paths
+    from .analysis.transfer import bode_views
+    from .components.values import parse_value
+    from .report.formats import response_lines
+    board = _load(args.board, False)
+    cfg = _settings(board, args.board, args.settings).config
+    names = [n.name for n in cfg.nets]
+    unknown = [n for n in (args.nets or ()) if n not in names]
+    if unknown:
+        raise CliError(f"not a signal path in the settings: {', '.join(unknown)} (paths: {', '.join(names)})")
+    over = {}
+    for key, text in (("sweep_from", args.sweep_from), ("sweep_to", args.sweep_to)):
+        if text is not None:
+            v = parse_value(text[:-2] if text.lower().endswith("hz") else text)
+            if not v or v <= 0:
+                raise CliError(f"--{key.split('_')[1]} {text!r} is not a frequency (e.g. 1Hz, 10MHz)")
+            over[key] = v
+    if args.points is not None:
+        over["sweep_points"] = args.points
+    if over:
+        cfg = replace(cfg, nets=[replace(n, **over) for n in cfg.nets])
+    results = bode_paths(board, cfg, args.nets)
+    for r in results:
+        print(f"{r.net} ({r.driver} → {r.receiver})" + (f": {r.error}" if r.error else ""))
+        for resp in r.responses:
+            for line in response_lines(resp):
+                print(line)
+        for n in r.notes:
+            print(f"    note: {n}")
+    out = Path(args.out_dir)
+    if args.json or args.plots:
+        out.mkdir(parents=True, exist_ok=True)
+    if args.json:
+        data = [{"net": r.net, "driver": r.driver, "receiver": r.receiver, "error": r.error, "notes": r.notes,
+                 "responses": [resp.summary(points=len(resp.f)) for resp in r.responses]}
+                for r in results]
+        (out / "groundtruth-bode.json").write_text(json.dumps(data, indent=1), encoding="utf-8")
+        print(f"wrote {out / 'groundtruth-bode.json'}")
+    if args.plots:
+        from types import SimpleNamespace
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
+        from .report.plots import draw_bode, draw_pz
+        for v in bode_views(SimpleNamespace(routes=[r for r in results if not r.error], converters=[], pdn=[])):
+            stem = "".join(c if c.isalnum() or c in "-_" else "_" for c in v.owner).strip("_")
+            for what, draw, size in (("bode", draw_bode, (9.5, 5.0)), ("pz", draw_pz, (9.5, 4.0))):
+                fig = Figure(figsize=size, dpi=110)
+                FigureCanvasAgg(fig)
+                draw(fig, v)
+                fig.savefig(out / f"{stem}_{what}.png")
+                print(f"wrote {out / f'{stem}_{what}.png'}")
+    return EXIT_OK if all(not r.error for r in results) else EXIT_CONFIG
+
+
 def cmd_history(args) -> int:
     """The runs kept for a board (simulate --history, and every Simulate in the plugin), or two compared."""
     import json
@@ -708,6 +769,20 @@ def build_parser() -> argparse.ArgumentParser:
         else:
             sp.set_defaults(history=False)
         sp.set_defaults(func=(lambda a, s=sim: _run(a, s)))
+
+    sp = sub.add_parser("bode", help="the signal paths' frequency sweeps alone (no field solve): gain, -3 dB "
+                                      "frequency, poles and zeros per path; --plots / --json write them")
+    board_args(sp)
+    sp.add_argument("--nets", nargs="+", help="only these signal paths (names as in the settings)")
+    sp.add_argument("--from", dest="sweep_from", metavar="F", help="sweep start for every path, e.g. 1Hz "
+                                                                    "(default: each net's sweep_from, else f/100)")
+    sp.add_argument("--to", dest="sweep_to", metavar="F", help="sweep end, e.g. 10MHz (default: each net's "
+                                                                "sweep_to, else the top of its band)")
+    sp.add_argument("--points", type=int, help="log-spaced frequencies (default: each net's sweep_points, else 300)")
+    sp.add_argument("--json", action="store_true", help="write groundtruth-bode.json into --out-dir")
+    sp.add_argument("--plots", action="store_true", help="write a Bode and a pole-zero PNG per path into --out-dir")
+    sp.add_argument("--out-dir", default=".", help="directory for --json and --plots (default: .)")
+    sp.set_defaults(func=cmd_bode)
 
     sp = sub.add_parser("history", help="list the runs kept for a board (simulate --history, the plugin's "
                                         "Simulate), or compare two")

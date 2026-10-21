@@ -65,10 +65,11 @@ class Response:
         return np.degrees(np.unwrap(np.angle(self.h)))
 
     def summary(self, points: int = 200) -> dict:
-        """Plain data for the JSON report: the curve decimated to `points`, the poles and zeros as rows."""
+        """Plain data for the JSON report: the curve decimated to `points`, the poles and zeros as rows, a gain's
+        figures (gain_figures: low-end gain, −3 dB frequency, peaking; None for an impedance or loop gain)."""
         k = np.unique(np.linspace(0, len(self.f) - 1, min(points, len(self.f))).astype(int)) if len(self.f) else []
         return {"name": self.name, "owner": self.owner, "quantity": self.quantity, "exact": self.exact,
-                "fit_error_db": self.fit_error_db, "notes": list(self.notes),
+                "fit_error_db": self.fit_error_db, "notes": list(self.notes), "gain": gain_figures(self),
                 "poles": pz_rows(self.poles), "zeros": pz_rows(self.zeros),
                 "f": [float(self.f[i]) for i in k], "magnitude": [float(self.magnitude()[i]) for i in k],
                 "phase_deg": [float(self.phase_deg()[i]) for i in k]}
@@ -87,6 +88,45 @@ def pz_rows(roots) -> list[dict]:
         q = None if real or s.real == 0 else w / (-2 * s.real)
         rows.append({"f0": w / (2 * math.pi), "q": q, "re": s.real, "im": s.imag})
     return sorted(rows, key=lambda r: r["f0"])
+
+
+PEAKING_DB = 0.5               # a gain this far above its low-frequency value is reported as peaking
+
+
+def gain_figures(r) -> Optional[dict]:
+    """A gain's (a voltage gain's or current ratio's) figures from its sweep: the gain at its lowest frequency (dB and
+    as a ratio: the DC gain when the sweep starts low enough), the first frequency where it has fallen 3 dB below that
+    (interpolated in log f between the two samples around it; None when it never does in the sweep), and its highest
+    value above the low one by PEAKING_DB or more (a resonance: dB, Hz). None for an impedance or a loop gain, or a
+    sweep of fewer than two points. The −3 dB point lies between two samples: (|H_low| / |H|)² is interpolated
+    linearly in f² to 2 (half the power), exact for a single pole, 1 + (f/f_c)² [Franco 2015]."""
+    if r.quantity not in ("voltage gain", "current ratio") or len(r.f) < 2:
+        return None
+    m = r.magnitude()
+    ref = float(m[0])
+    out = {"low_db": ref, "low_ratio": float(abs(r.h[0])), "low_f": float(r.f[0]), "f_3db": None,
+           "peak_db": None, "peak_f": None}
+    below = np.nonzero(m < ref - 3.0103)[0]          # 10·log10(2): half the power
+    if len(below) and below[0] > 0:
+        k = int(below[0])
+        a0, a1 = float(abs(r.h[k - 1])), float(abs(r.h[k]))
+        y0, y1 = (out["low_ratio"] / a0) ** 2, (out["low_ratio"] / a1) ** 2
+        u0, u1 = float(r.f[k - 1]) ** 2, float(r.f[k]) ** 2
+        t = (2.0 - y0) / (y1 - y0) if y1 != y0 else 0.0
+        out["f_3db"] = math.sqrt(u0 + min(max(t, 0.0), 1.0) * (u1 - u0))
+    k = int(np.argmax(m))
+    if m[k] >= ref + PEAKING_DB:
+        out["peak_db"], out["peak_f"] = float(m[k] - ref), float(r.f[k])
+    return out
+
+
+def gain_text(g: dict) -> str:
+    """gain_figures as one line: '−0.01 dB (0.999×) at 1 Hz, −3 dB at 15.5 kHz, peaking +2.1 dB at 1.2 MHz'."""
+    text = f"{g['low_db']:+.2f} dB ({g['low_ratio']:.3g}×) at {fmt_hz(g['low_f'])}"
+    text += f", −3 dB at {fmt_hz(g['f_3db'])}" if g["f_3db"] else ", no −3 dB point in the sweep"
+    if g["peak_db"]:
+        text += f", peaking +{g['peak_db']:.1f} dB at {fmt_hz(g['peak_f'])}"
+    return text
 
 
 def fmt_hz(f: float) -> str:

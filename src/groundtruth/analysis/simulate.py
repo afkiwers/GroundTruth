@@ -1062,23 +1062,20 @@ def _stage_routes(route: Route, config: Config) -> Optional[list[list]]:
     return out
 
 
-def _amplified_route(model: "BoardModel", setup: RouteSetup, freqs, amps, source, load, cavity,
-                     main_ref: str) -> bool:
-    """A signal path through op-amp stages (part model `amplifier`): False when the route has none. The path is cut
-    at each op-amp into stages: the driver (or the op-amp before) drives the stage, its receivers' end is the next
-    op-amp's input (loaded by its input impedance) or the receivers. Each stage's current returns to the pin its
-    source returns to: the driver's return pin, or the op-amp's ground pin (its nearest reference-net pin). So every
-    stage is a current loop of its own (its shunts too), solved on the fine and board-wide models; the main loop
-    is the last stage's (the op-amp to the receivers: the maps, loop inductance and ideal comparison refer to it).
-    Loop weights are per volt of the source, and setup.currents the source's harmonics (× a slew cap)."""
+def _amp_circuit(model: "BoardModel", route: Route, main_ref: str, notes: list) -> Optional[tuple]:
+    """The circuit of a signal path through op-amp stages (part model `amplifier`), without plane models: (stages
+    [Route per stage], amps [PathAmp], their ground pins [Pad], elements per stage, shunts per stage, report rows).
+    None when the route has no op-amp, or one whose input, output or ground pin can't be told (a note says so: the
+    path is then one stage). The path is cut at each op-amp: the driver (or the op-amp before) drives the stage, its
+    receivers' end is the next op-amp's input (loaded by its input impedance) or the receivers."""
     from ..components.models import amplifier_pins
-    board, config, res, route = model.board, model.config, setup.res, setup.route
+    board, config = model.board, model.config
     raw = _stage_routes(route, config)
     if raw is None:
-        return False
-    stages, pamps, rows, returns = [], [], [], [setup.drv_ret]
+        return None
+    stages, pamps, rows, grounds = [], [], [], []
     drv = route.driver
-    for k, (steps, ref, m, inside) in enumerate(raw):
+    for steps, ref, m, inside in raw:
         if ref is None:
             rcv = route.receiver
         else:
@@ -1086,18 +1083,17 @@ def _amplified_route(model: "BoardModel", setup: RouteSetup, freqs, amps, source
             pads = amplifier_pins(fp, m) if fp is not None else None
             ret = return_pad(board, config, pads[0], None) if pads else None
             if pads is None or ret is None:
-                res.notes.append(f"op-amp {ref}: its input, output or ground pin can't be told: the path is "
-                                 "treated as one stage")
-                return False
+                notes.append(f"op-amp {ref}: its input, output or ground pin can't be told: the path is treated as "
+                             "one stage")
+                return None
             rcv = pads[0]
         nets = {sg.net for sg in steps if isinstance(sg, RouteSegment) and sg.net} | {drv.net, rcv.net}
         sr = Route(route.net, drv, rcv, steps, nets, inside)
         stages.append(sr)
         if ref is not None:
-            returns.append(ret)
-            pamps.append(PathAmp(ref, m.amp_gain, m.amp_z_in, m.amp_z_out(), m.params.get("slew")))
+            grounds.append(ret)
+            pamps.append(PathAmp(ref, m.amp_gain, m.amp_z_in, m.amp_z_out_at, m.params.get("slew")))
             drv = pads[1]
-    returns.append(setup.rcv_ret)
     # the circuit of each stage, its shunts, its rows for the report
     els, shunt_sets = [], []
     for k, sr in enumerate(stages):
@@ -1108,6 +1104,32 @@ def _amplified_route(model: "BoardModel", setup: RouteSetup, freqs, amps, source
         rows += r
         if k < len(pamps):
             rows.append({"kind": "amp", "ref": pamps[k].name, "model": "amplifier", "length_mm": 0.0})
+    return stages, pamps, grounds, els, shunt_sets, rows
+
+
+def _amp_response(els: list, pamps: list, source, load) -> tuple[Callable, list]:
+    """(response_fn, amp_gains) of an op-amp path's circuit: v_receiver / v_source at any frequencies (the amps
+    without their slew limit: a small-signal sweep), and each amp's own gain."""
+    linear = [PathAmp(a.name, a.gain, a.z_in, a.z_out) for a in pamps]
+    response = lambda fs: amplified_path(fs, np.ones(len(fs)), els, linear, source, load)[-1].v_end   # noqa: E731
+    gains = [(a.name, lambda fs, g=a.gain: np.array([complex(g(float(x))) for x in fs])) for a in pamps]
+    return response, gains
+
+
+def _amplified_route(model: "BoardModel", setup: RouteSetup, freqs, amps, source, load, cavity,
+                     main_ref: str) -> bool:
+    """A signal path through op-amp stages (_amp_circuit): False when the route has none. Each stage's current
+    returns to the pin its source returns to: the driver's return pin, or the op-amp's ground pin (its nearest
+    reference-net pin). So every stage is a current loop of its own (its shunts too), solved on the fine and
+    board-wide models; the main loop is the last stage's (the op-amp to the receivers: the maps, loop inductance and
+    ideal comparison refer to it). Loop weights are per volt of the source, and setup.currents the source's
+    harmonics (× a slew cap)."""
+    res = setup.res
+    got = _amp_circuit(model, setup.route, main_ref, res.notes)
+    if got is None:
+        return False
+    stages, pamps, grounds, els, shunt_sets, rows = got
+    returns = [setup.drv_ret, *grounds, setup.rcv_ret]
     results = amplified_path(freqs, amps, els, pamps, source, load)
     unclamped = amplified_path(freqs, amps, els, [PathAmp(a.name, a.gain, a.z_in, a.z_out) for a in pamps],
                                source, load) if any(a.slew for a in pamps) else results
@@ -1167,9 +1189,7 @@ def _amplified_route(model: "BoardModel", setup: RouteSetup, freqs, amps, source
     setup.currents = np.abs(np.asarray(amps, float)) * clamp
     merged = _merge_results(results, pamps)
     setup.path = (rows, merged)
-    linear = [PathAmp(a.name, a.gain, a.z_in, a.z_out) for a in pamps]
-    setup.response_fn = lambda fs: amplified_path(fs, np.ones(len(fs)), els, linear, source, load)[-1].v_end
-    setup.amp_gains = [(a.name, lambda fs, g=a.gain: np.array([complex(g(float(x))) for x in fs])) for a in pamps]
+    setup.response_fn, setup.amp_gains = _amp_response(els, pamps, source, load)
     res.notes.append(f"signal path through op-amp(s) {', '.join(a.name for a in pamps)}: {len(stages)} stages, "
                      f"{len(loops)} current loop(s); the maps and loop inductance show the last stage's loop "
                      "(the op-amp to the receivers)")
@@ -1190,16 +1210,30 @@ def _merge_results(results: list, pamps: list):
                            i_mean=results[-1].i_mean, v_end=results[-1].v_end)
 
 
-PATH_SWEEP = 300               # frequencies of a signal path's Bode sweep
+PATH_SWEEP = 300               # frequencies of a signal path's Bode sweep (unless the net sets sweep_points)
+
+
+def sweep_range(spec: NetSpec, harmonics) -> np.ndarray:
+    """The Bode sweep's frequencies: log-spaced from the net's sweep_from to its sweep_to with sweep_points; each
+    unset one as before: a hundredth of the first harmonic (at least 1 Hz), the top of the harmonics' band (at
+    least ten times the first), PATH_SWEEP points. A from above the to (one set, the other the default) is moved a
+    decade below it."""
+    fs = np.asarray(harmonics, float)
+    lo = getattr(spec, "sweep_from", None) or max(fs.min() / 100, 1.0)
+    hi = getattr(spec, "sweep_to", None) or max(fs.max(), fs.min() * 10)
+    if lo >= hi:
+        lo = hi / 10 if getattr(spec, "sweep_to", None) else lo
+        hi = max(hi, lo * 10)
+    return np.geomspace(lo, hi, getattr(spec, "sweep_points", None) or PATH_SWEEP)
 
 
 def path_responses(setup, net: str) -> list:
     """The signal path's Bode responses (analysis/transfer.py): v_receiver / v_source of its circuit (source, lines,
-    series parts, shunts, op-amp stages without their slew limit, the receivers' load) from a hundredth of its first
-    harmonic to the top of its band, with poles and zeros by vector fitting; each op-amp stage's gain too."""
+    series parts, shunts, op-amp stages without their slew limit, the receivers' load) over the net's sweep
+    (sweep_range: by default a hundredth of its first harmonic to the top of its band), with poles and zeros by
+    vector fitting; each op-amp stage's gain too."""
     from .transfer import fitted_response
-    fs = np.asarray(setup.harmonics, float)
-    f = np.geomspace(max(fs.min() / 100, 1.0), max(fs.max(), fs.min() * 10), PATH_SWEEP)
+    f = sweep_range(setup.spec, setup.harmonics)
     out = []
     try:
         out.append(fitted_response(f"{net}: receiver / source", net, "voltage gain", f, setup.response_fn(f)))
@@ -1263,6 +1297,74 @@ def _inject(model: BoardModel, st: StackBuild, pad: Pad, notes: Optional[list] =
                              f"the {st.grids[n[0]].net_at(n[1:])} plane on {l}")
             return n
     return None
+
+
+def _signal_harmonics(config: Config, spec: NetSpec) -> tuple[np.ndarray, np.ndarray, tuple]:
+    """The signal's trapezoid harmonics up to the top of its analysis band: (frequencies, amplitudes, the band)."""
+    edge = min(spec.rise_time, spec.fall_time or spec.rise_time)
+    top, band = band_top(config, analysis_band(spec.freq, edge))
+    freqs, amps = trapezoid_harmonics(spec.freq, spec.rise_time, spec.amplitude_v, spec.duty, top, spec.fall_time)
+    return freqs, amps, band
+
+
+def _source_load(config: Config, spec: NetSpec) -> tuple[PathSource, PathLoad]:
+    """The path's Thevenin source (R + jωL, an output capacitance) and its receivers' load (their capacitance in
+    parallel, a termination), each from the net's settings or the analysis defaults."""
+    a = config.analysis
+    source = PathSource(spec.driver_ohms if spec.driver_ohms is not None else a.driver_ohms,
+                        (spec.driver_nh or 0.0) * 1e-9, (spec.driver_pf or 0.0) * 1e-12)
+    load = PathLoad((spec.load_pf if spec.load_pf is not None else a.load_pf) * 1e-12 * max(len(spec.receivers), 1),
+                    spec.load_ohms)
+    return source, load
+
+
+def bode_paths(board: Board, config: Config, nets: Optional[list[str]] = None,
+               progress: Optional[Progress] = None) -> list[RouteResult]:
+    """The signal paths' Bode sweeps alone (Signal paths tab "Bode", `groundtruth bode`): per path and receiver
+    its circuit (source, lines with their cross-sections' Z0, series parts, shunts, op-amp stages, the receivers'
+    load: what Simulate solves the path with) swept over the net's sweep range and fitted for poles and zeros
+    (path_responses), without the plane models or the field solve: seconds, not minutes. A RouteResult per path
+    and receiver with `responses` (bode_views shows them), or `error` when its route or circuit can't be made.
+    nets: these paths only (switched off ones too, when named); else every enabled path. `progress` is called
+    between paths (the window's raises to cancel)."""
+    from types import SimpleNamespace
+    from .route import RouteError, find_route
+    active = config.active(nets)
+    specs = [s for s in active.nets if not nets or s.name in nets]
+    model = BoardModel(board, active)
+    jobs = [(s, rx) for s in specs for rx in s.receivers]
+    out = []
+    for k, (spec, rx) in enumerate(jobs):
+        if progress is not None:
+            progress(f"Bode: {spec.name} → {rx}", k / max(len(jobs), 1))
+        res = RouteResult(spec.name, spec.driver, rx)
+        out.append(res)
+        try:
+            route = find_route(board, active, spec.name, spec.driver, rx, spec.through)
+        except RouteError as e:
+            res.error = f"no route: {e}"
+            continue
+        _, main_ref, _ = _route_references(board, route)
+        if not main_ref:
+            res.error = "no reference layer next to the route (the lines' impedance needs one)"
+            continue
+        source, load = _source_load(active, spec)
+        notes: list[str] = []
+        got = _amp_circuit(model, route, main_ref, notes)
+        if got is not None:
+            _, pamps, _, els, _, _ = got
+            response_fn, amp_gains = _amp_response(els, pamps, source, load)
+        else:
+            elements, _ = path_elements(board, active, route, main_ref, find_shunts(model, route), line_cache(model))
+            response_fn = lambda fs, e=elements: path_currents(fs, np.ones(len(fs)), e, source, load).v_end   # noqa
+            amp_gains = []
+        res.notes += notes
+        freqs, _, _ = _signal_harmonics(active, spec)
+        sweep = SimpleNamespace(spec=spec, harmonics=freqs, response_fn=response_fn, amp_gains=amp_gains, res=res)
+        res.responses = path_responses(sweep, spec.name)
+    if progress is not None:
+        progress("Bode: done", 1.0)
+    return out
 
 
 def prepare_route(model: BoardModel, spec: NetSpec, route: Route) -> tuple[Optional[RouteSetup], RouteResult,
@@ -1358,9 +1460,7 @@ def prepare_route(model: BoardModel, spec: NetSpec, route: Route) -> tuple[Optio
     res.dc_connected = exc.dc_connected
 
     f0 = spec.freq
-    edge = min(spec.rise_time, spec.fall_time or spec.rise_time)
-    top, res.band = band_top(config, analysis_band(f0, edge))
-    freqs, amps = trapezoid_harmonics(f0, spec.rise_time, spec.amplitude_v, spec.duty, top, spec.fall_time)
+    freqs, amps, res.band = _signal_harmonics(config, spec)
     setup = RouteSetup(spec, route, res, ModelRun(st, exc), cavity, drv_ret, rcv_ret, route_refs, main_ref, h_mm,
                        freqs, issues=issues, t_start=t_start)
     # Current on the line per harmonic: driver resistance (+ series parts), line Z0/εeff, receiver load
@@ -1378,10 +1478,7 @@ def prepare_route(model: BoardModel, spec: NetSpec, route: Route) -> tuple[Optio
     else:
         # the path: a Thevenin source, a line per stretch between series parts, each part's impedance at its
         # place, the receivers' load (emi/path.py). Before, one line with the resistors' R added to the source
-        source = PathSource(spec.driver_ohms if spec.driver_ohms is not None else a.driver_ohms,
-                            (spec.driver_nh or 0.0) * 1e-9, (spec.driver_pf or 0.0) * 1e-12)
-        load = PathLoad((spec.load_pf if spec.load_pf is not None else a.load_pf) * 1e-12 * max(len(spec.receivers), 1),
-                        spec.load_ohms)
+        source, load = _source_load(config, spec)
         if _amplified_route(model, setup, freqs, amps, source, load, cavity, main_ref):
             if res.error:
                 issue("return_path_broken", res.error, route.driver.position, key=f"amp:{route.receiver.pin}")

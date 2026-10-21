@@ -241,6 +241,26 @@ def series_path_board(shunt: Optional[tuple] = None) -> BoardGen:
     return g
 
 
+def rc_lowpass_board(r: str = "1k", c: str = "10n") -> BoardGen:
+    """An RC low-pass over a GND plane: U1.1 (SIG_A) → R1 (`r`) → SIG_B → U2.1, with C9 (`c`) from SIG_B to GND
+    2 mm above the path (a stub to its pad, a GND via at its other pad). With the source's R_s and the receiver's
+    C_L: H(s) = 1 / (1 + s·(R_s + R1)·(C9 + C_L)) where the 30 mm of track is short against the wavelength."""
+    g = BoardGen(layers=2, size=(40.0, 20.0))
+    y = 10.0
+    g.ic("U1", (5.0, y), "SIG_A", gnd_offset=(0.0, 1.0))
+    g.ic("U2", (35.0, y), "SIG_B", gnd_offset=(0.0, 1.0))
+    g.two_pin("R1", r, (15.0, y), "SIG_A", "SIG_B", kind="R")
+    g.track((5.0, y), (14.5, y), "SIG_A")
+    g.track((15.5, y), (35.0, y), "SIG_B")
+    g.two_pin("C9", c, (25.0, y + 2.0), "SIG_B", "GND", kind="C")
+    g.track((24.5, y), (24.5, y + 2.0), "SIG_B")
+    g.plane("GND", g.cu[-1])
+    for x, yy in ((5.0, y + 1.0), (35.0, y + 1.0), (25.5, y + 2.0)):
+        g.via((x, yy + 0.6), "GND", (g.cu[0], g.cu[-1]))
+        g.track((x, yy), (x, yy + 0.6), "GND")
+    return g
+
+
 def opamp_path_board(r_after: Optional[str] = None, **fields: str) -> BoardGen:
     """A signal path through an op-amp stage over a GND plane: U1.1 (SIG_A) → R1 33 Ω → SIG_B → U5 (+IN pin 3,
     OUT pin 1, GND pin 2 with a via to the plane) → SIG_C → U2.1. `fields`: U5's symbol fields as InvenTree would
