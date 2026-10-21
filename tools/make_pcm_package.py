@@ -157,7 +157,7 @@ def main() -> int:
         "identifier": IDENTIFIER,
         "type": "plugin",
         "author": {"name": "afkiwers & his good old mate claude", "contact": {"email": "iwers11@gmail.com"}},
-        "license": "MIT",
+        "license": "GPL-3.0",              # the LICENSE file (GNU GPL v3); the PCM schema's name for it
         "resources": {},
         "tags": ["emi", "return-path", "pcb", "simulation", "power", "thermal"],   # lowercase, dashes
         "versions": [{"version": version, "status": args.status, "kicad_version": "10.0", "runtime": "ipc"}],
