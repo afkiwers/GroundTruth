@@ -754,6 +754,7 @@ class RouteSetup:
     loop_weights: Optional[Callable] = None    # f array -> [complex weight per shunt loop ..., the receivers'
                                                # loop]: loop current / path mean current (band_moments)
     f_ref: float = 0.0                         # inductive reference frequency, max(f0, F_REF_MIN)
+    network: Optional["NetworkPath"] = None    # the path's whole circuit for its currents (NetworkPath), or None
 
     # the fine model (kept as attributes for callers that only need one model)
     @property
@@ -1020,7 +1021,8 @@ def _shunt_loops(model: "BoardModel", setup: RouteSetup, shunts: list[dict], ele
         """Each kept loop's current per ampere of the path's mean current at frequencies fs (complex): what
         band_moments weights the loops' moments with. A shunt too small for its own loop passes its current on
         to the next kept loop (carry)."""
-        q = path_currents(fs, np.ones(len(fs)), elements, source, load)
+        net = getattr(setup, "network", None)
+        q = net.results(fs, np.ones(len(fs)))[0] if net is not None else             path_currents(fs, np.ones(len(fs)), elements, source, load)
         lc = q.loop_currents()
         out, carry = [], 0
         for k in range(len(shunts)):
@@ -1060,6 +1062,171 @@ def _stage_routes(route: Route, config: Config) -> Optional[list[list]]:
         out.append((list(route.steps[start:i]), ref, m, inside))
         start = i + 1
     return out
+
+
+class NetworkPath:
+    """A signal path's currents for the emission estimate from its whole circuit (analysis/analog_net, emi/mna;
+    docs/ANALOG_AC.md step 4): per stage of the route (the whole route, or its pieces between op-amps) what the
+    cascade (emi/path.path_currents / amplified_path) gave, a PathResult with the same meaning: each group's (the
+    route between shunts) length-weighted mean current, each shunt's current, the share passing each shunt, the
+    current into the stage and the voltage at its end, the series parts' |Z|. From the circuit's solution, so an
+    op-amp's real closed-loop gain and output impedance (its feedback network), a filter's response and every
+    track's line drive the loops' currents; the loops themselves (their geometry and the field solves) are the
+    cascade's. A track's mean current is its line's exact one [Pozar 2012]: I(z) = I₁ cosh γz − (V₁/Zc) sinh γz
+    averaged over its length."""
+
+    def __init__(self, net, stages: list, shunt_sets: list, board: Board, config: Config):
+        """net: the path's AnalogNetwork (lines, not lumped); stages: the route's stage Routes in order; shunt_sets:
+        each stage's shunts (find_shunts)."""
+        self.net, self.stages, self.shunt_sets = net, stages, shunt_sets
+        self.board, self.config = board, config
+        nodes = net.circuit.nodes
+        self.ys = [(nodes.get(x["a"], -1), nodes.get(x["b"], -1), x, line_y_of(x["line"])) for x in net.lines]
+
+    def _node_v(self, x: np.ndarray, node: str) -> np.ndarray:
+        """A node's voltage at every frequency (ground: 0)."""
+        i = self.net.circuit.nodes.get(node, -1)
+        return x[:, i] if i >= 0 else np.zeros(len(x), complex)
+
+    def _pad_node(self, pad: Pad) -> str:
+        """The circuit node of a pad (the network's own map)."""
+        return self.net.node_of.get(f"{pad.footprint}.{pad.number}", self.net.circuit.ground)
+
+    def results(self, f, v_source) -> list:
+        """One PathResult per stage at frequencies f, scaled by the source's amplitude per frequency v_source."""
+        from ..emi.path import PathResult
+        f = np.asarray(f, float)
+        v_src = np.asarray(v_source, complex)
+        x = self.net.circuit.solve(f) * v_src[:, None]
+        # every line's mean current and its end currents, both directions
+        lines = []
+        for ia, ib, meta, yfun in self.ys:
+            va = x[:, ia] if ia >= 0 else np.zeros(len(f), complex)
+            vb = x[:, ib] if ib >= 0 else np.zeros(len(f), complex)
+            y = yfun(f)
+            line = meta["line"]
+            zc = line.zc(f)
+            gl = line.gamma_l(f)
+            g = np.where(np.abs(gl) > 1e-12, gl, 1e-12)
+            i_a = y[:, 0, 0] * va + y[:, 0, 1] * vb           # into the line at a (flowing a -> b)
+            i_b = y[:, 1, 0] * va + y[:, 1, 1] * vb           # into the line at b (flowing b -> a)
+            mean_ab = i_a * np.sinh(g) / g - (va / zc) * (np.cosh(g) - 1) / g
+            mean_ba = i_b * np.sinh(g) / g - (vb / zc) * (np.cosh(g) - 1) / g
+            lines.append({**meta, "i_a": i_a, "i_b": i_b, "mean_ab": mean_ab, "mean_ba": mean_ba})
+        out = []
+        for k, sr in enumerate(self.stages):
+            out.append(self._stage(sr, self.shunt_sets[k] if k < len(self.shunt_sets) else [], f, x, lines))
+        return out
+
+    def _stage(self, sr: Route, shunts: list, f: np.ndarray, x: np.ndarray, lines: list):
+        """A stage's PathResult from the circuit's solution x (see results)."""
+        from ..emi.path import PathResult
+        n = len(f)
+        pieces = []                                    # (segment index, place along it 0..1, length m, current)
+        parts = iter(sr.parts)
+        part_z = {}
+        last = np.zeros(n, complex)
+        for si, seg in enumerate(sr.segments):
+            if seg.kind == "part":
+                ref = next(parts, None)
+                got = self.net.part_nodes.get(ref) if ref else None
+                if got is not None:
+                    na, nb, m, pa, pb = got
+                    zf = np.array([complex(m.impedance(float(fk)) or 1e12) for fk in f])
+                    # oriented along the route: from the pad nearer the segment's start
+                    first = pa if math.dist(pa.position, seg.start) <= math.dist(pb.position, seg.start) else pb
+                    v1 = self._node_v(x, self._pad_node(first))
+                    v2 = self._node_v(x, self._pad_node(pb if first is pa else pa))
+                    last = (v1 - v2) / zf
+                    part_z[ref] = np.abs(zf)
+                pieces.append((si, 0.5, seg.length * 1e-3, last))
+                continue
+            own = [ln for ln in lines if seg.kind == "track" and ln["uuid"] == seg.uuid
+                   and _on_segment(ln["pa"], seg) and _on_segment(ln["pb"], seg)]
+            if not own:                               # a pour, a pad: the current of the copper before it
+                pieces.append((si, 0.5, seg.length * 1e-3, last))
+                continue
+            d = (seg.end[0] - seg.start[0], seg.end[1] - seg.start[1])
+            for ln in own:
+                fwd = (ln["pb"][0] - ln["pa"][0]) * d[0] + (ln["pb"][1] - ln["pa"][1]) * d[1] >= 0
+                cur = ln["mean_ab"] if fwd else ln["mean_ba"]
+                mid = ((ln["pa"][0] + ln["pb"][0]) / 2, (ln["pa"][1] + ln["pb"][1]) / 2)
+                pieces.append((si, _seg_place(mid, seg), ln["line"].length_m, cur))
+                last = cur
+        # groups between the shunts (their places along the route), as the cascade's path_elements makes them
+        marks = sorted(shunts, key=lambda sh: (sh["seg"], sh["t"]))
+        groups, g_len, shunt_i, split = [], [], {}, []
+        for sh in marks:              # each shunt's current from its nodes' voltages, wherever it is along the route
+            na, nb, m, pa, pb = self.net.part_nodes[sh["ref"]]
+            path_node = self._pad_node(sh["path_pad"])
+            other = nb if path_node == na else na
+            zf = np.array([complex(m.impedance(float(fk)) or 1e12) for fk in f])
+            shunt_i[sh["ref"]] = (self._node_v(x, path_node) - self._node_v(x, other)) / zf
+            part_z[sh["ref"]] = np.abs(zf)            # as the cascade lists them (the report's |Z|)
+        acc, length, j = np.zeros(n, complex), 0.0, 0
+        before = np.zeros(n, complex)
+        order = sorted(pieces, key=lambda p: (p[0], p[1]))
+        for si, t, ln_m, cur in order:
+            while j < len(marks) and (si, t) > (marks[j]["seg"], marks[j]["t"]):
+                sh = marks[j]
+                groups.append(acc / length if length > 0 else before)
+                g_len.append(length)
+                split.append(np.where(np.abs(before) > 0, (before - shunt_i[sh["ref"]])
+                                      / np.where(np.abs(before) > 0, before, 1.0), 0.0))
+                acc, length = np.zeros(n, complex), 0.0
+                j += 1
+            acc = acc + ln_m * cur
+            length += ln_m
+            before = cur
+        while j < len(marks):                          # shunts past the last piece
+            sh = marks[j]
+            groups.append(acc / length if length > 0 else before)
+            g_len.append(length)
+            acc, length = np.zeros(n, complex), 0.0
+            split.append(np.where(np.abs(before) > 0, (before - shunt_i[sh["ref"]])
+                                  / np.where(np.abs(before) > 0, before, 1.0), 0.0))
+            j += 1
+        groups.append(acc / length if length > 0 else before)
+        g_len.append(length)
+        total = sum(p[2] for p in order)
+        i_mean = sum(p[2] * p[3] for p in order) / total if total > 0 else before
+        i_in = order[0][3] if order else np.zeros(n, complex)
+        v_end = self._node_v(x, self._pad_node(sr.receiver))
+        return PathResult(f, i_mean, i_in, v_end, part_z, groups, shunt_i, g_len, split)
+
+
+def line_y_of(line):
+    """A PathLine's admittance-matrix function (emi/mna.line_y)."""
+    from ..emi.mna import line_y
+    return line_y(line.zc, line.gamma_l)
+
+
+def _seg_place(p, seg) -> float:
+    """Where point p lies along a route segment, 0 at its start, 1 at its end."""
+    dx, dy = seg.end[0] - seg.start[0], seg.end[1] - seg.start[1]
+    ll = dx * dx + dy * dy
+    return 0.0 if ll == 0 else min(max(((p[0] - seg.start[0]) * dx + (p[1] - seg.start[1]) * dy) / ll, 0.0), 1.0)
+
+
+def _on_segment(p, seg, tol: float = 2e-3) -> bool:
+    """Whether point p (mm) lies on the route segment (within tol of its straight line, between its ends)."""
+    t = _seg_place(p, seg)
+    q = (seg.start[0] + t * (seg.end[0] - seg.start[0]), seg.start[1] + t * (seg.end[1] - seg.start[1]))
+    return math.dist(p, q) <= tol
+
+
+def network_path(model: "BoardModel", spec: NetSpec, route: Route, stages: list, shunt_sets: list,
+                 notes: list) -> Optional[NetworkPath]:
+    """The path's NetworkPath, or None (a note says why) when its circuit can't be made: the cascade then."""
+    from .analog_net import analog_network
+    try:
+        net = analog_network(model.board, model.config, spec, route.receiver.pin, cache=line_cache(model))
+        np_ = NetworkPath(net, stages, shunt_sets, model.board, model.config)
+        np_.results(np.array([1e6]), np.ones(1))      # it must solve
+        return np_
+    except (ValueError, KeyError, SolverError, np.linalg.LinAlgError, RuntimeError) as e:
+        notes.append(f"the path's circuit could not be solved ({e}): its currents from the path cascade")
+        return None
 
 
 def _amp_circuit(model: "BoardModel", route: Route, main_ref: str, notes: list) -> Optional[tuple]:
@@ -1135,6 +1302,13 @@ def _amplified_route(model: "BoardModel", setup: RouteSetup, freqs, amps, source
                                source, load) if any(a.slew for a in pamps) else results
     clamp = np.where(np.abs(unclamped[-1].v_end) > 0,
                      np.abs(results[-1].v_end) / np.maximum(np.abs(unclamped[-1].v_end), 1e-300), 1.0)
+    # the stages' currents from the path's whole circuit where it can be made (NetworkPath: the op-amps' real
+    # closed loops, their feedback networks, every track a line), else the cascade's; the slew cap above stays
+    setup.network = network_path(model, setup.spec, setup.route, stages, shunt_sets, res.notes)
+    if setup.network is not None:
+        results = setup.network.results(freqs, amps)
+        res.notes.append("signal path currents from its whole circuit (every track a line, every part and op-amp "
+                         "on its nets, the op-amps' closed loops)")
     # the loops: every stage's kept shunts, then the stage itself; the last stage's own loop is the main one
     loops, keep_sets = [], []
     for k, sr in enumerate(stages):
@@ -1172,8 +1346,8 @@ def _amplified_route(model: "BoardModel", setup: RouteSetup, freqs, amps, source
     def weights(fs: np.ndarray) -> list:
         """Each loop's current at frequencies fs, per volt of the source (stage by stage: the shunt loops kept,
         then the stage's terminal loop), for band_moments."""
-        qs = amplified_path(fs, np.ones(len(fs)), els, [PathAmp(a.name, a.gain, a.z_in, a.z_out) for a in pamps],
-                            source, load)
+        qs = setup.network.results(fs, np.ones(len(fs))) if setup.network is not None else             amplified_path(fs, np.ones(len(fs)), els, [PathAmp(a.name, a.gain, a.z_in, a.z_out) for a in pamps],
+                           source, load)
         out = []
         for k, q in enumerate(qs):
             lc, carry = q.loop_currents(), 0
@@ -1569,6 +1743,12 @@ def prepare_route(model: BoardModel, spec: NetSpec, route: Route) -> tuple[Optio
             shunts = find_shunts(model, route)
             elements, rows = path_elements(board, config, route, main_ref, shunts, line_cache(model))
             pr = path_currents(freqs, amps, elements, source, load)
+            # the currents from the path's whole circuit where it can be made (NetworkPath), else the cascade's
+            setup.network = network_path(model, spec, route, [route], [shunts], res.notes)
+            if setup.network is not None:
+                pr = setup.network.results(freqs, amps)[0]
+                res.notes.append("signal path currents from its whole circuit (every track a line, every part "
+                                 "and op-amp on its nets)")
             setup.currents = np.abs(pr.i_mean)
             setup.path = (rows, pr)
             setup.response_fn = lambda fs: path_currents(fs, np.ones(len(fs)), elements, source, load).v_end
