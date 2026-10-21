@@ -1,12 +1,25 @@
 # GroundTruth handover
 
-## Current state (2026-10-21, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-21, branches `issue-clusters`, `report-pages` open; `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branches `issue-clusters` and `report-pages` (2026-10-21, from `main` 66e119e, the second on the first; not
+  merged):**
+  - `issue-clusters`, the user of a thermal map with a ring per hot part: "the heatmap is cluttered with circles. we
+    need to find a better way", then "merge" (of merging the overlapping markers; the other offer, the hot parts'
+    outlines on a temperature map, not done). Issues closer than 7 % of the view's span share one ring in the worst's
+    colour with the count beside it (`plots.cluster_issues`, `cluster_text`, `ISSUE_CLUSTER`); the hover counts them
+    and names the worst, a click shows the worst; zooming in parts them. Tests: tests/test_issue_clusters.py (2).
+  - `report-pages`, the user: "these tables are too long in the report. can we pageinate, default is 25, then 50,
+    100, all" for the Issues, a bridge's parts' losses and its RMS vias, and the victims: `_table(paged=True)` above
+    PAGE_ROWS (25) rows, the pager made by the page's script (rows of the issues' filters counted, a sort or a filter
+    back to page 1, printing shows every row). The Issues table's Net column broke names mid-word ("/DC DC Conver
+    ters/VI N", the user's screenshot, from `report-polish`'s max-width with overflow-wrap:anywhere): it breaks only
+    after a '/' now. Tests: test_report_filter (paged or not; the pager in headless Edge).
 - **Branch `audit-dead-time` (2026-10-21, from `main` 4bb511b, merged into `main` at the user's "merge") and installers:** the user's "Do it" (the full suite, then installers). Full suite on `main` 4bb511b: 1029 passed, 8 failed, 1 skipped (`out/release_2026-10-21/full_suite.log`, 44 min on the laptop). Two were GUI timing tests under the suite's load (`test_jobs_run_off_the_gui_thread`, the bridges tab's): pass alone. Six were the validation audit's independent loss budget (CV-11, CV-13, P-4) without the dead-time term the model charges since `dead-time` (A48): the budget now has it and the tests set unequal rise / fall dead times and V_SD (random in P-4); 9 pass. Installers from `main` 4bb511b (signed with the laptop's release key): `out/dist/groundtruth-0.1.42170-4bb511b-pcm.zip`, `groundtruth-server-0.1.42170-4bb511b.zip` (+ .sig).
 - **Branch `results-tab` (2026-10-20, from `main` d10f5a5, merged into `main` on 2026-10-21 at the user's "Yes"):** the user: "In the plugin, result are shown
   under heatmap, is there a better name for it like Simulation Results or similar?", then "Rename results, I believe
