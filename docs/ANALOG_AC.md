@@ -33,7 +33,7 @@ dual and quad parts. What decides a circuit's response is its parts and wiring a
     optional `Cin_cm`); defaults: 1 TΩ, 2 pF;
   - open-loop gain **A(s) = A0 / ((1 + s/ω1)(1 + s/ω2))**: A0 the new `Aol` field (default 100 dB), the dominant
     pole ω1 = 2π·GBW/A0, and an optional second pole ω2 (new `Fp2` field, or from the datasheet's phase margin at
-    unity gain, `PM`: ω2 = 2π·GBW·tan(PM)); without either, one pole (as the gain block assumed). The second pole
+    unity gain, `PM`: ω2 = 2π·GBW·sin(PM)·tan(PM)); without either, one pole (as the gain block assumed). The second pole
     is what makes a follower driving a capacitor, or a transimpedance stage, ring: their stability shows;
   - a voltage-controlled source A(s)·(v₊ − v₋) behind the open-loop output resistance `Zout` (R_O);
   - its supplies: AC ground (decoupled); no rails, saturation or slew in a small-signal model (the slew cap stays

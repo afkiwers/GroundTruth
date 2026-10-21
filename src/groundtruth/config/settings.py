@@ -99,6 +99,9 @@ class NetSpec:
     sweep_from: Optional[float] = None
     sweep_to: Optional[float] = None
     sweep_points: Optional[int] = None
+    # the path's bandwidth limit (Hz): its −3 dB frequency at the receiver above it is a bandwidth_limit issue (an
+    # ADC input's anti-alias filter, a sensor's); None: no limit
+    max_bandwidth: Optional[float] = None
 
 
 SWEEP_MIN_HZ = 0.01                       # the lowest frequency a Bode sweep may start at (near DC, never 0: log axis)
@@ -1069,6 +1072,8 @@ def net_problems(spec: NetSpec) -> list[str]:
         out.append("sweep_to must be above sweep_from")
     if spec.sweep_points is not None and not SWEEP_POINTS[0] <= spec.sweep_points <= SWEEP_POINTS[1]:
         out.append(f"sweep_points must be {SWEEP_POINTS[0]} to {SWEEP_POINTS[1]}")
+    if spec.max_bandwidth is not None and not spec.max_bandwidth > 0:
+        out.append("max_bandwidth must be above 0 Hz (leave it out for no limit)")
     return out
 
 
@@ -1306,6 +1311,8 @@ def config_from_data(data: Any) -> Config:
                 sweep_to=None if n.get("sweep_to") is None else _num(n.get("sweep_to"), f"{where}.sweep_to", "Hz"),
                 sweep_points=None if n.get("sweep_points") is None else int(_num(n.get("sweep_points"),
                                                                                  f"{where}.sweep_points")),
+                max_bandwidth=None if n.get("max_bandwidth") is None else _num(n.get("max_bandwidth"),
+                                                                               f"{where}.max_bandwidth", "Hz"),
                 through=[str(x) for x in ([n["through"]] if isinstance(n.get("through"), str)
                                           else (n.get("through") or []))],
                 driver_return=n.get("driver_return"), receiver_return=n.get("receiver_return"),
@@ -1788,7 +1795,7 @@ class SettingsFile:
                     d[key] = getattr(n, key)
             if n.fall_time is not None:
                 d["fall_time"] = format_si(n.fall_time, "s")
-            for key in ("sweep_from", "sweep_to"):            # the Bode sweep, with its unit ("1Hz", "10MHz")
+            for key in ("sweep_from", "sweep_to", "max_bandwidth"):   # with their unit ("1Hz", "10MHz")
                 if getattr(n, key) is not None:
                     d[key] = format_si(getattr(n, key), "Hz")
             if n.sweep_points is not None:

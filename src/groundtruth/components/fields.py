@@ -100,18 +100,27 @@ PARAMS = (
           -1e6, 1e6, "10", "signal paths: the output side's source"),
     Param("GBW", "op-amp", "the amplifier model's gbw: bandwidth = GBW / |gain|", "Hz", 1e6, "MHz", 1e3, 1e11,
           "10MHz", "signal paths: the gain's roll-off"),
-    Param("Bandwidth", "op-amp", "the amplifier model's closed-loop -3 dB bandwidth (wins over GBW)", "Hz", 1e6,
-          "MHz", 1e3, 1e11, "1MHz", "signal paths: the gain's roll-off"),
-    Param("Zout", "op-amp", "the amplifier model's output impedance", "ohm", 1.0, "Ω", 0.0, 1e4, "1ohm",
+    Param("Bandwidth", "op-amp", "a gain block's closed-loop -3 dB bandwidth (wins over GBW); on an op-amp solved "
+          "in its circuit: its stage's bandwidth limit", "Hz", 1e6, "MHz", 1e-1, 1e11, "1MHz",
+          "signal paths: the gain block's roll-off, or the bandwidth_limit check"),
+    Param("Zout", "op-amp", "the amplifier model's open-loop output resistance R_O (the circuit divides it by its "
+          "loop; a gain block: its output impedance)", "ohm", 1.0, "Ω", 0.0, 1e5, "2.3kohm",
           "signal paths: the output side's source impedance"),
-    Param("Cin", "op-amp", "the amplifier model's input capacitance", "F", 1e-12, "pF", 1e-14, 1e-9, "3pF",
-          "signal paths: the input side's load"),
+    Param("Cin", "op-amp", "the amplifier model's input capacitance (each input to ground)", "F", 1e-12, "pF", 1e-14,
+          1e-9, "3pF", "signal paths: the input side's load"),
     Param("Rin", "op-amp", "the amplifier model's input resistance", "ohm", 1.0, "Ω", 1.0, 1e15, "1Gohm",
           "signal paths: the input side's load"),
     Param("Slew Rate", "op-amp", "the amplifier model's slew (V/µs)", "V/s", 1e6, "V/µs", 1e3, 1e11, "20V/us",
           "signal paths: caps each output harmonic at SR / 2πf"),
     Param("CMRR", "op-amp", "the amplifier model's cmrr (dB): shown, not used (a single-ended path)", "dB", 1.0,
           "dB", 0.0, 200.0, "90dB", "nothing yet"),
+    Param("Aol", "op-amp", "the amplifier model's aol: its open-loop DC gain (the circuit model)", "dB", 1.0, "dB",
+          40.0, 200.0, "110dB", "signal paths: the op-amp's gain in its circuit (with GBW)"),
+    Param("Fp2", "op-amp", "the amplifier model's fp2: a second open-loop pole (or PM)", "Hz", 1e6, "MHz", 1e4, 1e11,
+          "20MHz", "signal paths: the op-amp's loop, its phase margin"),
+    Param("PM", "op-amp", "the amplifier model's pm: its phase margin at unity gain, degrees (fp2 = "
+          "GBW·sin(PM)·tan(PM))",
+          "deg", 1.0, "°", 10.0, 90.0, "60", "signal paths: the op-amp's loop, its phase margin"),
 )
 BY_FIELD = {p.field.lower(): p for p in PARAMS}
 # component model parameter -> field, per model kind
@@ -119,6 +128,7 @@ MODEL_FIELDS = {"cap": {"C": "Capacitance", "ESR": "ESR", "ESL": "ESL", "C_bias"
                 "inductor": {"L": "Inductance", "R": "DCR"},
                 "resistor": {"R": "Resistance"},
                 "amplifier": {"gain": "Gain", "gbw": "GBW", "bandwidth": "Bandwidth", "z_out": "Zout", "c_in": "Cin",
+                              "aol": "Aol", "fp2": "Fp2", "pm": "PM",
                               "r_in": "Rin", "slew": "Slew Rate", "cmrr": "CMRR"}}
 
 
@@ -153,7 +163,7 @@ def read(fp, name: str) -> Optional[Reading]:
         return None
     source = f"{fp.reference} {field_name} {text.strip()}"
     # gains, slew rates and dB values have no SI unit parse_quantity knows: _special reads those
-    value, why = _special(text, p) if p.quantity in ("gain", "V/s", "dB", "S") else parse_quantity(
+    value, why = _special(text, p) if p.quantity in ("gain", "V/s", "dB", "S", "deg") else parse_quantity(
         text, p.quantity, p.assumed)
     if value is None:
         return Reading(None, text, source, why)
@@ -188,6 +198,8 @@ def _special(text: str, p: Param) -> tuple[Optional[float], str]:
             return None, f"'{text}': not a transconductance (S, mho)"
         if p.quantity == "dB":
             return float(re.sub(r"(?i)db$", "", t)), ""
+        if p.quantity == "deg":                         # an angle in degrees: "60", "60°", "60deg", "60 degrees"
+            return float(re.sub(r"(?i)(°|deg|degrees|degree)$", "", t)), ""
         if p.quantity == "gain":
             if low.endswith("db"):                      # a voltage gain in dB: 20 log10 |G|
                 return 10 ** (float(t[:-2]) / 20), ""
@@ -213,7 +225,7 @@ def _special(text: str, p: Param) -> tuple[Optional[float], str]:
 
 def _symbol(p: Param) -> str:
     """The unit symbol for messages ("Ω" for ohm, else the quantity as it is: "F", "V" ...)."""
-    return {"ohm": "Ω"}.get(p.quantity, p.quantity)
+    return {"ohm": "Ω", "deg": "°"}.get(p.quantity, p.quantity)
 
 
 def _common(board, refs: list[str], name: str, times: int = 1) -> tuple[Optional[Reading], list[str]]:
@@ -351,7 +363,8 @@ class Difference:
 _KEY_UNITS = {"rds_on": "Ω", "rds_on_low": "Ω", "dcr": "Ω", "ESR": "Ω", "R": "Ω", "c_oss": "F", "C": "F",
               "C_bias": "F", "q_oss": "C", "q_rr": "C", "dead_rise": "s", "dead_fall": "s", "v_sd": "V", "diode_vf": "V",
               "ESL": "H", "L": "H", "gbw": "Hz",
-              "bandwidth": "Hz", "z_out": "Ω", "c_in": "F", "r_in": "Ω", "slew": "V/s", "cmrr": "dB", "gain": ""}
+              "bandwidth": "Hz", "z_out": "Ω", "c_in": "F", "r_in": "Ω", "slew": "V/s", "cmrr": "dB", "gain": "",
+              "aol": "dB", "fp2": "Hz", "pm": "°"}
 
 
 def _sync(getter, setter, linked: list[str], values: dict, keys, default=None) -> bool:

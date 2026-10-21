@@ -49,6 +49,8 @@ NET_TIPS = {
                   "hundredth of the frequency). The gain at the sweep's start is shown as the path's DC gain.",
     "Sweep to": "Where the Bode sweep ends, e.g. 10MHz (empty: the top of the signal's harmonics' band).",
     "Sweep points": "How many log-spaced frequencies the Bode sweep has, 20 to 5000 (empty: 300).",
+    "Max bandwidth": "The path's bandwidth limit, e.g. 1kHz for an ADC input's anti-alias filter: a bandwidth at the "
+                     "receiver above it (3 dB below the passband peak) is a bandwidth_limit issue (empty: no limit).",
 }
 NET_BUTTON_TIPS = {
     "Add": "Add a new net from the form.",
@@ -161,11 +163,12 @@ class NetsPanel(SelectableRows, wx.Panel):
         self.duty = wx.TextCtrl(self, value="0.5")
         self.fall, self.src_r, self.src_l, self.src_c, self.load_r, self.load_c, self.through = (
             wx.TextCtrl(self) for _ in range(7))
-        self.sweep_from, self.sweep_to, self.sweep_pts = (wx.TextCtrl(self) for _ in range(3))
+        self.sweep_from, self.sweep_to, self.sweep_pts, self.max_bw = (wx.TextCtrl(self) for _ in range(4))
         for ctrl, hint in ((self.fall, "= rise time"), (self.src_r, "25 (default)"), (self.src_l, "none"),
                            (self.src_c, "none"), (self.load_r, "none"), (self.load_c, "5 (default)"),
                            (self.through, "e.g. C12, R7"), (self.sweep_from, "auto: frequency / 100"),
-                           (self.sweep_to, "auto: the band's top"), (self.sweep_pts, "300")):
+                           (self.sweep_to, "auto: the band's top"), (self.sweep_pts, "300"),
+                           (self.max_bw, "none")):
             ctrl.SetHint(hint)
         self._on_bode = on_bode
         self.through.Bind(wx.EVT_KILL_FOCUS, lambda e: (e.Skip(), self.on_net(keep=True)))
@@ -183,7 +186,7 @@ class NetsPanel(SelectableRows, wx.Panel):
                             ("Source L (nH)", self.src_l), ("Source C (pF)", self.src_c), ("Load R (Ω)", self.load_r),
                             ("Load C (pF)", self.load_c), ("Pass through", self.through),
                             ("Sweep from", self.sweep_from), ("Sweep to", self.sweep_to),
-                            ("Sweep points", self.sweep_pts)):
+                            ("Sweep points", self.sweep_pts), ("Max bandwidth", self.max_bw)):
             text = wx.StaticText(self, label=label)
             text.SetToolTip(NET_TIPS[label])         # on the label and the field: hovering either explains it
             ctrl.SetToolTip(NET_TIPS[label])
@@ -368,7 +371,8 @@ class NetsPanel(SelectableRows, wx.Panel):
         for ctrl, v in ((self.src_r, n.driver_ohms), (self.src_l, n.driver_nh), (self.src_c, n.driver_pf),
                         (self.load_r, n.load_ohms), (self.load_c, n.load_pf)):
             ctrl.SetValue("" if v is None else f"{v:g}")
-        for ctrl, v in ((self.sweep_from, n.sweep_from), (self.sweep_to, n.sweep_to)):
+        for ctrl, v in ((self.sweep_from, n.sweep_from), (self.sweep_to, n.sweep_to),
+                        (self.max_bw, n.max_bandwidth)):
             ctrl.SetValue("" if v is None else format_si(v, "Hz"))
         self.sweep_pts.SetValue("" if n.sweep_points is None else str(n.sweep_points))
 
@@ -413,7 +417,8 @@ class NetsPanel(SelectableRows, wx.Panel):
                 problems.append(f"{label} must be a number or empty")
             extra[key] = v
         for key, ctrl, label in (("sweep_from", self.sweep_from, "sweep from"),
-                                 ("sweep_to", self.sweep_to, "sweep to")):
+                                 ("sweep_to", self.sweep_to, "sweep to"),
+                                 ("max_bandwidth", self.max_bw, "max bandwidth")):
             v, ok = self._optional(ctrl, "Hz")
             if not ok:
                 problems.append(f"{label} must be a frequency (e.g. 1Hz, 10MHz) or empty")

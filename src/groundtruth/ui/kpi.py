@@ -82,6 +82,11 @@ def _bode(rr) -> list[Kpi]:
                     "error" if pm < PM_ERROR else "warn" if pm < PM_WARN else "",
                     "the lowest phase margin of the op-amps' loops (180° + the loop gain's phase where it falls "
                     "through 1): below 45° the circuit rings, near 0° it oscillates"))
+    # a bandwidth limit exceeded (the path's max_bandwidth, an op-amp's Bandwidth field: network_responses)
+    over = [n for r in rr.responses for n in r.notes if n.startswith("bandwidth_limit: ")]
+    if over:
+        out.append(("bandwidth limit", "exceeded", over[0].split(": ", 2)[-1][:60], "warn",
+                    "; ".join(n.split(": ", 1)[1] for n in over)))
     for r in [x for x in rr.responses if x.quantity != "loop gain"][:4]:
         if len(out) >= 4:
             break

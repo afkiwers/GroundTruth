@@ -26,7 +26,7 @@ MODEL_PARAMS: dict[str, tuple[str, ...]] = {
     # an op-amp stage: gain (V/V, the stage's closed-loop gain, negative = inverting), gbw / bandwidth (Hz),
     # z_out (Ω), c_in (F), r_in (Ω), slew (V/s), cmrr (dB, kept and shown: a single-ended path has no common mode);
     # for the circuit model (analysis/analog_net, emi/mna.Circuit.opamp): aol (open-loop DC gain, dB), fp2 (a second
-    # open-loop pole, Hz) or pm (the phase margin at unity gain, degrees: fp2 = gbw·tan(pm))
+    # open-loop pole, Hz) or pm (the phase margin at unity gain, degrees: fp2 = gbw·sin(pm)·tan(pm))
     "amplifier": ("gain", "gbw", "bandwidth", "z_out", "c_in", "r_in", "slew", "cmrr", "aol", "fp2", "pm"),
 }
 # Parameters that may stay empty: C_bias, a ceramic capacitor's capacitance at its DC bias (from the maker's

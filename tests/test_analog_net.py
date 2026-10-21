@@ -114,3 +114,91 @@ def test_a_t_junction_splits_the_track_instead_of_doubling_it(tmp_path):
     assert sum(x["line"].length_m for x in net.lines) * 1e3 == pytest.approx(copper, rel=1e-9)
     sig_b = [x for x in net.lines if x["net"] == "SIG_B" and x["pa"][1] == x["pb"][1] == 10.0]
     assert len(sig_b) == 2 and {x["pa"][0] for x in sig_b} | {x["pb"][0] for x in sig_b} >= {24.5}
+
+
+def _findings(board, cfg, spec, f=None):
+    """network_responses' findings for the path to U2.1 over 1 Hz-10 MHz."""
+    from groundtruth.analysis.simulate import network_responses
+    f = np.geomspace(1.0, 1e7, 300) if f is None else f
+    return network_responses(board, cfg, spec, "U2.1", f)[2]
+
+
+def test_a_paths_max_bandwidth_flags_a_wider_filter(tmp_path):
+    """The RC low-pass (1 kΩ + 25 Ω, 10 nF + 5 pF: −3 dB at 15.5 kHz) with max_bandwidth 10 kHz: a bandwidth_limit
+    finding at the receiver naming both; 20 kHz: none; Simulate makes it a warning issue."""
+    from dataclasses import replace
+    from boardgen import rc_lowpass_board
+    from groundtruth.analysis.simulate import simulate
+    spec = NetSpec("SIG_A", "U1.1", ["U2.1"], 1e6, 10e-9, max_bandwidth=10e3)
+    board, sc, _ = make(tmp_path, rc_lowpass_board(), "bw", nets=(spec,), solve_points=1, max_solves=1)
+    (fd,) = _findings(board, sc.config, spec)
+    assert fd["check"] == "bandwidth_limit" and "15.5 kHz" in fd["message"] and "10 kHz" in fd["message"]
+    assert _findings(board, sc.config, replace(spec, max_bandwidth=20e3)) == []
+    res = simulate(board, sc.config)
+    assert any(i.check == "bandwidth_limit" and i.severity == "warning" for i in res.issues)
+
+
+def test_an_op_amp_stages_bandwidth_field_is_its_limit(tmp_path):
+    """The Sallen-Key (f0 1.12 kHz, Q 0.707: −3 dB at f0) with U3's Bandwidth 500 Hz: its stage is flagged (the
+    stage's own transfer, from the driver pin to U3's output); 2 kHz: not; a gain block (Gain set) is never checked."""
+    parts = [("R1", "10k", "R", "SIG_IN", "A"), ("R2", "10k", "R", "A", "B"), ("C1", "20n", "C", "A", "OUT"),
+             ("C2", "10n", "C", "B", "GND")]
+    pins = {3: ("+IN", "B"), 2: ("-IN", "OUT"), 1: ("OUT", "OUT"), 5: ("V+", "+5V"), 4: ("V-", "GND")}
+    board, cfg, spec, _ = _setup(tmp_path, parts, [("U3", pins)], bandwidth=500.0)
+    found = _findings(board, cfg, spec)
+    assert [x["check"] for x in found] == ["bandwidth_limit"] and "U3" in found[0]["message"]
+    cfg.components["U3"].model = ComponentModel("amplifier", {"gbw": 100e6, "bandwidth": 2e3})
+    assert _findings(board, cfg, spec) == []
+    cfg.components["U3"].model = ComponentModel("amplifier", {"gbw": 100e6, "bandwidth": 500.0, "gain": 1.0})
+    assert [x for x in _findings(board, cfg, spec) if x["check"] == "bandwidth_limit"] == []
+
+
+def test_a_follower_with_little_phase_margin_is_flagged(tmp_path):
+    """A follower whose op-amp has PM 30° (fp2 = GBW·tan 30°): an opamp_stability warning ("it rings"); PM 15°: an
+    error ("close to oscillating"); PM 60°: none."""
+    pins = {3: ("+IN", "SIG_IN"), 2: ("-IN", "OUT"), 1: ("OUT", "OUT"), 5: ("V+", "+5V"), 4: ("V-", "GND")}
+    f = np.geomspace(1e3, 1e9, 600)
+    for pm, want in ((30.0, "warning"), (15.0, "error"), (60.0, None)):
+        (tmp_path / str(int(pm))).mkdir()
+        board, cfg, spec, _ = _setup(tmp_path / str(int(pm)), [], [("U3", pins)], gbw=1e6, pm=pm, z_out=1.0)
+        found = [x for x in _findings(board, cfg, spec, f) if x["check"] == "opamp_stability"]
+        if want is None:
+            assert found == []
+        else:
+            assert len(found) == 1 and (found[0]["severity"] or "warning") == want
+
+
+def test_the_new_settings_and_fields(tmp_path):
+    """max_bandwidth round-trips with its unit ("1kHz") and must be above 0; the schematic fields Aol, Fp2 and PM read
+    "110dB", "20MHz", "60°" / "60deg" into the amplifier model's aol, fp2, pm."""
+    from boardgen import rc_lowpass_board
+    from groundtruth.components.fields import BY_FIELD, _special, model_values
+    from groundtruth.config.settings import SettingsFile, net_problems
+    spec = NetSpec("SIG_A", "U1.1", ["U2.1"], 1e6, 10e-9, max_bandwidth=1e3)
+    _, sc, _ = make(tmp_path, rc_lowpass_board(), "set", nets=(spec,))
+    assert "max_bandwidth: 1kHz" in sc.path.read_text(encoding="utf-8")
+    assert SettingsFile.load(sc.path).config.nets[0].max_bandwidth == 1e3
+    assert any("max_bandwidth" in m for m in net_problems(NetSpec("x", "U1.1", ["U2.1"], 1e6, 1e-9, max_bandwidth=0.0)))
+    g = opamp_circuit_board([], [("U3", OPAMP)])
+    g.fields("U3", Aol="110dB", Fp2="20MHz", PM="60°")
+    (tmp_path / "f").mkdir()
+    board, _, _ = make(tmp_path / "f", g, "fields", nets=())
+    vals, _ = model_values(board.footprint("U3"), "amplifier")
+    assert (vals["aol"].value, vals["fp2"].value, vals["pm"].value) == (110.0, pytest.approx(20e6), 60.0)
+    for text in ("60deg", "60", "60 degrees"):
+        assert _special(text, BY_FIELD["pm"])[0] == 60.0, text
+
+
+def test_a_pm_field_gives_that_phase_margin(tmp_path):
+    """A follower whose op-amp has PM 30°, 45°, 60°, 75° (fp2 = GBW·sin(PM)·tan(PM)): its loop's phase margin comes
+    out at that value (0.5°)."""
+    from groundtruth.analysis.analog_net import analog_network
+    from groundtruth.analysis.transfer import phase_margin
+    pins = {3: ("+IN", "SIG_IN"), 2: ("-IN", "OUT"), 1: ("OUT", "OUT"), 5: ("V+", "+5V"), 4: ("V-", "GND")}
+    f = np.geomspace(1e3, 1e9, 3000)
+    for pm in (30.0, 45.0, 60.0, 75.0):
+        (tmp_path / str(int(pm))).mkdir()
+        board, cfg, spec, _ = _setup(tmp_path / str(int(pm)), [], [("U3", pins)], gbw=1e6, pm=pm, z_out=1e-3,
+                                     aol=200.0)
+        net = analog_network(board, cfg, spec, "U2.1")
+        assert phase_margin(f, net.circuit.loop_gain("U3", f))["pm"] == pytest.approx(pm, abs=0.5), pm

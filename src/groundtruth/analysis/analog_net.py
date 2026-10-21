@@ -154,6 +154,7 @@ class AnalogNetwork:
     # "layer", "net"}; each passive part's nodes and model: {ref: (node a, node b, model, pad a, pad b)}
     lines: list = field(default_factory=list)
     part_nodes: dict = field(default_factory=dict)
+    amp_params: dict = field(default_factory=dict)      # op-amp channel -> its model's values (gain, bandwidth ...)
 
 
 def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, lumped: bool = False,
@@ -354,7 +355,11 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
         gbw = prm.get("gbw") or AMP_GBW
         if not prm.get("gbw"):
             notes.append(f"{nm}: no GBW, {AMP_GBW / 1e6:g} MHz assumed")
-        fp2 = prm.get("fp2") or (gbw * math.tan(math.radians(prm["pm"])) if prm.get("pm") else None)
+        # PM → the second pole: a follower's loop A(s) = GBW/s · 1/(1 + s/ω2) crosses over at x·GBW with
+        # x·√(1 + (x·GBW/fp2)²) = 1 and has PM = 90° − atan(x·GBW/fp2), so x = sin(PM) and fp2 = GBW·sin(PM)·tan(PM)
+        # (exact for A0 ≫ 1; GBW·tan(PM), which takes the crossover at GBW, gave 29° for 15°)
+        pm = math.radians(prm["pm"]) if prm.get("pm") else None
+        fp2 = prm.get("fp2") or (gbw * math.sin(pm) * math.tan(pm) if pm else None)
         # c_in is each input's capacitance to ground (what it meant for the gain block: the load on the path), no
         # capacitance between the inputs: with it, a follower's input fed its output past the amplifier and
         # cancelled the output through R_O at √(2π·GBW/(C·R_O)), an undamped notch (5.88 MHz, −175 dB on kraft's
@@ -398,7 +403,7 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
                    for (nm, kind), ch in zip(opamps, amps.values())],
         "in": gnd(drv.net), "out": gnd(rcv.net)}
     return AnalogNetwork(ckt, out, nets, opamps, sorted(parts), tracks, notes, node_of, schematic, amp_out, lines,
-                         part_nodes)
+                         part_nodes, {nm: dict(ch.params) for nm, ch in amps.items()})
 
 
 def _seg_t(p, a, b) -> float:
