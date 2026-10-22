@@ -322,7 +322,8 @@ class Circuit:
         """The loop gain T(f) around op-amp channel `name` (opamp): its loop broken at its internal output, which
         is an ideal source (the buffer before R_O), so driving it with 1 V instead loads nothing and the break is
         exact [Middlebrook 1975]; with the input source at 0 V, what comes back across its inputs is
-        d = v₊ − v₋ = −β·1 V, and T = −A(s)·d, A(s) = A0 / ((1 + s/ω1)(1 + s/ω2)) its open-loop gain. Every other
+        d = v₊ − v₋ = −β·1 V, and T = −A(s)·d (Bode's return ratio −v_r/v_t [Bode 1945]: checked against A(s)·β by hand,
+        audit round 7, to 1e-10), A(s) = A0 / ((1 + s/ω1)(1 + s/ω2)) its open-loop gain. Every other
         op-amp keeps working (it is part of this loop's β). Positive and real at low frequency for negative
         feedback; the phase margin is 180° + ∠T where |T| crosses 1 (transfer.phase_margin)."""
         import scipy.sparse.linalg as spl

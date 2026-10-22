@@ -1419,13 +1419,16 @@ LOOP_LEAD = 60                 # a loop gain's points from near DC to its sweep'
 
 
 def cancel_doublets(poles, zeros) -> tuple[list, list, int]:
-    """Poles and zeros without the pairs closer than DOUBLET (relative): a pole-zero doublet changes |H| by less
-    than that fraction anywhere, but writing it out doubles the transfer function's length (kraft's TLV6001 output:
-    451 Hz twice, 0.02 % apart: the R303 / C304 load its closed loop hardly sees). (poles, zeros, pairs removed)."""
+    """Poles and zeros without the pairs closer than DOUBLET of the pole's distance from the jω axis, |Re p|: such a
+    doublet changes |H| by less than that fraction anywhere on the axis (|s − p| ≥ |Re p| there, so |(s − z)/(s − p)|
+    lies within 1 ± |z − p|/|Re p|), but writing it out doubles the transfer function's length (kraft's TLV6001
+    output: 451 Hz twice, 0.02 % apart: the R303 / C304 load its closed loop hardly sees). Audit round 7, AA-8: within
+    DOUBLET of |p| instead, a pair of Q 2000 0.05 % apart was cancelled though it moves |H| by 7.7 dB near it.
+    (poles, zeros, pairs removed)."""
     p, z, n = list(poles), list(zeros), 0
     for zi in list(z):
         best = min(p, key=lambda pi: abs(pi - zi), default=None)
-        if best is not None and abs(best - zi) <= DOUBLET * max(abs(best), abs(zi), 1e-12):
+        if best is not None and abs(best - zi) <= DOUBLET * max(abs(best.real), 1e-12):
             p.remove(best)
             z.remove(zi)
             n += 1

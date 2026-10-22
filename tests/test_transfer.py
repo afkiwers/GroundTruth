@@ -252,3 +252,19 @@ def test_the_phase_margin_is_the_smallest_over_every_crossover_and_positive_feed
     m2 = phase_margin(fs, t2(fs), lead=t2(np.geomspace(1e-6, 1e3, 60, endpoint=False)))
     fc = m2["f_c"]
     assert m2["pm"] == pytest.approx(180 - math.degrees(math.atan(fc / 10) + math.atan(fc / 100)), abs=0.01)
+
+
+def test_a_doublet_cancels_only_where_it_cannot_change_the_response():
+    """Audit round 7, AA-8 (tools/dev/analog_audit.py T1): a pole pair of Q 2000 at 1 MHz with a zero pair 0.05 %
+    above it changes |H| by 7.7 dB near it: it is not cancelled (it was: within 0.1 % of |p|). A real pole and zero
+    0.02 % apart (kraft's 451 Hz pair) still are; then |H| moves by less than 0.1 % anywhere."""
+    import math
+    from groundtruth.analysis.simulate import cancel_doublets
+    wp = 2 * math.pi * 1e6
+    p = list(np.roots([1, wp / 2000, wp ** 2]))
+    z = list(np.roots([1, wp * 1.0005 / 2000, (wp * 1.0005) ** 2]))
+    assert cancel_doublets(p, z)[2] == 0
+    pr, zr = -2 * math.pi * 451.0, -2 * math.pi * 451.0 * 1.0002
+    assert cancel_doublets([pr], [zr])[2] == 1
+    w = 2 * math.pi * np.geomspace(1, 1e6, 2000)
+    assert np.max(np.abs(np.abs((1j * w - zr) / (1j * w - pr)) * pr / zr - 1)) < 1e-3
