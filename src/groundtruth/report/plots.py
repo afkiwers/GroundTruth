@@ -947,10 +947,17 @@ def _section_rows(board: Board, sec: dict) -> list[str]:
     return [l for l in board.copper_layers if l in used] + sorted(used - set(board.copper_layers))
 
 
-def section_height_in(board: Board, rr) -> float:
-    """The figure height (inches) the plugin's scrolling Results tab gives draw_section: the title (a second line
-    for a plane displacement), a share plot of about an inch, 0.3 in per copper layer in the side view and the
-    distance axis with its label. 0: the view has no section."""
+def _section_caption(half_mm: float, width_in: float) -> list[str]:
+    """The cross-section's caption (SECTION_CAPTION) as lines for a figure width_in wide (wrapped 15 % short of the
+    width: _width_in estimates this font size a little narrow)."""
+    return _wrap(SECTION_CAPTION.format(w=half_mm, w2=2 * half_mm), 0.85 * (width_in - 0.3), FS_TICK)
+
+
+def section_height_in(board: Board, rr, width_in: Optional[float] = None) -> float:
+    """The figure height (inches) draw_section wants: the title (a second line for a plane displacement), a share
+    plot of about an inch, 0.3 in per copper layer in the side view, the distance axis with its label, and for a
+    figure width_in wide its caption (the plugin's scrolling Results tab, the report, the CLI's PNGs). 0: the view
+    has no section."""
     from ..analysis.simulate import displacement
     if rr.kind == "bridge":                         # the capacitors' ripple bars (none on the sweep view)
         return 2.8 if getattr(rr, "caps", None) and getattr(rr, "view", "") != "sweep" else 0.0
@@ -958,8 +965,9 @@ def section_height_in(board: Board, rr) -> float:
     if not sec or rr.kind in ("converter", "thermal"):
         return 0.0
     lines = 2 if displacement(rr.transfers) is not None else 1
+    caption = (_lh(FS_TICK, len(_section_caption(sec["half_mm"], width_in))) + 0.10) if width_in else 0.0
     return 0.06 + _lh(FS_TITLE, lines) + 0.08 + 1.0 + GAP_IN + len(_section_rows(board, sec)) * 0.30 + TICKS_IN + \
-        _lh(FS_TEXT) + 0.02
+        _lh(FS_TEXT) + 0.02 + caption
 
 
 def draw_section(fig: Figure, board: Board, rr) -> None:
@@ -998,20 +1006,24 @@ def draw_section(fig: Figure, board: Board, rr) -> None:
     extra = (f"+ {share(cap['fraction'])} displacement {'–'.join(cap['layers'])} @ {cap.get('f', 0) / 1e6:.4g} "
              "MHz (board-wide model, spread over the pair)") if cap is not None and h_in >= 2.6 else ""
     rows_in = len(rows) * ROW_IN
+    # what the plots show, under them (the user: "can you add a description at the bottom that explains the plots
+    # especially the green lines"); left out first when the figure is small
+    caption = _section_caption(W, w_in)
 
-    def layout(labelled: bool):
+    def layout(labelled: bool, described: bool):
         """(title lines, top and bottom margins, height left for the share plot), with the x-axis label on its
-        own line or (labelled False, to save a line) in the title."""
+        own line or (labelled False, to save a line) in the title, and (described) the caption under it all."""
         lines = _wrap(head if labelled else f"{head}; x: {xlabel}", w_in - 0.3, FS_TITLE)
         lines += _wrap(extra, w_in - 0.3, FS_TITLE) if extra else []
         top_in = 0.06 + _lh(FS_TITLE, len(lines)) + 0.08
-        bottom_in = TICKS_IN + (_lh(FS_TEXT) + 0.02 if labelled else 0.0)
+        bottom_in = TICKS_IN + (_lh(FS_TEXT) + 0.02 if labelled else 0.0) + \
+            (_lh(FS_TICK, len(caption)) + 0.10 if described else 0.0)
         return lines, top_in, bottom_in, h_in - top_in - bottom_in - rows_in    # what is left for the share plot
-    labelled = True
-    lines, top_in, bottom_in, spare = layout(True)
-    if spare < SHARE_MIN_IN + GAP_IN:
-        labelled = False
-        lines, top_in, bottom_in, spare = layout(False)
+    labelled = described = True
+    for labelled, described in ((True, True), (False, True), (True, False), (False, False)):
+        lines, top_in, bottom_in, spare = layout(labelled, described)
+        if spare >= SHARE_MIN_IN + GAP_IN:
+            break
     left_in = max([_width_in(r, FS_TICK) for r in rows] + [_width_in("100 %", FS_TICK)]) + 0.34
     right_in = 0.12 + 0.10 + 0.08 + _width_in("−100", FS_TICK) + 0.08 + _lh(FS_TEXT) + 0.06
     x0, x1, y0, y1 = _frame(fig, left_in, right_in, bottom_in, top_in)
@@ -1095,6 +1107,9 @@ def draw_section(fig: Figure, board: Board, rr) -> None:
         side.set_xlabel(xlabel, fontsize=FS_TEXT, labelpad=2)
     side.tick_params(labelsize=FS_TICK)
     fig.suptitle("\n".join(lines), fontsize=FS_TITLE, y=1 - 0.06 / h_in, va="top")
+    if described:
+        fig.text(0.15 / w_in, 0.06 / h_in, "\n".join(caption), ha="left", va="bottom", fontsize=FS_TICK,
+                 linespacing=1.25)
     if mesh is not None:
         pos = side.get_position()
         cb = fig.colorbar(mesh, cax=fig.add_axes((pos.x1 + 0.12 / w_in, pos.y0, 0.10 / w_in, pos.height)),
@@ -1137,6 +1152,16 @@ def draw_board(fig: Figure, board: Board, routes: list[RouteResult], issues: lis
 # --------------------------------------------------------------------------- motor bridges
 BRIDGE_WAVE_IN = 4.2        # the drive's waveforms on the plugin's page
 SECTION_CARRIERS = 8             # vias and parts drawn in the cross-section's side view at most
+# the cross-section's caption (draw_section; {w}: the corridor's half width, mm)
+SECTION_CAPTION = (
+    "Top: each plane layer's share of the return current flowing under the route (within ±{w:.1f} mm of the track), "
+    "the part in phase with the signal; dashed Σ: their sum (below 100 %, the return has left the corridor). "
+    "Side view: the copper layers top to bottom, each band coloured by that share (red: carrying the return, blue: "
+    "flowing the other way); the outlined line is the signal track on its layer, the grey bars its own vias. "
+    "Green bars: the vias and parts (decaps, 0 Ω links) that carry the return current from one layer to another, "
+    "with the share of the signal current through each: solid within {w2:.1f} mm of the route, dashed with their "
+    "distance when farther away. A layer change without a green bar near it means the return found no nearby path "
+    "between the layers.")
 PHASE_COLOURS = ("#1f77b4", "#ff7f0e", "#2ca02c")
 
 
