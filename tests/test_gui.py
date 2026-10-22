@@ -2316,9 +2316,20 @@ def test_clicking_a_bar_in_the_cross_section_shows_its_via_in_kicad(app, frame):
     canvas = SimpleNamespace(figure=fig, toolbar=None)
     h._press(SimpleNamespace(inaxes=ax, dblclick=False, button=1, x=px + 2, y=py, canvas=canvas))
     assert seen == [("via", via, via["name"], "")]
+    # a real click through the cross-section canvas's own callbacks: it must be connected there (it was for the
+    # hover only: the tooltip said "click: show it in KiCad" and a click did nothing)
+    old = h.canvas3.figure
+    try:
+        fig._canvas_callbacks = old._canvas_callbacks     # as show_rendered hands them on with a new figure
+        h.canvas3.figure = fig
+        fig.set_canvas(h.canvas3)
+        h.canvas3.callbacks.process("button_press_event",
+                                    MouseEvent("button_press_event", h.canvas3, px + 2, py, button=1))
+        assert seen[-1] == ("via", via, via["name"], "") and len(seen) == 2
+    finally:
+        h.canvas3.figure = old
+        old.set_canvas(h.canvas3)
     h.on_mark = f.on_map_mark
-    fig.canvas = h.canvas3
-    h._hover(MouseEvent("motion_notify_event", h.canvas3, px, py))
 
 
 def test_clicking_a_map_marker_shows_it_in_kicad(app, frame):

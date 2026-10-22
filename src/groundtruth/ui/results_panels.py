@@ -490,6 +490,9 @@ class ResultsPanel(wx.Panel):
         self.fig3 = Figure(figsize=(8, 2.6))           # the cross-section along the route (routes only)
         self.canvas3 = PrerenderedCanvas(self.page, -1, self.fig3)
         self.canvas3.mpl_connect("motion_notify_event", self._hover)
+        # a click on a via bar of the cross-section's side view shows that via in KiCad (_press); it was connected
+        # for the hover only, so the tooltip offered a click that did nothing
+        self.canvas3.mpl_connect("button_press_event", self._press)
         self.fig2 = Figure(figsize=(8, 2.4))
         self.canvas2 = PrerenderedCanvas(self.page, -1, self.fig2)
         self.canvas2.mpl_connect("motion_notify_event", self._hover)     # the pole-zero map's markers (draw_pz)
