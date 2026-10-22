@@ -1414,6 +1414,7 @@ def sweep_range(spec: NetSpec, harmonics) -> np.ndarray:
 POLE_SPAN = 10.0               # poles and zeros up to this many times the sweep's top are listed and written out
 DOUBLET = 1e-3                 # a pole and a zero this close (relative) cancel in the lists and the written-out
                                # H(s) [A54]
+from .transfer import STEP_MAX as _STEP_MAX  # noqa: E402  (the step note)
 LOOP_LEAD = 60                 # a loop gain's points from near DC to its sweep's start (phase_margin's `lead`)
 
 
@@ -1460,7 +1461,10 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
         poles, zeros, n_doublets = cancel_doublets(poles, zeros)
         r = Response(title, spec.name, "voltage gain", np.asarray(f, float), h, keep(poles), keep(zeros), exact=True)
         r.normal = normal_form(poles, zeros, k, f_max=f_max)
-        r.step = _step_of(lumped, lnode, keep(poles), r.normal, f)
+        r.step = _step_of(lumped, lnode, keep(poles), r.normal, f, keep(zeros))
+        if r.step and r.step.get("capped"):
+            r.notes.append(f"step: its ringing is under-resolved (more than {_STEP_MAX:,} steps would be needed for "
+                           "a lightly damped pole over the slowest one's settling): its overshoot may read low")
         if n_doublets:
             r.notes.append(f"{n_doublets} pole-zero pair(s) within {DOUBLET:.1%} of each other cancelled (doublets: "
                            "a load the output hardly sees)")
@@ -1496,24 +1500,58 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
     return out, notes, _bandwidth_and_stability(board, config, spec, receiver, net, f, out)
 
 
-def _step_of(lumped, node: str, poles: list, normal: dict, f: np.ndarray) -> Optional[dict]:
-    """A response's step response (emi/mna.Circuit.step on the lumped circuit [Gear 1971]): STEP_POINTS steps over
-    STEP_SPAN time constants of its slowest pole (|σ| of the lowest-frequency pole listed; without one, of the
-    sweep's lowest frequency), its figures (transfer.step_metrics) with the DC gain as the final value. None for a
-    response with a pole at the origin (an integrator: no final value) or when it can't be stepped."""
-    from .transfer import STEP_POINTS, STEP_SPAN, step_metrics
+def step_share(p: complex, poles: list, zeros: list) -> float:
+    """A pole's share of a step response, relative to its final value: the residue of H(s)/s at p over H(0), for
+    H = K·Π(1 − s/z)/Π(1 − s/p): |Π(1 − p/z)| / |Π_{q≠p}(1 − p/q)| (partial fractions [Ogata 2010]), summed as
+    logarithms (hundreds of roots stay finite)."""
+    lz = sum(math.log(max(abs(1 - p / z), 1e-300)) for z in zeros if z != 0)
+    lp = sum(math.log(max(abs(1 - p / q), 1e-300)) for q in poles if q != 0 and q != p)
+    return math.exp(min(lz - lp, 700.0))
+
+
+STEP_SHARE = 1e-3              # a ringing pole whose share of the step is below this is not resolved (_step_of)
+
+
+def _step_of(lumped, node: str, poles: list, normal: dict, f: np.ndarray, zeros: Optional[list] = None
+             ) -> Optional[dict]:
+    """A response's step response (emi/mna.Circuit.step on the lumped circuit [Gear 1971]): STEP_SPAN time constants
+    of its slowest pole (|σ| of the lowest-frequency pole listed; without one, of the sweep's lowest frequency) in at
+    least STEP_POINTS steps, and STEP_PER_PERIOD per period of the fastest lightly damped pole that shows in it (its
+    step_share at least STEP_SHARE, given the zeros); its figures (transfer.step_metrics) with the DC gain as the
+    final value; a pole in the right half-plane: unstable, no final value. None for a response with a pole at the
+    origin (an integrator: no final value) or when it can't be stepped."""
+    from .transfer import STEP_MAX, STEP_PER_PERIOD, STEP_POINTS, STEP_Q, STEP_SPAN, step_metrics
     if normal.get("m", 0) < 0:
         return None
+    # a pole in the right half-plane: the step grows without bound, it has no final value (audit round 7, AA-7: the
+    # DC gain was reported as one); shown over five of its growth times
+    grow = [p.real for p in poles if p.real > 1e-9 * max(abs(p), 1.0)]
     sig = [abs(p.real) for p in poles if p != 0 and abs(p.real) > 0]
-    tau = 1.0 / min(sig) if sig else 1.0 / (2 * math.pi * float(f[0]))
-    t = np.linspace(0.0, STEP_SPAN * tau, STEP_POINTS)
+    tau = 5.0 / max(grow) / STEP_SPAN if grow else (1.0 / min(sig) if sig else 1.0 / (2 * math.pi * float(f[0])))
+    span = STEP_SPAN * tau
+    # resolve the fastest lightly damped pole (Q ≥ STEP_Q) with STEP_PER_PERIOD steps per period: BDF2 at a few
+    # steps per period neither finds the first peak nor keeps the ringing (AA-6: a Q 300 RLC read 25 % overshoot
+    # for 99.5 %); at most STEP_MAX steps (a note says when that is too few)
+    # (a track's GHz resonance in a kHz filter's output hardly shows: its share of the step decides, given the zeros)
+    ring = [abs(p.imag) for p in poles if p.imag != 0 and abs(p) / (-2 * p.real if p.real < 0 else 1e-300) >= STEP_Q
+            and (zeros is None or step_share(p, poles, zeros) >= STEP_SHARE)]
+    n = STEP_POINTS
+    if ring:
+        n = max(n, int(math.ceil(span * max(ring) / (2 * math.pi) * STEP_PER_PERIOD)) + 1)
+    capped = n > STEP_MAX
+    t = np.linspace(0.0, span, min(n, STEP_MAX))
     try:
         y = lumped.circuit.step(node, t)
     except (ValueError, RuntimeError, np.linalg.LinAlgError):
         return None
+    if grow:
+        k = int(np.argmax(np.abs(y)))
+        metrics = {"final": None, "peak": float(y[k]), "t_peak": float(t[k]), "rise": None, "overshoot_pct": None,
+                   "undershoot_pct": None, "settling": None, "unstable": True}
+        return {"t": t, "y": y, "metrics": metrics, "capped": capped}
     k = normal.get("k")
     final = (k.real if isinstance(k, complex) else float(k)) if normal.get("m", 0) == 0 and k is not None else None
-    return {"t": t, "y": y, "metrics": step_metrics(t, y, final)}
+    return {"t": t, "y": y, "metrics": step_metrics(t, y, final), "capped": capped}
 
 
 def _bandwidth_and_stability(board: Board, config: Config, spec: NetSpec, receiver: str, net, f: np.ndarray,
