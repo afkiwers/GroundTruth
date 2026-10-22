@@ -357,7 +357,7 @@ def bw():
         g = gain_figures(Response("t", "t", "voltage gain", f, h))
         check("bw", f"W2 2nd order Q {q:g}: the tile's −3 dB (gain_figures)", want, g["f_3db"], 2e-3)
         check("bw", f"W2 2nd order Q {q:g}: the check's bandwidth (upper_3db)", want, upper_3db(f, h), 2e-3,
-              note="upper_3db measures from the peak")
+              note="from the passband (DC) gain")
 
 
 # --------------------------------------------------------------------------------------------------- main

@@ -1522,9 +1522,10 @@ def _bandwidth_and_stability(board: Board, config: Config, spec: NetSpec, receiv
     max_bandwidth, each op-amp stage solved as a circuit against its Bandwidth field (the stage's own transfer, from
     the previous op-amp's output or the driver pin to its output: an upstream filter does not count against it),
     each loop's phase margin (without a route to order the op-amps by, an unrouted board: each from the driver pin).
-    A bandwidth is transfer.upper_3db (3 dB below the passband peak, above it); a limit is
-    exceeded by more than BW_TOL, or the response does not fall that far within the sweep while the sweep reaches
-    above the limit (then the bandwidth is at least the sweep's top)."""
+    A bandwidth is transfer.upper_3db (3 dB below the passband gain: the low-frequency gain of a response flat at the
+    sweep's start, else the peak); a limit is exceeded by more than BW_TOL, or the response does not fall that far
+    within the sweep while the sweep reaches above the limit (then the bandwidth is at least the sweep's top); a sweep
+    that ends below the limit before it falls leaves the limit unchecked (an info issue)."""
     from .route import RouteError, find_route
     from .transfer import BW_TOL, PM_ERROR, PM_WARN, fmt_hz, upper_3db
     out = []
@@ -1538,11 +1539,19 @@ def _bandwidth_and_stability(board: Board, config: Config, spec: NetSpec, receiv
         return fmt_hz(bw) if bw > limit * (1 + BW_TOL) else None
     if getattr(spec, "max_bandwidth", None) and responses:
         main = responses[0]
-        text = over(upper_3db(main.f, main.h), spec.max_bandwidth)
+        bw = upper_3db(main.f, main.h)
+        text = over(bw, spec.max_bandwidth)
         if text:
             out.append({"check": "bandwidth_limit", "severity": None, "at": rx_at,
                         "message": f"{spec.name}: its bandwidth at {receiver} is {text}, above its max_bandwidth "
                                    f"{fmt_hz(spec.max_bandwidth)}"})
+        elif bw is None and f[-1] <= spec.max_bandwidth:
+            # the sweep stops below the limit before the response has fallen 3 dB: the limit is not checked (AA-13:
+            # it was silently passed)
+            out.append({"check": "bandwidth_limit", "severity": "info", "at": rx_at,
+                        "message": f"{spec.name}: its bandwidth at {receiver} is not checked against its max_bandwidth "
+                                   f"{fmt_hz(spec.max_bandwidth)}: the sweep ends at {fmt_hz(float(f[-1]))} before it "
+                                   "falls 3 dB (sweep higher)"})
     # the op-amp stages in the path's order, each one's input: the previous stage's output, else the driver pin
     refs = []
     try:
