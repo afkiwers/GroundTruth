@@ -264,7 +264,8 @@ def loop():
     # at the sweep's first frequency (1 Hz, above the 10 Hz open-loop pole): T = −A(j·1 Hz), its real part
     check("loop", "L4 positive feedback: T(1 Hz) = −A(j·1 Hz)", float(-_a_ol(f[:1], 1e5, 1e6)[0].real),
           float(t[0].real), 1e-6)
-    m = phase_margin(f, t)
+    lead_f = np.geomspace(1e-9, 1.0, 60, endpoint=False)          # as simulate.network_responses gives it
+    m = phase_margin(f, t, lead=c.loop_gain("U", lead_f))
     check("loop", "L4 positive feedback reported unstable (PM < 0 or None)", 1.0,
           1.0 if (m is None or m["pm"] < 0) else 0.0, 0, rel=False,
           note=f"phase_margin gives {None if m is None else round(m['pm'], 1)}°")

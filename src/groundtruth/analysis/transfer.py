@@ -287,24 +287,43 @@ PM_WARN = 45.0                 # degrees: a loop with less phase margin rings (a
 PM_ERROR = 20.0                # to oscillating (an error) [A55]
 
 
-def phase_margin(f, t) -> Optional[dict]:
-    """A loop gain's crossover and phase margin [Ogata 2010]: the first frequency where |T| falls through 1
-    (interpolated in log f, |T| in dB linear between the samples), and there 180° + ∠T, ∠T unwrapped from the
-    sweep's start (0° for negative feedback). {"f_c", "pm", "t_low_db"}; None when |T| never crosses 1 in the sweep
-    (or starts below it: no loop to speak of)."""
+def phase_margin(f, t, lead=None) -> Optional[dict]:
+    """A loop gain's stability margin [Ogata 2010] [Nyquist 1932]: at every frequency where |T| crosses 1
+    (interpolated in log f, |T| in dB linear between the samples) 180° + ∠T; the margin reported is the smallest of
+    them, at its crossover (a resonance in the feedback can lift |T| through 1 again above the first crossover: audit
+    round 7, AA-4, the first alone read 98° for a loop whose margin is 27°).
+
+    `lead`: T on a grid from near DC up to the sweep's start (simulate.network_responses), so ∠T is unwrapped from DC
+    (two poles below the sweep's start leave ∠T past −180° there: unwrapped from the sweep's start alone it read
+    +180°, a margin 360° too high) and the sign at DC is known: a loop gain negative at DC with |T| > 1 is positive
+    feedback, T(0) beyond −1 on the Nyquist plot, a closed-loop pole in the right half-plane (the stage latches): pm
+    −180, "positive_feedback" (AA-3: it was given 270°). Without `lead` the sweep's start is taken as DC.
+    {"f_c", "pm", "t_low_db", "crossings": [(f, margin)], "positive_feedback"}; None when |T| starts at or below 1
+    (no loop to speak of) or never crosses 1 in the sweep."""
     f = np.asarray(f, float)
     t = np.asarray(t, complex)
     mag = 20 * np.log10(np.maximum(np.abs(t), 1e-300))
-    ph = np.degrees(np.unwrap(np.angle(t)))
-    below = np.nonzero(mag < 0)[0]
-    if not len(below) or below[0] == 0:
+    if len(f) < 2 or mag[0] <= 0:
         return None
-    k = int(below[0])
-    x0, x1 = math.log(f[k - 1]), math.log(f[k])
-    u = mag[k - 1] / (mag[k - 1] - mag[k])
-    f_c = math.exp(x0 + u * (x1 - x0))
-    phase = ph[k - 1] + u * (ph[k] - ph[k - 1])
-    return {"f_c": f_c, "pm": 180.0 + phase, "t_low_db": float(mag[0])}
+    lead = np.asarray(lead if lead is not None else [], complex)
+    ph = np.degrees(np.unwrap(np.angle(np.concatenate([lead, t]))))[len(lead):]
+    positive = bool((lead[0] if len(lead) else t[0]).real < 0)
+    if not len(lead) and positive and abs(ph[0]) < 135:
+        positive = False                 # past −90° at the sweep's start without the DC side known: a pole below it
+    crossings = []
+    for k in np.nonzero(np.sign(mag[1:]) != np.sign(mag[:-1]))[0] + 1:
+        x0, x1 = math.log(f[k - 1]), math.log(f[k])
+        u = mag[k - 1] / (mag[k - 1] - mag[k])
+        phase = ph[k - 1] + u * (ph[k] - ph[k - 1])
+        crossings.append((math.exp(x0 + u * (x1 - x0)), 180.0 + phase))
+    if positive:
+        f_c = crossings[0][0] if crossings else float(f[0])
+        return {"f_c": f_c, "pm": -180.0, "t_low_db": float(mag[0]), "crossings": crossings,
+                "positive_feedback": True}
+    if not crossings:
+        return None
+    f_c, pm = min(crossings, key=lambda c: c[1])
+    return {"f_c": f_c, "pm": pm, "t_low_db": float(mag[0]), "crossings": crossings, "positive_feedback": False}
 
 
 PEAKING_DB = 0.5               # a gain this far above its low-frequency value is reported as peaking

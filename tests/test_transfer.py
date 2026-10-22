@@ -224,3 +224,31 @@ def test_a_pdn_rails_poles_are_its_impedance_peaks(tmp_path):
     lo, hi = sorted(x["f"] for x in p.ports[0]["peaks"])[:2]
     assert any(lo < z["f0"] < hi and z["q"] for z in pz_rows(resp.zeros))
     assert p.summary()["responses"][0]["quantity"] == "impedance"
+
+
+def test_the_phase_margin_is_the_smallest_over_every_crossover_and_positive_feedback_is_unstable():
+    """Audit round 7, AA-3 / AA-4 (transfer.phase_margin against closed forms, tools/dev/analog_audit.py L4 / L5):
+    T = 100·ω1/(s + ω1)·(1 + 49x/(1 + x + y²)) (x = s/(Qωr), y = s/ωr, Q 20, fr 2 MHz) crosses |T| = 1 three times;
+    the margin is the smallest of the three (27.4°, at 2.11 MHz), the first alone read 98°. A loop gain of −A(s)
+    (positive feedback) is unstable: −180°, flagged; it read 270°."""
+    import math
+    from groundtruth.analysis.transfer import phase_margin
+    f = np.geomspace(1.0, 1e9, 4000)
+    s = 2j * math.pi * f
+    w1, wr, q = 2 * math.pi * 1e3, 2 * math.pi * 2e6, 20.0
+    x, y = s / (q * wr), s / wr
+    m = phase_margin(f, 100 * w1 / (s + w1) * (1 + 49 * x / (1 + x + y ** 2)))
+    assert len(m["crossings"]) == 3 and m["pm"] == pytest.approx(min(p for _, p in m["crossings"]))
+    assert m["pm"] < 30 and m["f_c"] == pytest.approx(2.11e6, rel=0.01) and not m["positive_feedback"]
+    a = lambda fr: 1e5 / (1 + 1j * fr / 10)                                # noqa: E731
+    lead = np.geomspace(1e-9, 1.0, 60, endpoint=False)                     # near DC up to the sweep's start
+    neg = phase_margin(f, -a(f), lead=-a(lead))
+    assert neg["positive_feedback"] and neg["pm"] == -180.0
+    assert phase_margin(f, a(f), lead=a(lead))["pm"] == pytest.approx(90.0, abs=0.01)     # one pole: 90°
+    # two poles below the sweep's start (10 Hz, 100 Hz; sweep from 1 kHz) with |T| still above 1: ∠T is past −180°
+    # there; unwrapped from DC its margin is 180 − atan(fc/10) − atan(fc/100), not 360° more
+    fs = np.geomspace(1e3, 1e9, 3000)
+    t2 = lambda fr: 1e9 / ((1 + 1j * fr / 10) * (1 + 1j * fr / 100))      # noqa: E731
+    m2 = phase_margin(fs, t2(fs), lead=t2(np.geomspace(1e-6, 1e3, 60, endpoint=False)))
+    fc = m2["f_c"]
+    assert m2["pm"] == pytest.approx(180 - math.degrees(math.atan(fc / 10) + math.atan(fc / 100)), abs=0.01)

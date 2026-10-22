@@ -1414,6 +1414,7 @@ def sweep_range(spec: NetSpec, harmonics) -> np.ndarray:
 POLE_SPAN = 10.0               # poles and zeros up to this many times the sweep's top are listed and written out
 DOUBLET = 1e-3                 # a pole and a zero this close (relative) cancel in the lists and the written-out
                                # H(s) [A54]
+LOOP_LEAD = 60                 # a loop gain's points from near DC to its sweep's start (phase_margin's `lead`)
 
 
 def cancel_doublets(poles, zeros) -> tuple[list, list, int]:
@@ -1472,13 +1473,21 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
     for name in net.circuit.opamps:
         t = net.circuit.loop_gain(name, f)
         r = Response(f"{name}: loop gain", spec.name, "loop gain", np.asarray(f, float), t)
-        pm = phase_margin(f, t)
+        # T from near DC (nine decades below the sweep) up to the sweep: its phase unwrapped from DC and its sign
+        # there (positive feedback), not only the sweep's (transfer.phase_margin, audit round 7, AA-3)
+        f_lead = np.geomspace(max(float(f[0]) * 1e-9, 1e-9), float(f[0]), LOOP_LEAD, endpoint=False)
+        pm = phase_margin(f, t, lead=net.circuit.loop_gain(name, f_lead))
         r.margin = pm
         if pm is None:
             r.notes.append("its loop gain does not fall through 1 in the sweep (sweep higher for the phase margin)")
+        elif pm.get("positive_feedback"):
+            r.notes.append("its loop gain is negative at low frequency (positive feedback: the stage latches or "
+                           "oscillates; check its inputs' connections)")
         else:
             r.notes.append(f"crossover {fmt_hz(pm['f_c'])}, phase margin {pm['pm']:.0f}°"
-                           + (" (it rings: below 45°)" if pm["pm"] < PM_WARN else ""))
+                           + (" (it rings: below 45°)" if pm["pm"] < PM_WARN else "")
+                           + (f"; the smallest of {len(pm['crossings'])} crossovers"
+                              if len(pm.get("crossings") or ()) > 1 else ""))
         out.append(r)
     notes = list(dict.fromkeys(net.notes + lumped.notes))
     kinds = ", ".join(f"{n} ({k})" for n, k in net.opamps)
@@ -1571,10 +1580,14 @@ def _bandwidth_and_stability(board: Board, config: Config, spec: NetSpec, receiv
             continue
         name = r.name.split(":")[0]
         fp = board.footprint(name) or board.footprint(name.rstrip("ABCD"))
+        if m.get("positive_feedback"):           # T(0) < −1: unstable whatever its crossover (AA-3)
+            message = (f"{name}: its loop gain is negative at low frequency: positive feedback, the stage latches or "
+                       "oscillates (check which input its feedback goes to)")
+        else:
+            message = (f"{name}: its loop's phase margin is {m['pm']:.0f}° at {fmt_hz(m['f_c'])}: "
+                       + ("close to oscillating" if m["pm"] < PM_ERROR else "it rings"))
         out.append({"check": "opamp_stability", "severity": "error" if m["pm"] < PM_ERROR else None,
-                    "at": fp.position if fp is not None else rx_at,
-                    "message": f"{name}: its loop's phase margin is {m['pm']:.0f}° at {fmt_hz(m['f_c'])}: "
-                               + ("close to oscillating" if m["pm"] < PM_ERROR else "it rings")})
+                    "at": fp.position if fp is not None else rx_at, "message": message})
     return out
 
 
