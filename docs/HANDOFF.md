@@ -7,6 +7,18 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Branch `audit-7` (2026-10-22, from `main` fa9fa4f; not merged):** the user asked for "a thorough, independent
+  scientific and engineering audit of the features that have just been implemented" in a set priority order, every
+  expectation derived independently, findings before code changes, a regression test per correction, a status per
+  feature. Record: [ANALOG_AUDIT.md](ANALOG_AUDIT.md) (summary in VALIDATION_AUDIT "Round 7"). Tools:
+  `tools/dev/analog_audit.py` (74 comparisons, all PASS after the corrections), `tools/dev/lcapy_reference.py` (Lcapy
+  1.26 in `%TEMP%\auditvenv`, never the project venv: no SPICE simulator here), `tools/dev/cap_bias_dump.py`.
+  Commits: 157a268 (phases 1-5: findings, no code), 3701e2d (AA-1 DC operating point `analysis/bias.
+  dc_operating_point`, AA-2 `safety.signed_rail_voltage`), 817ac94 (AA-3 / AA-4 `transfer.phase_margin(lead=)`,
+  every crossover, positive feedback), cb0776e (AA-5 / AA-13 `upper_3db` from the passband gain, an unchecked limit
+  said), db76abc (AA-6 / AA-7 the step's resolution `step_share`, unstable steps), 363ab3c (AA-8 doublets vs |Re p|;
+  A54 / A56 / A58; Bode 1945, Nyquist 1932, Murata 2022), 70d6e54 (help, labels). Kraft: one capacitor moved (C515
+  55 → 52.5 V). Left open: SPICE / vendor-model comparison, the linear DC network's limits, the small-signal scope.
 - **Estimated Cbias curves in flux-2 (2026-10-22, the user's project changed at the user's request):** "can you add
   a derating field to the kicad schematics. for now use an estimated curve". `tools/dev/estimate_cbias.py` (new)
   estimates each class II ceramic's curve from its Rated Voltage and Dielectric fields (C0/(1+(V/V1)²) [A56], V1 =

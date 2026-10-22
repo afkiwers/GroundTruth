@@ -182,6 +182,15 @@ def mna(lcapy_json):
         p, z, _ = c.poles_zeros("out")
         lp = [complex(*x) for x in r["poles"]]
         lz = [complex(*x) for x in r["zeros"]]
+        # AA-9 (documented): a root below 1e-6·2π·F_REF (1 mHz) is listed at the origin (a board's 1 TΩ node leaks
+        # make such roots residue); wide_values has a real one at 0.18 mHz: checked as that, the others as roots
+        origin = 1e-6 * 2 * math.pi * 1e3
+        slow = [x for x in lp if abs(x) < origin]
+        if slow:
+            check("mna", f"M4 {name}: its {len(slow)} root(s) below 1 mHz listed at the origin (AA-9)", float(len(slow)),
+                  float(sum(1 for x in p if x == 0)), 0, rel=False, note="a documented limitation")
+            lp = [x for x in lp if abs(x) >= origin]
+            p = [x for x in p if x != 0]
         check("mna", f"M4 {name}: poles vs Lcapy's denominator roots", 0.0, _match_roots(p, lp), 1e-6, rel=False,
               note=f"{len(p)} vs {len(lp)}")
         # zeros: Lcapy's numerator may hold roots far beyond the circuit's band (R_O feedthrough) that the QZ

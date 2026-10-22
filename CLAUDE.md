@@ -199,6 +199,14 @@ build_package.cmd [--committed]                   # the user's console/double-cl
                                                   # does not name (tests/test_licenses.py runs it): add a dependency there
 .venv/Scripts/python tools/dev/undocumented.py FILES   # functions and methods without a docstring (0 in src/groundtruth;
                                                   # new code keeps it so)
+.venv/Scripts/python tools/dev/analog_audit.py --lcapy REF.json [--only dcbias,mna,loop,tf,step,bw]   # audit round 7's
+                                                  # independent benchmarks (docs/ANALOG_AUDIT.md): expected vs actual
+%TEMP%\auditvenv\Scripts\python -I tools/dev/lcapy_reference.py REF.json   # its reference: Lcapy (pip install lcapy in
+                                                  # a venv of its own, never this one); no SPICE is installed here
+.venv/Scripts/python tools/dev/cap_bias_dump.py BOARD SETTINGS OUT.json [OLD.json]   # every capacitor's DC voltage and C
+                                                  # in circuit (analysis/bias.at_dc); with OLD: the ones that moved
+.venv/Scripts/python tools/dev/estimate_cbias.py BOARD [--args]   # estimated DC-bias curves from Rated Voltage and
+                                                  # Dielectric (label_project.py --field "Cbias Curve" writes them)
 .venv/Scripts/python tools/dev/result_diff.py A.json B.json   # two simulate JSON reports number by number (speed work
                                                   # must not change results): run main in a `git worktree` for A
 .venv/Scripts/python tools/dev/gpu_probe.py       # what this machine's GPU could do for the solver (needs pyopencl)

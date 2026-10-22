@@ -625,6 +625,26 @@ handling). The record is [NUMERICS_AUDIT.md](NUMERICS_AUDIT.md); the tests are t
 - Model uncertainty kept apart: the pads' feed (A42), the plane pairs' missing fringing capacitance (A46: a cavity
   ~+1.5 % high in the limit).
 
+## Round 7 (2026-10-22, branch `audit-7`)
+
+An independent scientific audit of the analog features (DC-bias derating, MNA, op-amp loop gain and stability,
+transfer functions and poles / zeros, the step response, the bandwidth check, the ADC settings, the presentation),
+findings documented before any change. The record is [ANALOG_AUDIT.md](ANALOG_AUDIT.md); the benchmarks
+`tools/dev/analog_audit.py` (hand-derived expectations) and `tools/dev/lcapy_reference.py` (Lcapy, an independent
+symbolic nodal analysis in its own venv; no SPICE simulator is installed here). In short:
+- Verified as shipped: the MNA solver (closed forms to 1e-15; seven circuits against Lcapy, H within 3e-13, roots
+  within 5e-13), the loop gain (A·β by hand to 1e-10, R_O's capacitive loading included), the DC-bias curve (its
+  closed forms exact), the legend and hover notes.
+- Fixed (AA-1 to AA-8, AA-12 to AA-14): the voltage across a capacitor is the board's linear DC operating point (it
+  was a per-net bound: a divider's midpoint 12 V for 6 V, a feedback capacitor 5 V for 0 V); a negative rail keeps its
+  sign (±12 V read 0 V, for the derating and the cap_voltage check); positive feedback is unstable (it read 270°);
+  the smallest margin of every crossover (the first read 98° for 27°); the bandwidth below the passband gain (a Q 2
+  low-pass read 22 % low and passed its limit); the step resolves its ringing (Q 300: 25 % for 99.5 %) and an
+  unstable step has no final value; doublets cancel only within 0.1 % of |Re p| (a Q 2000 pair hid 12 dB).
+- Documented: roots below 1 mHz listed at the origin (AA-9), the derating's small-signal scope (AA-10, Murata's
+  measurement conditions), the ADC settings' meaning (AA-11).
+- Kraft: one of 89 capacitors with a curve moved by more than 0.5 V (C515, 55 → 52.5 V); C304 / C342 unchanged.
+
 ## Remaining risks and unverified items
 - SP-19: above 1 GHz a board-wide resonance's worst margin moves about ±2 dB between the 4x, 8x and 16x grids on
   kraft (converged within 0.8 dB below 1 GHz); the grid note asks for 4x and says so (round 4).

@@ -24,7 +24,16 @@ No SPICE simulator is installed on this machine (no ngspice, LTspice or Qucs): t
 
 ## 1. Executive summary
 
-(Filled in after Phase 7, section 17.)
+The MNA solver, the loop-gain computation and the DC-bias curve were right: they agree with closed forms and with an
+independent nodal analysis (Lcapy, 30-digit arithmetic) to 1e-10 or better. The checks built on them were not:
+the voltage across a capacitor was a per-net bound, not the DC operating point (a divider 12 V for 6 V, a feedback
+capacitor 5 V for 0 V) and lost a negative rail's sign (24 V read 0 V); a positive-feedback loop was reported with a
+270° margin; only the first of several crossovers counted; the bandwidth check measured from the peak (a Q 2 low-pass
+22 % low, passing a limit it exceeds); the step response of a ringing circuit was under-resolved (25 % overshoot for
+99.5 %) and an unstable one had a "final value"; high-Q doublets were cancelled where they change the response by
+12 dB. All are corrected, each with a regression test that fails on the old code, and re-verified (74 / 74
+benchmark comparisons). What could not be established here: agreement with a SPICE simulator or vendor op-amp models
+(none installed), and the derating beyond its small-signal scope.
 
 ## 2. Scope (Phase 1)
 
@@ -179,8 +188,79 @@ Status: verified with limitations (typical data, read from a plot; the ADC itsel
 
 ## 14. Corrections (Phase 6)
 
-(Filled in as each correction is made, with its regression test.)
+Each correction: the error, its derivation or reference, the smallest change, a regression test that fails on the
+code before it (checked by running the test with only the source files stashed), the benchmark again.
 
-## 15-17. Re-audit, limitations, status
+| Finding | Commit | Change | Regression test (fails before) | Benchmark after |
+|---|---|---|---|---|
+| AA-1 | 3701e2d | `analysis/bias.dc_operating_point` + `_sources` + `DcPoint`; `cap_voltages` uses the operating point's interval of the difference | test_bias: `test_a_feedback_capacitor_sits_at_its_dc_operating_point`; the divider case in `test_each_capacitor_gets_the_worst_dc_voltage_across_it` (it asserted the defect, 12 V: updated to 6 V) | B5 6 V, B6 5.5e-12 V |
+| AA-2 | 3701e2d | `safety.signed_rail_voltage` in `voltage_model` (pdn.rail_voltage keeps the magnitude for the PDN target) | test_bias: `test_a_capacitor_across_plus_and_minus_rails_sees_both` (24 V, and the cap_voltage error on a 16 V part) | B7 24 V |
+| AA-3 | 817ac94 | `transfer.phase_margin(f, t, lead)`: the loop gain from 1e-9 × the sweep's start (`LOOP_LEAD` points, `network_responses`); negative at DC with |T| > 1: positive feedback, pm −180, an error naming it; tile, note, console | test_analog_net: `test_a_follower_with_its_inputs_swapped_is_positive_feedback`; test_transfer: `test_the_phase_margin_is_the_smallest_over_every_crossover_and_positive_feedback_is_unstable` (also two poles below the sweep's start: the margin from DC, not +360°) | L4 −180°, flagged |
+| AA-4 | 817ac94 | every |T| = 1 crossing, the smallest margin (`crossings` in the result) | same test_transfer test | L5 27.44° |
+| AA-5 | cb0776e | `transfer.upper_3db`: the reference is the low-frequency gain when the response is flat over its sweep's first octave (`FLAT_DB` 0.5 dB), else the peak | test_analog_net: `test_a_peaked_low_pass_is_measured_from_its_dc_gain` (a Sallen-Key of Q 2 against its closed form, 591 Hz, and a 520 Hz limit) | W2 Q 2 within 1.7e-4 |
+| AA-13 | cb0776e | an info `bandwidth_limit` issue when the sweep ends below the limit before the response falls | same test (a sweep to 300 Hz) | — |
+| AA-6 | db76abc | `simulate._step_of`: at least `STEP_PER_PERIOD` (100) steps per period of the fastest pole with Q ≥ 1 whose `step_share` (residue of H(s)/s over H(0)) is ≥ 0.1 %, up to `STEP_MAX` (200 000, a note when capped). 40 per period first left 2 % (BDF2's damping of the first half-period, ~(ωh)⁴ per step): raised to 100, not the tolerance | test_step: `test_a_lightly_damped_step_is_resolved_and_an_unstable_one_has_no_final_value` (Q 100 within 0.5 %), `test_a_ringing_pole_that_hardly_shows_does_not_stretch_the_step` | S1 Q 20 / 100 / 300 within 0.31 % |
+| AA-7 | db76abc | a right-half-plane pole: `metrics["unstable"]`, no final value, rise or settling; `step_text` and the tile say so | same test_step test | S2 flagged |
+| AA-8 | 363ab3c | `simulate.cancel_doublets`: within `DOUBLET` × |Re p| (on the jω axis |s − p| ≥ |Re p|: |H| moves by less than 0.1 % anywhere) | test_transfer: `test_a_doublet_cancels_only_where_it_cannot_change_the_response` | T1 not cancelled |
+| AA-10, AA-12, AA-14 | 363ab3c, 70d6e54 | REFERENCES A54 / A56 / A58; help "Cbias" (the operating point, the small-signal scope, the narrowed "pessimistic"); "≤ 3.3 V" in the Parts tab, "Worst-case DC V" in the report | the GUI test's cell text | — |
+| AA-9, AA-11 | — | documented (this file, A56, the help); the benchmark checks AA-9's behaviour explicitly | — | M4 wide_values: its 0.18 mHz root at the origin |
 
-(Filled in after Phase 7.)
+## 15. Re-audit (Phase 7)
+
+From a clean run of every area, a freshly computed Lcapy reference (`tools/dev/analog_audit.py --lcapy`): **74
+comparisons, 0 FAIL** (DC bias 20, MNA 26, loop 11, transfer 2, step 6, bandwidth 9). The full test suite on the
+branch: 1117 passed, 1 skipped, 0 failed.
+
+Kraft (flux-2, the user's settings and the estimated Cbias curves, read only; `tools/dev/cap_bias_dump.py`, main
+fa9fa4f in a worktree against the branch): of 89 capacitors with a curve, one moved by more than 0.5 V: C515
+(the LM5008's feedback network, fed from the 0-55 V switch node through resistors) 55 V → 52.5 V (−2.48 … 52.5 V),
+5.21 → 5.52 nF. C304 / C342 stay at ≤ 3.3 V (99.3 nF, now set by U1102's ADC pins rail to rail); U303's soft-start,
+compensation and DRVCC capacitors stay unknown (a 55 V controller's pins are not sources). The board has no op-amp
+feedback capacitor, divider capacitor or ± rail with a curve, so AA-1 / AA-2 change little there; their benchmarks
+are the circuits where they matter.
+
+## 16. Remaining limitations and unsupported configurations
+
+- **No SPICE comparison**: no simulator is installed here; the independent solver is Lcapy (symbolic MNA), the
+  op-amp in it the same macromodel. A comparison with a vendor op-amp model (a TLV6001 SPICE macro) would test the
+  macromodel's fidelity, which this audit does not (only the solver).
+- **The DC operating point is linear**: no diodes, transistors, regulators or op-amp saturation (an op-amp's output
+  is clipped only to the board's span of voltages); IC pins other than low-voltage drivers are open. A net reached
+  only through such parts is unknown (nominal C, a note).
+- **The derated capacitance is small-signal** (A56, Murata 2022): not a charge model for a capacitor swinging across
+  its curve; no temperature, AC-amplitude or ageing dependence; typical curves, not guaranteed limits; above the
+  rated voltage the curve's tail is an extrapolation. The estimated curves now in flux-2 (`estimate_cbias.py`) are
+  estimates (package and capacitance density ignored) until the makers' curves replace them.
+- **Loop stability**: the margin is per op-amp's return ratio with the other op-amps closed (Bode); for a global loop
+  through several op-amps each return ratio is valid when the rest of the circuit is stable alone. The macromodel
+  has no slew limit, rails or output-stage poles beyond fp2.
+- **Bandwidth**: "flat at the sweep's start" decides low-pass vs band-pass; a sweep starting inside a low-pass's
+  transition (above its corner) is measured from its peak.
+- **Step**: linear, from rest, a 1 V step; capped at 200 000 steps (a note); poles below 1 mHz are integrators (AA-9).
+- **ADC**: GroundTruth does not model ADC sampling (acquisition, the sample-and-hold's kickback); 1 kHz / 2 µs are the
+  emission signal's, read from typical datasheet plots (AA-11).
+
+## 17. Status per feature
+
+| Feature | Status | Scope / evidence |
+|---|---|---|
+| DC-bias curve (`components/bias.py`) | **Verified** | closed forms B1-B2, B7, B9-B11 exact; PCHIP monotone (Fritsch 1980); one-point form fits the user's datasheet within 3 points (A56, fitted, not derived) |
+| Voltage across a capacitor | **Verified with limitations** (was **Incorrect**: AA-1, AA-2) | hand-derived operating points B3-B7; linear network only (§16) |
+| Applying the derating | **Verified with limitations** | one pass is exact (capacitors are open at DC: C cannot move the operating point); small-signal only (AA-10) |
+| MNA solver | **Verified** | closed forms M1-M2 to 1e-15; Lcapy M3-M4, 7 circuits, H within 3e-13, roots within 5e-13; roots < 1 mHz at the origin (AA-9) |
+| Op-amp macromodel | **Verified with limitations** | the solver's treatment of it against Lcapy; its fidelity to real op-amps not tested (no vendor models, §16) |
+| Loop gain (`Circuit.loop_gain`) | **Verified** | T = A·β by hand L1-L3 within 1e-10, including R_O's capacitive loading |
+| Phase margin, `opamp_stability` | **Verified** (was **Incorrect**: AA-3, AA-4) | L1-L5: crossovers 2e-7, margins 3e-5°; positive feedback flagged; the smallest of several crossovers |
+| Poles, zeros, normal form | **Verified** (doublets were **Incorrect**: AA-8) | Lcapy roots; T1; the plotted curve was always the circuit's own |
+| Symbolic H(s) | **Verified with limitations** | closed forms in test_symbolic (Sallen-Key, MFB, inverting) and the numeric solve to 1e-6 (round of analog-ac); ideal circuit by design (A54) |
+| Bode sweep | **Verified** | M3 (the same `transfer`), the sweep range per path (test_bode) |
+| Step response | **Verified with limitations** (was **Incorrect**: AA-6, AA-7) | RC within 1e-4 (test_step); RLC Q 2-300 overshoot within 0.31 %; unstable flagged; capped at 200 000 steps |
+| Bandwidth limit | **Verified** (was **Incorrect**: AA-5, AA-13) | W1 one pole within 1e-6; W2 Q 0.707-2 within 7e-4 against the DC-referenced closed form |
+| ADC signal settings | **Verified with limitations** | their meaning established (§11); typical datasheet values |
+| Presentation (legend, hover, tiles, report) | **Verified** | the legend and hover tests; the tile, note, console and report texts follow the corrected results; "worst-case DC" labelled |
+
+Overall: no Critical finding; the four High findings (AA-1, AA-2, AA-3, and AA-5's effect on the check) and the
+Medium ones are corrected and protected by tests that fail on the old code; nothing Critical or High is left open.
+The remaining limitations (§16) are documented in the help, REFERENCES (A54, A56, A58) and here.
+
+Full suite on the branch after the corrections (`.venvScriptspython -m pytest -q`): **1117 passed, 1 skipped (the live-KiCad test), 0 failed** in 60 min.

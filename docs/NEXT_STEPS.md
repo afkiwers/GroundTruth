@@ -23,6 +23,15 @@ emission estimate from it, bandwidth limits ([ANALOG_AC.md](ANALOG_AC.md), its H
 user wants it:** nothing planned (the step response is merged too); a new plugin package (the one in `out/dist` has
 none of today's branches).
 
+## Done (2026-10-22): audit round 7
+
+The analog features' independent audit ([ANALOG_AUDIT.md](ANALOG_AUDIT.md), branch `audit-7`): MNA, the loop gain and
+the DC-bias curve verified; the capacitors' DC voltage, negative rails, positive feedback, several crossovers, the
+bandwidth check's reference, the step's resolution and unstable steps, high-Q doublets corrected (AA-1 to AA-8).
+Left open (ANALOG_AUDIT.md §16): no SPICE / vendor op-amp model comparison (none installed here: on a machine with
+ngspice, run the Lcapy benchmark circuits through it too); the DC operating point is linear (no diodes,
+transistors, regulators, op-amp saturation); the derating is small-signal.
+
 ## Done (2026-10-20): audit round 6
 
 The numerical audit (stopping tests, convergence against independent references, adversarial copper, metamorphic
