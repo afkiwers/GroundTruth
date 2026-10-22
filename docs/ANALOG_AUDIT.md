@@ -263,4 +263,4 @@ Overall: no Critical finding; the four High findings (AA-1, AA-2, AA-3, and AA-5
 Medium ones are corrected and protected by tests that fail on the old code; nothing Critical or High is left open.
 The remaining limitations (§16) are documented in the help, REFERENCES (A54, A56, A58) and here.
 
-Full suite on the branch after the corrections (`.venvScriptspython -m pytest -q`): **1117 passed, 1 skipped (the live-KiCad test), 0 failed** in 60 min.
+Full suite on the branch after the corrections (`.venv/Scripts/python -m pytest -q`): **1117 passed, 1 skipped (the live-KiCad test), 0 failed** in 60 min.
