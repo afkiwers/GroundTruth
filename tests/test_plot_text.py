@@ -162,16 +162,20 @@ def test_the_section_gives_up_its_axis_label_then_its_share_plot_when_short(rout
     plot over the side view, at least 0.25 in per layer, and the distance axis labelled. Short: the label moves
     into the title, then the share plot goes (the side view's colours show the same shares)."""
     board, rr, _ = route
-    h = section_height_in(board, rr)
-    assert 3.0 < h < 3.8
+    h = section_height_in(board, rr, 19.1)              # with the caption's lines at that width
+    assert 3.0 < h < 4.2 and h > section_height_in(board, rr)
     tall = render(draw_section, (19.1, h), board, rr)
     top, side = tall.axes[0], tall.axes[1]
     assert len(tall._gt_section) == 2 and side.get_xlabel().startswith("mm along the route")
+    # the caption under it (the user: "can you add a description at the bottom that explains the plots especially
+    # the green lines"); a short figure leaves it out first
+    assert any("Green bars" in x.get_text() for x in tall.texts)
     assert "displacement" in tall._suptitle.get_text()
     assert side.get_position().height * h / 4 >= 0.25 and top.get_position().height * h >= 0.8
     short = render(draw_section, (11.5, 1.3), board, rr)
     assert len(short._gt_section) == 1                       # the side view and the colour bar
     assert "x: mm along the route" in short._suptitle.get_text()
+    assert not any("Green bars" in x.get_text() for x in short.texts)
     assert not problems(short)
     assert section_height_in(board, NS(section={}, kind="converter")) == 0.0
 
