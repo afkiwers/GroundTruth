@@ -90,7 +90,11 @@ def _bode(rr) -> list[Kpi]:
     st = next((r.step for r in rr.responses if getattr(r, "step", None)), None)
     if st and len(out) < 4:
         m = st["metrics"]
-        if m.get("rise") is not None:
+        if m.get("unstable"):
+            out.append(("step", "unstable", "a pole in the right half-plane", "error",
+                        "the receiver's response to a 1 V step at the driver grows without bound: the circuit has a "
+                        "pole in the right half-plane (see the poles and zeros)"))
+        elif m.get("rise") is not None:
             out.append(("step", f"{m['overshoot_pct']:.1f} % overshoot",
                         f"rise {fmt_s(m['rise'])} · settles {fmt_s(m['settling'])}",
                         "warn" if m["overshoot_pct"] >= 20 else "",

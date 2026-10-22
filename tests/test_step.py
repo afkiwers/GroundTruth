@@ -84,3 +84,47 @@ def test_an_all_pass_stage_undershoots_and_an_integrator_has_no_step():
     assert m["undershoot_pct"] > 90 and m["final"] == 1.0
     assert "undershoot" in step_text(m)
     assert _step_of(None, "out", [-1.0], {"m": -1, "k": 1.0}, np.array([1.0, 10.0])) is None
+
+
+def test_a_lightly_damped_step_is_resolved_and_an_unstable_one_has_no_final_value():
+    """Audit round 7, AA-6 / AA-7 (tools/dev/analog_audit.py S1 / S2): a series RLC of Q 100 through simulate._step_of
+    overshoots e^(−πζ/√(1−ζ²)) = 98.44 % within 0.5 % (it read 62.9 %: 3000 steps over 382 periods); a circuit with
+    a pole at +1000 /s (a negative conductance) is unstable, without a final value (it read the DC gain, −1)."""
+    from types import SimpleNamespace
+    from groundtruth.analysis.simulate import _step_of
+    from groundtruth.analysis.transfer import normal_form, step_text
+    lc, cc, q = 1e-3, 1e-6, 100.0
+    c = Circuit()
+    c.vsource("in", "0")
+    c.r("in", "a", math.sqrt(lc / cc) / q)
+    c.l("a", "b", lc)
+    c.c("b", "0", cc)
+    p, z, k = c.poles_zeros("b")
+    st = _step_of(SimpleNamespace(circuit=c), "b", list(p), normal_form(p, z, k), np.array([1.0, 1e6]), list(z))
+    zeta = 1 / (2 * q)
+    assert st["metrics"]["overshoot_pct"] == pytest.approx(100 * math.exp(-math.pi * zeta / math.sqrt(1 - zeta ** 2)),
+                                                           rel=5e-3)
+    c = Circuit()
+    c.vsource("in", "0")
+    c.r("in", "a", 1e3)
+    c.c("a", "0", 1e-6)
+    c.vccs("0", "a", "a", "0", 2e-3)
+    p, z, k = c.poles_zeros("a")
+    st = _step_of(SimpleNamespace(circuit=c), "a", list(p), normal_form(p, z, k), np.array([1.0, 1e6]), list(z))
+    assert st["metrics"]["unstable"] and st["metrics"]["final"] is None and st["metrics"]["settling"] is None
+    assert step_text(st["metrics"]).startswith("unstable")
+
+
+def test_a_ringing_pole_that_hardly_shows_does_not_stretch_the_step():
+    """A pole's share of the step (simulate.step_share, the residue of H(s)/s over H(0)): an RC low-pass (1 kHz)
+    whose response also has a pair at 300 MHz, Q 150, cancelled to 1e-6 by a zero pair beside it, keeps STEP_POINTS
+    steps (it would need 1e8 to resolve that ringing); the pair's share is below STEP_SHARE."""
+    from groundtruth.analysis.simulate import STEP_SHARE, step_share
+    from groundtruth.analysis.transfer import STEP_POINTS
+    w = 2 * math.pi * 300e6
+    pair = list(np.roots([1, w / 150, w * w]))
+    zpair = list(np.roots([1, w / 150, (w * (1 + 1e-6)) ** 2]))
+    rc = -2 * math.pi * 1e3
+    assert step_share(pair[0], [rc] + pair, zpair) < STEP_SHARE
+    assert step_share(rc, [rc] + pair, zpair) == pytest.approx(1.0, rel=1e-3)
+    assert STEP_POINTS == 3000

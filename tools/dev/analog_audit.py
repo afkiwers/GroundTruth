@@ -316,12 +316,12 @@ def step():
         c = Circuit(); c.vsource("in", "0"); c.r("in", "a", math.sqrt(lc / cc) / q)              # noqa: E702
         c.l("a", "b", lc); c.c("b", "0", cc)                                                        # noqa: E702
         p, z, k = c.poles_zeros("b")
-        st = _step_of(SimpleNamespace(circuit=c), "b", list(p), normal_form(p, z, k), np.array([1.0, 1e6]))
+        st = _step_of(SimpleNamespace(circuit=c), "b", list(p), normal_form(p, z, k), np.array([1.0, 1e6]), list(z))
         zeta = 1 / (2 * q)
         w0 = 1 / math.sqrt(lc * cc)
         os_ = 100 * math.exp(-math.pi * zeta / math.sqrt(1 - zeta ** 2))
         check("step", f"S1 series RLC Q {q:g}: overshoot {os_:.1f} % (closed form)", os_,
-              st["metrics"]["overshoot_pct"], 0.02, note=f"{len(st['t'])} steps over {st['t'][-1] * w0 / (2 * math.pi):.0f} periods")
+              st["metrics"]["overshoot_pct"], 0.005, note=f"{len(st['t'])} steps over {st['t'][-1] * w0 / (2 * math.pi):.0f} periods")
     # S2 unstable: a negative conductance (a VCCS of 2 mS on a node with 1 kΩ to the input and 1 µF): the pole at
     # +(gm − 1/R)/C = +1000 /s; the step grows without bound: no final value may be reported
     c = Circuit(); c.vsource("in", "0"); c.r("in", "a", 1e3); c.c("a", "0", 1e-6)               # noqa: E702
@@ -332,7 +332,7 @@ def step():
     m = st["metrics"] if st else None
     check("step", "S2 unstable: no final value or settling reported", 1.0,
           1.0 if (m is None or (m["settling"] is None and m.get("unstable"))) else 0.0, 0, rel=False,
-          note=("metrics: final {:.3g}, settling {}".format(m["final"], m["settling"]) if m else "no step"))
+          note=(f"metrics: final {m['final']}, settling {m['settling']}, unstable {m.get('unstable')}" if m else "no step"))
 
 
 def bw():

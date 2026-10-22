@@ -190,7 +190,10 @@ def normal_form(poles, zeros, k: complex, f_max: Optional[float] = None) -> dict
 
 SETTLE_BAND = 0.02             # the step response's settling band: ±2 % of its final value [Ogata 2010]
 STEP_SPAN = 12.0               # a step is simulated for this many of its slowest pole's time constants 1/|σ|
-STEP_POINTS = 3000             # time steps of a step response (BDF2: its error ~ (h/τ)², ~1e-5 here)
+STEP_POINTS = 3000             # time steps of a step response (BDF2: its error ~ (h/τ)², ~1e-5 here), at least
+STEP_PER_PERIOD = 100          # ... this many per period of its fastest lightly damped pole (Q ≥ STEP_Q) [Gear 1971]
+STEP_Q = 1.0                   # (audit round 7, AA-6)
+STEP_MAX = 200_000             # and at most this many (a note says the ringing is then under-resolved)
 
 
 def step_metrics(t, y, final: Optional[float] = None) -> dict:
@@ -246,6 +249,9 @@ def fmt_s(x: Optional[float]) -> str:
 
 def step_text(m: dict) -> str:
     """step_metrics as one line: 'final 0.998, rise 1.62 ms, overshoot 4.3 %, settles (±2 %) in 2.91 ms'."""
+    if m.get("unstable"):
+        return f"unstable (a pole in the right half-plane): it grows without bound, {m['peak']:.3g} at " \
+               f"{fmt_s(m['t_peak'])}"
     if m.get("rise") is None and m.get("overshoot_pct") is None:
         return f"no final value (AC-coupled): peak {m['peak']:.3g} at {fmt_s(m['t_peak'])}"
     parts = [f"final {m['final']:.4g}", f"rise {fmt_s(m['rise'])}", f"overshoot {m['overshoot_pct']:.1f} %"]
