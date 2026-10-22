@@ -260,10 +260,14 @@ BW_TOL = 0.01                  # a bandwidth this much above its limit is a band
 
 
 def upper_3db(f, h) -> Optional[float]:
-    """A response's bandwidth [Franco 2015]: the first frequency above its passband peak (|H|'s largest value in the
-    sweep) where
-    |H| has fallen 3 dB below that peak, (|H_peak|/|H|)² interpolated linearly in f² to 2 between the samples around
-    it (exact for one pole, as gain_figures). None when it does not fall that far above the peak within the sweep (a
+    """A response's bandwidth [Franco 2015]: the first frequency above its peak (|H|'s largest value in the sweep)
+    where |H| has fallen 3 dB below its passband gain, (|H_ref|/|H|)² interpolated linearly in f² to 2 between the
+    samples around it (exact for one pole, as gain_figures). The passband gain is the gain at the sweep's start when
+    the response starts in its passband (flat there: within FLAT_DB over the sweep's first octave; a low-pass, with
+    or without peaking: its usual bandwidth below its DC gain, as the −3 dB tile, gain_figures), else the peak (a
+    band-pass or a high-pass, still rising at the sweep's start). Audit round 7, AA-5:
+    measured from the peak, a low-pass with Q 2 read 22 % low (1.16 kHz for 1.48 kHz), and a peaked filter above its
+    max_bandwidth passed the check. None when it does not fall that far above the peak within the sweep (a
     high-pass, or a band reaching past the sweep's top)."""
     f = np.asarray(f, float)
     a = np.abs(np.asarray(h, complex))
@@ -273,11 +277,14 @@ def upper_3db(f, h) -> Optional[float]:
     peak = float(a[k0])
     if peak <= 0:
         return None
-    below = np.nonzero(a[k0:] < peak / math.sqrt(2))[0]
+    j = min(int(np.searchsorted(f, 2 * f[0])), len(f) - 1)          # one octave above the sweep's start
+    flat = a[0] > 0 and abs(20 * math.log10(max(a[j], 1e-300) / a[0])) <= FLAT_DB
+    ref = float(a[0]) if flat else peak
+    below = np.nonzero(a[k0:] < ref / math.sqrt(2))[0]
     if not len(below):
         return None
     k = k0 + int(below[0])
-    y0, y1 = (peak / max(a[k - 1], 1e-300)) ** 2, (peak / max(a[k], 1e-300)) ** 2
+    y0, y1 = (ref / max(a[k - 1], 1e-300)) ** 2, (ref / max(a[k], 1e-300)) ** 2
     u0, u1 = float(f[k - 1]) ** 2, float(f[k]) ** 2
     t = (2.0 - y0) / (y1 - y0) if y1 != y0 else 0.0
     return math.sqrt(u0 + min(max(t, 0.0), 1.0) * (u1 - u0))
@@ -327,6 +334,8 @@ def phase_margin(f, t, lead=None) -> Optional[dict]:
 
 
 PEAKING_DB = 0.5               # a gain this far above its low-frequency value is reported as peaking
+FLAT_DB = 0.5                  # a response whose gain moves less than this over its sweep's first octave starts in
+                               # its passband (upper_3db measures from that gain, not the peak)
 
 
 def gain_figures(r) -> Optional[dict]:

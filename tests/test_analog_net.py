@@ -168,6 +168,33 @@ def test_a_follower_with_little_phase_margin_is_flagged(tmp_path):
             assert len(found) == 1 and (found[0]["severity"] or "warning") == want
 
 
+def test_a_peaked_low_pass_is_measured_from_its_dc_gain(tmp_path):
+    """Audit round 7, AA-5: a unity-gain Sallen-Key with Q 2 (R 10k, 10k; C1 160 nF, C2 10 nF: f0 398 Hz) has its
+    −3 dB point below its DC gain at 1.4845·f0 = 591 Hz (x² = (b + √(b² + 4))/2, b = 2 − 1/Q²); with max_bandwidth
+    520 Hz it is a bandwidth_limit issue. Measured from its +6.3 dB peak it read 464 Hz and passed. A sweep ending at
+    300 Hz, below the limit, leaves it unchecked: an info issue says so (AA-13)."""
+    import math
+    from groundtruth.analysis.transfer import upper_3db
+    parts = [("R1", "10k", "R", "SIG_IN", "A"), ("R2", "10k", "R", "A", "B"), ("C1", "160n", "C", "A", "OUT"),
+             ("C2", "10n", "C", "B", "GND")]
+    pins = {3: ("+IN", "B"), 2: ("-IN", "OUT"), 1: ("OUT", "OUT"), 5: ("V+", "+5V"), 4: ("V-", "GND")}
+    board, cfg, spec, _ = _setup(tmp_path, parts, [("U3", pins)], gbw=100e6, z_out=1e-3)
+    for ref, c in (("C1", 160e-9), ("C2", 10e-9)):
+        cfg.components[ref].model = ComponentModel("cap", {"C": c, "ESR": 0.0, "ESL": 0.0})
+    f0 = 1 / (2 * math.pi * 10e3 * math.sqrt(160e-9 * 10e-9))
+    b = 2 - 1 / 4
+    want = f0 * math.sqrt((b + math.sqrt(b * b + 4)) / 2)
+    from groundtruth.analysis.simulate import network_responses
+    f = np.geomspace(1.0, 1e5, 400)
+    out, _, _ = network_responses(board, cfg, spec, "U2.1", f)
+    assert upper_3db(out[0].f, out[0].h) == pytest.approx(want, rel=5e-3)
+    spec.max_bandwidth = 520.0
+    found = [x for x in _findings(board, cfg, spec, f) if x["check"] == "bandwidth_limit"]
+    assert len(found) == 1 and found[0]["severity"] is None and "above its max_bandwidth" in found[0]["message"]
+    found = [x for x in _findings(board, cfg, spec, np.geomspace(1.0, 300.0, 100)) if x["check"] == "bandwidth_limit"]
+    assert len(found) == 1 and found[0]["severity"] == "info" and "not checked" in found[0]["message"]
+
+
 def test_a_follower_with_its_inputs_swapped_is_positive_feedback(tmp_path):
     """Audit round 7, AA-3: a follower whose output goes back to +IN (positive feedback, T(0) = −A0) is an
     opamp_stability error naming positive feedback; its phase margin was 270° before, and no issue."""
