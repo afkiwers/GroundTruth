@@ -112,13 +112,14 @@ def _voltage_board():
 
 def test_each_capacitor_gets_the_worst_dc_voltage_across_it(tmp_path):
     """A rail's capacitor its rail (12 V), an op-amp output's its op-amp's supply (3.3 V, rail-to-rail worst case), a
-    divider's midpoint its top rail (12 V), a net nothing knows none (a note; the nominal C), a 48 V controller's
-    soft-start pin none either (not its input, [A58])."""
+    10k/10k divider's midpoint its DC operating point, 6 V (audit round 7, AA-1: the bound before gave it its top
+    rail, 12 V), a net nothing knows none (a note; the nominal C), a 48 V controller's soft-start pin none either (not
+    its input, [A58])."""
     from groundtruth.analysis.bias import cap_voltages
     board, sc, _ = make(tmp_path, _voltage_board(), "volts", nets=())
     v = cap_voltages(board, sc.config)
     assert v["C1"][0] == pytest.approx(12.0) and v["C2"][0] == pytest.approx(3.3)
-    assert "U3" in v["C2"][1] and v["C3"][0] == pytest.approx(12.0) and "R1" in v["C3"][1]
+    assert "U3" in v["C2"][1] and v["C3"][0] == pytest.approx(6.0) and "DC operating point" in v["C3"][1]
     assert v["C4"][0] is None and v["C6"][0] is None
 
 
@@ -130,7 +131,7 @@ def test_a_run_uses_each_capacitors_own_capacitance(tmp_path):
     cfg, rows, notes = at_dc(board, sc.config)
     by = {r.ref: r for r in rows}
     v1 = v1_through(C0, 40e-9, 40.0)
-    for ref, volts in (("C1", 12.0), ("C2", 3.3), ("C3", 12.0)):
+    for ref, volts in (("C1", 12.0), ("C2", 3.3), ("C3", 6.0)):
         want = C0 / (1 + (volts / v1) ** 2)
         assert cfg.model_for(ref).capacitance() == pytest.approx(want, rel=1e-9) and by[ref].c == pytest.approx(want)
     assert cfg.model_for("C5").capacitance() == pytest.approx(C0) and by["C5"].how == "class I"
@@ -180,3 +181,45 @@ def test_the_helps_chart_draws_the_plugins_curve_through_its_points():
     assert "<svg" in sections["cbias"] and "@CBIAS_CHART@" not in sections["cbias"]
     classic = h.page()
     assert "@CBIAS_CHART@" not in classic and "<svg" not in classic and text in classic and "(a point)" in classic
+
+
+def _feedback_board():
+    """An AC-coupled inverting stage on a single 5 V supply (VREF 2.5 V from a 10k/10k divider at +IN; C14 couples
+    the input, R3 10k, R4 100k with C13 across it), and C7 a 16 V part between +12V and −12V: what audit round 7's
+    B6 and B7 benchmarks check (tools/dev/analog_audit.py)."""
+    parts = [("R5", "10k", "R", "+5V", "VREF"), ("R6", "10k", "R", "VREF", "GND"),
+             ("C14", "1u", "C", "SIG_IN", "RIN"), ("R3", "10k", "R", "RIN", "INN"),
+             ("R4", "100k", "R", "INN", "AMP_OUT"), ("C13", "1n", "C", "INN", "AMP_OUT"),
+             ("C7", "100n 16V", "C", "+12V", "-12V")]
+    pins = {3: ("+IN", "VREF"), 2: ("-IN", "INN"), 1: ("OUT", "AMP_OUT"), 5: ("V+", "+5V"), 4: ("V-", "GND")}
+    g = opamp_circuit_board(parts, [("U3", pins)], out_net="AMP_OUT")
+    g.fields("C13", **{"Cbias": "0.4nF@40V", "Rated Voltage": "50V"})
+    g.fields("C7", **{"Cbias": "40nF@8V"})
+    return g
+
+
+def test_a_feedback_capacitor_sits_at_its_dc_operating_point(tmp_path):
+    """Audit round 7, AA-1: C13 across the feedback resistor of an AC-coupled inverting stage sees 0 V at DC (the
+    virtual ground: out = in− = VREF, no DC current in R4) and keeps its nominal 1 nF; before, each end was bounded
+    by the op-amp's supply on its own and C13 read 5 V."""
+    from groundtruth.analysis.bias import at_dc, cap_voltages
+    from groundtruth.components.models import ComponentModel
+    board, sc, _ = make(tmp_path, _feedback_board(), "fb", nets=())
+    sc.config.components["U3"].model = ComponentModel("amplifier", {"gbw": 1e6})
+    v = cap_voltages(board, sc.config)
+    assert v["C13"][0] == pytest.approx(0.0, abs=1e-6) and "DC operating point" in v["C13"][1]
+    _, rows, _ = at_dc(board, sc.config)
+    assert next(r for r in rows if r.ref == "C13").c == pytest.approx(1e-9, rel=1e-6)
+
+
+def test_a_capacitor_across_plus_and_minus_rails_sees_both(tmp_path):
+    """Audit round 7, AA-2: C7 between +12V and −12V sees 24 V (the rail's sign kept: safety.signed_rail_voltage);
+    it is derated there, and the cap_voltage check flags its 16 V rating. Before, −12V read +12 V: 0 V across C7."""
+    from groundtruth.analysis.bias import cap_voltages
+    from groundtruth.analysis.safety import check_capacitors, voltage_model
+    board, sc, _ = make(tmp_path, _feedback_board(), "pm", nets=())
+    assert cap_voltages(board, sc.config)["C7"][0] == pytest.approx(24.0)
+    found = []
+    check_capacitors(board, sc.config, voltage_model(board, sc.config), sc.config.safety,
+                     lambda check, name, msg, *a, **k: found.append((check, name, k.get("severity"))))
+    assert ("cap_voltage", "C7", "error") in found

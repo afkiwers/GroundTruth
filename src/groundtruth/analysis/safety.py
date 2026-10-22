@@ -123,11 +123,23 @@ class Volts:
         return f"{hi:g} V" if lo == hi else f"{lo:g}-{hi:g} V"
 
 
+def signed_rail_voltage(net: str):
+    """A rail's voltage from its name with its sign: "+12V" 12, "-12V" / "−12V" −12 (pdn.rail_voltage reads the
+    magnitude, which the PDN's target impedance wants). Audit round 7, AA-2: the sign was dropped, so a capacitor
+    between +12V and −12V read 0 V instead of 24 V, for the DC-bias derating and the cap_voltage check alike."""
+    from .pdn import rail_voltage
+    v = rail_voltage(net)
+    if v is None:
+        return None
+    name = net.rsplit("/", 1)[-1].strip()
+    return -v if name[:1] in ("-", "−") else v
+
+
 def voltage_model(board: Board, config) -> Volts:
     """The nets' voltages (see the module and Volts): names, grounds, reference nets, PDN rails, power stages (the
     switch node 0 to its rail), bridges (the phases 0 to the bus), the settings' own, series parts with no drop,
-    then the gates and bootstrap nets riding their source or switch node (`_riding`)."""
-    from .pdn import rail_voltage
+    then the gates and bootstrap nets riding their source or switch node (`_riding`). A negative rail's name gives
+    a negative voltage (signed_rail_voltage), so Volts.dv across +12V and −12V is 24 V."""
     out: dict[str, tuple[float, str]] = {}
     lo: dict[str, float] = {}
     nodes: list[str] = []
@@ -140,7 +152,7 @@ def voltage_model(board: Board, config) -> Volts:
         if is_ground(net):
             put(net, 0.0, "ground")
         else:
-            put(net, rail_voltage(net), "from its name")
+            put(net, signed_rail_voltage(net), "from its name")
     for net in config.reference_nets:
         put(net, 0.0, "reference net", force=True)
     for d in getattr(config, "pdn", ()):

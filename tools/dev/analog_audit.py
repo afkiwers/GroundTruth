@@ -87,6 +87,8 @@ def dcbias():
         g.fields(ref, **{"Cbias": "40nF@40V" if ref != "C13" else "0.4nF@40V", "Rated Voltage": "100V"})
     with tempfile.TemporaryDirectory() as tmp:
         board, sc, _ = make(Path(tmp), g, "audit", nets=())
+        from groundtruth.components.models import ComponentModel
+        sc.config.components["U3"].model = ComponentModel("amplifier", {"gbw": 1e6})   # an op-amp stage
         v = cap_voltages(board, sc.config)
         _, rows, notes = at_dc(board, sc.config)
     by = {r.ref: r for r in rows}
