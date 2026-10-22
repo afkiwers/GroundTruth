@@ -87,6 +87,13 @@ def _contour_widths(prefs: dict) -> dict:
             "contour_index_mm": mm("contour_index_mm", CONTOUR_INDEX_MM)}
 
 
+def _kicad_zoom(prefs: dict) -> float:
+    """The board shown around an item in KiCad (mm, 1 to 500), else highlight.VIEW_MM (15 mm)."""
+    from ..analysis.highlight import VIEW_MM
+    v = prefs.get("kicad_zoom_mm")
+    return float(v) if isinstance(v, (int, float)) and 1.0 <= v <= 500.0 else VIEW_MM
+
+
 def defaults(prefs: dict) -> dict:
     """The preferences with their defaults filled in."""
     from ..analysis.simulate import RESOLUTIONS
@@ -111,6 +118,7 @@ def defaults(prefs: dict) -> dict:
             "history_report": bool(prefs.get("history_report", True)),
             **_arrow_range(prefs),
             **_contour_widths(prefs),
+            "kicad_zoom_mm": _kicad_zoom(prefs),
             "compute": "server" if prefs.get("compute") == "server" else "local",
             "server": str(prefs.get("server", "") or ""),
             "server_key": str(prefs.get("server_key", "") or ""),
@@ -504,6 +512,12 @@ class PreferencesDialog(wx.Dialog):
         row(board, "Index contour line (mm)", self.contour_index,
             "Draw contours on board: the width of the index lines, every decade (1, 10, 100 ...) or every fifth "
             "isotherm, drawn thicker like a map's index contours")
+        self.kicad_zoom = wx.SpinCtrlDouble(self, min=1.0, max=500.0, inc=1.0, initial=p["kicad_zoom_mm"])
+        self.kicad_zoom.SetDigits(0)
+        row(board, "Zoom in KiCad (mm)", self.kicad_zoom,
+            "when an issue, a map's marker, a cross-section's via or a current-density tile is shown in KiCad: at "
+            "least this much of the board around it (a bigger item still fits whole; KiCad zooms in steps, so "
+            "the view is close to this, not exact)")
 
         report = group("Report", "left")
         self.author = wx.TextCtrl(self, value=p["author"])
@@ -586,6 +600,7 @@ class PreferencesDialog(wx.Dialog):
                                 "arrow_max_mm": self.arrow_max.GetValue()}),
                 **_contour_widths({"contour_line_mm": self.contour_line.GetValue(),
                                    "contour_index_mm": self.contour_index.GetValue()}),
+                "kicad_zoom_mm": _kicad_zoom({"kicad_zoom_mm": self.kicad_zoom.GetValue()}),
                 "via_markers": self.via_markers.GetValue(),
                 "max_vias": int(v) if v.isdigit() else None,
                 "outlines": self.outlines.GetValue(),
