@@ -165,7 +165,7 @@ class PartsPanel(wx.Panel):
             return f"{c} (no voltage or rating: as given)"
         if row.why == "voltage unknown":
             return f"{c} (voltage unknown: 0 V)"
-        return f"{c} at {row.volts:.3g} V"
+        return f"{c} at ≤ {row.volts:.3g} V"     # the worst-case DC voltage across it (analysis/bias.cap_voltages)
 
     def _visible(self) -> list[str]:
         """The references the filter lets through: the text found in the reference, value or footprint, or equal

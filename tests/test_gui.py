@@ -2576,7 +2576,7 @@ def test_the_parts_tab_shows_each_capacitor_at_its_dc_voltage(app, tmp_path, mon
     try:
         run_steps(app, f, [])
         g, row = f.parts.grid, f.parts.rows.index("C1")
-        wait_for(app, lambda: "at 12 V" in g.GetCellValue(row, CIRCUIT_COL))
+        wait_for(app, lambda: "at ≤ 12 V" in g.GetCellValue(row, CIRCUIT_COL))
         assert g.GetCellValue(row, CIRCUIT_COL).startswith("88") and g.IsReadOnly(row, CIRCUIT_COL)
         assert g.GetCellValue(row, PARAM_COL["C_bias"]) == "40nF@40V"
         col = PARAM_COL["C_bias"]
@@ -2593,7 +2593,7 @@ def test_the_parts_tab_shows_each_capacitor_at_its_dc_voltage(app, tmp_path, mon
         assert told and "each needs its voltage" in told[-1] and "75nF@50V" in told[-1]
         assert f.settings.config.components["C1"].model.bias == "95nF@10V, 66nF@30V, 39nF@50V"    # kept
         wait_for(app, lambda: g.GetCellValue(row, col) == "95nF@10V, 66nF@30V, 39nF@50V"
-                 and "at 12 V" in g.GetCellValue(row, CIRCUIT_COL))
+                 and "at ≤ 12 V" in g.GetCellValue(row, CIRCUIT_COL))
     finally:
         close_window(f)
 

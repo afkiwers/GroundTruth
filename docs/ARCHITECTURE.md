@@ -1414,9 +1414,15 @@ section with a worked chart.
   `differences`, `same` compares curves point by point) and the Parts tab the text.
 - `fields.bias_reading`: `Cbias Curve` (text) over `Cbias`; a single value takes `Cbias Voltage`. `Dielectric`
   C0G / NP0 (or the value / description) means class I.
-- `analysis/bias.cap_voltages`: `safety.voltage_model` plus `bounds` (an IC's supply ≤ `IC_SUPPLY_MAX` 18 V for
-  its other pins, then a resistor's known far side; a bounded net 0 … bound, so `Volts.dv` gives the worst case)
-  [A58]; `part_bias` one capacitor (CapBias), `at_dc(board, config)` the run's copy of the settings with every
+- `analysis/bias.cap_voltages` [A58]: between two nets `safety.voltage_model` knows (names with their sign:
+  `signed_rail_voltage`), `Volts.dv`; else `dc_operating_point`: the board's linear DC network (resistors; shorts,
+  inductors, ferrites at their DCR ≥ `LINK_OHMS`; op-amp channels of amplifier parts as A0 behind R_O; capacitors
+  open) with `_sources` (the known nets at their ranges, and the driving or untyped signal pins of ICs supplied at
+  ≤ `IC_SUPPLY_MAX` 18 V, rail to rail), solved by superposition (one dense solve, a right-hand side per source):
+  `DcPoint.coef` {net: {source: coefficient}}, so a capacitor's voltage is the exact interval of its ends'
+  difference, its larger end (at most the board's span); nets with no DC path to a source are `floating` (unknown).
+  Audit round 7 (docs/ANALOG_AUDIT.md, AA-1 / AA-2) replaced per-net bounds that read a divider's midpoint at its top
+  rail and a feedback capacitor at the op-amp's supply, and gave −12V the sign of +12V. `part_bias` one capacitor (CapBias), `at_dc(board, config)` the run's copy of the settings with every
   curve applied, the table and the notes (unknown voltages, half-rating defaults). Called by `simulate`,
   `bode_paths` and `suggest_fixes` after `Config.active`; idempotent (a derated copy gives the same copy).
   `SimulationResult.cap_bias` carries the table to the JSON (`capacitors_at_bias`), the HTML report (`_cap_bias`)

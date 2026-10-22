@@ -1114,7 +1114,7 @@ def _cap_bias(rows) -> str:
                    + f"<td class='num' data-v='{r.c0}'>{format_si(float(f'{r.c0:.3g}'), 'F')}</td>"
                    + f"<td class='num' data-v='{r.c}'>{format_si(float(f'{r.c:.3g}'), 'F')}</td>"
                    + _num(change, "{:+.0f} %") + f"<td>{e(r.curve)}</td><td>{e(how.get(r.how, r.how))}</td></tr>")
-    return _table(["Part", "Nets", "#V across", "Where the voltage comes from", "#C nominal", "#C used", "#Change",
+    return _table(["Part", "Nets", "#Worst-case DC V", "Where the voltage comes from", "#C nominal", "#C used", "#Change",
                    "Cbias", "DC-bias loss"], out, paged=True)
 
 
