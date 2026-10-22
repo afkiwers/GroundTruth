@@ -7,7 +7,7 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
-- **Branch `audit-7` (2026-10-22, from `main` fa9fa4f; not merged):** the user asked for "a thorough, independent
+- **Branch `audit-7` (2026-10-22, from `main` fa9fa4f; into `main` at the user's "merge", a fast-forward, branch deleted; full suite 1117 passed, 1 skipped, 0 failed):** the user asked for "a thorough, independent
   scientific and engineering audit of the features that have just been implemented" in a set priority order, every
   expectation derived independently, findings before code changes, a regression test per correction, a status per
   feature. Record: [ANALOG_AUDIT.md](ANALOG_AUDIT.md) (summary in VALIDATION_AUDIT "Round 7"). Tools:
