@@ -7,6 +7,17 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Estimated Cbias curves in flux-2 (2026-10-22, the user's project changed at the user's request):** "can you add
+  a derating field to the kicad schematics. for now use an estimated curve". `tools/dev/estimate_cbias.py` (new)
+  estimates each class II ceramic's curve from its Rated Voltage and Dielectric fields (C0/(1+(V/V1)²) [A56], V1 =
+  0.4 × rated for X7R / X7S / X6S (the user's 100 nF 100 V X7R chart: V1 = 40 V), 0.3 for X5R, 0.15 for Y5V; percent
+  points at 10 / 25 / 50 / 75 / 100 % of the rating); `label_project.py --field "Cbias Curve"` wrote them, after the
+  user closed the project, as hidden fields into the 7 sheets and the board (80 capacitors, every one found in both;
+  backup `out/kraft_backup_2026-10-22_cbias/`). kicad-cli exports the netlist and drill files from them. GroundTruth
+  reads all 80 as curves (none at half their rating any more): C304 / C342 98.7 nF at 3.3 V, C315 (1 µF 100 V X5R)
+  228 nF at 55 V, C324 (10 µF 100 V X7S) 3.47 µF at 55 V, C302 (22 µF 35 V X5R) 2.73 µF at 28 V; still unknown:
+  U303's six pins' capacitors. The estimates ignore package and capacitance density; the makers' curves go into
+  InvenTree's Cbias Curve (the prompt for that session was given to the user), which then comes with the library.
 - **Branch `dc-bias` (2026-10-22, from `main` f12cacd; into `main` at the user's "commit and merge", a fast-forward,
   branch deleted; the full suite was still running at the merge):** its full suite: 1107 passed, 1 skipped, 2 failed,
   both fixed on `dc-bias-fixes` (merged right after): `simulate --history` used the run's capacitor table where

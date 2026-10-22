@@ -271,7 +271,11 @@ in `tools/dev/`, never only in the scratchpad.
   and `out/kraft_backup_2026-10-22b_settings/` (540 ns). Don't give the ZXCT1107s Gain / Bandwidth fields: either
   makes them an op-amp model whose single-ended input is the rail (S+), and their gain is R_GAIN's (4 mA/V × 10 kΩ).
   Their symbol pins (1 Vs+, 2 Vs−, 3 OUT) differ from the datasheet's numbers on purpose (the generic SOT-23
-  footprint): physically right.
+  footprint): physically right. Since 2026-10-22 (the user: "can you add a derating field to the kicad schematics.
+  for now use an estimated curve") every class II ceramic in `flux-2` (80 capacitors, schematic sheets and board)
+  has a hidden `Cbias Curve` field: an ESTIMATE from its Rated Voltage and Dielectric (`tools/dev/estimate_cbias.py`:
+  C0/(1+(V/V1)²), V1 = 0.4 × rated for X7R-class, 0.3 for X5R; percent points at 10-100 % of the rating), to be
+  replaced by the makers' curves through InvenTree; before: `out/kraft_backup_2026-10-22_cbias/`.
   Power stages (all found by `groundtruth detect`), rail +VDC unless noted:
 
   | Stage | Controller | Switches | Switch node | Inductor |
