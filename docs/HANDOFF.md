@@ -1,12 +1,37 @@
 # GroundTruth handover
 
-## Current state (2026-10-21, `step-response`, `analog-ac`, `bode-sweep`, `pin-shares`, `electrothermal`, `density-pcb`, `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
+## Current state (2026-10-22, `section-caption`, `merge-no-ff`, `audit-7`, `cbias-estimate`, `dc-bias-fixes`, `dc-bias`, `bode-legend`, `step-response`, `analog-ac`, `bode-sweep`, `pin-shares`, `electrothermal`, `density-pcb`, `help-licenses`, `pager-fix`, `density-zoom`, `kelvin-rtn`, `refill-wait`, `issue-clusters`, `report-pages`, `audit-dead-time`, `results-tab`, `report-polish`, `report-check-filter`, `dead-edges`, `dead-time`, `jobs-fetching`, `issues-filter`, `qs-band` and audit round 6 merged into `main`)
 
 **Start here**, and for what is left to do: [NEXT_STEPS.md](NEXT_STEPS.md) (what is done, what waits on the user, what is open, with the commands; rewritten 2026-10-19, round 5 added 2026-10-20). Then the dated "Session 10, …" entries below (newest first), "Where things are", and
 [../CLAUDE.md](../CLAUDE.md) (environment, rules, commands, real boards) and [ARCHITECTURE.md](ARCHITECTURE.md)
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **Where things stand (2026-10-22, end of the day):** `main` 277f7c0 + this docs branch, the only branches; not
+  pushed by Claude (`origin/main` was at 01bb044 when the user last pushed). **Next, asked and waiting** (the user,
+  with a screenshot of the Issues tab): "add sorting when clicking on Check, severity etc. Also, add a filter where
+  the user can select one or more of the issues to be displayed ... keep the numbering #1 etc the same. Make sure
+  when clicking on an issue it zooms in on the actual PCB, some are doing this but clearance_voltage, cap_voltage
+  conducted_emissions and others seem not zoom in" (`ui/results_panels.IssuesPanel`: a filter exists already as
+  **Checks…**, a MultiChoiceDialog, so make it visible; sorting: `EVT_LIST_COL_CLICK`; the zoom: trace which
+  checks' issues carry no copper to show, `MainFrame` on_show → the KiCad sink). Start it on its own branch when
+  the user says go. **The installed plugin** is older than the audit fixes and the cross-section caption: the last
+  package is 0.1.42345 (fa9fa4f, built 2026-10-22 on the laptop, whose release key is here); build a new one when
+  the user asks (`tools/make_pcm_package.py`).
+- **Branch `section-caption` (2026-10-22, from `main` 6d19d97; merged with `--no-ff` at the user's "merge",
+  277f7c0):** the user, of the Results tab's cross-section: "can you add a description at the bottom that explains
+  the plots especially the green lines". `plots.draw_section` puts `SECTION_CAPTION` under the figure (the share plot
+  and its dashed Σ, the side view's bands, the signal track and its vias, the green bars: the vias and parts carrying
+  the return between layers with their share, solid within 2 × the corridor, dashed with their distance; a layer
+  change without one: no nearby return path); `section_height_in(board, rr, width_in)` leaves room for it at that
+  width (the Results tab passes the page's width; the report 9.5 in, the CLI's PNG 8 in); a short figure drops the
+  caption first (before the axis label and the share plot). The help's Results section says the same. Tests:
+  test_plot_text (the caption at the plugin's height, gone when short), the report / CLI / Results GUI tests; the
+  full suite not run on it.
+- **Branch `merge-no-ff` (2026-10-22, merged with `--no-ff`, 6d19d97):** the user, of SourceTree's straight history
+  after several fast-forward merges: "why don't you do branches anymore?", then "yes" to merge commits: CLAUDE.md's
+  git rule says `git merge --no-ff <branch>`, never a fast-forward (also in this machine's Claude memory). History
+  already on origin is not rewritten.
 - **Branch `audit-7` (2026-10-22, from `main` fa9fa4f; into `main` at the user's "merge", a fast-forward, branch deleted; full suite 1117 passed, 1 skipped, 0 failed):** the user asked for "a thorough, independent
   scientific and engineering audit of the features that have just been implemented" in a set priority order, every
   expectation derived independently, findings before code changes, a regression test per correction, a status per

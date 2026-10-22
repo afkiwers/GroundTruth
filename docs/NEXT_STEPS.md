@@ -7,6 +7,20 @@ read [../CLAUDE.md](../CLAUDE.md) (environment of this machine, rules, commands)
 bigger machine and audit items 1-5, then 6-7) is in git history (`git log -p docs/NEXT_STEPS.md`); all of it is
 done, with the evidence in [VALIDATION_AUDIT.md](VALIDATION_AUDIT.md) "Round 4".
 
+## Next (2026-10-22): asked by the user, not started
+
+**The Issues tab** (`ui/results_panels.IssuesPanel`), the user with a screenshot: "add sorting when clicking on
+Check, severity etc. Also, add a filter where the user can select one or more of the issues to be displayed. Non
+selected ones should not be listed. Obviously keep the numbering #1 etc the same. Make sure when clicking on an
+issue it zooms in on the actual PCB, some are doing this but clearance_voltage, cap_voltage conducted_emissions and
+others seem not zoom in?" A check filter exists (**Checks…**, a dialog, remembered in ui.json `issues_hidden`):
+make it findable on the tab itself; sorting per column (`EVT_LIST_COL_CLICK`, the # numbers kept); for the zoom,
+find which checks' issues give the KiCad sink no copper (or only a point) to show and give each one its parts,
+tracks or region. On its own branch, merged with `--no-ff` at the user's word.
+
+Also when the user asks: a new plugin package (the last, 0.1.42345 of fa9fa4f, has neither audit round 7's
+corrections nor the cross-section's caption).
+
 ## Open (2026-10-21): after the electro-thermal and pin-share merges
 
 The electro-thermal coupling (`thermal.electrothermal`; kraft: settled in 2 rounds, T_max unchanged) and the pin
