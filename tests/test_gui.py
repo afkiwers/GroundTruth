@@ -2290,6 +2290,37 @@ def test_find_servers_lists_the_cluster_and_fills_the_address(app, frame, monkey
         assert "No compute server with this access key" in told[-1]
 
 
+def test_clicking_a_bar_in_the_cross_section_shows_its_via_in_kicad(app, frame):
+    """Results tab, the cross-section's side view: a click on a green (return-carrying) or grey (signal) via bar
+    hands that via to the window like a map's marker (on_map_mark), with no layer of its own (the via on any); its
+    tooltip says a click shows it. The user: "click on the grey or green vias ... zoom into the pcb and highlight
+    that specific via"."""
+    from types import SimpleNamespace
+    from matplotlib.backend_bases import MouseEvent
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    f = frame
+    run_steps(app, f, [])
+    h = f.results_panel
+    fig = Figure(figsize=(6, 2), dpi=100)
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot(111)
+    ax.set_xlim(0, 30), ax.set_ylim(3.5, -0.5)
+    via = {"x": 15.0, "y": 10.0, "name": "signal via F.Cu → B.Cu @(15.00, 10.00)"}
+    fig._gt_section = {ax: None}
+    fig._gt_marks = {ax: [(15.0, r, 1, via["name"]) for r in (0.0, 0.5, 1.0)]}
+    fig._gt_mark_refs = {ax: [("via", via)] * 3}
+    px, py = ax.transData.transform((15.0, 0.5))
+    seen = []
+    h.on_mark = lambda *a: seen.append(a)
+    canvas = SimpleNamespace(figure=fig, toolbar=None)
+    h._press(SimpleNamespace(inaxes=ax, dblclick=False, button=1, x=px + 2, y=py, canvas=canvas))
+    assert seen == [("via", via, via["name"], "")]
+    h.on_mark = f.on_map_mark
+    fig.canvas = h.canvas3
+    h._hover(MouseEvent("motion_notify_event", h.canvas3, px, py))
+
+
 def test_clicking_a_map_marker_shows_it_in_kicad(app, frame):
     """Results tab: a single left click on a marker (an issue's circle, a via's ▲) hands it to the window
     (on_map_mark), which shows it in KiCad; a double click still resets the zoom and shows nothing; on a board
