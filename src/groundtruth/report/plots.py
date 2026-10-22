@@ -1064,8 +1064,20 @@ def draw_section(fig: Figure, board: Board, rr) -> None:
     for s0, s1, lname in sec["signal"]:                                     # signal on a red band vanished)
         side.plot([s0, s1], [row[lname]] * 2, color=layer_colour(board, lname), lw=2.6, solid_capstyle="butt",
                   zorder=3, path_effects=halo)
-    for sv, a, b in sec["vias"]:
+    # what each bar is, for the plugin's hover and click (mark_at / mark_ref_at: show it in KiCad), a mark on every
+    # row the bar spans so a click anywhere along it finds it; where a green bar is drawn over a grey one (a stitching
+    # via beside the signal's projects onto the same station) the green one, on top, wins
+    marks, refs = [], []
+    for k, (sv, a, b) in enumerate(sec["vias"]):
         side.plot([sv, sv], [row[a], row[b]], color="#b0b0b0", lw=2.0, zorder=3, path_effects=halo)
+        at_xy = (sec.get("via_at") or [])[k] if k < len(sec.get("via_at") or []) else None
+        if at_xy is not None:
+            x_, y_, kind = at_xy
+            what = {"x": x_, "y": y_, "name": f"signal {'pad' if kind == 'pad' else 'via'} {a} → {b} "
+                                               f"@({x_:.2f}, {y_:.2f})"}
+            for r in np.arange(min(row[a], row[b]), max(row[a], row[b]) + 0.01, 0.5):   # every half row
+                marks.append((sv, float(r), 1, what["name"]))
+                refs.append(("via", what))
     placed = []
     for t in point_transfers(rr.transfers)[:SECTION_CARRIERS]:      # the biggest: a side view has room for a few
         at = station_at(t["x"], t["y"], rr.route_xy)
@@ -1078,6 +1090,9 @@ def draw_section(fig: Figure, board: Board, rr) -> None:
         near = dist <= 2 * W
         side.plot([sp, sp], [r0 - 0.3, r1 + 0.3], color=CARRIER, lw=4.0 if near else 2.0, ls="-" if near else "--",
                   solid_capstyle="round", zorder=4)
+        for r in np.arange(r0, r1 + 0.01, 0.5):                                          # every half row
+            marks.append((sp, float(r), 0, carrier_text(t) + ("" if near else f", {dist:.0f} mm from the route")))
+            refs.append(("via" if t.get("kind") == "via" else "part", t))
         if t["fraction"] < MIN_LABEL:
             continue
         text = share(t["fraction"]) + ("" if near else f", {dist:.0f} mm away")
@@ -1118,6 +1133,8 @@ def draw_section(fig: Figure, board: Board, rr) -> None:
         cb.set_label("% of return", fontsize=FS_TEXT)
         cb.ax.tick_params(labelsize=FS_TICK)
     fig._gt_section = {ax: (s, I, planes, W) for ax in (top, side) if ax is not None}   # the value under the mouse
+    fig._gt_marks = {side: marks}
+    fig._gt_mark_refs = {side: refs}
 
 
 def section_value(hit, x: float) -> str:

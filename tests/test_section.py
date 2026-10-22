@@ -99,3 +99,45 @@ def test_the_section_figure(tmp_path):
     assert text.startswith("s 8.") and "In1.Cu 89 %" in text and "within ±4.7 mm" in text
     draw_section(fig, board, NS(section={}, kind="converter"))
     assert fig.axes[0].texts[0].get_text() == SECTION_NONE
+
+
+def test_a_bar_in_the_side_view_points_at_its_via_on_the_board(tmp_path):
+    """The user: "click on the grey or green vias ... that would then zoom into the pcb and highlight that specific
+    via". The section keeps each layer change's via on the board (`via_at`, the route's own via); draw_section
+    records every bar's target (fig._gt_marks / _gt_mark_refs on the side view, a mark every half row): a click on
+    the green bar finds the stitching via that carries the return, one on the grey bar's F.Cu end the signal's via,
+    each at its board position (plots.mark_ref_at, what the Results tab's click hands to KiCad)."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+    from groundtruth.analysis.route import RouteVia
+    from groundtruth.report.plots import draw_section, mark_ref_at
+    board, res, rr, _ = _run(tmp_path, layer_change_board(0.8), "click")
+    route_via = next(st for st in res.setups[0].route.steps if isinstance(st, RouteVia)
+                     and st.from_layer != st.to_layer)
+    assert rr.section["via_at"][0][:2] == pytest.approx(tuple(route_via.position))
+    fig = Figure(figsize=(8, 3.2))
+    FigureCanvasAgg(fig).draw()
+    draw_section(fig, board, rr)
+    FigureCanvasAgg(fig).draw()
+    side = fig.axes[1]
+    carrier = next(t for t in rr.transfers if t["kind"] == "via")
+    sp = next(m[0] for m, r in zip(fig._gt_marks[side], fig._gt_mark_refs[side]) if r[1] is carrier)
+    rows = [m[1] for m, r in zip(fig._gt_marks[side], fig._gt_mark_refs[side]) if r[1] is carrier]
+    px, py = side.transData.transform((sp, sum(rows) / len(rows)))
+    kind, what, text = mark_ref_at(fig, side, px + 2, py)
+    assert kind == "via" and what is carrier and "% of the current" in text
+    assert mark_ref_at(fig, side, px, py + 200) is None                  # off every bar
+    # the same board without its stitching via: the grey bar alone at the layer change (a green one drawn over it,
+    # the stitching via beside it at the same station, wins: it is what shows there)
+    board, res, rr, _ = _run(tmp_path, layer_change_board(None), "grey")
+    route_via = next(st for st in res.setups[0].route.steps if isinstance(st, RouteVia)
+                     and st.from_layer != st.to_layer)
+    fig = Figure(figsize=(8, 3.2))
+    FigureCanvasAgg(fig).draw()
+    draw_section(fig, board, rr)
+    FigureCanvasAgg(fig).draw()
+    side = fig.axes[1]
+    px, py = side.transData.transform((15.0, 0.5))                     # the grey bar, between F.Cu and In1.Cu
+    kind, what, text = mark_ref_at(fig, side, px, py)
+    assert kind == "via" and text.startswith("signal via")
+    assert (what["x"], what["y"]) == pytest.approx(tuple(route_via.position))
