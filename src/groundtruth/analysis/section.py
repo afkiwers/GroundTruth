@@ -34,15 +34,17 @@ def corridor_mm(h_mm: float) -> float:
     return min(max(HALF_HEIGHTS * h_mm, HALF_MIN_MM), HALF_MAX_MM)
 
 
-def _path(route: Route) -> tuple[list, list, list]:
-    """(pieces [(s0, s1, start, end, layer)], signal runs [(s0, s1, layer)], layer changes [(s, from, to)]) along
-    the route from the driver, s in mm."""
-    pieces, runs, changes = [], [], []
+def _path(route: Route) -> tuple[list, list, list, list]:
+    """(pieces [(s0, s1, start, end, layer)], signal runs [(s0, s1, layer)], layer changes [(s, from, to)], and each
+    change's via on the board [(x, y, kind)] (mm; kind "via" or "pad", a through-hole pad)) along the route from the
+    driver, s in mm."""
+    pieces, runs, changes, at = [], [], [], []
     s = 0.0
     for step in route.steps:
         if isinstance(step, RouteVia):
             if step.from_layer != step.to_layer:
                 changes.append((s, step.from_layer, step.to_layer))
+                at.append((float(step.position[0]), float(step.position[1]), step.kind))
             continue
         if not isinstance(step, RouteSegment) or step.length <= 0:
             continue
@@ -52,7 +54,7 @@ def _path(route: Route) -> tuple[list, list, list]:
         else:
             runs.append((s, s + step.length, step.layer))
         s += step.length
-    return pieces, runs, changes
+    return pieces, runs, changes, at
 
 
 def route_section(sol, st, route: Route, own: Optional[set] = None, half_mm: float = 4.0,
@@ -67,9 +69,10 @@ def route_section(sol, st, route: Route, own: Optional[set] = None, half_mm: flo
     f         the solution's frequency
     signal    [(s0, s1, layer)]: where the signal runs on which layer
     vias      [(s, from_layer, to_layer)]: where it changes layer
+    via_at    [(x, y, kind)]: those vias on the board (mm), in the same order (the plugin's click shows one in KiCad)
     length_mm the route's length"""
     from scipy.ndimage import map_coordinates
-    pieces, runs, changes = _path(route)
+    pieces, runs, changes, via_xy = _path(route)
     if not pieces:
         return {}
     length = pieces[-1][1]
@@ -109,7 +112,7 @@ def route_section(sol, st, route: Route, own: Optional[set] = None, half_mm: flo
         I[li] = -along.sum(axis=1) * du * 1e-3                # A/m × m
     return {"s_mm": s.astype(np.float32), "layers": list(st.names), "I": I.astype(np.complex64),
             "half_mm": float(half_mm), "f": float(sol.f), "signal": runs, "vias": changes,
-            "length_mm": float(length)}
+            "via_at": via_xy, "length_mm": float(length)}
 
 
 def station_at(x: float, y: float, route_xy: list) -> Optional[tuple[float, float]]:
