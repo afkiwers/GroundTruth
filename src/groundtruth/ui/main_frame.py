@@ -347,8 +347,15 @@ class Session:
                                  "done")
         try:
             target = h.layer or self.saved_layer
+            # the zoom: at least the Preferences' "Zoom in KiCad" of the board around the focus (highlight.zoom_steps)
+            zoom_out = h.zoom_out
+            if h.area:
+                from ..analysis.highlight import zoom_steps
+                from .prefs_dialog import defaults
+                span = max(h.area[2] - h.area[0], h.area[3] - h.area[1])
+                zoom_out = zoom_steps(span, defaults(theme.prefs())["kicad_zoom_mm"])
             r = show_items(self.kb, h.lit, h.focus, h.context, nets=nets and h.nets, zoom=zoom,
-                           zoom_out=h.zoom_out, layer=target, clear_old=self.net_lit, wait=wait)
+                           zoom_out=zoom_out, layer=target, clear_old=self.net_lit, wait=wait)
             self.net_lit = r["lit"]
             if h.layer:
                 if self.saved_layer is None:
