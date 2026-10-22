@@ -580,7 +580,7 @@ matters:</p>
   give it a <code>resistor</code> model with its real resistance for the DC paths and the losses;</li>
 <li>a ceramic capacitor: <b>C at bias</b> is its DC-bias curve, one to twelve points read off the maker's chart
   (<code>75nF@50V</code>, or <code>95nF@10V, 66nF@30V, 39nF@50V</code>); each copy of the part then gets its
-  capacitance at the DC voltage across it, shown in <b>C in circuit</b> (<code>99.9nF at 3.3 V</code>): what every
+  capacitance at the DC voltage across it, shown in <b>C in circuit</b> (<code>99.9nF at ≤ 3.3 V</code>): what every
   solve uses. Empty, the nominal C. How it works: <a href="#cbias">Cbias: capacitance at DC bias</a>.</li>
 <li>a FET, a controller or a driver: its fields (<b>Rds(on)</b>, <b>Coss</b>, <b>Qoss</b>, <b>Vsd</b>, <b>Qrr</b>,
   <b>Vds</b>, the controller's loop fields …) are <i>stage</i> parameters, not a part model. The Parts table models
@@ -705,17 +705,26 @@ the one-point curve from the 50 V point alone (dotted):</p>
   <code>safety: voltages:</code> (which win), carried through series parts (0 Ω, ferrites, inductors, small
   resistors); a bootstrap capacitor sees the gate drive, a switch node swings from 0 to its rail
   (<a href="#safety">Voltage-aware safety checks</a> use the same voltages);</li>
-<li>a net none of those give, on an IC's signal pins: at most that IC's highest supply (an op-amp's output on a
-  3.3 V op-amp, an MCU's ADC pin: the rail-to-rail worst case). Only for ICs supplied at 18 V or less [A58]: a 55 V
-  controller's soft-start or compensation pin sits on its internal regulator, not near its input;</li>
-<li>else at most the highest known net one resistor away (a divider's midpoint: its top rail);</li>
-<li>else unknown: 0 V, the nominal C. A note after the run names those; give such a net its voltage under
+<li>a net none of those give: the board's <b>DC operating point</b>. GroundTruth solves the linear network at DC
+  (resistors, 0 Ω links, inductors and ferrites, op-amp channels with their open-loop gain; capacitors are open at
+  DC) with the known nets as sources, and each signal pin of an IC supplied at 18 V or less that drives (or may:
+  untyped) anywhere between that IC's supply rails (an MCU's ADC pin, a sensor's output: the rail-to-rail worst case
+  [A58]; a 55 V controller's soft-start or compensation pin sits on its internal regulator and is not a source). The
+  result is the range of the voltage across the capacitor, both ends together: a 10k / 10k divider's midpoint from
+  12 V is 6 V, a capacitor across an op-amp's feedback resistor about 0 V (the virtual ground); the larger end of the
+  range is used;</li>
+<li>else unknown (no DC path to any source, e.g. the midpoint of two capacitors in series, set only by their
+  leakage): 0 V, the nominal C. A note after the run names those; give such a net its voltage under
   <code>safety: voltages:</code> in the settings.</li>
 </ul>
-<p>Worst case on purpose: less capacitance raises a filter's corner (the bandwidth check stays on the safe side) and
-weakens decoupling (the PDN and conducted estimates stay pessimistic).</p>
-<p><b>Where it shows.</b> The Parts tab's <b>C in circuit</b> column (the capacitance and the voltage, e.g.
-<code>99.9nF at 3.3 V</code>), the report's <i>Capacitors at their DC bias</i> table (each one's nets, voltage and
+<p>Less capacitance is the pessimistic side for a filter's corner (the bandwidth check stays on the safe side) and for
+decoupling (the PDN and conducted estimates), not necessarily for a control loop: derated output capacitors can move
+a converter's crossover up and its phase margin either way. The value is the small-signal capacitance at the DC
+operating point, as the makers measure their curves (1 kHz, 0.5-1 Vrms, from 0 V to the rated voltage [Murata 2022]):
+right for the frequency sweeps and the small-signal step around that point, not for a capacitor that swings across
+its curve (a snubber across a switch node, a large step), and the curve beyond the rated voltage is extrapolated.</p>
+<p><b>Where it shows.</b> The Parts tab's <b>C in circuit</b> column (the capacitance and the worst-case DC voltage,
+e.g. <code>99.9nF at ≤ 3.3 V</code>), the report's <i>Capacitors at their DC bias</i> table (each one's nets, voltage and
 where it comes from, nominal and used C, the change), the JSON report's <code>capacitors_at_bias</code>, and the
 run's notes (capacitors at an unknown voltage, values taken at half their rating). Every solve uses it: the power
 stages' hot loops and input ripple, conducted emission, the PDN, the control loops, signal paths and op-amp
