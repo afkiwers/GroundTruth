@@ -392,7 +392,11 @@ def response_lines(r) -> list[str]:
     if r.quantity == "loop gain" and not len(r.poles) and not len(r.zeros):
         # a loop gain (an op-amp's loop, emi/mna.Circuit.loop_gain): its crossover and phase margin
         from ..analysis.transfer import fmt_hz
+        if margin and margin.get("positive_feedback"):
+            return [f"    {r.name}: positive feedback (negative loop gain at low frequency): unstable"]
         return [f"    {r.name}: " + (f"crossover {fmt_hz(margin['f_c'])}, phase margin {margin['pm']:.0f}°"
+                                     + (f" (the smallest of {len(margin['crossings'])} crossovers)"
+                                        if len(margin.get("crossings") or ()) > 1 else "")
                                      if margin else "no crossover in the sweep")]
     out = ([f"    {r.name}: gain {gain_text(g)}"] if g is not None else []) + \
         [f"    {r.name}: poles {roots(pz_rows(r.poles))}; zeros {roots(pz_rows(r.zeros))} ({how})"]

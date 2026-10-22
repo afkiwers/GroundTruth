@@ -168,6 +168,16 @@ def test_a_follower_with_little_phase_margin_is_flagged(tmp_path):
             assert len(found) == 1 and (found[0]["severity"] or "warning") == want
 
 
+def test_a_follower_with_its_inputs_swapped_is_positive_feedback(tmp_path):
+    """Audit round 7, AA-3: a follower whose output goes back to +IN (positive feedback, T(0) = −A0) is an
+    opamp_stability error naming positive feedback; its phase margin was 270° before, and no issue."""
+    pins = {3: ("+IN", "OUT"), 2: ("-IN", "SIG_IN"), 1: ("OUT", "OUT"), 5: ("V+", "+5V"), 4: ("V-", "GND")}
+    f = np.geomspace(1e3, 1e9, 600)
+    board, cfg, spec, _ = _setup(tmp_path, [], [("U3", pins)], gbw=1e6, pm=60.0, z_out=1.0)
+    found = [x for x in _findings(board, cfg, spec, f) if x["check"] == "opamp_stability"]
+    assert len(found) == 1 and found[0]["severity"] == "error" and "positive feedback" in found[0]["message"]
+
+
 def test_the_new_settings_and_fields(tmp_path):
     """max_bandwidth round-trips with its unit ("1kHz") and must be above 0; the schematic fields Aol, Fp2 and PM read
     "110dB", "20MHz", "60°" / "60deg" into the amplifier model's aol, fp2, pm."""

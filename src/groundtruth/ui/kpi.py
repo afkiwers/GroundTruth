@@ -78,7 +78,10 @@ def _bode(rr) -> list[Kpi]:
     if loops:
         worst = min(loops, key=lambda r: r.margin["pm"])
         pm = worst.margin["pm"]
-        out.append(("phase margin", f"{pm:.0f}°", f"{worst.name.split(':')[0]} at {fmt_hz(worst.margin['f_c'])}",
+        positive = worst.margin.get("positive_feedback")
+        out.append(("phase margin", "unstable" if positive else f"{pm:.0f}°",
+                    f"{worst.name.split(':')[0]}: positive feedback" if positive else
+                    f"{worst.name.split(':')[0]} at {fmt_hz(worst.margin['f_c'])}",
                     "error" if pm < PM_ERROR else "warn" if pm < PM_WARN else "",
                     "the lowest phase margin of the op-amps' loops (180° + the loop gain's phase where it falls "
                     "through 1): below 45° the circuit rings, near 0° it oscillates"))
