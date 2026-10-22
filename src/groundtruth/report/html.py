@@ -17,7 +17,8 @@ from .formats import _si2, dc_resistance, share
 from ..core.board import Board
 from ..core.issues import Issue
 from .boardview import BOARD_CSS, BOARD_JS, section as board_section
-from .plots import draw_bridge_caps, draw_heatmap, draw_section, draw_spectrum, figure_png, heatmap_dpi
+from .plots import (draw_bridge_caps, draw_heatmap, draw_section, draw_spectrum, figure_png, heatmap_dpi,
+                    section_height_in)
 
 e = html.escape
 DPI = 200               # the plots (spectra, sections, bars): sharp on a high-resolution screen and in print
@@ -827,7 +828,8 @@ def _net(board, rr, issues, warn, figs, view3d) -> str:
     if view3d:
         body.append(_view3d_link(rr))
     if getattr(rr, "section", None):
-        body.append(_img(figs.png(f"{rr.net} cross-section", draw_section, board, rr, size=(9.5, 3.4)),
+        body.append(_img(figs.png(f"{rr.net} cross-section", draw_section, board, rr,
+                                 size=(9.5, max(3.4, section_height_in(board, rr, 9.5)))),
                          f"{rr.net}: the return current layer by layer along the route, driver on the left"))
     else:
         figs.done += 1

@@ -846,7 +846,13 @@ their state for next time. How vias and parts are marked is set in <a href="#pre
   outlines (off where the names crowd a busy map). Remembered for every board; the exported report follows them.</li>
 <li><b>Tiles</b>: the view's key numbers, coloured by your rules. Hover over a tile for what it means.</li>
 <li><b>Cross-section</b> (signal nets): the return current layer by layer along the route, driver on the
-  left.</li>
+  left. Top: each plane layer's share of the return under the route (within the corridor beside the track) and
+  their sum, dashed (where it dips the return has left the route). Side view: the layers as bands coloured by that
+  share, the signal track outlined on its layer, its own vias in grey, and in <b>green</b> the vias and parts
+  (decaps, 0 Ω links) that carry the return from one layer to another, each with its share of the signal current
+  (solid near the route, dashed with its distance farther away). A layer change with no green bar near it: the
+  return found no nearby path between the layers (a stitching via is missing). The figure's caption says the
+  same.</li>
 <li><b>Spectrum</b>: the emission against the limit, harmonic by harmonic (or a simulated receiver's reading for
   a bridge).</li>
 <li><b>Ctrl + mouse wheel</b> over a map zooms it; double-click shows the whole map; the wheel alone scrolls the

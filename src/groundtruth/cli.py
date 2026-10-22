@@ -682,7 +682,7 @@ def _capacity_text(views) -> str:
 def _write_pngs(board, routes, issues, out_dir: Path):
     """Each view's heatmap, cross-section and spectrum as PNGs, and its 3D page (view3d_<stem>.html, linked from
     the HTML report)."""
-    from .report.plots import draw_heatmap, draw_section, draw_spectrum, figure_png
+    from .report.plots import draw_heatmap, draw_section, draw_spectrum, figure_png, section_height_in
     from .report.view3d import file_stem, has_view, write_view3d
     for rr in routes:
         if rr.grid is None:
@@ -691,7 +691,8 @@ def _write_pngs(board, routes, issues, out_dir: Path):
         size = (8, 5) if len(rr.main_layers()[:4]) <= 1 else (9, 7)
         (out_dir / f"heatmap_{stem}.png").write_bytes(figure_png(draw_heatmap, board, rr, issues, size=size))
         if getattr(rr, "section", None):
-            (out_dir / f"section_{stem}.png").write_bytes(figure_png(draw_section, board, rr, size=(8, 3.2)))
+            (out_dir / f"section_{stem}.png").write_bytes(figure_png(draw_section, board, rr,
+                                                                         size=(8, max(3.2, section_height_in(board, rr, 8)))))
         (out_dir / f"spectrum_{stem}.png").write_bytes(figure_png(draw_spectrum, rr, size=(8, 3.2)))
         if has_view(rr):
             write_view3d(board, rr, out_dir)
