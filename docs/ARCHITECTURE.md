@@ -1967,7 +1967,10 @@ automatic recognition more robust"; options weighed:
   staggered labels (dashed with the distance beyond 2× the corridor). The plugin's hover over it reads the shares
   at the mouse (`fig._gt_section`, `section_value`). Layer
   colours as swatches beside the row labels; margins in inches from the text sizes (see "Plot text" below).
-  With little height the axis label moves into the title, then the share plot goes (side view alone). In the
+  Under it `SECTION_CAPTION` (2026-10-22, the user: "explains the plots especially the green lines"), wrapped by
+  `_section_caption` 15 % short of the width; `section_height_in(board, rr, width_in)` adds its lines (the plugin,
+  the report at 9.5 in, the CLI at 8 in). With little height the caption goes first, then the axis label moves into
+  the title, then the share plot goes (side view alone). In the
   plugin it is the middle plot of the Results tab's scrolling page (below). **A canvas whose size changes**
   froze the window (0.68–0.84 s in `test_jobs_run_off_the_gui_thread` when the section came or went in the old
   one-screen layout): matplotlib's resize marks a canvas undrawn, its next paint renders the figure on the GUI
