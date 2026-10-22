@@ -609,8 +609,11 @@ class ResultsPanel(wx.Panel):
             text = mark if len(mark) <= READOUT_CHARS else mark[:READOUT_CHARS - 1] + "…"
             if hit is not None:
                 text = text or map_value(hit, event.xdata, event.ydata)
-        # only a map's marker is shown in KiCad by a click (_press); a pole's or zero's tooltip has no such line
-        tip = mark + ("\n(click: show it in KiCad)" if mark and hit is not None and self.on_mark is not None else "")
+        # a map's marker and a cross-section bar are shown in KiCad by a click (_press); a pole's or zero's
+        # tooltip has no such line
+        refs = (getattr(event.canvas.figure, "_gt_mark_refs", None) or {}).get(event.inaxes)
+        tip = mark + ("\n(click: show it in KiCad)" if mark and (hit is not None or refs) and self.on_mark is not None
+                      else "")
         if event.canvas.GetToolTipText() != tip:
             event.canvas.SetToolTip(tip)
         sec = (getattr(event.canvas.figure, "_gt_section", None) or {}).get(event.inaxes) \
@@ -668,6 +671,11 @@ class ResultsPanel(wx.Panel):
         if hit is not None and event.inaxes in maps:
             kind, what, text = hit
             self.on_mark(kind, what, text, maps[event.inaxes][0])     # [0]: the map's layer
+        elif hit is not None:
+            # the cross-section's side view: a signal via (grey) or a via / part carrying the return (green); any
+            # layer (the user: "click on the grey or green vias ... zoom into the pcb and highlight that specific via")
+            kind, what, text = hit
+            self.on_mark(kind, what, text, "")
 
     def reset_zoom(self) -> bool:
         """Back to the whole map; True when there was a zoom to undo."""
