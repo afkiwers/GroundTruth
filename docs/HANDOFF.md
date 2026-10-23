@@ -7,6 +7,29 @@
 (physics, code). The user may continue on another Claude account: everything needed is in the repo; the session
 scratchpad is gone (reusable scripts are in `tools/dev/`).
 
+- **2026-10-23 (laptop), merged into `main` with `--no-ff` at the user's word, pushed to `origin` once (e14631d):**
+  `kicad-zoom` (Preferences zoom for show-in-KiCad; the user then made it steps, 74e7cf6), `tab-colours` (tabs drawn
+  by `ui/tabbook.py`: pastel setup tabs), `tab-counts` (count badges, hollow empty tabs, run buttons usable while
+  the board is read with the click queued, Results before Issues, Server jobs hidden without a server, window logo,
+  scipy imported in the read job; "Clear EMI layers" → "Clear GT drawings"), `tick-all` (Select All over every tick
+  column; the user's Run-checks-per-check Preferences commit 74e7cf6 came in with it), `release-ci`
+  (`.github/workflows/release.yml`: a published GitHub release builds the KiCad and server packages, signs the server
+  package with the release key from the encrypted Actions secret `GROUNDTRUTH_RELEASE_KEY` (set by the user; checked
+  against `tools/release_key.pub`, never in the repo), attaches them and publishes a KiCad PCM repository on GitHub
+  Pages: `https://afkiwers.github.io/GroundTruth/repository.json`; Pages source and the github-pages tag rule set by
+  the user; tags as plain numbers `0.1.1`, rule `*.*.*`), `release-tag-names` (README; merged, not pushed). The
+  workflow has not run yet: the first release will show it. UI checks run on `plugin/demo` from now on (the user:
+  flux-2 takes too long), flux-2 only for size-dependent work.
+- **Branch `configs` (2026-10-23):** saved configurations, Back to last settings, Undo / Redo (the user: no way to
+  save a set-up and run it again later; "an undo button"). See ARCHITECTURE "Configurations and Undo" and the help's
+  `#configs`. Tests: test_scenario, test_cli (--config), test_gui (the whole flow; the every-button test leaves
+  Configuration ▾ out: a popup menu's own loop under the test's clicking timer crashed the process). Known tool
+  fault: `tools/dev/gui_probe.py` crashes now and then (access violation) in its watchdog's `sys._current_frames()`
+  (gui_probe.py:103, Python 3.13, while threads start); rerun it, the plugin is not involved. Next, asked: the Run
+  checks' bases in Preferences as links that open the help at the References entry (IPC-2221B, A26, ...; new
+  assumption entries for the checks without a source), then a victims picker on the Bridges tab (list of nets, add /
+  bulk add, delete / bulk delete; the automatic victims shown, copied into the list on the first add, Reset to
+  automatic: agreed with the user).
 - **Where things stand (2026-10-22, end of the day):** `main` 277f7c0 + this docs branch, the only branches; not
   pushed by Claude (`origin/main` was at 01bb044 when the user last pushed). **Next, asked and waiting** (the user,
   with a screenshot of the Issues tab): "add sorting when clicking on Check, severity etc. Also, add a filter where

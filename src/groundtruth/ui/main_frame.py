@@ -42,6 +42,7 @@ from .parts_panel import PartsPanel
 from .progress import ProgressClock, clock, release_failure
 from .results_panels import ResultsPanel, IssuesPanel
 from .tabbook import SETUP_HUES, TabBook
+from .config_menu import ConfigActions, initial_state
 
 BOARD_ARROW_SPACING_MM = 0.8   # spot spacing of the current arrows drawn on the board (arrows 0.56 mm long)
 MAX_BOARD_ARROWS = 1500        # three graphic segments each; the spacing grows beyond that
@@ -466,7 +467,7 @@ def count_tip(on: int, total: int, one: str, many: str) -> str:
     return f"{on} of {total} {many} take part in Run checks and Simulate ({total - on} switched off)"
 
 
-class MainFrame(wx.Frame):
+class MainFrame(ConfigActions, wx.Frame):
     """The plugin window: a top bar of actions (Reload, Refill, Run checks, Simulate, Thermal, Export, Save, Clear,
     Preferences, Help), the tabs, and a status bar with a progress gauge.
 
@@ -484,6 +485,7 @@ class MainFrame(wx.Frame):
         self._window_id = self.GetId()
         self.session = session
         self.board = None
+        self._config_init()                     # configurations and Undo / Redo (ui/config_menu.py)
         self.settings: Optional[SettingsFile] = None
         self.issues = []
         self.routes = []
@@ -527,7 +529,7 @@ class MainFrame(wx.Frame):
         bar.Add(self.whatif, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT, 8)
         self.t_cancel = button("Cancel", self.on_cancel, "danger")
         bar.AddSpacer(12)
-        button("Save settings", self.on_save)
+        self._config_buttons(button)            # Configuration ▾, Undo, Redo (ui/config_menu.py)
         self.t_clear = button("Clear GT drawings", self.on_clear) if session.live else None
         bar.AddStretchSpacer()
         button("Preferences…", lambda e: self.on_preferences(),
@@ -547,7 +549,8 @@ class MainFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, lambda e: self._step_tab(1), id=next_id)
         self.SetAcceleratorTable(wx.AcceleratorTable([(wx.ACCEL_NORMAL, wx.WXK_F1, help_id),
                                                       (wx.ACCEL_CTRL, wx.WXK_PAGEUP, prev_id),
-                                                      (wx.ACCEL_CTRL, wx.WXK_PAGEDOWN, next_id)]))
+                                                      (wx.ACCEL_CTRL, wx.WXK_PAGEDOWN, next_id),
+                                                      *self._config_accelerators()]))
         line = wx.Panel(self, size=(-1, 1))
         line.SetBackgroundColour(theme.colour(theme.palette().border))
 
@@ -585,7 +588,7 @@ class MainFrame(wx.Frame):
             ("fixes", "Fixes", lambda nb: FixesPanel(nb, self.on_suggest, self.on_draw_suggestions,
                                                      self.on_place_vias, self.on_add_whatif, self.on_compare,
                                                      self.on_check_design)),
-            ("history", "History", lambda nb: HistoryPanel(nb)),
+            ("history", "History", lambda nb: HistoryPanel(nb, on_load=self.load_config_from_run)),
             ("server_jobs", "Server jobs", lambda nb: ServerJobsPanel(nb, self.on_show_job, self.on_cancel_job,
                                                                       self.on_remove_job))]
 
@@ -1105,6 +1108,7 @@ class MainFrame(wx.Frame):
         self.fixes.enable(on)
         self.issues_panel.enable_drawing(on)
         self.results_panel.enable_drawing(on)
+        self._config_enable(on)
 
     def _progress(self, msg, frac):
         """(GUI thread) A job's progress report: the status line and the gauge."""
@@ -1186,11 +1190,12 @@ class MainFrame(wx.Frame):
                 _planes(board)              # (~160 ms on kraft_flux_mini_2 the first time, then cached)
             copy = session.board_copy(path) if keep and path else (None, "")
             if not path:
-                return board, path, None, None, copy, fp
+                return board, path, None, None, copy, fp, None
             try:                            # here, not in the GUI thread: parsing the YAML takes ~0.5 s
-                return board, path, _open_settings(board, path), None, copy, fp
+                opened = _open_settings(board, path)
+                return board, path, opened, None, copy, fp, initial_state(opened[0])
             except ConfigError as e:
-                return board, path, None, e.messages, copy, fp
+                return board, path, None, e.messages, copy, fp, None
         if not self._start("reading the board…", work, self._loaded, what="read the board", cancellable=False,
                            kicad=self.session.live, queue_runs=True):
             self._after_load = None
@@ -1198,7 +1203,7 @@ class MainFrame(wx.Frame):
     def _loaded(self, result):
         """The board was read: open its history and the KiCad-button inbox, fill the tabs, offer to refill
         unfilled zones, and detect nets and stages when the settings list nothing yet."""
-        board, path, opened, errors, self._board_copy, fp = result
+        board, path, opened, errors, self._board_copy, fp, undo_state = result
         startup.mark(f"board read ({len(board.footprints)} parts)", last=True)
         if not path:
             self._after_load = None
@@ -1216,6 +1221,9 @@ class MainFrame(wx.Frame):
         self._board_fp = fp
         settings, new, self.dirty = opened
         self.board, self.settings = board, settings
+        self._config_loaded(undo_state)         # the undo stack's current state: the settings as read
+        if self.dirty:                          # the board's new parts merged in: saved, but no undo step of its own
+            self._undo_label = ""
         if self._inbox is None:
             try:
                 self._inbox = Inbox(path)
@@ -1304,6 +1312,7 @@ class MainFrame(wx.Frame):
         self.nets.load(self.board, self.settings)
         self.converters.load(self.board, self.settings)
         self.bridges.load(self.board, self.settings)
+        self._undo_label = "Detect"         # the undo step's name (ui/config_menu.py)
         self.on_config_change()
         if bridges_only:            # the settings already list nets or converters: only bridges were looked for
             self.SetStatusText(f"detected {len(brid)} motor bridge(s), orange until reviewed: set the operating point "
@@ -1557,7 +1566,9 @@ class MainFrame(wx.Frame):
     def on_save(self, _=None):
         """Save settings: write them in the background (the newest snapshot wins)."""
         if self.settings is not None:
-            self._saver.save(self.settings)     # copies the settings here, writes them in the background
+            doc = self._saver.save(self.settings)   # copies the settings here, writes them in the background
+            if self.dirty:                          # a change: that copy is also its undo step (ui/config_menu.py)
+                self._record_undo(doc)
             self.dirty = False
 
     def _save_failed(self, e: Exception):
@@ -2688,6 +2699,7 @@ class MainFrame(wx.Frame):
         """Waive an issue: its fingerprint and the reason go into the settings, so later runs keep it waived."""
         self.settings.add_waiver(issue.fingerprint, reason)
         issue.waived, issue.waiver_reason = True, reason
+        self.dirty, self._undo_label = True, f"Waive {issue.check}"
         self.on_save()
         self.issues_panel.show(self.issues)
 

@@ -16,8 +16,12 @@ class BackgroundSaver:
         self._worker = LatestOnly("groundtruth-save", on_error)
 
     def save(self, settings):
-        """Hand a copy of the settings over; a save still waiting is replaced (this copy holds its changes too)."""
-        self._worker.submit(settings.snapshot())
+        """Hand a copy of the settings over; a save still waiting is replaced (this copy holds its changes too).
+        Returns the copied document (the window keeps it as the undo step: ui/config_menu.py); nobody may change
+        it."""
+        doc, write = settings.snapshot_doc()
+        self._worker.submit(write)
+        return doc
 
     def flush(self, timeout: float = 10.0) -> bool:
         """Wait until everything handed over is on disk (before the window closes). False on timeout."""

@@ -625,6 +625,80 @@ def test_all_ticks_every_row_on_or_off_and_shows_a_mixed_table(app, frame):
     assert not f.bridges.bridges and not f.bridges.all_ticks.IsEnabled()
 
 
+def test_configurations_back_to_last_settings_and_undo(app, frame, monkeypatch):
+    """The user: save a configuration and load it later to run the same simulation, load the last one by default,
+    "a button to load settings from file or return to last settings", "an undo button". Every settings change is an
+    undo step (Undo / Redo restore the tabs, the counts and the file); a configuration saved, the settings changed
+    (title *), loaded back (exactly the saved state, title without *), Back to last settings toggles to the state
+    before the load; a past run's settings load too; Ctrl+Z in a text field is that field's, not the settings'."""
+    from types import SimpleNamespace
+    from groundtruth.config import scenario
+    from groundtruth.config.settings import SettingsFile
+    f = frame
+    run_steps(app, f, [lambda: None])
+    idle = lambda: wait_for(app, lambda: not f.busy(), timeout=60)     # noqa: E731
+    on = lambda: [n.enabled for n in f.settings.config.nets]            # noqa: E731
+    nets = f.notebook.FindPage(f.nets)
+    assert not f._undo.can_undo() and not f.t_undo.IsEnabled() and on() == [True]
+    f.notebook.SetSelection(nets)
+    f.nets.tick_all(False)                                               # a change: an undo step
+    assert on() == [False] and f.t_undo.IsEnabled() and f._undo.undo_label() == "Signal paths edit"
+    f.on_undo()
+    idle()
+    assert on() == [True] and f.notebook.badges[nets][0] == 1 and f.t_redo.IsEnabled()
+    assert f.nets.list.IsItemChecked(0)
+    f._saver.flush()
+    assert SettingsFile.load(f.settings.path).config.nets[0].enabled
+    f.on_redo()
+    idle()
+    assert on() == [False] and f.notebook.badges[nets][0] == 0
+    f._enable(False)                                                     # a job runs: no Undo
+    assert not f.t_undo.IsEnabled() and not f.t_config.IsEnabled()
+    f._enable(True)
+    # a configuration: saved with the net on, then changed, loaded back
+    f.on_undo()
+    idle()
+    path = scenario.folder_for(f.settings.path) / scenario.file_name("net on")
+    f._write_config(path, "net on", "the clock")
+    idle()
+    assert path.exists() and f.GetTitle().endswith("· net on") and scenario.load(path)["note"] == "the clock"
+    f.nets.tick_all(False)
+    assert f.GetTitle().endswith("· net on*")
+    f._load_config(lambda: scenario.load(path), {"file": str(path)}, "Load configuration net_on")
+    idle()
+    assert on() == [True] and f.GetTitle().endswith("· net on") and f.nets.list.IsItemChecked(0)
+    assert (path.parent / scenario.BEFORE_LOAD).exists()
+    f.back_to_last()                                                     # the state before that load: net off
+    idle()
+    assert on() == [False] and f.GetTitle().endswith("· net on*")
+    f.back_to_last()                                                     # and back again
+    idle()
+    assert on() == [True]
+    f.on_undo()                                                          # a load is one undo step
+    idle()
+    assert on() == [False]
+    # a past run's settings (the History tab's button and the menu)
+    text = f.settings.dumps().replace("enabled: false", "enabled: true")
+    run = SimpleNamespace(id="2026-10-23_10-00-00", note="", settings_text=lambda: text)
+    f.load_config_from_run(run)
+    idle()
+    assert on() == [True] and "·" not in f.GetTitle()
+    # Ctrl+Z in a text field goes to the field: the settings stay
+    field = next(w for w in f.nets.GetChildren() if isinstance(w, wx.TextCtrl))
+    monkeypatch.setattr(wx.Window, "FindFocus", staticmethod(lambda: field))
+    steps = f._undo.undo_label()
+    f._undo_key(False)
+    assert on() == [True] and f._undo.undo_label() == steps
+    # the Configuration menu's entries (captured instead of popped up: a popup menu blocks)
+    shown = []
+    monkeypatch.setattr(f.topbar, "PopupMenu", lambda menu, pos: shown.extend(
+        (i.GetItemLabelText(), i.IsEnabled()) for i in menu.GetMenuItems() if not i.IsSeparator()))
+    f.on_config_menu()
+    assert [s[0] for s in shown] == ["Save configuration as…", "Save configuration", "Load configuration…",
+                                     "Load from a past run", "Back to last settings", "Save settings now"]
+    assert dict(shown)["Back to last settings"] and not dict(shown)["Load from a past run"]   # no runs kept here
+
+
 def test_run_buttons_stay_usable_while_the_board_is_read_and_a_click_waits(app, frame):
     """The user saw Refill, Run checks, Simulate and Thermal grey at start-up (a board load is a job, and a job
     disabled every button) and chose: clickable, the click queued. During a load (the tabs being built, the board
@@ -2110,7 +2184,8 @@ def test_every_button_works_before_and_after_a_simulate(app, frame, monkeypatch)
     old_log = wx.Log.SetActiveTarget(Log())
     try:
         run_steps(app, f, [])
-        skip = {"Suggest fixes", "Compare what-if", "Simulate", "Reload board", "Cancel"}
+        # Configuration ▾ pops a menu up (a loop of its own waiting for the mouse): its entries are tested on their own
+        skip = {"Suggest fixes", "Compare what-if", "Simulate", "Reload board", "Cancel", "Configuration ▾"}
         clicked = []
 
         def buttons(w):

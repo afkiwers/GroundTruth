@@ -2141,8 +2141,20 @@ class SettingsFile:
         """Saving in two halves for a GUI: copy the document now (~60 ms for a 200-part board) and return a
         function that writes that copy (the YAML emitting, ~400 ms), safe to run in another thread while this
         one keeps editing the settings."""
+        return self.snapshot_doc()[1]
+
+    def snapshot_doc(self) -> tuple[CommentedMap, Callable[[], None]]:
+        """As snapshot, with the copied document itself too: the plugin keeps it as an undo step (ui/undo.py), so a
+        save and its undo step share one deep copy. Neither the caller nor the writer may change it."""
         doc, path = copy.deepcopy(self.doc), self.path
-        return lambda: _write_atomic(path, _dumps(doc))
+        return doc, lambda: _write_atomic(path, _dumps(doc))
+
+    def restore(self, doc: CommentedMap) -> None:
+        """Take a document kept earlier (an undo step) as the settings again: a deep copy of it (the kept one stays
+        as it is), parsed. ConfigError leaves the settings as they were."""
+        doc = copy.deepcopy(doc)
+        config = config_from_data(doc)
+        self.doc, self.config = doc, config
 
     def frozen_text(self) -> Callable[[], str]:
         """The settings as they are now, for another thread: the document copied now (as snapshot), its YAML text
