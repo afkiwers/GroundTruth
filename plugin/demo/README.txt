@@ -23,7 +23,7 @@ Try it:
    board" puts it on the board; "Add ticked to what-if" and Simulate with "with what-if edits" ticked (top bar) show
    the return staying in narrow bands under the traces, and the cross-section shows it swapping planes right at
    the vias. "Compare what-if" lists what changed.
-6. Clear EMI layers (top bar) removes everything GroundTruth drew.
+6. Clear GT drawings (top bar) removes everything GroundTruth drew.
 
 Preferences... (top bar, right) sets the resolution, the via markers and part outlines of the maps and the theme;
 Help (F1) explains every tab.

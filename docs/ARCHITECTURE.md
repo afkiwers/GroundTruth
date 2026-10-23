@@ -2196,7 +2196,7 @@ a History tab with a comparison (and the CLI).
   own inputs (in the job). Test: `test_results_of_an_earlier_board_or_settings_are_marked_and_not_heated`.
 - **Top bar** (`MainFrame.__init__`, drawn `theme.Button`s): Reload board, Refill zones (live), Run checks,
   Simulate, Thermal, **Export report…** (see "HTML report"), the "with what-if edits" switch, Cancel, Save settings,
-  Clear EMI layers (live), and on the right **Preferences…** and **Help**. There is no theme selector any more:
+  Clear GT drawings (live), and on the right **Preferences…** and **Help**. There is no theme selector any more:
   the theme is a preference. **Help** (and F1, an accelerator) opens `ui/help.py` `HelpWindow`, one window raised
   again, scrolled to the shown tab's anchor (`topic_of`, `TOPICS`); links outside the page open in the browser. A
   feature that changes a tab or what Simulate computes updates help.html in the same branch.
@@ -2251,7 +2251,7 @@ a History tab with a comparison (and the CLI).
   `Execute({ pluginFile })`), so each action has its own script. The schema has no context-menu or hotkey
   field: plugins cannot add right-click entries. Manifest: identifier `io.github.iwers.groundtruth`, runtime
   python ≥ 3.11, scope `pcb`; `analyse` and `add-net` have toolbar buttons (`show-button`), `clear` none (the
-  window's top bar has Clear EMI layers too); light and dark icons at 24/48 px in `plugin/icons/` (drawn by
+  window's top bar has Clear GT drawings too); light and dark icons at 24/48 px in `plugin/icons/` (drawn by
   `tools/make_icons.py`).
 - **Entry scripts**: each takes `time.time()` on its first line (for the start-up log), puts its own folder on
   `sys.path` (the bundled `groundtruth` copy lives next to it) and calls `ui/app.py` `plugin_main` with its action:

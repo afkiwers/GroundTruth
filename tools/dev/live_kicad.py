@@ -283,7 +283,7 @@ def cmd_write(args):
     if args.shot:
         _screenshot("PCB Editor", "live", args.shot)
     if args.keep:
-        print("kept the drawings: look at them in KiCad, then use Clear EMI layers (or close without saving)")
+        print("kept the drawings: look at them in KiCad, then use Clear GT drawings (or close without saving)")
     else:
         f.on_clear()
         wait()

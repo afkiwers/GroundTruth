@@ -91,7 +91,7 @@ def _connect(log):
 
 
 def _clear(log) -> int:
-    """The "Clear EMI layers" action. No window of ours is open while it talks to KiCad."""
+    """The "Clear GT drawings" action. No window of ours is open while it talks to KiCad."""
     kb, failure = _connect(log)
     if failure:
         log.mark(failure[0])
@@ -101,7 +101,7 @@ def _clear(log) -> int:
     try:
         n = clear(kb)
     except Exception as e:
-        _error(f"Could not clear the EMI layers:\n{e}")
+        _error(f"Could not clear GroundTruth's drawings:\n{e}")
         return 2
     startup.mark(f"cleared {n} item(s)", last=True)
     wx.MessageBox(f"Removed {n} GroundTruth item(s) from the board (one undo step).", "GroundTruth")
