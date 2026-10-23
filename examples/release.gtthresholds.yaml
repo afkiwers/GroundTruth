@@ -1,0 +1,55 @@
+# GroundTruth thresholds: pass / fail criteria for `groundtruth verify` (a CI gate).
+#
+#   groundtruth verify BOARD --config groundtruth/configs/<name>.gtconfig.yaml --thresholds <this file> \
+#       --out-dir results
+#
+# Exit code 0: every criterion passed; 1: one or more failed; 2: the run could not be set up (no common settings
+# file next to the board, an invalid configuration or thresholds file). Results: results/groundtruth-verify-junit.xml
+# (GitLab: artifacts:reports:junit) and a summary in the job log.
+#
+# Every criterion is optional: null (or a line left out) is not judged. Unknown keys are an error, so a misspelt one
+# can't switch a check off unnoticed. Margins are "at least" (dB above the limit line: positive is under the limit);
+# the other figures are "at most" unless the comment says "at least".
+groundtruth_thresholds: 1
+
+issues:                         # Run checks' and Simulate's issues; waived ones (and a --baseline's) never count
+  max_errors: 0                 # at most this many errors
+  max_warnings: null            # e.g. 10
+  max_info: null
+  checks:                       # per check, at most this many issues (a check's id as in the Issues tab and the report)
+    gap_crossing: 0
+    layer_change_stitch: 0
+    clearance_voltage: 0
+    # emi_margin: 0
+    # victim_coupling: 0
+
+nets:                           # the signal paths (Signal paths tab)
+  default:                      # every path, unless named below
+    radiated_margin_db: 0       # the worst radiated estimate's margin to its limit, at least (dB)
+    return_path_ratio: null     # the return loop's inductance against an ideal plane under the route, at most (1.0:
+                                # the return runs right under the track; e.g. 1.5)
+  # "/CPU/SPI_SCK":             # a path of its own (its name as on the Signal paths tab): replaces default's values
+  #   radiated_margin_db: 6
+
+converters:                     # the power stages (Converters tab)
+  default:
+    radiated_margin_db: 0       # at least (dB)
+    conducted_margin_db: 0      # the worst conducted estimate's margin (LISN, the stage's standard), at least (dB)
+    loop_inductance_nh: null    # the hot loop's inductance, at most (nH)
+    overshoot_v: null           # the switch node's overshoot L·di/dt, at most (V)
+    efficiency_pct: null        # at least (%)
+    current_density_a_mm2: null # the copper's highest DC current density, at most (A/mm²)
+  # "buck 5V":
+  #   loop_inductance_nh: 3
+
+bridges:                        # the motor bridges (Bridges tab): the same figures as a power stage
+  default:
+    radiated_margin_db: 0
+    conducted_margin_db: 0
+    loop_inductance_nh: null
+    overshoot_v: null
+    efficiency_pct: null
+    current_density_a_mm2: null
+
+thermal:                        # set a value here and verify runs Thermal too (needs the [thermal] extra)
+  max_c: null                   # the hottest copper or part, at most (°C)

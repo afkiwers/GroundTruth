@@ -5,6 +5,8 @@
 #                   widget and Tests tab; fails on errors.
 # - `emi-simulate`  the field solver (nets and power stages) on the default branch, or by hand: HTML report with
 #                   heatmaps, JSON and JUnit as artifacts; fails on errors or an emission within 3 dB of the limit.
+# - `emi-verify`    the release gate: a saved configuration simulated and judged against a thresholds file (one
+#                   JUnit test per criterion); on tags and the default branch, before production artefacts are built.
 # - `emi-thermal`   by hand: copper/part temperatures and the current capacity of the power stages.
 # - `emi-suggest`   by hand: proposed fixes (stitching vias, capacitors, fills), predicted and verified together.
 # - `emi-simulate-gpu`, `emi-check-refill`: optional variants (a GPU runner; zones refilled with KiCad's CLI).
@@ -73,6 +75,35 @@ emi-simulate:
     reports:
       codequality: emi/gl-code-quality-report.json
       junit: emi/groundtruth-junit.xml
+
+# The release gate. A configuration (what is simulated and how: the plugin's Configuration > Save configuration
+# as..., committed in groundtruth/configs/) is simulated on the board with its common settings file and judged
+# against a thresholds file (start from examples/release.gtthresholds.yaml, or `groundtruth verify --write-template
+# F`). One JUnit test case per criterion shows in the pipeline's Tests tab. Exit 1 (a criterion failed) fails the
+# job; exit 2: the common settings file, the configuration or the thresholds file is missing or invalid. Let the
+# production jobs wait for it: `needs: [emi-verify]`.
+emi-verify:
+  extends: .groundtruth
+  stage: test
+  timeout: 2h
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  variables:
+    GT_CONFIG: "hardware/groundtruth/configs/release.gtconfig.yaml"
+    GT_THRESHOLDS: "hardware/groundtruth/release.gtthresholds.yaml"
+  script:
+    - pip install --quiet "${GROUNDTRUTH}[thermal]"    # only needed for a thermal max_c criterion
+    - groundtruth verify "$BOARD" --config "$GT_CONFIG" --thresholds "$GT_THRESHOLDS" --out-dir emi --verbose
+  artifacts:
+    reports:
+      junit: emi/groundtruth-verify-junit.xml
+
+# e.g. the production files, built only when the gate passed:
+# fab-outputs:
+#   stage: build
+#   needs: [emi-verify]
+#   script: [kicad-cli pcb export gerbers ...]
 
 # Copper and part temperatures from the power stages' DC paths and losses, and each stage's current capacity
 # (the load that brings the hottest copper or junction to thermal.capacity_c). Needs the [thermal] extra and
