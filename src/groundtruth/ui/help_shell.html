@@ -59,6 +59,8 @@ section {
   padding: 6px 28px 18px; margin: 0 0 18px; box-shadow: 0 1px 2px var(--shadow);
 }
 section.flash { animation: flash 1.4s ease-out; }
+tr.flash > td { animation: rowflash 2.4s ease-out; }
+@keyframes rowflash { from { box-shadow: inset 0 0 0 999px var(--accent-soft); } 60% { box-shadow: inset 0 0 0 999px var(--accent-soft); } to { box-shadow: none; } }
 @keyframes flash { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: 0 1px 2px var(--shadow); } }
 section.hidden { display: none; }
 section > h3 {
@@ -119,6 +121,12 @@ function gtShow(id) {
   var sec = el.closest ? el.closest("section") : null;
   el.scrollIntoView({block: "start"});
   if (sec) { sec.classList.remove("flash"); void sec.offsetWidth; sec.classList.add("flash"); }
+  // a References entry (ref-…): its table row is marked too, and kept clear of the top edge
+  var row = el.closest ? el.closest("tr") : null;
+  if (row) {
+    row.scrollIntoView({block: "center"});
+    row.classList.remove("flash"); void row.offsetWidth; row.classList.add("flash");
+  }
 }
 // links within the page: scroll, never navigate (a navigation would reload the page)
 document.addEventListener("click", function (e) {

@@ -2487,6 +2487,36 @@ def test_preferences_switch_each_check_and_set_the_esd_distance(app, frame):
     with PreferencesDialog(frame, defaults(v)) as dlg:
         assert not dlg.checks["check_diff_pairs"].GetValue() and dlg.esd_mm.GetValue() == 4.5
 
+def test_each_check_shows_its_basis_as_links_into_the_references(app, frame):
+    """The user: "add the standards used to judge these options. e.g. Voltage spacing (IPC....)", then "add reference
+    to the assumptions with clickable links that open the doc and jump to the section". Preferences shows each Run
+    check's basis (prefs_dialog.CHECK_BASIS: IPC-2221B for Voltage spacing, the rule-of-thumb assumptions for the
+    others) as links; every one is a row of docs/REFERENCES.md with an anchor in the help, and a click opens the help
+    at that row (enabled, though the modal dialog disabled the windows open before it). The help's Preferences section
+    lists the same bases, each linked."""
+    import re
+    from groundtruth.ui.help import HelpWindow, page, ref_anchor, reference_entry
+    from groundtruth.ui.prefs_dialog import CHECK_BASIS, CHECK_TOGGLES, PreferencesDialog, defaults
+    f = frame
+    run_steps(app, f, [lambda: None])
+    assert set(CHECK_BASIS) == {key for key, *_ in CHECK_TOGGLES}
+    assert CHECK_BASIS["check_clearance_voltage"] == ("IPC-2221B",)
+    text = page()
+    for refs in CHECK_BASIS.values():
+        for r in refs:
+            assert reference_entry(r), r                                       # a row of REFERENCES.md
+            assert f'name="{ref_anchor(r)}"' in text and f'href="#{ref_anchor(r)}"' in text, r
+    with PreferencesDialog(f, defaults({})) as dlg:
+        assert dlg.basis_links == {k: list(v) for k, v in CHECK_BASIS.items()}
+        dlg.open_reference("IPC-2221B")
+    h = f._help
+    assert h is not None and h.IsShown() and h.IsEnabled()
+    assert h._pending in ("ref-IPC-2221B", "references") or h._loaded
+    assert HelpWindow._target("references", "ref-A26") == "ref-A26"
+    assert HelpWindow._target("results", "no such; thing") == "results"
+    assert re.search(r"<b>Voltage spacing</b>: <a href=\"#ref-IPC-2221B\">IPC-2221B</a>", text)
+
+
 def test_find_servers_lists_the_cluster_and_fills_the_address(app, frame, monkeypatch):
     """Preferences › Find servers: without a key it only says to enter one; the servers found are listed (the lead
     first, with its role) and the one picked goes into the address (its port only when not the default)."""
