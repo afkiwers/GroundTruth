@@ -32,3 +32,24 @@ def test_the_pcm_package_has_kicads_layout_and_valid_metadata(tmp_path):
     from PIL import Image
     import io
     assert Image.open(io.BytesIO(z.read("resources/icon.png"))).size == (64, 64)
+
+
+def test_a_release_package_carries_its_tag_as_the_version(tmp_path):
+    """--version (the release workflow passes its tag, a build number the user tagged it with): the package's
+    metadata, version.txt and the zip's name carry exactly it, a leading v dropped; --print-version shows the current
+    build number; a tag that is not major.minor.patch, or not pyproject's major.minor, is refused."""
+    tool = [sys.executable, str(ROOT / "tools" / "make_pcm_package.py"), "--out", str(tmp_path)]
+    now = subprocess.run(tool + ["--print-version"], capture_output=True, text=True, cwd=ROOT).stdout.strip()
+    major_minor, build = now.rsplit(".", 1)
+    tag = f"{major_minor}.{int(build) - 7}"              # a build number tagged earlier: kept exactly
+    r = subprocess.run(tool + ["--version", "v" + tag, "--status", "stable"], capture_output=True, text=True, cwd=ROOT)
+    assert r.returncode == 0, r.stderr
+    (zpath,) = tmp_path.glob("groundtruth-*-pcm.zip")
+    z = zipfile.ZipFile(zpath)
+    (v,) = json.loads(z.read("metadata.json"))["versions"]
+    assert v["version"] == tag and v["status"] == "stable" and zpath.name.startswith(f"groundtruth-{tag}-")
+    assert z.read("plugins/version.txt").decode().startswith(f"GroundTruth {tag} ")
+    r = subprocess.run(tool + ["--version", "release-1"], capture_output=True, text=True, cwd=ROOT)
+    assert r.returncode == 2 and "major.minor.patch" in r.stderr
+    r = subprocess.run(tool + ["--version", "9.9.1"], capture_output=True, text=True, cwd=ROOT)
+    assert r.returncode == 2 and "build numbering" in r.stderr and "--print-version" in r.stderr
