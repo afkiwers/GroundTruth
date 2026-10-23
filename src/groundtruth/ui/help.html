@@ -253,8 +253,12 @@ in the schematic: see <a href="#siglabels">Labelling a signal path</a>.</p>
   some are. With every row off, Simulate says so. The command line runs a switched-off row only when
   <code>--nets</code> names it.</li>
 <li>The form on the right edits the selected row: <b>Add</b> (a new net from the form), <b>Update selected</b>
-  (one row only; editing a detected net counts as reviewing it), <b>Remove selected</b>, <b>Mark reviewed</b>
-  (the orange stops). Hover over a field or a button for what it means. With no nets yet, a line above the table
+  (editing a detected net counts as reviewing it; the row stays selected for the next edit), <b>Remove selected</b>,
+  <b>Mark reviewed</b> (the orange stops). <b>Several rows at once:</b> Ctrl- or Shift-click them; the form shows
+  each signal field they share, and <b>*</b> where they differ, with each path's own net, driver and receivers
+  greyed. Change a field (e.g. Amplitude to 5) and press <b>Update selected</b>: only the fields you changed are
+  set on every selected path, a <b>*</b> left as it is keeps each path's own value. Hover over a field or a button
+  for what it means. With no nets yet, a line above the table
   says how to start.</li>
 <li>Clicking a row fills the form and highlights the net's whole path in KiCad, from its driver through its series
   parts, Pass through parts and op-amps to its receivers (<b>Zoom KiCad to the selected nets</b> also
