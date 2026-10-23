@@ -3263,3 +3263,19 @@ def test_clicking_a_bridge_leg_shows_that_leg_alone_in_kicad(app):
         assert shown[-1] == ["bridge J1 B"] and p.leg_high.GetValue() == "Q3"
     finally:
         top.Destroy()
+
+
+def test_update_keeps_the_signal_path_selected_for_the_next_edit(app, frame):
+    """The user: "when hitting update signal it looses focus and further editing gets lost if not reselected
+    manually". After Update selected, the path is still selected, so a second edit and Update apply to it too."""
+    f = frame
+    run_steps(app, f, [lambda: None])
+    p = f.nets
+    p.select_only(0)
+    run_steps(app, f, [lambda: None])
+    p.freq.SetValue("30MHz")
+    p.on_update(None)
+    assert p.selected_rows() == [0]
+    p.freq.SetValue("40MHz")
+    p.on_update(None)
+    assert p.selected_rows() == [0] and f.settings.config.nets[0].freq == 40e6

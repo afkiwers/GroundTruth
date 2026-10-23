@@ -470,7 +470,8 @@ class NetsPanel(SelectableRows, wx.Panel):
                                    enabled=old.enabled,
                                    driver_return=old.driver_return, receiver_return=old.receiver_return,
                                    current_a=old.current_a)
-            self._commit()
+            if self._commit():
+                self.select_only(i)          # the list was rebuilt: the path stays selected for the next edit
 
     def on_bode(self, _):
         """"Bode": sweep the selected paths, or every ticked one when none is selected (the window runs it as a job
