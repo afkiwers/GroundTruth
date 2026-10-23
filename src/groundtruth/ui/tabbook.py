@@ -67,6 +67,7 @@ class TabBook(wx.Simplebook):
         self.hues: list[Optional[str]] = []
         self.gaps: set[int] = set()            # pages with a gap before them (a new group starts)
         self.badges: dict[int, tuple] = {}     # page -> (count, tooltip)
+        self.hidden: set[int] = set()          # pages without a tab (set_hidden): still there, not offered
         self.strip = TabStrip(parent, self)
         self.Bind(wx.EVT_BOOKCTRL_PAGE_CHANGED, lambda e: (e.Skip(), self.strip.Refresh()))
 
@@ -88,6 +89,31 @@ class TabBook(wx.Simplebook):
             else:
                 self.badges[page] = new
             self.strip.changed()
+
+    def set_hidden(self, page: int, hidden: bool) -> None:
+        """Take tab `page` off the strip (the page stays, and SetSelection can still show it) or put it back; a
+        hidden page that is showing gives way to the first page."""
+        if hidden == (page in self.hidden):
+            return
+        if hidden:
+            self.hidden.add(page)
+            if self.GetSelection() == page:
+                self.SetSelection(0)
+        else:
+            self.hidden.discard(page)
+        self.strip.changed()
+
+    def step(self, step: int) -> None:
+        """Show the shown tab `step` places before (< 0) or after, round the ends, skipping hidden tabs."""
+        n = self.GetPageCount()
+        if not n or len(self.hidden) >= n:
+            return
+        k = self.GetSelection()
+        for _ in range(n):
+            k = (k + (1 if step > 0 else -1)) % n
+            if k not in self.hidden:
+                break
+        self.SetSelection(k)
 
     def SetSelection(self, page: int) -> int:
         """Show page `page` (sending the page-changed events, as wx.Notebook does) and mark its tab."""
@@ -153,16 +179,21 @@ class TabStrip(wx.Control):
         return self._widths
 
     def tab_rects(self) -> list:
-        """(x, width) of every tab, left to right. When the window is too narrow for the natural widths, the
-        padding shrinks first (to 5 px a side); a tab's label is then clipped to its tab."""
+        """(x, width) of every tab, left to right (a hidden one: width 0, nothing hits or draws it). When the window
+        is too narrow for the natural widths, the padding shrinks first (to 5 px a side); a tab's label is then
+        clipped to its tab."""
         widths = [lw + (bw + self.BADGE_GAP if bw else 0) for lw, bw in self._measure()]
-        gaps = len(self.book.gaps) * self.GAP + self.SPACE * max(len(widths) - 1, 0) + 8
+        shown = [w for k, w in enumerate(widths) if k not in self.book.hidden]
+        gaps = len(self.book.gaps) * self.GAP + self.SPACE * max(len(shown) - 1, 0) + 8
         room = self.GetClientSize().width
         pad = self.PAD_X
-        if room > 0 and widths and sum(widths) + 2 * pad * len(widths) + gaps > room:
-            pad = max(5, (room - gaps - sum(widths)) // (2 * len(widths)))
+        if room > 0 and shown and sum(shown) + 2 * pad * len(shown) + gaps > room:
+            pad = max(5, (room - gaps - sum(shown)) // (2 * len(shown)))
         x, out = 8, []
         for k, w in enumerate(widths):
+            if k in self.book.hidden:
+                out.append((x, 0))
+                continue
             if k in self.book.gaps:
                 x += self.GAP - self.SPACE
             out.append((x, w + 2 * pad))
@@ -201,11 +232,10 @@ class TabStrip(wx.Control):
     def _key(self, evt):
         """Left / Right (with the focus on the strip): the page before / after; other keys go on."""
         step = {wx.WXK_LEFT: -1, wx.WXK_RIGHT: 1}.get(evt.GetKeyCode())
-        n = self.book.GetPageCount()
-        if step is None or not n:
+        if step is None:
             evt.Skip()
             return
-        self.book.SetSelection((self.book.GetSelection() + step) % n)
+        self.book.step(step)
 
     def _paint(self, evt):
         """Draw the strip: the window background, a baseline, every tab (fill with rounded top corners, label,
@@ -225,6 +255,8 @@ class TabStrip(wx.Control):
         sel = self.book.GetSelection()
         sizes = self._measure()
         for k, (x, tw) in enumerate(self.tab_rects()):
+            if tw == 0:                                  # hidden
+                continue
             if k in self.book.gaps:                      # a short divider in the middle of the gap
                 gc.SetPen(wx.Pen(theme.colour(pal.border), 1))
                 xd = x - self.GAP / 2 + 0.5

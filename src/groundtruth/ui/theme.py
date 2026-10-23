@@ -130,6 +130,30 @@ def rgb(hex_: str) -> tuple:
     return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
 
 
+_icons = None
+
+
+def app_icons() -> "wx.IconBundle":
+    """GroundTruth's logo (the toolbar button's: a ground symbol in a current loop on a navy badge) as the windows'
+    icon, at the sizes Windows picks from for the title bar, taskbar and Alt+Tab (ui/icons, drawn by
+    tools/make_icons.py). Made once; an empty bundle when the files are missing (the window keeps wx's default)."""
+    global _icons
+    if _icons is None:
+        _icons = wx.IconBundle()
+        for png in sorted((Path(__file__).with_name("icons")).glob("groundtruth-*.png")):
+            icon = wx.Icon(str(png), wx.BITMAP_TYPE_PNG)
+            if icon.IsOk():
+                _icons.AddIcon(icon)
+    return _icons
+
+
+def set_icon(win) -> None:
+    """Give a top-level window GroundTruth's icon (app_icons)."""
+    icons = app_icons()
+    if not icons.IsEmpty():
+        win.SetIcons(icons)
+
+
 def status_colour(status: str) -> str:
     """The colour of a status (ok, warn, error); the text colour for anything else."""
     p = _current

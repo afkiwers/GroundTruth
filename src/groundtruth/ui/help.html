@@ -17,10 +17,12 @@ next one).</p>
 <li>The tabs (the coloured ones are what you set up before a run, those after the gap the parts and the results;
   Ctrl+PgUp / Ctrl+PgDn move between them). A coloured tab's number is how many of its rows the next Run checks
   or Simulate takes: the ticked ones. A tab drawn hollow, with a dashed outline and a grey 0, takes none (nothing
-  listed, or everything switched off); its tooltip says which. Check the numbers before a long Simulate:<a href="#nets">Signal paths</a> · <a href="#converters">Converters</a> · <a href="#bridges">Bridges</a> ·
+  listed, or everything switched off); its tooltip says which. Check the numbers before a long Simulate.
+  <a href="#nets">Signal paths</a> · <a href="#converters">Converters</a> · <a href="#bridges">Bridges</a> ·
   <a href="#dcloads">DC loads</a> · <a href="#pdn">Power integrity</a> · <a href="#si">Signal integrity</a> ·
-  <a href="#parts">Parts</a> · <a href="#issues">Issues</a> · <a href="#results">Results</a> · <a href="#fixes">Fixes</a> ·
-  <a href="#history">History</a></li>
+  <a href="#parts">Parts</a> · <a href="#results">Results</a> · <a href="#issues">Issues</a> · <a href="#fixes">Fixes</a> ·
+  <a href="#history">History</a> · <a href="#server">Server jobs</a> (only while Preferences name a
+  compute server)</li>
 <li><a href="#safety">Voltage-aware safety checks</a></li>
 <li><a href="#fields">Part parameters from the schematic (InvenTree fields)</a></li>
 <li><a href="#thermal">Thermal and Current capacity</a></li>
@@ -61,6 +63,9 @@ immediately). The board itself is never changed, except when you place suggested
 <b>Save settings</b>; <b>Clear GT drawings</b> removes what GroundTruth drew. On the right, <b>Preferences…</b> and
 <b>Help</b>. Refill zones and Clear GT drawings are there only when GroundTruth was started from KiCad's toolbar
 (<b>Analyse return paths</b>); opened on a board file, it can analyse but not show or draw anything in KiCad.
+While a job runs the buttons are greyed, except while the board is read (at start, after Reload or Refill, and
+while new boards' nets are detected): then <b>Run checks</b>, <b>Simulate</b> and <b>Thermal</b> stay usable, and a
+click waits for the board (the status line ends with "then Simulate") and starts by itself.
 Hover over <b>Thermal</b>, <b>Export report…</b>, <b>with what-if edits</b>, <b>Preferences…</b> or <b>Help</b> for
 what it does.</p>
 <p>The results shown are always of the board and settings they were computed on. When the board was read again and

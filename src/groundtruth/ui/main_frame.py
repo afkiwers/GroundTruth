@@ -480,6 +480,7 @@ class MainFrame(wx.Frame):
         (_build_pages), and then the board is read as a job."""
         name = session.name
         super().__init__(None, title=f"{name} – GroundTruth" if name else "GroundTruth", size=(1200, 820))
+        theme.set_icon(self)                    # the GroundTruth logo in the title bar and taskbar
         self._window_id = self.GetId()
         self.session = session
         self.board = None
@@ -575,11 +576,12 @@ class MainFrame(wx.Frame):
             ("pdn", "Power integrity", lambda nb: PdnPanel(nb, self.on_config_change, in_steps=True)),
             ("si", "Signal integrity", lambda nb: SiPanel(nb, self.on_config_change, in_steps=True)),
             ("parts", "Parts", lambda nb: PartsPanel(nb, self.on_config_change)),
-            ("issues_panel", "Issues", lambda nb: IssuesPanel(nb, self.on_issue_selected, self.on_draw_issues,
-                                                             self.on_waive, live=session.live)),
+            # Results before Issues (the user: "I want it to be Results, Issues, Fixes")
             ("results_panel", "Results", lambda nb: ResultsPanel(nb, self.on_draw_contours, self.on_draw_arrows,
                                                            self.on_sharper, self.on_capacity, in_steps=True,
                                                            on_mark=self.on_map_mark)),
+            ("issues_panel", "Issues", lambda nb: IssuesPanel(nb, self.on_issue_selected, self.on_draw_issues,
+                                                             self.on_waive, live=session.live)),
             ("fixes", "Fixes", lambda nb: FixesPanel(nb, self.on_suggest, self.on_draw_suggestions,
                                                      self.on_place_vias, self.on_add_whatif, self.on_compare,
                                                      self.on_check_design)),
@@ -632,6 +634,12 @@ class MainFrame(wx.Frame):
         # after new results show: one garbage collection once the user is idle, then they are frozen (gil.py)
         self._settle_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, lambda _: self._settle_when_idle(), self._settle_timer)
+        # Run checks / Simulate / Thermal clicked while the board is read: (name, action), started by this timer once
+        # the window is idle (the user wanted the buttons usable at start-up rather than grey; _queue_if_loading)
+        self._queued: Optional[tuple[str, Callable]] = None
+        self._job_queues = False                # the running job is a board load: the run buttons stay enabled
+        self._queue_timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, lambda _: self._run_queued(), self._queue_timer)
         self._kicad_watch = None
         if session.live:                      # close with KiCad instead of outliving it
             from .kicad_watch import watch_kicad
@@ -695,15 +703,22 @@ class MainFrame(wx.Frame):
         else:
             self._holder.Destroy()
             self._holder = None
+            self._show_server_tab()
             self.notebook.SetSelection(0)
             freeze_long_lived()             # garbage collection walks only what comes after (ui/gil.py)
             self.on_reload()
 
     def _step_tab(self, step: int):
-        """Ctrl+PgUp / Ctrl+PgDn: the tab before / after (as with native tabs), round the ends."""
-        n = self.notebook.GetPageCount()
-        if n:
-            self.notebook.SetSelection((self.notebook.GetSelection() + step) % n)
+        """Ctrl+PgUp / Ctrl+PgDn: the tab before / after (as with native tabs), round the ends; hidden tabs skipped."""
+        self.notebook.step(step)
+
+    def _show_server_tab(self):
+        """The Server jobs tab only while Preferences send the analyses to a compute server (the user: "if no server
+        is specified, hide the Server Jobs tab"); the page itself stays, so the job tracker can still fill it."""
+        from .prefs_dialog import compute_server
+        page = getattr(self, "server_jobs", None)
+        if page is not None:
+            self.notebook.set_hidden(self.notebook.FindPage(page), compute_server(theme.prefs()) is None)
 
     def pages_built(self) -> bool:
         """Every tab has been built (and the board read was started)."""
@@ -881,6 +896,7 @@ class MainFrame(wx.Frame):
         applies when the window opens next. Resolution, threads and GPU are read by the next Simulate."""
         old = theme.load_pref()
         theme.save_prefs(**values)
+        self._show_server_tab()
         self.results_panel.set_display(values["via_markers"], values["max_vias"], values["outlines"], values["names"])
         note = (f"; the {values['theme']} theme applies the next time GroundTruth opens"
                 if values["theme"] != old else "")
@@ -983,23 +999,25 @@ class MainFrame(wx.Frame):
 
     def _start(self, status: str, work: Callable, done: Optional[Callable] = None, *, what: str,
                cancellable: bool = True, kicad: bool = False, solver: bool = False,
-               local: Optional[Callable] = None) -> bool:
+               local: Optional[Callable] = None, queue_runs: bool = False) -> bool:
         """Run work(progress) -> result in the worker thread, then done(result) in the GUI thread.
         Everything work needs must be captured before the call; work must not touch wx. kicad: the job talks
         to KiCad (its Session calls hold the KiCad lock, so an issue shown meanwhile waits for them). solver:
         the job runs the field solver's threads (Python's default GIL interval meanwhile, see ui/gil.py).
         local: for a job sent to the compute server, how to start it again on this computer, offered when the
-        server can't take it (ServerUnavailable)."""
+        server can't take it (ServerUnavailable). queue_runs: a board load; Run checks, Simulate and Thermal stay
+        enabled meanwhile, and a click on them waits for it (_queue_if_loading)."""
         if self._refuse_if_busy():
             return False
         self._local_retry = local
+        self._job_queues = queue_runs
         if solver:
             self._solver_interval.enter()
         self._cancel.clear()
         self.gauge.SetValue(0)
-        self._enable(False, cancellable)
+        self._enable(False, cancellable, keep_runs=queue_runs)
         self._clock.start(status)
-        self.SetStatusText(self._clock.line())
+        self.SetStatusText(self._clock_line())
         self._clock_timer.Start(1000)
 
         def progress(msg, frac):
@@ -1039,6 +1057,7 @@ class MainFrame(wx.Frame):
         """(GUI thread) A job ended: stop the clock, enable the buttons, then show its result with done(result),
         or say it was cancelled, or show the error (in full with its traceback unless it is an expected kind)."""
         self.worker = None
+        self._job_queues = False
         self._solver_interval.leave()
         self._clock_timer.Stop()
         took = self._clock.elapsed()
@@ -1074,11 +1093,13 @@ class MainFrame(wx.Frame):
             self.SetStatusText(self.GetStatusBar().GetStatusText(0) + f" · enabled {', '.join(enabled)} on the board "
                                "for the drawings (Board Setup › Board Editor Layers)")
 
-    def _enable(self, on: bool, cancellable: bool = False):
-        """Enable the actions (no job running) or disable them (a job runs; Cancel only if it can be cancelled)."""
-        for b in (self.t_reload, self.t_refill, self.t_check, self.t_sim, self.t_thermal, self.t_clear):
+    def _enable(self, on: bool, cancellable: bool = False, keep_runs: bool = False):
+        """Enable the actions (no job running) or disable them (a job runs; Cancel only if it can be cancelled).
+        keep_runs: a board load runs; Run checks, Simulate and Thermal stay enabled (a click waits for it)."""
+        runs = (self.t_check, self.t_sim, self.t_thermal)
+        for b in (self.t_reload, self.t_refill, *runs, self.t_clear):
             if b is not None:
-                b.Enable(on)
+                b.Enable(on or (keep_runs and b in runs))
         self.t_cancel.Enable(not on and cancellable)
         self.whatif.Enable(on)
         self.fixes.enable(on)
@@ -1089,15 +1110,48 @@ class MainFrame(wx.Frame):
         """(GUI thread) A job's progress report: the status line and the gauge."""
         if self.busy() and not self._cancel.is_set():
             self._clock.update(msg, frac)
-            self.SetStatusText(self._clock.line())
+            self.SetStatusText(self._clock_line())
             self.gauge.SetValue(int(self._clock.frac * 1000))
 
     def _tick_clock(self):
         """Timer, every second while a job runs: the elapsed time and the estimate count on between reports."""
         if self._clock.running and self.busy() and not self._cancel.is_set():
-            line = self._clock.line()
+            line = self._clock_line()
             if line != self.status_text():
                 self.SetStatusText(line)
+
+    def _clock_line(self) -> str:
+        """The running job's status line, and the run waiting for it (a click during a board load)."""
+        line = self._clock.line()
+        return f"{line} · then {self._queued[0]}" if self._queued else line
+
+    def _loading(self) -> bool:
+        """The window is still being built, filling its tabs, or reading / detecting a board (a queue_runs job)."""
+        return (not self.pages_built() or getattr(self, "_tabs_loading", False)
+                or (self._job_queues and self.worker is not None and self.worker.is_alive()))
+
+    def _queue_if_loading(self, name: str, action: Callable) -> bool:
+        """A run clicked while the board is being read: keep `action` to start once the window is idle (the
+        latest click wins), say so on the status line, and True; False when nothing is loading (run it now)."""
+        if not self._loading():
+            return False
+        self._queued = (name, action)
+        self.SetStatusText(self._clock_line() if self._clock.running else f"{name} starts once the board is read")
+        if not self._queue_timer.IsRunning():
+            self._queue_timer.Start(200)
+        return True
+
+    def _run_queued(self):
+        """Timer while a run waits: start it once no job runs, no tab is loading and no dialog is open (the zones'
+        refill question, detection's messages)."""
+        if self._queued is None:
+            self._queue_timer.Stop()
+            return
+        if self.busy() or self._modal_open():
+            return
+        self._queue_timer.Stop()
+        (_, action), self._queued = self._queued, None
+        action()
 
     def on_cancel(self, _=None):
         """Cancel: ask the running job to stop (it does at its next progress report)."""
@@ -1123,6 +1177,10 @@ class MainFrame(wx.Frame):
             # modules the tabs' load() uses, imported here and not on the GUI thread (analysis.pdn took 59 ms there)
             from ..analysis import pdn, si, transfer  # noqa: F401
             from . import pin_complete  # noqa: F401           (the Power integrity tab's load: 50 ms more)
+            # scipy's interpolate (the Parts tab's C at DC bias, components/bias.c_at) and optimize: imported on the
+            # GUI thread they blocked the window 260-520 ms during the load (gui_probe on flux-2)
+            import scipy.interpolate  # noqa: F401
+            import scipy.optimize  # noqa: F401
             if session.live:                # a click on a table row shows it in KiCad: the board's planes ready
                 from ..analysis.highlight import _planes
                 _planes(board)              # (~160 ms on kraft_flux_mini_2 the first time, then cached)
@@ -1134,7 +1192,7 @@ class MainFrame(wx.Frame):
             except ConfigError as e:
                 return board, path, None, e.messages, copy, fp
         if not self._start("reading the board…", work, self._loaded, what="read the board", cancellable=False,
-                           kicad=self.session.live):
+                           kicad=self.session.live, queue_runs=True):
             self._after_load = None
 
     def _loaded(self, result):
@@ -1229,7 +1287,7 @@ class MainFrame(wx.Frame):
         self._start("detecting motor bridges…" if bridges_only else
                     "nothing to analyse yet: detecting nets, power stages and motor bridges…", work,
                     lambda result: self._auto_detected(result, bridges_only),
-                    what="detect nets, power stages and bridges", cancellable=False)
+                    what="detect nets, power stages and bridges", cancellable=False, queue_runs=True)
 
     def _auto_detected(self, result, bridges_only: bool = False):
         """Add what detection found to the settings (unreviewed; bridges only when complete), show it on the tabs
@@ -1262,7 +1320,7 @@ class MainFrame(wx.Frame):
     def on_refill(self, _=None):
         """Refill zones in KiCad, then read the board again."""
         self._start("refilling zones…", lambda progress: self.session.refill(progress), lambda _: self.on_reload(),
-                    what="refill the zones", cancellable=False, kicad=True)
+                    what="refill the zones", cancellable=False, kicad=True, queue_runs=True)
 
     def on_config_change(self):
         """A tab changed the settings: save them (in the background), and work out the Signal paths tab's chains
@@ -1572,6 +1630,8 @@ class MainFrame(wx.Frame):
         when the window read it (_check_board): a track narrowed in KiCad since would otherwise be analysed at its
         old width (VALIDATION_AUDIT.md round 5, ISSUE-19). Changed: the board is read again as Reload board does
         (settings, tabs), and the run follows. Unchanged, or KiCad too busy to answer: the run goes on at once."""
+        if self._queue_if_loading("Simulate" if simulate else "Run checks", lambda: self.run(simulate, local, fresh)):
+            return
         if not self._ready(simulate):
             return
         if not fresh and self._board_fp is not None:
@@ -2003,6 +2063,8 @@ class MainFrame(wx.Frame):
         Preferences say so, unless `local`); the result is a heatmap view of its own (replacing an earlier one)
         and its issues join the list. First (unless `fresh`) the board is read again (_check_board): a design
         changed since the Simulate is refused with a word (_thermal_inputs), not heated as it was."""
+        if self._queue_if_loading("Thermal", lambda: self.on_thermal(local, fresh)):
+            return
         if self._refuse_if_busy():
             return
         if not fresh and self._board_fp is not None and self._views_src is not None:
@@ -2637,7 +2699,7 @@ class MainFrame(wx.Frame):
             tracker.stop()
         for timer in (getattr(self, "_kicad_watch", None), getattr(self, "_inbox_timer", None),
                       getattr(self, "_follow_timer", None), getattr(self, "_clock_timer", None),
-                      getattr(self, "_settle_timer", None)):
+                      getattr(self, "_settle_timer", None), getattr(self, "_queue_timer", None)):
             if timer is not None:
                 timer.Stop()
         if evt is not None:

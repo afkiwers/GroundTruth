@@ -318,6 +318,7 @@ class HeatmapWindow(wx.Frame):
         size = top.GetSize() if top else wx.Size(1200, 800)
         super().__init__(top, title=f"{top.GetTitle() if top else 'GroundTruth'}: heatmap",
                          size=(max(size.width, 1000), max(size.height, 750)))
+        theme.set_icon(self)
         self.fig = Figure(figsize=(12, 8))
         self.canvas = PrerenderedCanvas(self, -1, self.fig)
         self.toolbar = ZoomToolbar(self.canvas)

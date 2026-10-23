@@ -517,7 +517,7 @@ def test_converters_tab_adds_a_stage_and_simulate_shows_its_hot_loop(app, conv_f
     assert "DC input J1.1" in f.results_panel.tile_text() and "A/mm²" in f.results_panel.tile_text()
 
 
-def test_setup_tabs_are_pastel_and_the_strip_changes_page(app, frame):
+def test_setup_tabs_are_pastel_and_the_strip_changes_page(app, frame, monkeypatch):
     """The user: "can we colour those with pastel like colers and make them stand out". The tabs are drawn by
     GroundTruth (ui/tabbook.py; native Windows tabs can't be coloured one by one): the six setup tabs each have a
     hue of their own, the rest none, a gap before Parts. A tint is a light mix of the hue (stronger when selected),
@@ -570,6 +570,49 @@ def test_setup_tabs_are_pastel_and_the_strip_changes_page(app, frame):
     # the widths make room for the badge: a tab with one is wider than its label and padding alone
     lw, bw = nb.strip._measure()[k_nets]
     assert bw > 0 and nb.strip.tab_rects()[k_nets][1] >= lw + bw + nb.strip.BADGE_GAP
+    # Results, Issues, Fixes in that order; Server jobs hidden without a compute server (no width, skipped by the
+    # keys), shown once Preferences name one
+    assert labels.index("Results") + 1 == labels.index("Issues") == labels.index("Fixes") - 1
+    k_srv = nb.FindPage(f.server_jobs)
+    assert k_srv == nb.GetPageCount() - 1 and k_srv in nb.hidden and nb.strip.tab_rects()[k_srv][1] == 0
+    nb.SetSelection(k_srv - 1)
+    nb.step(1)
+    assert nb.GetSelection() == 0
+    nb.step(-1)
+    assert nb.GetSelection() == k_srv - 1
+    from groundtruth.ui import theme as theme_mod
+    monkeypatch.setattr(theme_mod, "prefs", lambda: {"compute": "server", "server": "gpu-box:8765", "server_key": "k"})
+    f._show_server_tab()
+    assert k_srv not in nb.hidden and nb.strip.tab_rects()[k_srv][1] > 0
+    nb.SetSelection(k_srv)
+    monkeypatch.setattr(theme_mod, "prefs", lambda: {})
+    f._show_server_tab()
+    assert k_srv in nb.hidden and nb.GetSelection() == 0         # hidden while shown: the first tab instead
+    # the user: "fix the plugin logo, add the groundtruth logo": the window carries the toolbar button's logo
+    assert theme.app_icons().GetIconCount() == 5 and f.GetIcon().IsOk() and f.GetIcon().GetWidth() in (16, 24, 32)
+
+
+def test_run_buttons_stay_usable_while_the_board_is_read_and_a_click_waits(app, frame):
+    """The user saw Refill, Run checks, Simulate and Thermal grey at start-up (a board load is a job, and a job
+    disabled every button) and chose: clickable, the click queued. During a load (the tabs being built, the board
+    read, detection) Run checks / Simulate / Thermal stay enabled; a click is kept (the latest wins), named on the
+    status line, and started once the window is idle. Other jobs still disable them, and Reload / Refill stay grey
+    during a load."""
+    f = frame
+    assert not f.pages_built() and f._loading()                  # the tabs are still being built
+    f.run(True)
+    f.run(False)                                                 # the latest click wins
+    assert f._queued[0] == "Run checks" and "Run checks" in f.status_text()
+    # the queued Run checks starts by itself once the board is read and the tabs are filled: the Issues tab shows
+    wait_for(app, lambda: f._queued is None and not f.busy() and f.issues is not None
+             and f.notebook.GetCurrentPage() is f.issues_panel, timeout=120)
+    assert not f._queue_timer.IsRunning()
+    assert not f._queue_if_loading("Simulate", lambda: None)    # loaded: a click runs at once
+    f._enable(False, keep_runs=True)                             # what a load job does
+    assert f.t_check.IsEnabled() and f.t_sim.IsEnabled() and f.t_thermal.IsEnabled() and not f.t_reload.IsEnabled()
+    f._enable(False)                                             # any other job
+    assert not (f.t_check.IsEnabled() or f.t_sim.IsEnabled() or f.t_thermal.IsEnabled())
+    f._enable(True)
 
 
 def test_help_opens_at_the_tab_shown_and_every_link_lands(app, frame):
@@ -1573,7 +1616,9 @@ def test_the_window_builds_its_tabs_in_steps(app, tmp_path, monkeypatch):
         assert f.pages_built() and f.board is not None
         assert [f.notebook.GetPageText(i) for i in range(f.notebook.GetPageCount())] == \
             ["Signal paths", "Converters", "Bridges", "DC loads", "Power integrity", "Signal integrity", "Parts",
-             "Issues", "Results", "Fixes", "History", "Server jobs"]
+             "Results", "Issues", "Fixes", "History", "Server jobs"]
+        # no compute server in Preferences (the tests' own): the Server jobs tab is hidden, its page still there
+        assert f.notebook.hidden == {f.notebook.FindPage(f.server_jobs)}
         # 12 tabs (DC loads since 2026-10-15, Power integrity since 2026-10-16, Signal integrity since 2026-10-17);
         # the forms and plots in steps of their own (`build_steps`): Bridges 5 (0.32-0.43 s in one), Converters 4
         # (155-240 ms in one on a kraft_flux_mini_2 copy; its fields in two since the spread spectrum's, 125-146 ms in
