@@ -552,6 +552,8 @@ between the microcontroller and what drives its pins, a reset or PWM line pickin
 facing a phase node across a stack's gap. When a bridge or a power stage is simulated, GroundTruth also looks at
 the **victims**:
 
+In the plugin, **Victims…** on the Bridges tab picks the victim nets: the board's nets on one side (filtered as you type), the victims on the other with why each is one; add or remove one or several at once. The automatic ones are shown until the first change, which keeps them in the list; **Reset to automatic** goes back.
+
 - the board's microcontrollers and reset supervisors (by their value: STM32, GD32, ATSAM, PIC, TCM809, MAX809 …);
 - its reset, crystal, Hall, debug and PWM / gate-input nets (by name), when they are routed;
 - or the ones listed in the settings (`victims: parts:` and `nets:`, which replace the automatic choice).

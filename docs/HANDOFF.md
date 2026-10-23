@@ -38,6 +38,10 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
   enables the help, which the modal dialog had disabled). The help's Preferences section lists the same bases
   (`@CHECK_BASIS@`). Only Voltage spacing is judged by a published standard; the rest are rules of thumb recorded
   as assumptions.
+- **Branch `victims-picker` (2026-10-23, on `check-basis`):** the Bridges tab's **Victims…** (`ui/victims_dialog.py`):
+  board nets (filter, multi-select) / victims with why, Add / Remove one or several, the automatic ones shown and
+  copied into the list on the first change (agreed), Reset to automatic; `analysis.victims.board_auto_nets` (every
+  stage's nets left out; equals find_victims for one bridge, test_stack), `SettingsFile.set_victim_nets`.
 - **Where things stand (2026-10-22, end of the day):** `main` 277f7c0 + this docs branch, the only branches; not
   pushed by Claude (`origin/main` was at 01bb044 when the user last pushed). **Next, asked and waiting** (the user,
   with a screenshot of the Issues tab): "add sorting when clicking on Check, severity etc. Also, add a filter where

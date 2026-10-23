@@ -701,6 +701,51 @@ def test_configurations_back_to_last_settings_and_undo(app, frame, monkeypatch):
     assert dict(shown)["Back to last settings"] and not dict(shown)["Load from a past run"]   # no runs kept here
 
 
+def test_the_victims_picker_adds_and_removes_several_nets_and_keeps_the_automatic_ones(app, frame, monkeypatch):
+    """The user: "under bridges, offer a selector where the user can add victims by selecting nets and also review
+    them ... select one or more and then add/bulk add them ... select one or more added victims to delete/bulk
+    delete them". The picker lists the board's nets (filtered by what is typed) and the victims with why; while
+    automatic it shows the nets found by name, and the first change turns them into a list (nothing drops out);
+    Reset to automatic goes back; an empty list is automatic again. On the Bridges tab, Victims… writes the list (an
+    undo step) and the line above it says what is set."""
+    from groundtruth.ui.victims_dialog import VictimsDialog
+    f = frame
+    run_steps(app, f, [lambda: None])
+    auto = {"/MCU/NRST": "reset", "OSC_IN": "crystal"}
+    dlg = VictimsDialog(f, ["/MCU/NRST", "OSC_IN", "SIG", "SPI_CLK", "GND"], [], auto)
+    left = lambda: [dlg.nets.GetString(i) for i in range(dlg.nets.GetCount())]            # noqa: E731
+    why = lambda: {dlg.victims.GetItemText(i): dlg.victims.GetItemText(i, 1)               # noqa: E731
+                   for i in range(dlg.victims.GetItemCount())}
+    assert dlg.values() == [] and why() == {"/MCU/NRST": "auto: reset", "OSC_IN": "auto: crystal"}
+    assert left() == ["GND", "SIG", "SPI_CLK"] and dlg.mode.GetLabel().startswith("Automatic")
+    for k in (1, 2):                                             # SIG and SPI_CLK selected together: a bulk add
+        dlg.nets.SetSelection(k)
+    dlg.add()
+    assert sorted(dlg.values()) == ["/MCU/NRST", "OSC_IN", "SIG", "SPI_CLK"] and left() == ["GND"]
+    assert why()["SIG"] == "added" and why()["/MCU/NRST"] == "auto: reset"
+    rows = {dlg.victims.GetItemText(i): i for i in range(dlg.victims.GetItemCount())}
+    for n in ("/MCU/NRST", "SIG"):                               # a bulk remove
+        dlg.victims.Select(rows[n])
+    dlg.remove()
+    assert sorted(dlg.values()) == ["OSC_IN", "SPI_CLK"] and dlg.mode.GetLabel().startswith("Listed")
+    dlg.filter.SetValue("s")
+    assert left() == ["/MCU/NRST", "SIG"]                        # by any part of the name, any case
+    dlg.reset_auto()
+    assert dlg.values() == [] and not dlg.reset.IsEnabled()
+    dlg.remove(["/MCU/NRST", "OSC_IN"])
+    assert dlg.values() == [] and "automatic again" in dlg.mode.GetLabel()
+    dlg.Destroy()
+    # the Bridges tab: Victims… (the dialog answered by a stand-in that adds SIG) writes the list, undoably
+    assert f.bridges.victims_line.GetLabel().startswith("Victim nets: automatic")
+    monkeypatch.setattr(VictimsDialog, "ShowModal", lambda self: (self.add(["SIG"]), wx.ID_OK)[1])
+    f.bridges.on_victims()
+    run_steps(app, f, [lambda: None])
+    assert f.settings.config.victims.nets == ["SIG"] and "1 listed (SIG)" in f.bridges.victims_line.GetLabel()
+    f.on_undo()
+    run_steps(app, f, [lambda: None])
+    assert f.settings.config.victims.nets == [] and "automatic" in f.bridges.victims_line.GetLabel()
+
+
 def test_run_buttons_stay_usable_while_the_board_is_read_and_a_click_waits(app, frame):
     """The user saw Refill, Run checks, Simulate and Thermal grey at start-up (a board load is a job, and a job
     disabled every button) and chose: clickable, the click queued. During a load (the tabs being built, the board

@@ -181,3 +181,32 @@ def test_a_wider_gap_couples_less(victims_run):
         assert far[key]["peak"] < near[key]["peak"]
     c5, c8 = near[("injected", "logic:NRST")]["c_pf"], far[("injected", "logic:NRST")]["c_pf"]
     assert c8 / c5 == pytest.approx(5.0 / 8.0, rel=0.02)
+
+
+def test_the_pickers_automatic_victims_are_what_a_bridges_run_finds_and_the_list_is_written(tmp_path):
+    """The Bridges tab's victims picker: board_auto_nets lists, for a board with one bridge, exactly the victim nets
+    that bridge's Simulate finds when the settings list none (find_victims); set_victim_nets writes victims.nets
+    (the other victims settings kept) and an empty list removes it (automatic again)."""
+    from groundtruth.analysis.detect import detect_bridges
+    from groundtruth.analysis.victims import board_auto_nets, find_victims
+    g = bridge_board(header_gnd_pins=2)
+    g.track((12.0, 31.0), (40.0, 31.0), "/MCU/NRST", "B.Cu")         # a reset and a crystal net, routed
+    g.track((12.0, 32.5), (40.0, 32.5), "OSC_IN", "B.Cu")
+    board, sc, _ = make(tmp_path, g, "power", nets=(), max_nodes=20000)
+    (d,) = detect_bridges(board, sc.config)
+    sc.add_detected_bridges([d.spec], d.models)
+    sc.save()
+    cfg = SettingsFile.load(sc.path).config
+    (b,) = cfg.bridges
+    auto = board_auto_nets(board, cfg)
+    assert auto == {"/MCU/NRST": "reset", "OSC_IN": "crystal"}
+    assert auto == find_victims(board, cfg, b.stages(), b.rail, b.ground, b.input_connector).nets
+    sc = SettingsFile.load(tmp_path / "groundtruth" / "power.groundtruth.yaml")
+    sc.doc["victims"] = {"drive_ohms": 33.0}
+    sc.set_victim_nets(["NRST", "OSC_IN"])
+    assert sc.config.victims.nets == ["NRST", "OSC_IN"] and sc.config.victims.drive_ohms == 33.0
+    sc.set_victim_nets([])
+    assert sc.config.victims.nets == [] and "nets" not in sc.doc["victims"] and sc.config.victims.drive_ohms == 33.0
+    del sc.doc["victims"]["drive_ohms"]
+    sc.set_victim_nets([])
+    assert "victims" not in sc.doc

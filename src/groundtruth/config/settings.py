@@ -2008,6 +2008,22 @@ class SettingsFile:
                 del si[key]
         self._replace("si", si)
 
+    def set_victim_nets(self, nets: list[str]):
+        """Write `victims: nets:` (the nets a bridge's or power stage's switching may upset, analysis/victims.py),
+        keeping the rest of `victims:`; an empty list removes the entry: the victims are then found on the board
+        at each run."""
+        v = self.doc.get("victims")
+        v = CommentedMap(v) if isinstance(v, dict) else CommentedMap()
+        if nets:
+            v["nets"] = _flow_seq(nets)
+        elif "nets" in v:
+            del v["nets"]
+        if v:
+            self._replace("victims", v)
+        elif "victims" in self.doc:
+            del self.doc["victims"]
+            self.config = config_from_data(self.doc)
+
     def set_dc_loads(self, specs: list[DcLoadSpec]):
         """Write the DC loads (one flow-style line each; a load as {pin, return, current}). Parsed before the document
         changes: an invalid entry raises ConfigError and leaves the settings as they were."""
