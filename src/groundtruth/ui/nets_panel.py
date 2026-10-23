@@ -314,8 +314,8 @@ class NetsPanel(SelectableRows, wx.Panel):
                     f"a resistor over 1 kΩ, an op-amp without its model) can be named in Pass through.")
         else:
             text = f"Path: {c.text()}"
-            if c.shunts:
-                text += "\nAcross it: " + ", ".join(c.shunts)
+            if c.branches:                  # what hangs off each net of the path (✗: not placed, DNP)
+                text += "\nBranches:" + "".join(f"\n  at {net}: " + ", ".join(parts) for net, parts in c.branches)
         self.path_text.ChangeValue(text)
 
     def select(self, name: str):
