@@ -117,7 +117,7 @@ To open the same window on a file without KiCad (drawing on the board is disable
 ### The plugin window
 
 - **Tabs:** **Signal paths** (signal paths to analyse: driver → series parts / op-amps → receivers, across nets), **Converters** (DC-DC power stages), **Bridges** (motor bridges), **DC loads** (rails with the currents their loads draw), **Power integrity** (PDN rails and their target impedance), **Signal integrity** (impedance targets, differential pairs, crosstalk), **Parts** (part models), **Issues** (the findings, shown in KiCad on a click), **Results** (current maps, cross-section, spectra, Bode plots, temperatures), **Fixes** (suggested fixes and what-if edits), **History** (every Simulate kept, compared) and **Server jobs** (analyses handed to a compute server).
-- **Top bar:** **Reload board**, **Refill zones** (live KiCad only), **Run checks** (Tier 1), **Simulate** (Tier 1 + Tier 2, power stages and bridges), **Thermal**, **Export report…**, the **with what-if edits** tickbox, **Cancel**, **Save settings**, **Clear GT drawings** (live KiCad only), and at the right **Preferences…** and **Help** (F1).
+- **Top bar:** **Reload board**, **Refill zones** (live KiCad only), **Run checks** (Tier 1), **Simulate** (Tier 1 + Tier 2, power stages and bridges), **Thermal**, **Export report…**, the **with what-if edits** tickbox, **Cancel**, **Configuration ▾** (save and load configurations, Back to last settings), **Undo** / **Redo**, **Clear GT drawings** (live KiCad only), and at the right **Preferences…** and **Help** (F1).
 
 Each is described below and in the plugin's own help.
 

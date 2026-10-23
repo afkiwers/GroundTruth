@@ -1178,7 +1178,9 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   and skew) and <b>Impedance targets</b>. An unticked check's issues are left out of Run checks and Simulate on this
   computer (a voltage-aware check that is off is not run at all); the command line runs every check.
   <b>ESD search distance</b>: how close to a connector pin an ESD / TVS part on its net must be (10 mm by default);
-  it replaces the settings file's <code>safety.esd_mm</code> here.</td></tr>
+  it replaces the settings file's <code>safety.esd_mm</code> here. Beside each check, its <b>basis</b>: the standard,
+  source or assumption it judges by, each a link to its entry under <a href="#references">References and
+  assumptions</a> (a rule of thumb is an assumption there, with its reason): @CHECK_BASIS@.</td></tr>
 </table>
 <p>The exported report follows the heatmap settings and names the resolution it was simulated at. The working
 toggles keep their last state for next time too: the Results tab's <b>Current arrows</b>, <b>Log scale</b> and
