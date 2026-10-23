@@ -375,7 +375,7 @@ class ResultsPanel(wx.Panel):
         # its list.
         top = wx.WrapSizer(wx.HORIZONTAL, wx.REMOVE_LEADING_SPACES)     # no stretched last item
         route = wx.BoxSizer(wx.HORIZONTAL)
-        route.Add(wx.StaticText(self, label="Route:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
+        route.Add(wx.StaticText(self, label="View:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
         self.choice = wx.Choice(self)
         self.choice.SetMinSize((220, -1))
         self.choice.Bind(wx.EVT_CHOICE, lambda e: self._route_changed())
