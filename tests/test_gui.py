@@ -592,6 +592,39 @@ def test_setup_tabs_are_pastel_and_the_strip_changes_page(app, frame, monkeypatc
     assert theme.app_icons().GetIconCount() == 5 and f.GetIcon().IsOk() and f.GetIcon().GetWidth() in (16, 24, 32)
 
 
+def test_all_ticks_every_row_on_or_off_and_shows_a_mixed_table(app, frame):
+    """The user: "in each of the selectors, provide a enable/disable all button". Every tick-box table (Signal
+    paths, Converters, Bridges, DC loads, Power integrity, Signal integrity's pairs) has "Select All" above its tick column:
+    a click unticks every row when all were ticked and ticks them all otherwise, saved once (the settings and the
+    tab's count follow); it shows ticked / empty / the third state for all / none / some rows, greyed without rows."""
+    f = frame
+    run_steps(app, f, [lambda: None])
+    for panel in (f.nets, f.converters, f.bridges, f.dc_loads, f.pdn, f.si):
+        assert isinstance(panel.all_ticks, wx.CheckBox) and panel.all_ticks.GetContainingSizer() is not None
+    p = f.nets
+    n = len(p.nets)
+    assert n >= 1
+    p._sync_all_ticks()
+    assert p.all_ticks.Get3StateValue() == wx.CHK_CHECKED and p.all_ticks.IsEnabled()
+    p.tick_all()                                                 # all were on: all off
+    assert not any(s.enabled for s in f.settings.config.nets) and len(f.settings.config.nets) == n
+    assert p.all_ticks.Get3StateValue() == wx.CHK_UNCHECKED
+    assert not any(p.list.IsItemChecked(i) for i in range(p.list.GetItemCount()))
+    assert f.notebook.badges[f.notebook.FindPage(p)][0] == 0
+    p.tick_all()                                                 # none on: all on
+    assert all(s.enabled for s in f.settings.config.nets)
+    assert all(p.list.IsItemChecked(i) for i in range(p.list.GetItemCount()))
+    assert f.notebook.badges[f.notebook.FindPage(p)][0] == n
+    if n > 1:                                                    # some on: the third state, a click ticks all
+        p.list.CheckItem(0, False)
+        p._sync_all_ticks()
+        assert p.all_ticks.Get3StateValue() == wx.CHK_UNDETERMINED
+        p.tick_all()
+        assert all(s.enabled for s in f.settings.config.nets)
+    f.bridges._sync_all_ticks()                                  # no bridges on this board: greyed
+    assert not f.bridges.bridges and not f.bridges.all_ticks.IsEnabled()
+
+
 def test_run_buttons_stay_usable_while_the_board_is_read_and_a_click_waits(app, frame):
     """The user saw Refill, Run checks, Simulate and Thermal grey at start-up (a board load is a job, and a job
     disabled every button) and chose: clickable, the click queued. During a load (the tabs being built, the board
@@ -2355,6 +2388,27 @@ def test_use_all_cores_is_an_opt_in_with_its_issues_explained(app, frame, monkey
     assert told and told[0] == ALL_CORES_INFO
     assert "Potential issues" in ALL_CORES_INFO and "reproducible" in ALL_CORES_INFO and "memory" in ALL_CORES_INFO
 
+
+
+def test_preferences_switch_each_check_and_set_the_esd_distance(app, frame):
+    """Preferences > Run checks: a tick box per check, all ticked by default, and the ESD search distance (greyed
+    while ESD at connectors is unticked); values() hands them to ui.json."""
+    from groundtruth.ui.prefs_dialog import CHECK_TOGGLES, PreferencesDialog, checks_off, defaults
+    with PreferencesDialog(frame, defaults({})) as dlg:
+        assert set(dlg.checks) == {key for key, *_ in CHECK_TOGGLES}
+        assert all(box.GetValue() for box in dlg.checks.values())
+        assert dlg.esd_mm.GetValue() == 10.0 and dlg.esd_mm.IsEnabled()
+        esd = dlg.checks["check_esd_protection"]
+        esd.SetValue(False)
+        esd.ProcessEvent(wx.CommandEvent(wx.wxEVT_CHECKBOX, esd.GetId()))
+        assert not dlg.esd_mm.IsEnabled()
+        dlg.checks["check_diff_pairs"].SetValue(False)
+        dlg.esd_mm.SetValue(4.5)
+        v = dlg.values()
+    assert v["check_esd_protection"] is False and v["check_diff_pairs"] is False and v["esd_mm"] == 4.5
+    assert checks_off(v) == {"esd_protection", "diff_impedance", "diff_skew"}
+    with PreferencesDialog(frame, defaults(v)) as dlg:
+        assert not dlg.checks["check_diff_pairs"].GetValue() and dlg.esd_mm.GetValue() == 4.5
 
 def test_find_servers_lists_the_cluster_and_fills_the_address(app, frame, monkeypatch):
     """Preferences › Find servers: without a key it only says to enter one; the servers found are listed (the lead

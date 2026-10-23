@@ -625,6 +625,9 @@ class Config:
     victims: VictimSettings = field(default_factory=VictimSettings)
     tht: dict = field(default_factory=dict)      # the board's through-hole pin defaults (analysis/pins.py)
     base_dir: str = ""            # the board's folder (stack board files are relative to it: SettingsFile.config)
+    # Run checks' checks switched off on this computer (the plugin's Preferences, ui.json; never in the settings
+    # file): their issues are left out, and a safety check that is off is not run (rules/checks.run_checks)
+    checks_off: frozenset = field(default_factory=frozenset)
 
     def model_for(self, reference: str) -> Optional[ComponentModel]:
         """The model of a part, or None when the settings don't list it (or it is marked removed)."""

@@ -500,13 +500,17 @@ def check_esd(board: Board, safety, add: Add):
             details={"pins": [p.pin for p in bare]})
 
 
-def run_safety_checks(board: Board, config, copper, add: Add):
-    """The Run checks part (clearance_voltage, cap_voltage, esd_protection)."""
+def run_safety_checks(board: Board, config, copper, add: Add, off: frozenset = frozenset()):
+    """The Run checks part (clearance_voltage, cap_voltage, esd_protection), each unless `off` names it (switched
+    off in Preferences: not run at all, the clearance check being the slow one)."""
     safety = getattr(config, "safety", None)
-    volts = voltage_model(board, config)
-    check_clearances(board, copper, volts, safety, add)
-    check_capacitors(board, config, volts, safety, add)
-    check_esd(board, safety, add)
+    volts = voltage_model(board, config) if {"clearance_voltage", "cap_voltage"} - set(off) else None
+    if "clearance_voltage" not in off:
+        check_clearances(board, copper, volts, safety, add)
+    if "cap_voltage" not in off:
+        check_capacitors(board, config, volts, safety, add)
+    if "esd_protection" not in off:
+        check_esd(board, safety, add)
 
 
 def resistor_rating(fp: Footprint) -> tuple[Optional[float], str]:
