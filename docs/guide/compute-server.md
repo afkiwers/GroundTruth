@@ -26,7 +26,7 @@ port, registers a scheduled task that starts the server at boot as SYSTEM, and s
 (`install_server.cmd status | key | stop | start | uninstall`, `--cuda cu126` for an NVIDIA GPU; its README.md).
 **Remote updates**: a server installed with `--remote-update on` (asked on a first install) is updated from the
 plugin: Preferences, Compute server, **Servers** lists the cluster's servers with their versions, and **Update** (one server) or **Update all**
-installs the plugin's own version on the out-of-date ones (their running jobs finish first; a new server that does
+installs the plugin's own version on the out-of-date ones (their running jobs are cancelled at once and their owners told so; a new server that does
 not stay up is rolled back by the service). Only packages signed with the release key of the build PC the server was
 last installed from by hand are taken (`tools/make_pcm_package.py` signs; the key is in
 `%LOCALAPPDATA%\GroundTruth\release\` of the build PC, or the release workflow's encrypted secret, never in the
