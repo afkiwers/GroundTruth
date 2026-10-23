@@ -40,8 +40,15 @@ UPDATE_EXIT = 75                            # the server's exit code when an upd
 VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 
+KEY_ENV = "GROUNDTRUTH_RELEASE_KEY"        # a path to the private key instead of private_key_path()'s (the GitHub
+#                                             release build writes its secret to a temporary file and names it here)
+
+
 def private_key_path() -> Path:
-    """The release key's private half on the build PC: next to this user's ui.json, never in the repository."""
+    """The release key's private half on the build PC: next to this user's ui.json, never in the repository; or the
+    file the environment names (KEY_ENV: the release workflow's temporary copy of its secret)."""
+    if os.environ.get(KEY_ENV):
+        return Path(os.environ[KEY_ENV])
     base = os.environ.get("LOCALAPPDATA")
     return (Path(base) / "GroundTruth" if base else Path.home() / ".groundtruth") / "release" / "release_ed25519.pem"
 
