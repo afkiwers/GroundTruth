@@ -1496,16 +1496,34 @@ def draw_bode(fig: Figure, view) -> None:
     header = _title_and_key(ax_m, f"{view.owner}: Bode", w_in - left_in - right_in)
     # the first response's transfer function in its part names (analysis/symbolic.py), in matplotlib's math text
     # under the title: the user, "i want the transfer function to be shown in the results as well"
+    # Two lines, each labelled (the user: "the transfer function does not mention the two complex poles, why!?"):
+    # the ideal circuit's H(s) in part names (ideal op-amps, no source, load or tracks: a lone series resistor is
+    # H = 1), and the full model's H(s) in normal form with its poles' and zeros' frequencies and Q (what the curves,
+    # the step and the pole plot show)
+    first = resp[0] if resp else None
     sym = next((r.symbolic for r in resp if getattr(r, "symbolic", None)), None)
-    extra = 0.0
+    nf = getattr(first, "normal", None) if first is not None else None
+    lines = []
     if sym and sym.get("latex"):
-        tex = sym["latex"].replace(r"\left(", "(").replace(r"\right)", ")")      # sizes mathtext does not need
+        lines.append((r"\mathrm{ideal\ circuit:}\ " + sym["latex"], ""))
+    if nf and nf.get("latex") and (nf.get("poles") or nf.get("zeros")):
+        vals = nf["text"].split(";  ", 1)[1] if ";  " in nf["text"] else ""
+        lines.append((r"\mathrm{full\ model:}\ " + nf["latex"], vals))
+    extra, y = 0.0, 0.08
+    for tex, vals in lines:
+        tex = tex.replace(r"\left(", "(").replace(r"\right)", ")")      # sizes mathtext does not need
         try:
-            fig.text(left_in / w_in, 1 - 0.08 / h_in, f"${tex}$", ha="left", va="top", fontsize=FS_TEXT * 1.6,
+            fig.text(left_in / w_in, 1 - y / h_in, f"${tex}$", ha="left", va="top", fontsize=FS_TEXT * 1.4,
                      transform=fig.transFigure)
-            extra = 0.5
+            step = 0.5
+            if vals:                                       # the factors' values on a short line under the formula
+                fig.text(left_in / w_in, 1 - (y + 0.48) / h_in, vals, ha="left", va="top", fontsize=FS_TICK,
+                         transform=fig.transFigure, color="0.4")
+                step += _lh(FS_TICK) + 0.04
+            y += step
+            extra += step
         except ValueError:                  # math text it can't parse: the summary line shows the plain text
-            extra = 0.0
+            continue
     _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TICK) + 0.08, header + 0.06 + extra, hspace=0.08)
 
 
