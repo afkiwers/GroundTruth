@@ -3314,3 +3314,22 @@ def test_several_signal_paths_are_edited_at_once_and_only_what_changed_applies(a
         assert p.freq.GetValue() == "50MHz" and p.driver.IsEnabled()
     finally:
         close_window(f)
+
+
+def test_the_window_opens_big_enough_and_as_it_was_closed(app, tmp_path, monkeypatch):
+    """The user: "the window opens up too small for the content". The first time 1500 x 960 (at most 92 % of the
+    screen); closed at another size, it opens at that size the next time (ui.json "window")."""
+    from boardgen import layer_change_board
+    from conftest import make
+    from groundtruth.ui import main_frame, theme
+    _, _, path = make(tmp_path, layer_change_board(None), "win")
+    assert theme.prefs().get("window") is None
+    area = wx.Display(0).GetClientArea()
+    assert main_frame.window_size() == (min(1500, int(area.width * 0.92)), min(960, int(area.height * 0.92)))
+    f = main_frame.MainFrame(main_frame.Session(file_path=str(path)))
+    f.Show()
+    run_steps(app, f, [lambda: None])
+    f.SetSize((1100, 700))
+    close_window(f)
+    assert theme.prefs()["window"] == {"width": 1100, "height": 700, "maximized": False}
+    assert main_frame.window_size() == (1100, 700)
