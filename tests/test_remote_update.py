@@ -2,7 +2,7 @@
 update and roll-back, server_setup.py apply-update, make_server_package's signing, the Preferences list's logic).
 The user: "a feature that can be enabled when the server is installed for the first time that allows it to update
 remotely ... show the user which server is out of date and offers to update it through a button press"; asked:
-signed builds only, and a busy server waits for its running jobs; "The signing key that is used to update the
+signed builds only, and a busy server cancels its running jobs and updates at once; "The signing key that is used to update the
 server should be reset if the server is re-installed manually"."""
 import io
 import json
@@ -34,6 +34,16 @@ def package(version: str = NEW, folder: str = "groundtruth-server-0.1.99999-abc1
         z.writestr(f"{folder}/version.txt", version + "\n")
         z.writestr(f"{folder}/groundtruth/__init__.py", "")
     return buf.getvalue()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_build_cache():
+    """The server reads its build text once (server.server_build); these tests fake an old one, so the cache is
+    cleared before and after each, or a later test file's server reports the fake build."""
+    from groundtruth.remote import server
+    server._BUILD.clear()
+    yield
+    server._BUILD.clear()
 
 
 @pytest.fixture
@@ -119,28 +129,30 @@ def test_the_server_takes_only_signed_newer_packages_when_allowed(home, signer, 
         srv.stop()
 
 
-def test_a_busy_server_finishes_its_running_job_first(home, signer, monkeypatch):
-    """An update taken while a job runs waits: the queued job does not start, the running one finishes, then the
-    server ends for the update; the queued job is still queued (on disk: it runs after the update)."""
+def test_a_busy_server_cancels_its_running_job_and_updates_at_once(home, signer, monkeypatch):
+    """The user: "when the server is outdated and a sim is running, cancel that sim and update immediately". An update
+    taken while a long job runs cancels it (its message says why), and the server ends for the update well before the
+    job would have finished; the queued job is still queued (on disk: it runs after the update)."""
     import groundtruth
     monkeypatch.setattr(groundtruth, "build_version", lambda: "GroundTruth 0.1.5 (old)")
     srv = started(home)
     try:
         r = Remote(f"127.0.0.1:{srv.port}", KEY, client="tester@here")
-        running, _ = r.submit("sleep", (1.5,))
+        running, _ = r.submit("sleep", (60.0,))
         t0 = time.time()
         while r.state(running)["state"] != "running" and time.time() - t0 < 10:
             time.sleep(0.05)
         queued, _ = r.submit("sleep", (0.1,))
         data = package()
-        assert r.update(data, release.sign(release.load_private(home.parent / "release" / "key.pem")[0], data)
-                        )["state"] == "waiting"
-        assert srv.exit_code is None and r.status()["update"]["state"] == "waiting"
+        answer = r.update(data, release.sign(release.load_private(home.parent / "release" / "key.pem")[0], data))
+        assert answer["state"] == "waiting" and answer["cancelled"] == [running]
         t0 = time.time()
         while srv.exit_code is None and time.time() - t0 < 20:
             time.sleep(0.1)
-        assert srv.exit_code == release.UPDATE_EXIT
-        assert r.state(running)["state"] == "done" and r.state(queued)["state"] == "queued"
+        assert srv.exit_code == release.UPDATE_EXIT and time.time() - t0 < 20       # not the job's 60 s
+        st = r.state(running)
+        assert st["state"] == "cancelled" and "updating to" in (st.get("message") or st.get("error") or "")
+        assert r.state(queued)["state"] == "queued"
     finally:
         srv.stop()
 
@@ -336,7 +348,7 @@ def test_the_preferences_list_and_an_update_followed(tmp_path):
     steps = []
     done, text = su.update("andre", KEY, bundle, steps.append, remote=Fake, sleep=lambda s: None)
     assert done and "updated to 0.1.99999 (abc1234)" in text and Fake.sent == [(b"zip", "ab")]
-    assert "waiting for 1 running job(s)" in steps and any("restarts" in s for s in steps)
+    assert "stopping 1 running job(s)" in steps and any("restarts" in s for s in steps)
     Fake.answers = [{"update": {"state": "failed", "at": 1.0}}, {"update": {"state": "failed", "at": 1.0}},
                     {"update": {"state": "rolled back", "at": 2.0, "error": "it ended after 3 s"}}]
     done, text = su.update("andre", KEY, bundle, steps.append, remote=Fake, sleep=lambda s: None)

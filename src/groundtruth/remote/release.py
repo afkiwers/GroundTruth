@@ -4,7 +4,7 @@ The user (2026-10-16): "Currently I have to physically go to the servers an upda
 feature that can be enabled when the server is installed for the first time that allows it to update remotely? ...
 when the groundtruth plugin is open and the user goes to preferences, it will show the user which server is out of
 date and offers to update it through a button press". Asked: only builds signed by the user's release key may update
-a server ("Signed builds only"), and a busy server waits for its running jobs ("Wait for running jobs").
+a server ("Signed builds only"), and a busy server cancels its running jobs and updates at once (the user, 2026-10-24).
 
 An update replaces code that runs as SYSTEM (root on a Mac), so three things must hold before a server takes one
 (server.ComputeServer._take_update):

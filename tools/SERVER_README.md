@@ -148,7 +148,7 @@ installs the plugin's own version on the out-of-date ones. Turn it on at the ser
   installed package's key, and a remote update never changes it. A package from another build PC is refused until
   it has been installed by hand once. The access key alone can't push code to a server.
 - Only a **newer** build than the server's own is taken (an old package can't take a server back).
-- A busy server **finishes its running jobs** first; queued jobs wait and run after the update.
+- A busy server **cancels its running jobs** and updates at once (their owners see why and run them again); queued jobs wait and run after the update.
 - The service installs the update with the new package's own installer, restarts, and goes **back to the previous
   version** by itself if the new server does not stay up for two minutes (`install_server.cmd status` says how the
   last update went; the previous program is kept in `app.prev`).

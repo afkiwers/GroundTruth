@@ -784,13 +784,21 @@ class ComputeServer:
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / "update-{}.{}.{}.zip".format(*new)
             path.write_bytes(data)
-            running = sum(1 for j in self.jobs.values() if j.state == "running")
-            self.update = {"state": "waiting" if running else "installing", "version": version,
-                           "from": build_version(), "zip": str(path), "since": time.time(), "running": running}
+            # running jobs are cancelled, not waited for: an outdated server should not finish a long Simulate on old
+            # code (the user: "when the server is outdated and a sim is running, cancel that sim and update
+            # immediately"); their owners see why and run them again on the new version
+            busy = [j for j in self.jobs.values() if j.state == "running"]
+            for j in busy:
+                j.message = f"cancelled: the server is updating to {version}; run it again"
+            self.update = {"state": "waiting" if busy else "installing", "version": version,
+                           "from": build_version(), "zip": str(path), "since": time.time(), "running": len(busy),
+                           "cancelled": [j.id for j in busy]}
             self.lock.notify_all()
             answer = {k: v for k, v in self.update.items() if k != "zip"}
-        log.info("update to %s taken; %s", version, f"waiting for {running} running job(s)" if running else
+        log.info("update to %s taken; %s", version, f"cancelling {len(busy)} running job(s) first" if busy else
                  "installing it now")
+        for j in busy:
+            self.cancel(j.id)                   # the slot stops it, then installs the update (_update_when_idle)
         self._update_when_idle()
         return 202, answer
 

@@ -2805,7 +2805,7 @@ the other powerful pc to do all the computation"; Windows 11 Pro server, local n
   servers a `find_servers` query heard that the lead does not name (by host and port).
 - **Signed remote updates** (2026-10-16, the user: "Currently I have to physically go to the servers an update
   them manually ... show the user which server is out of date and offers to update it through a button press";
-  asked: signed builds only, a busy server waits for its running jobs; "The signing key that is used to update the
+  asked: signed builds only, a busy server waits for its running jobs (since 2026-10-24: cancels them and updates at once, the user's choice); "The signing key that is used to update the
   server should be reset if the server is re-installed manually"):
   - `remote/release.py`: Ed25519 (the `cryptography` library: the server's requirements, `SERVER_EXTRA`; the dev
     venv; not the plugin). The build PC's private key `private_key_path()` (%LOCALAPPDATA%\GroundTruth\release,
