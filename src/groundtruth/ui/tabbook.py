@@ -3,6 +3,11 @@ native Windows tabs cannot be coloured one by one. The setup tabs (Signal paths 
 enters before a run) each get a pastel colour of their own (the user: "colour those with pastel like colours and make
 them stand out"); the tabs after them (parts, results, history) stay neutral, set apart by a gap.
 
+A setup tab also carries a badge: how many of its rows take part in the next run (the user: "add (#) as indicator
+for how many signals are actively part of the sim ... to make sure the user doesn't accidentally simulate unintended
+signals"). A tab with none (nothing listed, or everything switched off) is drawn hollow, with a dashed outline and a
+grey 0, so an empty tab shows at a glance; the tooltip says which it is.
+
 TabBook keeps the wx.Notebook API the window, its tools and the tests use (AddPage, SetSelection, GetSelection,
 FindPage, GetPageText, GetPageCount, GetCurrentPage), so nothing else changes. No wx objects at import time."""
 from __future__ import annotations
@@ -41,16 +46,28 @@ def tab_colours(hue: Optional[str], selected: bool, hover: bool, pal: theme.Pale
     return mix(hue, "#ffffff", share + 0.04), mix(hue, "#000000", 0.55), hue if selected else None
 
 
+def badge_colours(hue: Optional[str], count: int, pal: theme.Palette) -> tuple:
+    """(pill fill, pill text) of a tab's count badge: a stronger tint of the tab's hue with its deep shade (light) or
+    white (dark); grey for 0 (nothing takes part)."""
+    if count == 0 or hue is None:
+        return pal.border, pal.muted
+    if pal.dark:
+        return mix(hue, pal.panel, 0.6), "#ffffff"
+    return mix(hue, "#ffffff", 0.5), mix(hue, "#000000", 0.6)
+
+
 class TabBook(wx.Simplebook):
     """The pages (a wx.Simplebook: no tabs of its own) and their strip (`strip`, a sibling the window lays out above
-    the book). AddPage takes a page's colour and whether a gap goes before it; every change of page redraws the
-    strip."""
+    the book). AddPage takes a page's colour and whether a gap goes before it; set_badge gives a tab its count;
+    every change of page redraws the strip."""
 
     def __init__(self, parent):
         """An empty book in `parent`, with its strip (also a child of `parent`)."""
         super().__init__(parent)
         self.hues: list[Optional[str]] = []
         self.gaps: set[int] = set()            # pages with a gap before them (a new group starts)
+        self.badges: dict[int, tuple] = {}     # page -> (count, tooltip)
+        self.hidden: set[int] = set()          # pages without a tab (set_hidden): still there, not offered
         self.strip = TabStrip(parent, self)
         self.Bind(wx.EVT_BOOKCTRL_PAGE_CHANGED, lambda e: (e.Skip(), self.strip.Refresh()))
 
@@ -62,6 +79,41 @@ class TabBook(wx.Simplebook):
         done = super().AddPage(page, text, select)
         self.strip.changed()
         return done
+
+    def set_badge(self, page: int, count: Optional[int], tip: str = "") -> None:
+        """Show `count` on tab `page` (None: no badge), `tip` as the tab's tooltip; redrawn only when it changed."""
+        new = (count, tip) if count is not None else None
+        if self.badges.get(page) != new:
+            if new is None:
+                self.badges.pop(page, None)
+            else:
+                self.badges[page] = new
+            self.strip.changed()
+
+    def set_hidden(self, page: int, hidden: bool) -> None:
+        """Take tab `page` off the strip (the page stays, and SetSelection can still show it) or put it back; a
+        hidden page that is showing gives way to the first page."""
+        if hidden == (page in self.hidden):
+            return
+        if hidden:
+            self.hidden.add(page)
+            if self.GetSelection() == page:
+                self.SetSelection(0)
+        else:
+            self.hidden.discard(page)
+        self.strip.changed()
+
+    def step(self, step: int) -> None:
+        """Show the shown tab `step` places before (< 0) or after, round the ends, skipping hidden tabs."""
+        n = self.GetPageCount()
+        if not n or len(self.hidden) >= n:
+            return
+        k = self.GetSelection()
+        for _ in range(n):
+            k = (k + (1 if step > 0 else -1)) % n
+            if k not in self.hidden:
+                break
+        self.SetSelection(k)
 
     def SetSelection(self, page: int) -> int:
         """Show page `page` (sending the page-changed events, as wx.Notebook does) and mark its tab."""
@@ -78,11 +130,12 @@ class TabBook(wx.Simplebook):
 
 class TabStrip(wx.Control):
     """The row of tabs over a TabBook: rounded-top tabs drawn with a GraphicsContext (anti-aliased), a gap and a
-    thin divider between groups, a baseline under the row. A click or the arrow keys (with the focus) change the
-    page; the window adds Ctrl+PgUp / Ctrl+PgDn. Widths come from the bold font for every tab, so the selected tab
-    turning bold moves nothing."""
+    thin divider between groups, a baseline under the row, count badges. A click or the arrow keys (with the focus)
+    change the page; the window adds Ctrl+PgUp / Ctrl+PgDn. Widths come from the bold font for every tab, so the
+    selected tab turning bold moves nothing."""
 
     PAD_X, PAD_Y, TOP, SPACE, GAP, RADIUS, BAR = 14, 7, 6, 3, 18, 7, 3
+    BADGE_GAP, BADGE_PAD = 6, 5                 # between label and badge; the pill's padding beside its number
 
     def __init__(self, parent, book: TabBook):
         """The strip of `book`, in `parent`; it paints itself entirely (no background erase: no flicker)."""
@@ -90,8 +143,9 @@ class TabStrip(wx.Control):
         self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
         self.book = book
         self._bold = self.GetFont().Bold()
+        self._small = self.GetFont().Bold().Scaled(0.85)
         self._hover: Optional[int] = None
-        self._widths: Optional[list] = None      # each label's width in the bold font (changed() forgets them)
+        self._widths: Optional[list] = None      # each tab's (label width, badge width) (changed() forgets them)
         for evt, fn in ((wx.EVT_PAINT, self._paint), (wx.EVT_LEFT_DOWN, self._left_down),
                         (wx.EVT_MOTION, self._motion), (wx.EVT_LEAVE_WINDOW, lambda e: self._set_hover(None)),
                         (wx.EVT_KEY_DOWN, self._key), (wx.EVT_SET_FOCUS, lambda e: self.Refresh()),
@@ -100,7 +154,7 @@ class TabStrip(wx.Control):
         self.SetInitialSize()
 
     def changed(self) -> None:
-        """A page was added: measure the labels again and redraw."""
+        """A page or a badge was added or changed: measure the tabs again and redraw."""
         self._widths = None
         self.Refresh()
 
@@ -109,25 +163,37 @@ class TabStrip(wx.Control):
         h = self.GetCharHeight() + 2 * self.PAD_Y + self.TOP + self.BAR
         return wx.Size(sum(w for _, w in self.tab_rects()) or 200, h)
 
-    def _label_widths(self) -> list:
-        """Each tab label's width in the bold font (cached until a page is added)."""
+    def _measure(self) -> list:
+        """Each tab's (label width in the bold font, badge pill width or 0), cached until something changes."""
         if self._widths is None:
             dc = wx.ClientDC(self)
-            dc.SetFont(self._bold)
-            self._widths = [dc.GetTextExtent(self.book.GetPageText(k))[0] for k in range(self.book.GetPageCount())]
+            out = []
+            for k in range(self.book.GetPageCount()):
+                dc.SetFont(self._bold)
+                lw = dc.GetTextExtent(self.book.GetPageText(k))[0]
+                badge = self.book.badges.get(k)
+                dc.SetFont(self._small)
+                bw = dc.GetTextExtent(str(badge[0]))[0] + 2 * self.BADGE_PAD if badge else 0
+                out.append((lw, max(bw, dc.GetCharHeight() + 2) if badge else 0))
+            self._widths = out
         return self._widths
 
     def tab_rects(self) -> list:
-        """(x, width) of every tab, left to right. When the window is too narrow for the natural widths, the
-        padding shrinks first (to 5 px a side); a tab's label is then clipped to its tab."""
-        widths = self._label_widths()
-        gaps = len(self.book.gaps) * self.GAP + self.SPACE * max(len(widths) - 1, 0) + 8
+        """(x, width) of every tab, left to right (a hidden one: width 0, nothing hits or draws it). When the window
+        is too narrow for the natural widths, the padding shrinks first (to 5 px a side); a tab's label is then
+        clipped to its tab."""
+        widths = [lw + (bw + self.BADGE_GAP if bw else 0) for lw, bw in self._measure()]
+        shown = [w for k, w in enumerate(widths) if k not in self.book.hidden]
+        gaps = len(self.book.gaps) * self.GAP + self.SPACE * max(len(shown) - 1, 0) + 8
         room = self.GetClientSize().width
         pad = self.PAD_X
-        if room > 0 and widths and sum(widths) + 2 * pad * len(widths) + gaps > room:
-            pad = max(5, (room - gaps - sum(widths)) // (2 * len(widths)))
+        if room > 0 and shown and sum(shown) + 2 * pad * len(shown) + gaps > room:
+            pad = max(5, (room - gaps - sum(shown)) // (2 * len(shown)))
         x, out = 8, []
         for k, w in enumerate(widths):
+            if k in self.book.hidden:
+                out.append((x, 0))
+                continue
             if k in self.book.gaps:
                 x += self.GAP - self.SPACE
             out.append((x, w + 2 * pad))
@@ -142,10 +208,15 @@ class TabStrip(wx.Control):
         return None
 
     def _set_hover(self, k: Optional[int]) -> None:
-        """Mark tab k as under the mouse (None: none) and redraw when that changed."""
+        """Mark tab k as under the mouse (None: none), with its badge's tooltip, and redraw when that changed."""
         if k != self._hover:
             self._hover = k
             self.SetCursor(wx.Cursor(wx.CURSOR_HAND if k is not None else wx.CURSOR_DEFAULT))
+            tip = self.book.badges.get(k, (0, ""))[1] if k is not None else ""
+            if tip:
+                self.SetToolTip(tip)
+            else:
+                self.UnsetToolTip()
             self.Refresh()
 
     def _motion(self, evt):
@@ -161,15 +232,15 @@ class TabStrip(wx.Control):
     def _key(self, evt):
         """Left / Right (with the focus on the strip): the page before / after; other keys go on."""
         step = {wx.WXK_LEFT: -1, wx.WXK_RIGHT: 1}.get(evt.GetKeyCode())
-        n = self.book.GetPageCount()
-        if step is None or not n:
+        if step is None:
             evt.Skip()
             return
-        self.book.SetSelection((self.book.GetSelection() + step) % n)
+        self.book.step(step)
 
     def _paint(self, evt):
         """Draw the strip: the window background, a baseline, every tab (fill with rounded top corners, label,
-        the selected tab's underline), the divider in each group gap and a focus ring on the selected tab."""
+        badge, the selected tab's underline), the divider in each group gap and a focus ring on the selected tab.
+        A tab whose badge is 0 has no fill unless selected, only a dashed outline in its colour."""
         dc = wx.AutoBufferedPaintDC(self)
         pal = theme.palette()
         dc.SetBackground(wx.Brush(theme.colour(pal.bg)))
@@ -182,18 +253,30 @@ class TabStrip(wx.Control):
         gc.SetPen(wx.Pen(theme.colour(pal.border), 1))
         gc.StrokeLine(0, h - 0.5, w, h - 0.5)
         sel = self.book.GetSelection()
+        sizes = self._measure()
         for k, (x, tw) in enumerate(self.tab_rects()):
+            if tw == 0:                                  # hidden
+                continue
             if k in self.book.gaps:                      # a short divider in the middle of the gap
                 gc.SetPen(wx.Pen(theme.colour(pal.border), 1))
                 xd = x - self.GAP / 2 + 0.5
                 gc.StrokeLine(xd, top + 5, xd, bottom - 4)
-            fill, text, bar = tab_colours(self.book.hues[k], k == sel, k == self._hover, pal)
+            hue = self.book.hues[k]
+            badge = self.book.badges.get(k)
+            empty = badge is not None and badge[0] == 0
+            fill, text, bar = tab_colours(hue, k == sel, k == self._hover, pal)
+            if empty and k != sel:
+                fill, text = (pal.btn_hover if k == self._hover else None), pal.muted
             gc.PushState()
             gc.Clip(x, 0, tw, h)
             if fill is not None:
                 # a rounded rectangle running below the strip's bottom: only its top corners are round
                 gc.SetBrush(wx.Brush(theme.colour(fill)))
                 gc.SetPen(wx.Pen(theme.colour(pal.border), 1) if fill == pal.card else wx.TRANSPARENT_PEN)
+                gc.DrawRoundedRectangle(x + 0.5, top + 0.5, tw - 1, h - top + r, r)
+            if empty and k != sel and hue is not None:  # hollow: the tab's outline dashed in a soft shade of its hue
+                gc.SetBrush(wx.TRANSPARENT_BRUSH)
+                gc.SetPen(wx.Pen(theme.colour(mix(hue, pal.bg, 0.55)), 1, wx.PENSTYLE_SHORT_DASH))
                 gc.DrawRoundedRectangle(x + 0.5, top + 0.5, tw - 1, h - top + r, r)
             if bar is not None:
                 gc.SetPen(wx.TRANSPARENT_PEN)
@@ -203,7 +286,20 @@ class TabStrip(wx.Control):
             gc.SetFont(font, theme.colour(text))
             label = self.book.GetPageText(k)
             lw, lh = gc.GetTextExtent(label)[:2]
-            gc.DrawText(label, x + max((tw - lw) / 2, 4), top + (bottom - top - lh) / 2)
+            bw = sizes[k][1]
+            content = lw + (self.BADGE_GAP + bw if bw else 0)
+            x0 = x + max((tw - content) / 2, 4)
+            gc.DrawText(label, x0, top + (bottom - top - lh) / 2)
+            if badge is not None:                        # the count in a pill right of the label
+                pill, ink = badge_colours(hue, badge[0], pal)
+                gc.SetFont(self._small, theme.colour(ink))
+                nw, nh = gc.GetTextExtent(str(badge[0]))[:2]
+                ph = nh + 2
+                px, py = x0 + lw + self.BADGE_GAP, top + (bottom - top - ph) / 2
+                gc.SetPen(wx.TRANSPARENT_PEN)
+                gc.SetBrush(wx.Brush(theme.colour(pill)))
+                gc.DrawRoundedRectangle(px, py, bw, ph, ph / 2)
+                gc.DrawText(str(badge[0]), px + (bw - nw) / 2, py + 1)
             if k == sel and self.HasFocus():
                 gc.SetBrush(wx.TRANSPARENT_BRUSH)
                 gc.SetPen(wx.Pen(theme.colour(pal.accent, 150), 1))
