@@ -25,10 +25,11 @@
 
 variables:
   BOARD: "hardware/myboard.kicad_pcb"
-  # GroundTruth from its repository (it is not on PyPI). Pin a release tag, so every pipeline runs the same analysis
-  # code and a new GroundTruth arrives only when you change it: e.g. ...GroundTruth.git@0.1.42593 (the tags:
-  # https://github.com/afkiwers/GroundTruth/releases). A mirror of your own works too (git+https://gitlab.../...).
-  GROUNDTRUTH_URL: "git+https://github.com/afkiwers/GroundTruth.git@main"
+  # GroundTruth is not on PyPI: each release has a wheel with its number (https://github.com/afkiwers/GroundTruth/
+  # releases). Pin one, so every pipeline runs the same analysis code and a new GroundTruth arrives only when you
+  # change the number. The newest code between releases: "git+https://github.com/afkiwers/GroundTruth.git@main".
+  GROUNDTRUTH_VERSION: "0.1.42593"
+  GROUNDTRUTH_URL: "https://github.com/afkiwers/GroundTruth/releases/download/${GROUNDTRUTH_VERSION}/groundtruth_pcb-${GROUNDTRUTH_VERSION}-py3-none-any.whl"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 .groundtruth:
@@ -37,7 +38,6 @@ variables:
     key: groundtruth-pip
     paths: [.cache/pip]
   before_script:
-    - apt-get update -qq && apt-get install -y -qq git > /dev/null
     - pip install --quiet "groundtruth-pcb @ $GROUNDTRUTH_URL"
   artifacts:
     when: always

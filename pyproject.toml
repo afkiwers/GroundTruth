@@ -4,7 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "groundtruth-pcb"
-version = "0.1.0"
+# the build series: a build is <major.minor>.<counter> (tools/make_pcm_package.py --print-version); a release's
+# wheel gets its tag here (.github/workflows/release.yml), so an install from git shows "dev"
+version = "0.1.dev0"
 description = "Return-path and EMI analysis for KiCad 10+ boards: KiCad plugin and CI command line"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -37,6 +39,9 @@ groundtruth-gui = "groundtruth.ui.app:gui_main"   # needs the [plugin] extra (wx
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"groundtruth.ui" = ["*.html", "icons/*.png"]   # the help pages, the window icons
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
