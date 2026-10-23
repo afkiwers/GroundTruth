@@ -91,6 +91,16 @@ To install the KiCad plugin:
 
 **Or as a package** (for the Plugin and Content Manager, e.g. on a colleague's machine): run `build_package.cmd` in the repo folder (from a console or by double-click). It builds `out\dist\groundtruth-<version>-<commit>-pcm.zip` from the current files (`build_package.cmd --committed`: from the last commit only; on any system `python tools/make_pcm_package.py` builds from the last commit, `--working-tree` from the files on disk). Every build gets a higher version, so the manager installs a newer zip as an update. In KiCad: **Tools → Plugin and Content Manager → Install from File…**, pick the zip, **Apply Pending Changes**, restart KiCad. The manager installs it to `<Documents>/KiCad/10.0/3rdparty/plugins/io_github_iwers_groundtruth` and lists it under **Installed**, where it can be updated (a newer zip) or uninstalled. Keep only one of the two installs: with both, every button shows twice (`python tools/install_plugin.py --uninstall` removes the copied one). The API must be enabled in either case.
 
+**From the GroundTruth repository in KiCad** (updates by themselves): in **Tools → Plugin and Content Manager → Manage…**, **Add** `https://afkiwers.github.io/GroundTruth/repository.json`, then pick that repository in the manager's list: GroundTruth is listed there, and every new release shows as an update.
+
+**Releases.** Publishing a GitHub release (a tag `v0.1.1`, …) runs `.github/workflows/release.yml`: it builds what `build_package.cmd` builds (the KiCad package and the compute-server package of the same version, the server package signed with the release key), attaches both and the signature to the release, and publishes the repository above on GitHub Pages with every release's version (`tools/make_pcm_repository.py`). A pre-release is listed as `testing`, a release as `stable`. The private release key is never in the repository: the workflow takes it from an encrypted Actions secret, writes it to an owner-only temporary file for the build and deletes it; it checks the key against `tools/release_key.pub` (the public half the servers trust) and fails rather than sign with another key, and it checks the repository and the built packages for a private key before uploading. One-time setup on github.com:
+
+1. **Settings → Secrets and variables → Actions → New repository secret**: name `GROUNDTRUTH_RELEASE_KEY`, value the whole content of `%LOCALAPPDATA%\GroundTruth\release\release_ed25519.pem` (with its BEGIN / END lines). Or, with the GitHub CLI logged in: `gh secret set GROUNDTRUTH_RELEASE_KEY --repo afkiwers/GroundTruth < "%LOCALAPPDATA%\GroundTruth\release\release_ed25519.pem"`.
+2. **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+3. **Settings → Environments → github-pages → Deployment branches and tags**: add a tag rule `v*` (a release runs from its tag; by default only `main` may deploy).
+
+A release made before the setup (or one to build again): **Actions → Release packages → Run workflow** with its tag.
+
 **Where to find it** (checked on KiCad 10.0.5, Windows):
 
 | What | Where |
@@ -1184,7 +1194,8 @@ plugin: Preferences, Compute server, **Servers** lists the cluster's servers wit
 installs the plugin's own version on the out-of-date ones (their running jobs finish first; a new server that does
 not stay up is rolled back by the service). Only packages signed with the release key of the build PC the server was
 last installed from by hand are taken (`tools/make_pcm_package.py` signs; the key is in
-`%LOCALAPPDATA%\GroundTruth\release\` of the build PC, never in the repository), and only newer ones.
+`%LOCALAPPDATA%\GroundTruth\release\` of the build PC, or the release workflow's encrypted secret, never in the
+repository; `tools/release_key.pub` is its public half, and a build with any other key stops), and only newer ones.
 **On a Mac** (Apple Silicon such as an M2, or Intel; in use on an M2 since 2026-10-15): unzip the same package and
 double-click `install_server.command` (the first time: right-click, Open, Open), then type the Mac's password. It
 installs into `/Library/Application Support/GroundTruth` as the launchd daemon `com.groundtruth.server` (starts at
