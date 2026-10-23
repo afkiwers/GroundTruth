@@ -793,6 +793,24 @@ def build_parser() -> argparse.ArgumentParser:
             sp.set_defaults(history=False)
         sp.set_defaults(func=(lambda a, s=sim: _run(a, s)))
 
+    sp = sub.add_parser("verify", help="CI gate: a saved configuration simulated and judged against a thresholds "
+                                       "file; JUnit results, exit 0 pass / 1 fail / 2 setup error")
+    sp.add_argument("board", nargs="?", help="path to the .kicad_pcb file")
+    sp.add_argument("--settings", help="the common settings file (default: groundtruth/<board>.groundtruth.yaml next "
+                                       "to the board; it must exist)")
+    sp.add_argument("--config", metavar="FILE", help="the configuration to run (groundtruth/configs/*.gtconfig.yaml)")
+    sp.add_argument("--thresholds", metavar="FILE", help="the pass/fail criteria (*.gtthresholds.yaml; "
+                                                          "--write-template makes one)")
+    sp.add_argument("--out-dir", default=".", help="for groundtruth-verify-junit.xml and the run's JSON report "
+                                                   "(default: .)")
+    sp.add_argument("--write-template", metavar="FILE", help="write a documented thresholds template and stop")
+    sp.add_argument("--force", action="store_true", help="with --write-template: replace an existing file")
+    sp.add_argument("--refill-zones", action="store_true", help="refill zones with kicad-cli on a temp copy first")
+    sp.add_argument("--history", action="store_true", help="keep the run in the board's history")
+    sp.add_argument("-v", "--verbose", action="store_true", help="show solver progress")
+    solver_args(sp)
+    sp.set_defaults(func=cmd_verify)
+
     sp = sub.add_parser("bode", help="the signal paths' frequency sweeps alone (no field solve): gain, -3 dB "
                                       "frequency, poles and zeros per path; --plots / --json write them")
     board_args(sp)
@@ -930,6 +948,57 @@ def cmd_serve(args) -> int:
     return serve(args.host, cfg["port"], key, cfg["workers"], cfg["threads"], cfg["gpu"], args.log, cfg["keep_hours"],
                  cfg["beacon_port"], cfg["lead"], tuple(cfg["peers"]), remote_update=bool(cfg["remote_update"]),
                  address=str(cfg["address"] or ""))
+
+
+def cmd_verify(args) -> int:
+    """`groundtruth verify`: a saved configuration simulated on the board with its common settings file, judged
+    against a thresholds file (report/verify.py), for a CI gate. The run is `simulate --config C --format json`
+    through this same parser (with --thermal when a temperature criterion is set), so verify judges exactly what
+    simulate reports; then one JUnit test case per criterion (--out-dir/groundtruth-verify-junit.xml) and a summary
+    on stdout. Exit 0: every criterion passed; 1: one failed; 2: no common settings file, or an invalid
+    configuration or thresholds file. --write-template FILE writes a documented thresholds file and stops."""
+    import json
+    from .report import verify
+    if args.write_template:
+        path = Path(args.write_template)
+        if path.exists() and not args.force:
+            raise CliError(f"{path} exists already (--force replaces it)")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(verify.TEMPLATE, encoding="utf-8")
+        print(f"wrote {path}: edit the limits, then: groundtruth verify BOARD --config C --thresholds {path}")
+        return EXIT_OK
+    missing = [f for f, v in (("BOARD", args.board), ("--config", args.config), ("--thresholds", args.thresholds))
+               if not v]
+    if missing:
+        raise CliError(f"verify needs {', '.join(missing)} (or --write-template FILE for a thresholds template)")
+    from .config.settings import settings_path
+    common = Path(args.settings) if args.settings else settings_path(args.board)
+    if not common.exists():
+        raise CliError(f"no common settings file {common}: the board's settings must be there (part models, rules, "
+                       f"waivers); create it with: groundtruth init {args.board}")
+    if not Path(args.config).exists():
+        raise CliError(f"configuration {args.config} not found")
+    try:
+        doc = verify.load(args.thresholds)
+    except verify.ThresholdsError as e:
+        raise CliError("invalid thresholds:\n  " + "\n  ".join(e.messages)) from e
+    out_dir = Path(args.out_dir)
+    sim = ["simulate", args.board, "--config", args.config, "--format", "json", "--out-dir", str(out_dir)]
+    sim += ["--settings", str(common)] + (["--thermal"] if verify.needs_thermal(doc) else [])
+    sim += ["--refill-zones"] * args.refill_zones + ["--history"] * args.history + ["-v"] * args.verbose
+    sim += ["--all-cores"] * args.all_cores + (["--gpu", args.gpu] if args.gpu else [])
+    sim += ["--resolution", f"{args.resolution:g}"] if args.resolution else []
+    sim_args = build_parser().parse_args(sim)
+    sim_args.func(sim_args)                  # its own exit code (issues at --fail-on) is not the gate: the cases are
+    report = json.loads((out_dir / OUTPUT_NAMES["json"]).read_text(encoding="utf-8"))
+    cases = verify.evaluate(report, doc)
+    meta = {"board": args.board, "configuration": args.config, "thresholds": args.thresholds,
+            "settings": str(common), "version": __version__}
+    target = out_dir / verify.JUNIT_NAME
+    target.write_text(verify.junit(cases, meta), encoding="utf-8")
+    print(verify.summary(cases))
+    print(f"results: {target}")
+    return EXIT_ISSUES if any(c.status == "failed" for c in cases) else EXIT_OK
 
 
 def main(argv: Optional[list[str]] = None) -> int:

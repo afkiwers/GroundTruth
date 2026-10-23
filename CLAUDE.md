@@ -85,6 +85,9 @@ driver 527 / CUDA 12.0). The notes below were written on the old laptop (user `i
 .venv/Scripts/groundtruth simulate BOARD --config groundtruth/configs/X.gtconfig.yaml   # a saved configuration
                                                   # (config/scenario.py, the plugin's Configuration menu) for this
                                                   # run only: its nets/stages/bridges/run settings, the parts shared
+.venv/Scripts/groundtruth verify BOARD --config C.gtconfig.yaml --thresholds T.gtthresholds.yaml --out-dir D
+                                                  # CI release gate (report/verify.py): JUnit per criterion, exit 0/1/2;
+                                                  # --write-template F (= examples/release.gtthresholds.yaml)
 .venv/Scripts/groundtruth detect BOARD --settings X --write   # nets AND power stages (converters), unreviewed
 .venv/Scripts/groundtruth-gui board.kicad_pcb          # plugin window on a file (no KiCad needed)
 .venv/Scripts/groundtruth serve [--port 8765] [--workers 1] [--keep-hours 24]   # the compute server (remote/,
