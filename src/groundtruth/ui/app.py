@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 import wx
+from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 
 from . import startup
 from .gil import GUI_SWITCH_INTERVAL, responsive_gui  # noqa: F401  (GUI_SWITCH_INTERVAL: for tests)
@@ -19,7 +20,7 @@ from .gil import GUI_SWITCH_INTERVAL, responsive_gui  # noqa: F401  (GUI_SWITCH_
 
 def _error(msg: str):
     """An error message box for the user."""
-    wx.MessageBox(msg, "GroundTruth", wx.ICON_ERROR)
+    message_box(msg, "GroundTruth", wx.ICON_ERROR)
 
 
 def _icon() -> Optional[Path]:
@@ -105,7 +106,7 @@ def _clear(log) -> int:
         _error(f"Could not clear GroundTruth's drawings:\n{e}")
         return 2
     startup.mark(f"cleared {n} item(s)", last=True)
-    wx.MessageBox(f"Removed {n} GroundTruth item(s) from the board (one undo step).", "GroundTruth")
+    message_box(f"Removed {n} GroundTruth item(s) from the board (one undo step).", "GroundTruth")
     return 0
 
 
@@ -133,7 +134,7 @@ def _add_selected_net(log):
         startup.mark(f"nothing selected with a net ({len(kinds)} item(s){': ' + what if kinds else ''})", last=True)
         seen = (f"\n\nKiCad reports {len(kinds)} selected item(s) without a net ({what})." if kinds else
                 "\n\nKiCad reports an empty selection.")
-        wx.MessageBox(NO_SELECTION + seen, "GroundTruth", wx.ICON_INFORMATION)
+        message_box(NO_SELECTION + seen, "GroundTruth", wx.ICON_INFORMATION)
         return 2, None
     if not path:
         _error("Save the board first, so its settings can be stored next to it.")

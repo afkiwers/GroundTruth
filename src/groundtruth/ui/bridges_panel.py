@@ -11,6 +11,7 @@ from dataclasses import replace
 from typing import Optional
 
 import wx
+from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 
 from ..components.values import format_si
 from ..config.settings import (CONDUCTED_STANDARDS, CONNECTIONS, DRIVE_MODES, EMF_SHAPES, PWM_SCHEMES, BridgeSpec,
@@ -341,7 +342,7 @@ class BridgesPanel(SelectableRows, wx.Panel):
             try:
                 self.settings.set_victim_nets(nets)
             except ConfigError as e:
-                wx.MessageBox("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
+                message_box("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
                 return
             self._show_victims()
             self.on_change()
@@ -451,7 +452,7 @@ class BridgesPanel(SelectableRows, wx.Panel):
         leg = LegSpec(self.leg_phase.GetValue().strip() or str(len(self.legs) + 1), self.leg_node.GetValue().strip(),
                       _refs(self.leg_high.GetValue()), _refs(self.leg_low.GetValue()), self.leg_out.GetValue().strip())
         if not leg.switch_node or not leg.high_side or not leg.low_side:
-            wx.MessageBox("A leg needs its switch node, high side and low side.", "groundtruth", wx.ICON_WARNING)
+            message_box("A leg needs its switch node, high side and low side.", "groundtruth", wx.ICON_WARNING)
             return None
         return leg
 
@@ -532,7 +533,7 @@ class BridgesPanel(SelectableRows, wx.Panel):
         probe.nets, probe.converters, probe.bridges = [], [], [b]
         problems += _bridge_problems(b) + validate(probe, self.board)
         if problems:
-            wx.MessageBox("\n".join(problems), "groundtruth", wx.ICON_WARNING)
+            message_box("\n".join(problems), "groundtruth", wx.ICON_WARNING)
             return None
         return b
 
@@ -542,7 +543,7 @@ class BridgesPanel(SelectableRows, wx.Panel):
         try:
             self.settings.set_bridges(self.bridges)
         except ConfigError as e:
-            wx.MessageBox("\n".join(e.messages), "groundtruth", wx.ICON_WARNING)
+            message_box("\n".join(e.messages), "groundtruth", wx.ICON_WARNING)
             self.bridges = list(self.settings.config.bridges)
             return False
         self.refresh()
@@ -567,7 +568,7 @@ class BridgesPanel(SelectableRows, wx.Panel):
         """Replace the selected bridge with the form's values, keeping what the form does not show."""
         rows = self.selected_rows()
         if len(rows) > 1:
-            wx.MessageBox("Select a single bridge to update it from the form.", "GroundTruth", wx.ICON_INFORMATION)
+            message_box("Select a single bridge to update it from the form.", "GroundTruth", wx.ICON_INFORMATION)
             return
         i = rows[0] if rows else -1
         b = self._form() if rows else None
@@ -593,7 +594,7 @@ class BridgesPanel(SelectableRows, wx.Panel):
             taken[b.name] = use_schematic(self.board, self.settings.config, b)
             self.bridges[i] = b
         if not any(taken.values()):
-            wx.MessageBox("The selected bridges' FETs have no schematic fields for R_DS(on), C_oss, Q_oss or V_SD "
+            message_box("The selected bridges' FETs have no schematic fields for R_DS(on), C_oss, Q_oss or V_SD "
                           "(Help: Part parameters lists the field names).", "GroundTruth", wx.ICON_INFORMATION)
             return
         if self._commit():
@@ -628,7 +629,7 @@ class BridgesPanel(SelectableRows, wx.Panel):
         """Detection finished: let the user pick which new bridges to add (with the part models detection
         suggests for them)."""
         if not found:
-            wx.MessageBox("No motor bridges found (half-bridge legs: a switch from the bus to a node and one from the "
+            message_box("No motor bridges found (half-bridge legs: a switch from the bus to a node and one from the "
                           "node to ground, the node going to a connector without an inductor).", "groundtruth")
             return
         with BridgeDetectDialog(self, found, {frozenset(b.parts) for b in self.bridges}) as dlg:

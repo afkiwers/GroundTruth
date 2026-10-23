@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import Optional
 
 import wx
+from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 
 from ..components.values import format_si
 from ..config.settings import CONDUCTED_STANDARDS, TOPOLOGIES, ConfigError, ConverterSpec
@@ -413,7 +414,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             if text and parse_field(text, "Hz") is None:
                 problems.append(f"{what}: '{ctrl.GetValue()}' is not a number")
         if problems:
-            wx.MessageBox("\n".join(problems), "groundtruth", wx.ICON_WARNING)
+            message_box("\n".join(problems), "groundtruth", wx.ICON_WARNING)
             return None
         return spec
 
@@ -423,7 +424,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         try:
             self.settings.set_converters(self.converters)
         except ConfigError as e:
-            wx.MessageBox("\n".join(e.messages), "groundtruth", wx.ICON_WARNING)
+            message_box("\n".join(e.messages), "groundtruth", wx.ICON_WARNING)
             self.converters = list(self.settings.config.converters)
             return False
         self.refresh()
@@ -448,7 +449,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         """Replace the selected stage with the form's values, keeping what the form does not show."""
         rows = self.selected_rows()
         if len(rows) > 1:
-            wx.MessageBox("Select a single power stage to update it from the form.", "GroundTruth",
+            message_box("Select a single power stage to update it from the form.", "GroundTruth",
                           wx.ICON_INFORMATION)
             return
         i = rows[0] if rows else -1
@@ -479,7 +480,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             taken[c.name] = use_schematic(self.board, self.settings.config, c)
             self.converters[i] = c
         if not any(taken.values()):
-            wx.MessageBox("The selected stages' parts have no schematic fields for R_DS(on), C_oss, Q_oss, DCR or V_f "
+            message_box("The selected stages' parts have no schematic fields for R_DS(on), C_oss, Q_oss, DCR or V_f "
                           "(Help: Part parameters lists the field names).", "GroundTruth", wx.ICON_INFORMATION)
             return
         if self._commit():
@@ -514,7 +515,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         """Detection finished: let the user pick which new stages to add (with the part models detection
         suggests for them)."""
         if not found:
-            wx.MessageBox("No power stages found (an inductor next to a switching transistor, a catch diode or an "
+            message_box("No power stages found (an inductor next to a switching transistor, a catch diode or an "
                           "IC's SW pin).", "groundtruth")
             return
         with ConverterDetectDialog(self, found, {frozenset(c.parts) for c in self.converters}) as dlg:

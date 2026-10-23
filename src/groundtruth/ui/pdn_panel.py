@@ -11,6 +11,7 @@ from dataclasses import replace
 from typing import Optional
 
 import wx
+from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 
 from ..components.values import format_si
 from ..config.settings import ConfigError, PdnSpec
@@ -219,7 +220,7 @@ class PdnPanel(SelectableRows, wx.Panel):
         from ..config.settings import _pdn_from_data, pdn_problems, validate
         rail = self.rail.GetValue().strip()
         if not rail:
-            wx.MessageBox("Choose the rail (its net), or press Find rails.", "GroundTruth", wx.ICON_INFORMATION)
+            message_box("Choose the rail (its net), or press Find rails.", "GroundTruth", wx.ICON_INFORMATION)
             return None
         src = self.source.GetValue().strip()
         data = {"rail": rail, "ground": self.ground.GetValue().strip() if self.ground.GetValue().strip() !=
@@ -233,7 +234,7 @@ class PdnPanel(SelectableRows, wx.Panel):
         try:
             spec = _pdn_from_data(data, "the form")
         except ConfigError as e:
-            wx.MessageBox("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
+            message_box("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
             return None
         problems = pdn_problems(spec)
         if self.board is not None and self.settings is not None:
@@ -242,7 +243,7 @@ class PdnPanel(SelectableRows, wx.Panel):
             probe.nets, probe.converters, probe.bridges, probe.dc_loads, probe.pdn = [], [], [], [], [spec]
             problems += validate(probe, self.board)
         if problems:
-            wx.MessageBox("\n".join(problems), "GroundTruth", wx.ICON_WARNING)
+            message_box("\n".join(problems), "GroundTruth", wx.ICON_WARNING)
             return None
         return spec
 
@@ -251,7 +252,7 @@ class PdnPanel(SelectableRows, wx.Panel):
         try:
             self.settings.set_pdn(self.pdn)
         except ConfigError as e:
-            wx.MessageBox("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
+            message_box("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
             self.pdn = list(self.settings.config.pdn)
             return False
         self.refresh()
@@ -269,13 +270,13 @@ class PdnPanel(SelectableRows, wx.Panel):
         listed = {d.rail for d in self.pdn}
         new = [PdnSpec(rail) for rail in self.rails if rail not in listed]
         if not new:
-            wx.MessageBox("Every rail the ICs draw supply from is listed already." if self.rails else
+            message_box("Every rail the ICs draw supply from is listed already." if self.rails else
                           "No IC on this board has a supply pin (schematic pin type power_in) on a rail with a pad on "
                           f"{self._ground()}: add a rail by hand (Rail, then Add).", "GroundTruth", wx.ICON_INFORMATION)
             return
         self.pdn += new
         if self._commit():
-            wx.MessageBox(f"Added {len(new)} rail(s): {', '.join(d.rail for d in new)}. Set each one's load step (the "
+            message_box(f"Added {len(new)} rail(s): {', '.join(d.rail for d in new)}. Set each one's load step (the "
                           "current the ICs draw at once) for a target impedance, and switch off the ones not to "
                           "check.", "GroundTruth", wx.ICON_INFORMATION)
 
@@ -290,7 +291,7 @@ class PdnPanel(SelectableRows, wx.Panel):
         """Replace the selected rail with the form's values (its on/off state kept)."""
         rows = self.selected_rows()
         if len(rows) != 1:
-            wx.MessageBox("Select a single rail to update it from the form.", "GroundTruth", wx.ICON_INFORMATION)
+            message_box("Select a single rail to update it from the form.", "GroundTruth", wx.ICON_INFORMATION)
             return
         spec = self._form()
         if spec:

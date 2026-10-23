@@ -11,6 +11,7 @@ from dataclasses import replace
 from typing import Optional
 
 import wx
+from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 
 from ..components.values import format_si
 from ..config.settings import ConfigError, DcLoadSpec, load_text, parse_load_text
@@ -314,7 +315,7 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
         from ..config.settings import _dc_load_from_data, dc_load_problems, validate
         lines = [ln.strip() for ln in self.loads.GetValue().splitlines() if ln.strip()]
         if not self.source.GetValue().strip() and not lines:
-            wx.MessageBox("The form is empty. Press Fill from net… to pick the rail's parts from the board, or type the "
+            message_box("The form is empty. Press Fill from net… to pick the rail's parts from the board, or type the "
                           "source pin (e.g. J1.2) and one load per line (e.g. J2.2/J2.1=0.5A), then Add.",
                           "GroundTruth", wx.ICON_INFORMATION)
             return None
@@ -326,7 +327,7 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
                                        "max_drop": self.max_drop.GetValue().strip() or None,
                                        "note": self.note.GetValue().strip()}, "the form", 0)
         except ConfigError as e:
-            wx.MessageBox("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
+            message_box("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
             return None
         problems = dc_load_problems(spec)
         if self.board is not None and self.settings is not None:
@@ -335,7 +336,7 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
             probe.nets, probe.converters, probe.bridges, probe.dc_loads = [], [], [], [spec]
             problems += validate(probe, self.board)
         if problems:
-            wx.MessageBox("\n".join(problems), "GroundTruth", wx.ICON_WARNING)
+            message_box("\n".join(problems), "GroundTruth", wx.ICON_WARNING)
             return None
         return spec
 
@@ -344,7 +345,7 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
         try:
             self.settings.set_dc_loads(self.dc_loads)
         except ConfigError as e:
-            wx.MessageBox("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
+            message_box("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
             self.dc_loads = list(self.settings.config.dc_loads)
             return False
         self.refresh()
@@ -371,7 +372,7 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
                               "GND" if "GND" in nets else "")
         cands = rail_candidates(self.board, rail, ground or "")
         if len(cands) < 2:
-            wx.MessageBox(f"{rail} reaches {len(cands)} part(s): a rail needs a source and at least one load.",
+            message_box(f"{rail} reaches {len(cands)} part(s): a rail needs a source and at least one load.",
                           "GroundTruth", wx.ICON_INFORMATION)
             return
 
@@ -436,7 +437,7 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
         """Replace the selected rail with the form's values (its on/off state kept)."""
         rows = self.selected_rows()
         if len(rows) != 1:
-            wx.MessageBox("Select a single DC load to update it from the form.", "GroundTruth", wx.ICON_INFORMATION)
+            message_box("Select a single DC load to update it from the form.", "GroundTruth", wx.ICON_INFORMATION)
             return
         spec = self._form()
         if spec:

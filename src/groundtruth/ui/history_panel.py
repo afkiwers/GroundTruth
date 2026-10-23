@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 import wx
+from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 
 from ..report.history import History, Run, changes, compare, comparison_text
 from . import theme
@@ -257,7 +258,7 @@ class HistoryPanel(wx.Panel):
         elif key == "compare":
             self._compare(history, sel)
         elif key == "delete" and sel:
-            if wx.MessageBox(f"Delete {len(sel)} run(s) from the history? This cannot be undone.", "GroundTruth",
+            if message_box(f"Delete {len(sel)} run(s) from the history? This cannot be undone.", "GroundTruth",
                              wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING) != wx.YES:
                 return
 

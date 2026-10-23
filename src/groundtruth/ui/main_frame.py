@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import wx
+from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 
 from ..config.settings import ConfigError, SettingsFile, settings_path, validate
 from ..core.issues import sort_issues
@@ -756,7 +757,7 @@ class MainFrame(ConfigActions, wx.Frame):
         selected."""
         nets, pads = result
         if not nets:
-            wx.MessageBox(NO_SELECTION, "GroundTruth", wx.ICON_INFORMATION)
+            message_box(NO_SELECTION, "GroundTruth", wx.ICON_INFORMATION)
             return
         self.add_nets(nets, pads)
 
@@ -785,7 +786,7 @@ class MainFrame(ConfigActions, wx.Frame):
                 # refused as a supply: the user may know better (the user: "/CPU/ADC_I_RAIL_1 ... is actually a
                 # sensitive signal to an ADC ... it should be allowed to go into the nets tab")
                 forced, _ = suggest_net(self.board, self.settings.config, net, as_signal=True)
-                if forced is not None and wx.MessageBox(
+                if forced is not None and message_box(
                         f"{why}\n\nIf {net} is a signal (an ADC input, a sense line), add it to the Signal paths "
                         "tab anyway?",
                         "GroundTruth", wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION) == wx.YES:
@@ -814,7 +815,7 @@ class MainFrame(ConfigActions, wx.Frame):
         self.SetStatusText(" · ".join(([not_path] if not_path else []) + text + refused))
         self._to_front()
         if refused and not shown:
-            wx.MessageBox("\n".join(refused), "GroundTruth", wx.ICON_INFORMATION)
+            message_box("\n".join(refused), "GroundTruth", wx.ICON_INFORMATION)
 
     def _add_path(self, proposal):
         """Put a path picked in KiCad into the settings: the path (an unreviewed detected entry of the same name is
@@ -823,7 +824,7 @@ class MainFrame(ConfigActions, wx.Frame):
         from dataclasses import replace
         spec = proposal.spec
         old = next((n for n in self.settings.config.nets if n.name == spec.name), None)
-        if old is not None and not (old.source == "auto" and not old.reviewed) and wx.MessageBox(
+        if old is not None and not (old.source == "auto" and not old.reviewed) and message_box(
                 f"{spec.name} is listed already (driver {old.driver}). Replace it with the path picked in KiCad?\n\n"
                 f"{proposal.notes[0]}", "GroundTruth", wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION) != wx.YES:
             return
@@ -834,7 +835,7 @@ class MainFrame(ConfigActions, wx.Frame):
             for ref, model in proposal.models.items():
                 self.settings.set_component(ref, model)
         except ConfigError as e:
-            wx.MessageBox("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
+            message_box("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
             return
         self.nets.load(self.board, self.settings)
         if proposal.models:
@@ -862,7 +863,7 @@ class MainFrame(ConfigActions, wx.Frame):
                                "Update PCB from Schematic (F8) copies them to the board")
             return
         rows = "\n".join(f"    {ref}:  GT = {text}" for ref, text in sorted(labels.items()))
-        wx.MessageBox(f"The path is in the settings and Simulate uses it now. KiCad couldn't take the GT labels "
+        message_box(f"The path is in the settings and Simulate uses it now. KiCad couldn't take the GT labels "
                       f"({why}), so to keep them in the design add them by hand (Schematic editor › Symbol Fields "
                       f"Table, a column named GT; Ctrl+C copies this message), then Update PCB from Schematic:\n\n"
                       f"{rows}", "GroundTruth: GT labels", wx.ICON_INFORMATION)
@@ -1079,12 +1080,12 @@ class MainFrame(ConfigActions, wx.Frame):
             self.SetStatusText(f"could not {what}")
             retry, self._local_retry = getattr(self, "_local_retry", None), None
             if type(e).__name__ == "ServerUnavailable" and retry is not None:
-                if wx.MessageBox(f"Could not {what} on the compute server:\n{e}\n\nRun it on this computer instead?",
+                if message_box(f"Could not {what} on the compute server:\n{e}\n\nRun it on this computer instead?",
                                  "groundtruth: compute server", wx.YES_NO | wx.ICON_QUESTION) == wx.YES:
                     retry()
                 return
             detail = f"{e}" if type(e).__name__ in EXPECTED_ERRORS else f"{e}\n\n{tb}"
-            wx.MessageBox(f"Could not {what}:\n{detail}", "groundtruth", wx.ICON_WARNING)
+            message_box(f"Could not {what}:\n{detail}", "groundtruth", wx.ICON_WARNING)
             return
         self.gauge.SetValue(1000)
         if done is not None:
@@ -1208,7 +1209,7 @@ class MainFrame(ConfigActions, wx.Frame):
         if not path:
             self._after_load = None
             self.history.set_history(None, "The board is not saved yet: its history goes next to it.")
-            wx.MessageBox("Save the board first, so the settings can be stored next to it.", "groundtruth", wx.ICON_WARNING)
+            message_box("Save the board first, so the settings can be stored next to it.", "groundtruth", wx.ICON_WARNING)
             return
         if self.board_path != path:
             from ..report.history import history_for
@@ -1216,7 +1217,7 @@ class MainFrame(ConfigActions, wx.Frame):
             self.history.set_history(history_for(path))
         if errors:
             self._after_load = None
-            wx.MessageBox("Invalid settings file:\n" + "\n".join(errors), "groundtruth", wx.ICON_ERROR)
+            message_box("Invalid settings file:\n" + "\n".join(errors), "groundtruth", wx.ICON_ERROR)
             return
         self._board_fp = fp
         settings, new, self.dirty = opened
@@ -1262,7 +1263,7 @@ class MainFrame(ConfigActions, wx.Frame):
         self.SetStatusText(f"{Path(path).name}: {len(self.board.copper_layers)} copper layers, "
                            f"{len(self.board.footprints)} parts · settings {sp.name}{note}")
         if (self.board.unfilled_zones() and self.session.live and
-                wx.MessageBox("Some zones are not filled. Refill all zones now?", "groundtruth", wx.YES_NO) == wx.YES):
+                message_box("Some zones are not filled. Refill all zones now?", "groundtruth", wx.YES_NO) == wx.YES):
             self.on_refill()                # reloads the board, and detects then if the settings are still new
             return                          # (a run waiting for this reload continues after that one)
         self._show_stale()                  # results of the board as it was before this read are marked
@@ -1603,27 +1604,27 @@ class MainFrame(ConfigActions, wx.Frame):
         cfg = listed.active()                  # the rows ticked on their tabs: the others are not analysed
         if simulate and (listed.nets or listed.converters or listed.bridges or listed.dc_loads or listed.pdn) and not (
                 cfg.nets or cfg.converters or cfg.bridges or cfg.dc_loads or cfg.pdn):
-            wx.MessageBox("Every net, power stage, motor bridge and DC load is switched off: tick at least one on its "
+            message_box("Every net, power stage, motor bridge and DC load is switched off: tick at least one on its "
                           "tab (the tick box at the start of its row).", "groundtruth")
             return False
         if simulate and cfg.bridges:
             from ..config.settings import simulation_blockers
             blocked = [f"{b.name}: {'; '.join(simulation_blockers(b))}" for b in cfg.bridges if simulation_blockers(b)]
             if blocked:
-                wx.MessageBox("Set these on the Bridges tab first (or remove the bridge):\n" + "\n".join(blocked),
+                message_box("Set these on the Bridges tab first (or remove the bridge):\n" + "\n".join(blocked),
                               "groundtruth")
                 self.notebook.SetSelection(self.notebook.FindPage(self.bridges))
                 return False
         # Run checks without paths still runs the board-wide checks (voltage-aware safety, schematic, values)
         if simulate and not (cfg.nets or cfg.converters or cfg.bridges or cfg.dc_loads or cfg.pdn):
-            wx.MessageBox("Add at least one path on the Signal paths tab first (or a converter on the Converters "
+            message_box("Add at least one path on the Signal paths tab first (or a converter on the Converters "
                           "tab, a motor bridge on the Bridges tab, a DC load on the DC loads tab, or a rail on the "
                           "Power integrity tab).", "groundtruth")
             self.notebook.SetSelection(self.notebook.FindPage(self.converters))
             return False
         errors = validate(self.settings.config, self.board)
         if errors:
-            wx.MessageBox("\n".join(errors), "groundtruth: settings does not match the board", wx.ICON_WARNING)
+            message_box("\n".join(errors), "groundtruth: settings does not match the board", wx.ICON_WARNING)
             return False
         return True
 
@@ -1633,12 +1634,12 @@ class MainFrame(ConfigActions, wx.Frame):
         from ..analysis.whatif import validate_modifications
         active = [m for m in cfg.modifications if m.enabled]
         if not active:
-            wx.MessageBox("The settings has no enabled what-if edits. Add some on the Fixes tab (\"Add ticked to "
+            message_box("The settings has no enabled what-if edits. Add some on the Fixes tab (\"Add ticked to "
                           "what-if\") or under 'modifications:' in the settings.", "groundtruth")
             return None
         errors = validate_modifications(board, active)
         if errors:
-            wx.MessageBox("\n".join(errors), "groundtruth: invalid what-if edits", wx.ICON_WARNING)
+            message_box("\n".join(errors), "groundtruth: invalid what-if edits", wx.ICON_WARNING)
             return None
         return active
 
@@ -1860,7 +1861,7 @@ class MainFrame(ConfigActions, wx.Frame):
     def _need_live(self) -> bool:
         """True in KiCad; in file mode, say that drawing needs KiCad."""
         if not self.session.live:
-            wx.MessageBox("Drawing on the board needs the plugin to run inside KiCad.", "groundtruth")
+            message_box("Drawing on the board needs the plugin to run inside KiCad.", "groundtruth")
             return False
         return True
 
@@ -2027,7 +2028,7 @@ class MainFrame(ConfigActions, wx.Frame):
             self.SetStatusText(f"could not show it in KiCad: {e}")
         else:
             tb = "".join(traceback.format_exception(type(e), e, e.__traceback__))
-            wx.MessageBox(f"Could not show it in KiCad:\n{e}\n\n{tb}", "GroundTruth", wx.ICON_WARNING)
+            message_box(f"Could not show it in KiCad:\n{e}\n\n{tb}", "GroundTruth", wx.ICON_WARNING)
 
     def on_draw_issues(self):
         """Issues tab, "Draw markers on board": every issue's marker on the issues layer, as a job."""
@@ -2052,7 +2053,7 @@ class MainFrame(ConfigActions, wx.Frame):
         if why:
             # its heat would be the DC paths of the board and settings as simulated, not as they are now (ISSUE-29)
             self.results_panel.set_stale(why)
-            wx.MessageBox(f"{what} works from the last Simulate's DC paths and losses, but {why} since that "
+            message_box(f"{what} works from the last Simulate's DC paths and losses, but {why} since that "
                           f"Simulate: its temperatures would be those of the design as it was. Run Simulate again, "
                           f"then {what}.", "GroundTruth", wx.ICON_INFORMATION)
             return None
@@ -2126,7 +2127,7 @@ class MainFrame(ConfigActions, wx.Frame):
             """Show the temperature view and add its issues."""
             th, issues = result
             if th.error:
-                wx.MessageBox(th.error, "GroundTruth: thermal", wx.ICON_WARNING)
+                message_box(th.error, "GroundTruth: thermal", wx.ICON_WARNING)
                 return
             self.issues = sort_issues([i for i in self.issues if i.net != "thermal"] + issues)
             self.issues_panel.show(self.issues)
@@ -2161,7 +2162,7 @@ class MainFrame(ConfigActions, wx.Frame):
             failed = [r for r in results if r.error]
             views = bode_views(SimpleNamespace(routes=[r for r in results if not r.error], converters=[], pdn=[]))
             if not views:
-                wx.MessageBox("\n".join(f"{r.net} → {r.receiver}: {r.error}" for r in failed) or "Nothing to sweep.",
+                message_box("\n".join(f"{r.net} → {r.receiver}: {r.error}" for r in failed) or "Nothing to sweep.",
                               "GroundTruth: Bode", wx.ICON_WARNING)
                 return
             swept = {v.owner for v in views}
@@ -2211,7 +2212,7 @@ class MainFrame(ConfigActions, wx.Frame):
             from ..analysis.thermal import capacity_text
             failed = [v for v in views if v.error]
             if failed:
-                wx.MessageBox(failed[0].error, "GroundTruth: current capacity", wx.ICON_WARNING)
+                message_box(failed[0].error, "GroundTruth: current capacity", wx.ICON_WARNING)
             views = [v for v in views if not v.error]
             if not views:
                 return
@@ -2509,12 +2510,12 @@ class MainFrame(ConfigActions, wx.Frame):
         if meta is None or meta.get("state") != "ready" or self._refuse_if_busy():
             return
         if not self.remote_jobs.has_inputs(jid):
-            wx.MessageBox("This job was listed again from its server after this computer's list had lost it: its "
+            message_box("This job was listed again from its server after this computer's list had lost it: its "
                           "result is here, but not the board and settings it was run with, so it can't be shown. "
                           "Run Simulate again; Remove from list takes it away.", "groundtruth")
             return
         if not self._same_board(meta):
-            wx.MessageBox(f"This result is for {meta.get('board_name')} ({meta.get('board_path')}). Open that board "
+            message_box(f"This result is for {meta.get('board_name')} ({meta.get('board_path')}). Open that board "
                           "(in KiCad, then GroundTruth) to see it; it stays in the Server jobs tab.", "groundtruth")
             return
         jobs, kind = self.remote_jobs, meta["kind"]
@@ -2555,7 +2556,7 @@ class MainFrame(ConfigActions, wx.Frame):
         meta = self.remote_jobs.get(jid)
         if meta is None or meta.get("state") not in ("queued", "running"):
             return
-        if wx.MessageBox(f"Stop {meta.get('label')} on {meta.get('board_name')} on the compute server?",
+        if message_box(f"Stop {meta.get('label')} on {meta.get('board_name')} on the compute server?",
                          "groundtruth: cancel job", wx.YES_NO | wx.ICON_QUESTION) != wx.YES:
             return
         self._stop_job(meta, remove=False)
@@ -2581,7 +2582,7 @@ class MainFrame(ConfigActions, wx.Frame):
                 return
             if why is None:
                 self.SetStatusText(f"job {jid} cancelled on the compute server" + (" and removed" if remove else ""))
-            elif wx.MessageBox(f"The compute server {meta.get('server_name') or meta.get('server')} can't be "
+            elif message_box(f"The compute server {meta.get('server_name') or meta.get('server')} can't be "
                                f"reached, so {meta.get('label')} on {meta.get('board_name')} could not be stopped "
                                f"there:\n\n{why}\n\nRemove it from this list anyway? If the server comes back and "
                                "still has the job, it finishes it there; its result is not fetched.",
@@ -2600,11 +2601,11 @@ class MainFrame(ConfigActions, wx.Frame):
         if meta is None:
             return
         if meta.get("state") in ("queued", "running"):
-            if wx.MessageBox(f"Stop {meta.get('label')} on {meta.get('board_name')} on the compute server and remove "
+            if message_box(f"Stop {meta.get('label')} on {meta.get('board_name')} on the compute server and remove "
                              "it from the list?", "groundtruth: remove job", wx.YES_NO | wx.ICON_QUESTION) == wx.YES:
                 self._stop_job(meta, remove=True)
             return
-        if meta.get("state") == "ready" and wx.MessageBox(
+        if meta.get("state") == "ready" and message_box(
                 f"The result of {meta.get('label')} on {meta.get('board_name')} has not been shown yet. Remove it?",
                 "groundtruth", wx.YES_NO | wx.ICON_QUESTION) != wx.YES:
             return
@@ -2629,13 +2630,13 @@ class MainFrame(ConfigActions, wx.Frame):
         board (one undo step); they are then switched off as what-if edits and the board is read again."""
         vias = [s.modification for s in sugs if s.modification is not None and s.modification.type == "via"]
         if not vias:
-            wx.MessageBox("Tick at least one via suggestion. Capacitors and fills have to be placed by hand.",
+            message_box("Tick at least one via suggestion. Capacitors and fills have to be placed by hand.",
                           "groundtruth")
             return
         if self._refuse_if_busy() or not self._need_live():
             return
         text = "\n".join(f"  {m.label()}, {m.size:g} mm pad / {m.drill:g} mm drill" for m in vias)
-        if wx.MessageBox(f"Add these {len(vias)} through via(s) to the board?\n\n{text}\n\nThis changes the "
+        if message_box(f"Add these {len(vias)} through via(s) to the board?\n\n{text}\n\nThis changes the "
                          "design (one undo step in KiCad). Refill zones and run DRC afterwards.",
                          "groundtruth: place vias", wx.YES_NO | wx.ICON_QUESTION) != wx.YES:
             return
@@ -2657,7 +2658,7 @@ class MainFrame(ConfigActions, wx.Frame):
         from ..analysis.suggest import as_modifications
         mods = as_modifications(sugs, enabled=True)
         if not mods:
-            wx.MessageBox("Tick at least one via, capacitor or fill suggestion.", "groundtruth")
+            message_box("Tick at least one via, capacitor or fill suggestion.", "groundtruth")
             return
         n = self.settings.add_modifications(mods)
         again = self.settings.enable_modifications({m.key() for m in mods}, True)
