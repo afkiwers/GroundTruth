@@ -123,7 +123,7 @@ class BoardGen:
 
     def fields(self, ref: str, **values: str):
         """Give footprint `ref` symbol fields as KiCad 10 copies them onto the footprint (hidden properties), e.g.
-        fields("Q1", **{"Rds(on)": "3.8milliohm", "Coss": "616 picofarad"}): an InvenTree part's parameters."""
+        fields("Q1", **{"Rds(on)": "3.8milliohm", "Coss": "616 picofarad"}): an HTTP lib part's parameters."""
         key = f'(property "Reference" {_q(ref)}'
         k = next(i for i, it in enumerate(self.items) if key in it)
         extra = "".join(f'\t\t(property {_q(name)} {_q(v)}\n\t\t\t(at 0 0 0)\n\t\t\t(layer "F.Fab")\n\t\t\t(hide yes)\n'
@@ -286,7 +286,7 @@ def opamp_circuit_board(parts: Sequence[tuple], opamps: Sequence[tuple], out_net
 
 def opamp_path_board(r_after: Optional[str] = None, **fields: str) -> BoardGen:
     """A signal path through an op-amp stage over a GND plane: U1.1 (SIG_A) → R1 33 Ω → SIG_B → U5 (+IN pin 3,
-    OUT pin 1, GND pin 2 with a via to the plane) → SIG_C → U2.1. `fields`: U5's symbol fields as InvenTree would
+    OUT pin 1, GND pin 2 with a via to the plane) → SIG_C → U2.1. `fields`: U5's symbol fields as an HTTP lib would
     give them (Gain="10", GBW="10MHz" ...); a Gain field makes U5 an amplifier. r_after: a resistor R2 of this
     value between U5's output and U2 (SIG_C → R2 → SIG_D → U2.1), as refboard's R303 after the buffer."""
     g = BoardGen(layers=2, size=(50.0, 20.0))

@@ -24,7 +24,7 @@ next one).</p>
   <a href="#history">History</a> · <a href="#server">Server jobs</a> (only while Preferences name a
   compute server)</li>
 <li><a href="#safety">Voltage-aware safety checks</a></li>
-<li><a href="#fields">Part parameters from the schematic (InvenTree fields)</a></li>
+<li><a href="#fields">Part parameters from the schematic (HTTP lib fields)</a></li>
 <li><a href="#thermal">Thermal and Current capacity</a></li>
 <li><a href="#analog">Op-amp circuits and the transfer function</a></li>
 <li><a href="#prefs">Preferences</a></li>
@@ -648,11 +648,11 @@ Loads table's "of which at pins") and I²·R of heat at the part in Thermal; the
 No contact value is guessed: a connector pin carrying 3 A or more without one gets a note. <code>fill</code> and
 <code>pin</code> change the hole's conduction between layers in every analysis.</p>
 
-<hr><a name="fields"></a><h3>Part parameters from the schematic (InvenTree fields)</h3>
+<hr><a name="fields"></a><h3>Part parameters from the schematic (HTTP lib fields)</h3>
 <p>R_DS(on), C_oss, an inductor's DCR, a capacitor's ESR and the like can come from the parts' symbol fields
-instead of being typed in here: give the parts these fields in the schematic, or the parameter templates in
-InvenTree (KiCad's HTTP library hands them to the symbols as fields). Each parameter has one field name, matched
-without regard to case. A value with a unit is read as InvenTree sends it (<code>3.8milliohm</code>,
+instead of being typed in here: give the parts these fields in the schematic, or the parameters in
+an HTTP lib (KiCad's HTTP library hands them to the symbols as fields). Each parameter has one field name, matched
+without regard to case. A value with a unit is read as an HTTP lib sends it (<code>3.8milliohm</code>,
 <code>616 picofarad</code>, <code>38 nanocoulomb</code>, <code>6.9 mΩ</code>) or in datasheet notation
 (<code>3.8m</code>, <code>616p</code>, <code>4m7</code>); a bare number is in the unit the table names. A value of the
 wrong kind (<code>100V</code> for Rds(on)) is not used, and the stage's or part's note
@@ -673,7 +673,7 @@ stage's is listed on the Issues tab (<code>unusual_value</code>, info) in case a
   href="#cbias">Cbias</a>), an inductor's L and R (from DCR), a resistor's R. A FET's or controller's fields belong
   to its power stage (above), not to its row on the Parts tab.</li>
 <li><b>In sync:</b> a value from the schematic is marked <b>◆</b> and follows the field: it is read again every time
-  the board opens and before every run, so a change in InvenTree (after <i>Update symbols from library</i> and
+  the board opens and before every run, so a change in the HTTP lib (after <i>Update symbols from library</i> and
   <i>Update PCB from schematic</i> in KiCad) arrives by itself.</li>
 <li><b>Set here:</b> typing another value makes it yours: it is kept as it is and, where the schematic says
   something else, marked <b><font color="@WARN@">!</font></b> (hover over it for both values). The issue
@@ -694,7 +694,7 @@ and aluminium capacitors don't lose capacitance this way.</p>
 <p><b>Why per capacitor.</b> One part is used in many places: refboard's 100 nF 100 V X7R sits on the 55 V input
 (~70 nF there) and at the 3.3 V ADC input (~100 nF). A single "capacitance at bias" is right for one of them only, so
 the part carries its <i>curve</i>, and every copy gets its capacitance at its own DC voltage.</p>
-<p><b>How to give it.</b> On the symbol (from InvenTree) or in the Parts tab's <b>C at bias</b> cell, 1 to 12 points
+<p><b>How to give it.</b> On the symbol (from the HTTP lib) or in the Parts tab's <b>C at bias</b> cell, 1 to 12 points
 (at most 12: more add nothing a curve read by eye can give):</p>
 <table border="1" cellpadding="3" cellspacing="0">
 <tr><th>Written</th><th>Means</th></tr>
@@ -710,12 +710,12 @@ the part carries its <i>curve</i>, and every copy gets its capacitance at its ow
 <p>Separators: commas, semicolons or spaces; <code>75 nF @ 50 V</code> is read too; a bare number is µF. Refused
 (with the reason): more than 12 points, a list whose points lack voltages, two points at one voltage, 0 V, a point
 above 1.2 × the nominal C, a change outside −99 … +20 %.</p>
-<p><b>Fields (InvenTree parameters).</b> <b>Cbias Curve</b>: the curve as text (an InvenTree <i>text</i> parameter
-template: numeric templates can't hold the <code>@</code>); it wins over the others. <b>Cbias</b>: one value (a
-numeric template, as before) or any of the forms above; <b>Cbias Voltage</b>: the voltage that one value holds at.
+<p><b>Fields (HTTP lib parameters).</b> <b>Cbias Curve</b>: the curve as text (an HTTP lib <i>text</i> parameter:
+a numeric one can't hold the <code>@</code>); it wins over the others. <b>Cbias</b>: one value (a
+numeric parameter, as before) or any of the forms above; <b>Cbias Voltage</b>: the voltage that one value holds at.
 <b>Dielectric</b> C0G / NP0: no curve applied. <b>Rated Voltage</b>: for the half-rating default.</p>
 <p><b>How the plugin approximates the curve.</b> A made-up datasheet curve of a 100 nF 100 V X7R (grey), four points
-read off it (the dots: the text below them is what goes into InvenTree's Cbias Curve), the curve GroundTruth draws
+read off it (the dots: the text below them is what goes into the HTTP lib's Cbias Curve), the curve GroundTruth draws
 through them (solid: a monotone piecewise cubic from the nominal C at 0 V through each point [Fritsch 1980], which
 never overshoots between points), above the last point the one-point curve through it (dashed), and for comparison
 the one-point curve from the 50 V point alone (dotted):</p>

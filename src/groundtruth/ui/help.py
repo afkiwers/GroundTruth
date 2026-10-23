@@ -54,7 +54,7 @@ def page() -> str:
 
 
 # The Cbias section's worked example (the user: "draw a chart with a fake curve and place 3-4 points that are used
-# for approximation. create the string that would go into inventree's parameter and draw some line in between that
+# for approximation. create the string that would go into the HTTP lib's parameter and draw some line in between that
 # show how the plugin would approximate it. Also mention what the min/max number of samples can be"): a made-up
 # datasheet curve of a 100 nF 100 V X7R with the shape of the one the user showed (−20 % at 20 V, −50 % at 40 V,
 # −85 % at 100 V, a little rise near 0 V), and the voltages its points are read at
@@ -70,7 +70,7 @@ def cbias_datasheet(v: float) -> float:
 
 
 def cbias_example() -> tuple[str, str, list]:
-    """The worked example: (the Cbias Curve text for InvenTree, the same in percent, the curve as [(V, C)]), its
+    """The worked example: (the Cbias Curve text for the HTTP lib, the same in percent, the curve as [(V, C)]), its
     points the datasheet curve at CBIAS_AT rounded as one would read them (2 digits)."""
     from ..components.bias import bias_text, parse_bias
     pts = [(v, float(f"{CBIAS_C0 * cbias_datasheet(v):.2g}")) for v in CBIAS_AT]
@@ -84,7 +84,7 @@ def cbias_svg() -> str:
     """The worked example as an inline SVG chart for the browser view: ΔC (%) against DC volts, the datasheet curve
     (grey), its points (dots), GroundTruth's curve through them (components/bias.c_at: solid up to the last point,
     dashed above it), the one-point curve from 50 V alone (dotted); the colours the page's CSS variables (light and
-    dark themes). Then the InvenTree text and the limits."""
+    dark themes). Then the HTTP lib text and the limits."""
     from ..components.bias import BIAS_POINTS_MAX, c_at
     text, pct, pts = cbias_example()
     w, h, left, right, top, bottom = 600, 320, 52, 16, 14, 40
@@ -134,13 +134,13 @@ def cbias_svg() -> str:
         out.append(f'<line x1="{w - right - 190}" x2="{w - right - 166}" y1="{yy}" y2="{yy}" style="{style}"/>')
         out.append(f'<text x="{w - right - 160}" y="{yy + 4}" font-size="11" style="fill:var(--text)">{label}</text>')
     out.append("</svg>")
-    return ("".join(out) + f"<p>Cbias Curve for this part (InvenTree text parameter): <code>{text}</code><br>"
+    return ("".join(out) + f"<p>Cbias Curve for this part (HTTP lib text parameter): <code>{text}</code><br>"
             f"or as the change from the nominal: <code>{pct}</code><br>Points: at least 1 (one point: the formula), "
             f"two or more interpolated, at most {BIAS_POINTS_MAX}.</p>")
 
 
 def cbias_table() -> str:
-    """The worked example for wx's simple HTML view (no SVG): the points with the InvenTree text, then the datasheet
+    """The worked example for wx's simple HTML view (no SVG): the points with the HTTP lib text, then the datasheet
     and GroundTruth's curve side by side every 10 V (the one-point curve beside them)."""
     from ..components.bias import BIAS_POINTS_MAX, c_at
     text, pct, pts = cbias_example()
@@ -151,7 +151,7 @@ def cbias_table() -> str:
                     + (" (a point)" if any(p[0] == v for p in pts) else "") + "</td>"
                     f"<td>{100 * (c_at([pts[2]], CBIAS_C0, v) / CBIAS_C0 - 1):+.0f} %</td></tr>")
     return ("<table border='1' cellpadding='3' cellspacing='0'>" + "".join(rows) + "</table>"
-            f"<p>Cbias Curve for this part (InvenTree text parameter): <code>{text}</code><br>or as the change from "
+            f"<p>Cbias Curve for this part (HTTP lib text parameter): <code>{text}</code><br>or as the change from "
             f"the nominal: <code>{pct}</code><br>Points: at least 1 (one point: the formula), two or more "
             f"interpolated, at most {BIAS_POINTS_MAX}.</p>")
 

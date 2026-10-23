@@ -84,12 +84,21 @@ groundtruth check board.kicad_pcb                # the rule checks (seconds)
 groundtruth simulate board.kicad_pcb --format html --out-dir report   # the field solver, an HTML report
 ```
 
+## Part parameters for your parts database
+
+GroundTruth reads part parameters (a FET's `Rds(on)` and `Coss`, a capacitor's `ESR` and `Cbias`, an op-amp's `GBW`,
+a controller's `Vref` …) from the symbols' fields. Add them to the parts in your parts database, and KiCad's HTTP
+library interface brings them into the schematic with the parts, where GroundTruth reads them on every run. The full
+list, grouped by the tab that uses each (a parameter used on several tabs is listed under each, with where else it is
+used): [Part parameters](docs/guide/part-fields.md).
+
 ## Documentation
 
 | Guide | What's in it |
 |---|---|
 | [Installing](docs/guide/install.md) | the plugin and the command line, the development setup, GPU acceleration, where things are |
 | [How it works](docs/guide/how-it-works.md) | the analyses, how the solver splits the work, accuracy and what the numbers mean |
+| [Part parameters](docs/guide/part-fields.md) | every part parameter GroundTruth reads from the symbols' fields, by tab: to add to your parts database |
 | [The settings file](docs/guide/settings.md) | what a board's settings hold, configurations, part models from the schematic, the checks and their severities, finding the nets, GT labels |
 | [Working in KiCad](docs/guide/plugin.md) | showing issues on the board, drawing on it, fix suggestions and what-if edits |
 | [Power stages and bridges](docs/guide/power.md) | DC-DC converters, motor bridges, victims, control loops, the thermal solve |
