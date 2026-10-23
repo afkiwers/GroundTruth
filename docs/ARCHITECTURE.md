@@ -2670,6 +2670,29 @@ a History tab with a comparison (and the CLI).
   and wraps it with `Via(proto=...)`; setting the padstack on a fresh `Via()` did not stick. One commit, not
   grouped (it's a design change), and the matching what-if edit is switched off so it isn't counted twice.
 
+### Configurations and Undo (`config/scenario.py`, `ui/config_menu.py`, `ui/undo.py`, 2026-10-23, branch `configs`)
+- **The split.** The settings file stays one file (the working settings, auto-saved, opened as left: "the last
+  configuration"); no format change, the CLI reads it as before. A configuration is a second file,
+  `<board>/groundtruth/configs/<name>.gtconfig.yaml`, with `scenario.SCENARIO_KEYS` only (nets, converters,
+  bridges, dc_loads, pdn, si, modifications, analysis, thermal, victims) and a header (`groundtruth_configuration:
+  1`, name, note, saved, board, `parts`: an 8-hex SHA-256 per part entry). Decided with the user: part models are
+  shared (a configuration names those changed since, `changed_parts`, and never puts old values back); run
+  settings belong to the configuration. The working settings record the one in use as `configuration: {name,
+  file}` (config_from_data ignores unknown top-level keys).
+- **Loading** (`scenario.merged`): each scenario key replaced in place, one the configuration lacks removed (a
+  configuration defines what is simulated), the result parsed before anything is swapped in (an invalid file changes
+  nothing); notes: parts changed or gone, `validate(config, board)`. The plugin does the copy, merge, parse and
+  file writes in a job and swaps the document in on the GUI thread; it first writes the working settings' own
+  scenario to `configs/.before-load.gtconfig.yaml` (with `was`: the configuration then in use), which Back to last
+  settings loads (so it toggles). The CLI's `--config` (check / simulate / bode) uses `scenario.apply` in memory.
+- **Undo.** Every settings change ends in `MainFrame.on_save`, whose `BackgroundSaver.save` deep-copies the document
+  for the writer (`SettingsFile.snapshot_doc`); that copy is also the undo step (`UndoStack.record`, 50 steps; one
+  copy is ~1.2 MB on refboard's 223 parts). Undo / Redo `SettingsFile.restore` a kept copy (deep copy + parse, ~45 ms
+  on refboard) and reload the setting tabs with `_load_tabs` (one tab per event). A board read rebases the current
+  state (the steps stay); the parts merged at a read are saved without a step of their own. Ctrl+Z / Ctrl+Y are in
+  the frame's accelerator table, which on Windows comes before the focused control: in a `wx.TextEntry` they are
+  passed to the field's own Undo / Redo.
+
 ## Compute server (`remote/`, session 10, branch `compute-server`)
 The user: "run some sort of server that runs on a very powerful PC ... work on my personal machine in KiCad and use
 the other powerful pc to do all the computation"; Windows 11 Pro server, local network, several users.

@@ -55,10 +55,18 @@ def _load(board_arg: str, refill: bool):
     return board
 
 
-def _settings(board, board_arg: str, settings_arg: Optional[str]):
+CONFIG_HELP = ("a saved configuration (<board folder>/groundtruth/configs/*.gtconfig.yaml, the plugin's "
+               "Configuration menu): its nets, stages, bridges, loads, rails, pairs, what-if edits and run settings "
+               "instead of the settings file's, for this run only (the file is not changed)")
+
+
+def _settings(board, board_arg: str, settings_arg: Optional[str], config_arg: Optional[str] = None):
     """The board's settings file (the --settings path, else <board folder>/groundtruth/<board>.groundtruth.yaml),
-    parsed and checked against the board; the schematic fields' values applied in memory. CliError with every
-    problem listed when it is missing, invalid or does not match the board."""
+    parsed and checked against the board; the schematic fields' values applied in memory. config_arg (--config): a
+    saved configuration (config/scenario.py) put in place of the settings' nets, stages, bridges, loads, rails,
+    pairs, what-if edits and run settings, in memory only (the file is not written); its notes (parts changed
+    since it was saved) go to stderr. CliError with every problem listed when either is missing, invalid or does
+    not match the board."""
     from .config.settings import ConfigError, SettingsFile, settings_path, validate
     path = Path(settings_arg) if settings_arg else settings_path(board_arg)
     if not path.exists():
@@ -67,6 +75,13 @@ def _settings(board, board_arg: str, settings_arg: Optional[str]):
         sc = SettingsFile.load(path)
     except ConfigError as e:
         raise CliError("invalid settings:\n  " + "\n  ".join(e.messages)) from e
+    if config_arg:
+        from .config import scenario
+        try:
+            for note in scenario.apply(sc, scenario.load(config_arg)):
+                print(f"configuration {config_arg}: {note}", file=sys.stderr)
+        except ConfigError as e:
+            raise CliError("invalid configuration:\n  " + "\n  ".join(e.messages)) from e
     errors = validate(sc.config, board)
     if errors:
         raise CliError("settings does not match the board:\n  " + "\n  ".join(errors))
@@ -237,7 +252,7 @@ def _run(args, simulate: bool) -> int:
 
     t0 = time.time()
     board = _load(args.board, args.refill_zones)
-    sc = _settings(board, args.board, args.settings)
+    sc = _settings(board, args.board, args.settings, getattr(args, "config", None))
     cfg = sc.config
     _solver_options(cfg, args)
     on = cfg.active(args.nets)              # rows switched off (enabled: false) are not analysed, unless named
@@ -429,7 +444,7 @@ def cmd_bode(args) -> int:
     from .components.values import parse_value
     from .report.formats import response_lines
     board = _load(args.board, False)
-    cfg = _settings(board, args.board, args.settings).config
+    cfg = _settings(board, args.board, args.settings, args.config).config
     names = [n.name for n in cfg.nets]
     unknown = [n for n in (args.nets or ()) if n not in names]
     if unknown:
@@ -549,7 +564,7 @@ def _say_solver(solver: dict, args):
 def _prepare(args):
     """Board + settings + selected nets for the analysis commands."""
     board = _load(args.board, getattr(args, "refill_zones", False))
-    sc = _settings(board, args.board, args.settings)
+    sc = _settings(board, args.board, args.settings, getattr(args, "config", None))
     _solver_options(sc.config, args)
     if not sc.config.nets and not sc.config.converters and not sc.config.bridges:
         raise CliError(f"no nets or converters listed in {sc.path}; add them or run 'groundtruth detect --write'")
@@ -746,6 +761,7 @@ def build_parser() -> argparse.ArgumentParser:
         sp = sub.add_parser(name, help=helptext)
         board_args(sp)
         sp.add_argument("--nets", nargs="+", help="only these nets or converters (names as in the settings)")
+        sp.add_argument("--config", metavar="FILE", help=CONFIG_HELP)
         sp.add_argument("--fail-on", choices=("info", "warning", "error"), default="error")
         sp.add_argument("--format", action="append", choices=FORMATS,
                         help="output format, repeatable (default: text)")
@@ -781,6 +797,7 @@ def build_parser() -> argparse.ArgumentParser:
                                       "frequency, poles and zeros per path; --plots / --json write them")
     board_args(sp)
     sp.add_argument("--nets", nargs="+", help="only these signal paths (names as in the settings)")
+    sp.add_argument("--config", metavar="FILE", help=CONFIG_HELP)
     sp.add_argument("--from", dest="sweep_from", metavar="F", help="sweep start for every path, e.g. 1Hz "
                                                                     "(default: each net's sweep_from, else f/100)")
     sp.add_argument("--to", dest="sweep_to", metavar="F", help="sweep end, e.g. 10MHz (default: each net's "
