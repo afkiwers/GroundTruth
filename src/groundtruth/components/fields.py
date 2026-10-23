@@ -1,6 +1,6 @@
-"""Part parameters from the schematic: a symbol's fields (InvenTree parameters through KiCad's HTTP libraries, or
+"""Part parameters from the schematic: a symbol's fields (an HTTP lib's parameters (KiCad's HTTP library interface), or
 typed in) give R_DS(on), C_oss, an inductor's DCR, a capacitor's ESR ... One concrete field name per parameter
-(PARAMS), matched without regard to case; values with units as InvenTree sends them ("3.8milliohm"), or datasheet
+(PARAMS), matched without regard to case; values with units as an HTTP lib sends them ("3.8milliohm"), or datasheet
 notation ("3.8m"); a bare number is in the unit the table assumes.
 
 A stage's or part's value comes from the schematic (its key is listed in `from_schematic`, refreshed on every open
@@ -48,7 +48,7 @@ PARAMS = (
           "recovery loss Q_rr·V·f_sw, the recovery current spike in the spectrum and the overshoot"),
     Param("Vds", "FET", "the switch's voltage rating (read by the fix advisor)", "V", 1.0, "V", 1.0, 5000.0, "100V",
           "the overshoot's limit: the switch node's peak below 80 % of it"),
-    # InvenTree's names for the ratings (refboard's parts carry them); "Voltage" / "Power" read too
+    # the HTTP lib's names for the ratings (refboard's parts carry them); "Voltage" / "Power" read too
     Param("Rated Voltage", "capacitor", "the capacitor's rated voltage (else a voltage in its value: 100n 50V)", "V",
           1.0, "V", 1.0, 20000.0, "50V", "cap_voltage: the voltage across it against its rating, derated",
           ("Voltage",)),
@@ -91,7 +91,7 @@ PARAMS = (
           "replaces C at each capacitor's own DC voltage: ripple, conducted emission, filters, PDN"),
     Param("Cbias Voltage", "capacitor", "the voltage a single Cbias value holds at (else half the Rated Voltage)",
           "V", 1.0, "V", 0.1, 20000.0, "50V", "places the one Cbias value on the DC-bias curve"),
-    Param("Cbias Curve", "capacitor", "the DC-bias curve as text (an InvenTree text parameter; wins over Cbias)",
+    Param("Cbias Curve", "capacitor", "the DC-bias curve as text (an HTTP lib text parameter; wins over Cbias)",
           "F", 1e-6, "µF", 1e-13, 1.0, "95nF@10V, 66nF@30V, 39nF@50V, 20nF@80V",
           "the capacitance at each capacitor's own DC voltage, interpolated"),
     Param("Dielectric", "capacitor", "the ceramic's class: C0G / NP0 keep their capacitance (no DC-bias curve)",
@@ -103,7 +103,7 @@ PARAMS = (
     Param("Resistance", "resistor", "the resistor model's R (else the Value field)", "ohm", 1.0, "Ω", 0.0, 1e9,
           "8milliohm", "DC paths, series parts, signal routes"),
     # an op-amp stage in a signal path (model `amplifier`): gain is the stage's (set by its feedback resistors, so a
-    # field on the symbol in the schematic), the others are the op-amp's datasheet values (InvenTree)
+    # field on the symbol in the schematic), the others are the op-amp's datasheet values (the HTTP lib)
     Param("Gain", "op-amp", "the amplifier model's gain (V/V; negative = inverting; 20dB = 10)", "gain", 1.0, "V/V",
           -1e6, 1e6, "10", "signal paths: the output side's source"),
     Param("GBW", "op-amp", "the amplifier model's gbw: bandwidth = GBW / |gain|", "Hz", 1e6, "MHz", 1e3, 1e11,
@@ -330,7 +330,7 @@ def _controller_dead_times(board, spec) -> dict[str, Reading]:
 
 def bias_reading(fp) -> Optional[Reading]:
     """A capacitor's DC-bias curve from its fields (components/bias.py), as a Reading whose value is the curve's
-    text: `Cbias Curve` (a text field, InvenTree's text template) first, else `Cbias` (one value, a point or a
+    text: `Cbias Curve` (a text field, the HTTP lib's text parameter) first, else `Cbias` (one value, a point or a
     list); a single value without a voltage takes `Cbias Voltage` when the part has one. None without either
     field; value None (with the problems as its note) when the text can't be read."""
     from .bias import BiasPoint, bias_text, parse_bias

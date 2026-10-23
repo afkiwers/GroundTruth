@@ -48,7 +48,7 @@ def parse_value(text: str) -> Optional[float]:
 _PREFIX_WORDS = {"pico": 1e-12, "nano": 1e-9, "micro": 1e-6, "milli": 1e-3, "kilo": 1e3, "mega": 1e6, "giga": 1e9}
 _PREFIX_SYMBOLS = {"p": 1e-12, "n": 1e-9, "u": 1e-6, "µ": 1e-6, "μ": 1e-6, "m": 1e-3, "k": 1e3, "K": 1e3, "M": 1e6,
                    "G": 1e9}
-# unit words and symbols (lower case) -> quantity; InvenTree reports parameters with pint's names ("3.8milliohm")
+# unit words and symbols (lower case) -> quantity; an HTTP lib reports parameters with pint's names ("3.8milliohm")
 _UNITS = {"ohms": "ohm", "ohm": "ohm", "ω": "ohm", "r": "ohm", "farads": "F", "farad": "F", "f": "F",
           "henries": "H", "henrys": "H", "henry": "H", "h": "H", "coulombs": "C", "coulomb": "C", "c": "C",
           "volts": "V", "volt": "V", "v": "V", "amperes": "A", "ampere": "A", "amps": "A", "amp": "A", "a": "A",
@@ -84,7 +84,7 @@ def _unit_of(rest: str) -> Optional[tuple[float, str, str]]:
 def parse_quantity(text: str, quantity: str, assumed: float = 1.0) -> tuple[Optional[float], str]:
     """A part parameter as a schematic field holds it: (value in SI units, or None; why not / what was assumed).
 
-    Reads InvenTree's (pint) strings ("3.8milliohm", "616 picofarad", "38 nanocoulomb", "6.9 mΩ", "100V") and
+    Reads an HTTP lib's (pint) strings ("3.8milliohm", "616 picofarad", "38 nanocoulomb", "6.9 mΩ", "100V") and
     datasheet notation ("616p", "4m7", "2.2 uF", "10uF/16V"). quantity: "ohm", "F", "H", "C", "V" or "s" (a time:
     "20ns", "20 nanoseconds"); a unit of another quantity is refused. A bare number is in `assumed` units (e.g. 1e-3
     for "3.8" meaning mΩ)."""
