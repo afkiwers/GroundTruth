@@ -1545,7 +1545,7 @@ The plan's M3, at the user's "Merge and continue with M3" (2026-10-17).
   "si", the HTML part "Signal integrity" (tables, `plots.draw_impedance`: a range bar per net / pair over its target
   band); the plugin's Signal integrity tab (`_done(si=)` from Run checks, a local Simulate's res.checks.si, and a
   server's result).
-- refboard (detected nets + CAN pair): see README "Signal integrity". gui_probe: no stall on the tab or
+- refboard (detected nets + CAN pair): see docs/guide/analyses.md "Signal integrity". gui_probe: no stall on the tab or
   after Run checks; the one load stall (211 ms) is the Power integrity tab's `_rail_changed`, older.
 
 ## Through-hole pin values (`analysis/pins.py`, 2026-10-16)
@@ -1915,7 +1915,7 @@ driver and receivers replace the guessed ones. Labelled nets joined by 2-pin par
 a `GT_SIGNAL` net class from a directive label) for the ADC input /CPU/ADC_I_RAIL_1, refused as a supply.
 
 An optional `GT` field on schematic symbols says what a part is in a power stage (`conv_hs`, `conv1_L`, `hbA_ls`,
-`hb_out`, `ignore`; user docs in README "Detection labels"). The user asked for "labels like hb_A … to make the
+`hb_out`, `ignore`; user docs in docs/guide/settings.md "Detection labels"). The user asked for "labels like hb_A … to make the
 automatic recognition more robust"; options weighed:
 - **Net labels** (`hb_A` as a net name): rename nets the designer chose, and roles belong to parts (which FET is
   the high side), not nets. Not used.
