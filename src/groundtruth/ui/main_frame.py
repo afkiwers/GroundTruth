@@ -1312,7 +1312,7 @@ class MainFrame(ConfigActions, wx.Frame):
         self.nets.load(self.board, self.settings)
         self.converters.load(self.board, self.settings)
         self.bridges.load(self.board, self.settings)
-        self._undo_label = "Detect"         # the undo step's name (ui/config_menu.py)
+        self._undo_label = ""               # part of opening the board: saved, no undo step (ui/config_menu.py)
         self.on_config_change()
         if bridges_only:            # the settings already list nets or converters: only bridges were looked for
             self.SetStatusText(f"detected {len(brid)} motor bridge(s), orange until reviewed: set the operating point "
