@@ -3279,3 +3279,38 @@ def test_update_keeps_the_signal_path_selected_for_the_next_edit(app, frame):
     p.freq.SetValue("40MHz")
     p.on_update(None)
     assert p.selected_rows() == [0] and f.settings.config.nets[0].freq == 40e6
+
+
+def test_several_signal_paths_are_edited_at_once_and_only_what_changed_applies(app, tmp_path, monkeypatch):
+    """The user: "more than one could be selected and any edited at once. Any paras that are not the same are
+    presented as * and ignored on update unless the user changed it ... change all four voltages to 5V but not change
+    any of the other values". Two paths of different frequency selected: the form shows their common amplitude and *
+    for the frequency, their own fields greyed; Update with the amplitude changed sets it on both and keeps each
+    frequency; back to one row, its own values and fields return."""
+    from conftest import make
+    from boardgen import layer_change_board
+    from groundtruth.config.settings import NetSpec
+    from groundtruth.ui import main_frame
+    monkeypatch.setattr(wx, "MessageBox", lambda *a, **k: wx.YES)
+    _, sc, path = make(tmp_path, layer_change_board(None), "multi",
+                       nets=(NetSpec("SIG", "U1.1", ["U2.1"], 50e6, 1e-9), NetSpec("SIG", "U1.1", ["U2.1"], 20e6, 2e-9)))
+    f = main_frame.MainFrame(main_frame.Session(file_path=str(path)))
+    f.Show()
+    try:
+        run_steps(app, f, [lambda: None])
+        p = f.nets
+        for i in (0, 1):
+            p.list.Select(i)
+        run_steps(app, f, [lambda: None])
+        assert p.freq.GetValue() == "*" and p.rise.GetValue() == "*" and p.ampl.GetValue() == "3.3"
+        assert not p.driver.IsEnabled()
+        p.ampl.SetValue("5")
+        p.on_update(None)
+        a, b = f.settings.config.nets
+        assert a.amplitude_v == b.amplitude_v == 5.0 and (a.freq, b.freq) == (50e6, 20e6)
+        assert (a.rise_time, b.rise_time) == (1e-9, 2e-9) and p.selected_rows() == [0, 1]
+        p.list.Select(1, False)
+        run_steps(app, f, [lambda: None])
+        assert p.freq.GetValue() == "50MHz" and p.driver.IsEnabled()
+    finally:
+        close_window(f)
