@@ -468,6 +468,20 @@ def count_tip(on: int, total: int, one: str, many: str) -> str:
     return f"{on} of {total} {many} take part in Run checks and Simulate ({total - on} switched off)"
 
 
+WINDOW_DEFAULT = (1500, 960)    # the first opening's size: the top bar and the tabs' forms fit (1200 x 820 did not)
+
+
+def window_size() -> tuple[int, int]:
+    """The window's size when it opens: the one it had when last closed (ui.json "window"), else WINDOW_DEFAULT;
+    either way at most 92 % of the screen's work area (a laptop gets what it has room for)."""
+    w, h = WINDOW_DEFAULT
+    saved = theme.prefs().get("window") or {}
+    if isinstance(saved.get("width"), int) and isinstance(saved.get("height"), int):
+        w, h = saved["width"], saved["height"]
+    area = wx.Display(0).GetClientArea() if wx.Display.GetCount() else wx.Rect(0, 0, w, h)
+    return min(w, int(area.width * 0.92)), min(h, int(area.height * 0.92))
+
+
 class MainFrame(ConfigActions, wx.Frame):
     """The plugin window: a top bar of actions (Reload, Refill, Run checks, Simulate, Thermal, Export, Save, Clear,
     Preferences, Help), the tabs, and a status bar with a progress gauge.
@@ -481,7 +495,12 @@ class MainFrame(ConfigActions, wx.Frame):
         """The window with its top bar and status bar; the tabs are built afterwards, one per event-loop step
         (_build_pages), and then the board is read as a job."""
         name = session.name
-        super().__init__(None, title=f"{name} – GroundTruth" if name else "GroundTruth", size=(1200, 820))
+        super().__init__(None, title=f"{name} – GroundTruth" if name else "GroundTruth", size=window_size())
+        self._normal_size = tuple(self.GetSize())
+        self._maximized = False
+        self.Bind(wx.EVT_SIZE, self._track_size)
+        if (theme.prefs().get("window") or {}).get("maximized"):
+            self.Maximize()
         theme.set_icon(self)                    # the GroundTruth logo in the title bar and taskbar
         self._window_id = self.GetId()
         self.session = session
@@ -2726,6 +2745,9 @@ class MainFrame(ConfigActions, wx.Frame):
         if evt is not None and evt.GetId() != self._window_id:
             evt.Skip()
             return
+        if not getattr(self, "_size_kept", False):     # once, however the window ends (closed or destroyed)
+            self._size_kept = True
+            self._keep_window_size()
         tracker = getattr(self, "_tracker", None)
         if tracker is not None:                 # the jobs stay on the server and on disk for the next start
             tracker.stop()
@@ -2737,11 +2759,29 @@ class MainFrame(ConfigActions, wx.Frame):
         if evt is not None:
             evt.Skip()
 
+    def _track_size(self, evt):
+        """EVT_SIZE: note the window's size (its normal size, not a maximised one) and whether it is maximised, so the
+        end of the window can store them without asking a window that is being destroyed (that crashed)."""
+        evt.Skip()
+        maximized = self.IsMaximized()
+        if not maximized and not self.IsIconized():
+            w, h = self.GetSize()
+            self._normal_size = (int(w), int(h))
+        self._maximized = bool(maximized)
+
+    def _keep_window_size(self):
+        """Store the size noted last and whether the window was maximised (ui.json "window"): it opens so next time.
+        No wx call: this also runs while the window is being destroyed."""
+        w, h = getattr(self, "_normal_size", (0, 0))
+        if w > 300 and h > 200:
+            theme.save_prefs(window={"width": w, "height": h, "maximized": getattr(self, "_maximized", False)})
+
     def on_close(self, evt):
         """Closing: stop the timers, clear our highlight in KiCad, unregister the inbox, stop a running job, save
         unsaved settings and wait for the save, let a history report finish out of sight, stop the History tab's
         thread."""
         self._stop_timers()
+
         if self._highlighted and self.session.live:     # KiCad keeps a net highlight after we are gone
             self.Hide()                     # waiting for a show still on its way must not look frozen
             session = self.session
