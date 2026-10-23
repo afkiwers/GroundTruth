@@ -168,6 +168,16 @@ class BridgesPanel(SelectableRows, wx.Panel):
         left.Add(self.list, 2, wx.EXPAND)
         left.Add(wx.StaticText(self, label="Legs of the bridge in the form:"), 0, wx.TOP, 6)
         left.Add(self.leg_list, 1, wx.EXPAND | wx.TOP, 2)
+        # the victim nets (every bridge's and power stage's Simulate looks at them): what is set, and the picker
+        self.victims_line = wx.StaticText(self, label="Victim nets: the board is not loaded yet")
+        self.victims_btn = theme.Button(self, "Victims…")
+        self.victims_btn.SetToolTip("pick the nets the switching may upset (Simulate checks the noise they pick up): "
+                                    "add or remove one or several at once, or go back to finding them automatically")
+        self.victims_btn.Bind(wx.EVT_BUTTON, lambda e: self.on_victims())
+        vrow = wx.BoxSizer(wx.HORIZONTAL)
+        vrow.Add(self.victims_line, 1, wx.ALIGN_CENTER_VERTICAL)
+        vrow.Add(self.victims_btn, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
+        left.Add(vrow, 0, wx.EXPAND | wx.TOP, 6)
         left.Add(self.zoom, 0, wx.TOP, 6)
         from ..analysis.tags import HELP
         self.info = InfoBox(self, "Labels (GT field)", HELP["bridges"])
@@ -289,6 +299,53 @@ class BridgesPanel(SelectableRows, wx.Panel):
         from ..analysis.tags import board_tags
         self.info.set_status(board_tags(board).summary())
         self.refresh()
+        self._show_victims()
+
+    # ------------------------------------------------------------------ victims
+    def _show_victims(self):
+        """The line above Victims…: automatic, or the nets listed (the first few by name)."""
+        v = self.settings.config.victims if self.settings is not None else None
+        if v is None:
+            return
+        if not v.nets:
+            text = "Victim nets: automatic (reset, crystal, Hall, debug and PWM nets, found by name at each run)"
+        else:
+            names = ", ".join(n.split("/")[-1] for n in v.nets[:4]) + (" …" if len(v.nets) > 4 else "")
+            text = f"Victim nets: {len(v.nets)} listed ({names})"
+        if not v.enabled:
+            text += " · switched off (victims.enabled: false)"
+        self.victims_line.SetLabel(text)
+        self.victims_line.SetToolTip("\n".join(v.nets) if v.nets else text)
+
+    def on_victims(self):
+        """Victims…: the automatic victim nets found in a job (they leave out every stage's own nets), then the
+        picker; OK writes the list (an undo step like any edit)."""
+        if self.board is None or self.settings is None:
+            return
+        board, config = self.board, self.settings.config
+
+        def work(progress):
+            """(worker) The board's automatic victim nets."""
+            from ..analysis.victims import board_auto_nets
+            return board_auto_nets(board, config)
+
+        def done(auto):
+            """The picker; its list written on OK."""
+            from .victims_dialog import VictimsDialog
+            with VictimsDialog(self, list(board.nets), list(config.victims.nets), auto) as dlg:
+                if dlg.ShowModal() != wx.ID_OK:
+                    return
+                nets = dlg.values()
+            if nets == list(self.settings.config.victims.nets):
+                return
+            try:
+                self.settings.set_victim_nets(nets)
+            except ConfigError as e:
+                wx.MessageBox("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
+                return
+            self._show_victims()
+            self.on_change()
+        self.run_job("finding the victim nets…", work, done, "find the victim nets")
 
     def refresh(self):
         """Rebuild the bridge list: unreviewed or not yet set up bridges in the warning colour."""
