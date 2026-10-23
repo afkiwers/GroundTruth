@@ -1,0 +1,110 @@
+# On every published GitHub release: build the KiCad package and the signed compute-server package (what
+# build_package.cmd builds on the PC), attach them to the release, and publish the KiCad Plugin and Content Manager
+# repository on GitHub Pages with every release's version, so KiCad offers each release as an update
+# (KiCad: Plugin and Content Manager > Manage... > Add https://<owner>.github.io/<repo>/repository.json).
+#
+# The private release key is NOT in the repository. It is the encrypted Actions secret GROUNDTRUTH_RELEASE_KEY
+# (Settings > Secrets and variables > Actions), written to an owner-only temporary file for the build step and
+# deleted at its end; GitHub masks it in the logs and does not hand it to workflows of forks' pull requests.
+# tools/release_key.pub (the public half, which the servers already trust) makes the build fail when the secret
+# holds another key. Both the checkout and the built packages are checked for a private key before anything is
+# uploaded.
+#
+# One-time setup: see "Releases" in README.md.
+
+name: Release packages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release tag to build and attach again"
+        required: true
+
+permissions:
+  contents: write          # attach the packages to the release
+  pages: write             # publish the KiCad repository
+  id-token: write          # (GitHub Pages deployment)
+
+concurrency:
+  group: release-packages
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the packaging tools' libraries
+        run: python -m pip install pillow cryptography
+
+      - name: No private key in the repository
+        run: git ls-files -z | xargs -0 python tools/make_pcm_repository.py check-no-key
+
+      - name: Build and sign the packages
+        env:
+          RELEASE_KEY: ${{ secrets.GROUNDTRUTH_RELEASE_KEY }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          if [ -z "$RELEASE_KEY" ]; then
+            echo "::error::The Actions secret GROUNDTRUTH_RELEASE_KEY is not set (README.md, Releases)"
+            exit 1
+          fi
+          key="$RUNNER_TEMP/release_ed25519.pem"
+          trap 'rm -f "$key"' EXIT
+          (umask 077; printf '%s\n' "$RELEASE_KEY" > "$key")
+          status=stable
+          if [ "$PRERELEASE" = "true" ]; then status=testing; fi
+          GROUNDTRUTH_RELEASE_KEY="$key" python tools/make_pcm_package.py --status "$status" --out dist
+
+      - name: No private key in the packages
+        run: python tools/make_pcm_repository.py check-no-key dist
+
+      - name: Attach the packages to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          zip=$(ls dist/groundtruth-*-pcm.zip)
+          name=$(basename "$zip")
+          python tools/make_pcm_repository.py entry "$zip" \
+            "https://github.com/${{ github.repository }}/releases/download/$TAG/$name" "dist/$name.pcm.json"
+          gh release upload "$TAG" dist/* --clobber --repo "${{ github.repository }}"
+
+      - name: The KiCad repository from every release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p entries
+          for t in $(gh release list --repo "${{ github.repository }}" --limit 200 --exclude-drafts \
+                       --json tagName --jq '.[].tagName'); do
+            gh release download "$t" --repo "${{ github.repository }}" --pattern '*.pcm.json' --dir entries \
+              --skip-existing || true      # releases from before this workflow have none
+          done
+          python tools/make_pcm_repository.py site entries dist/groundtruth-*-pcm.zip "$PAGES_URL" site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  pages:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
