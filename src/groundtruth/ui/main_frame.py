@@ -348,13 +348,13 @@ class Session:
                                  "done")
         try:
             target = h.layer or self.saved_layer
-            # the zoom: at least the Preferences' "Zoom in KiCad" of the board around the focus (highlight.zoom_steps)
+            # the zoom: the fit, then the Preferences' "Zoom out in KiCad" steps (highlight.zoom_steps)
             zoom_out = h.zoom_out
             if h.area:
                 from ..analysis.highlight import zoom_steps
                 from .prefs_dialog import defaults
                 span = max(h.area[2] - h.area[0], h.area[3] - h.area[1])
-                zoom_out = zoom_steps(span, defaults(theme.prefs())["kicad_zoom_mm"])
+                zoom_out = zoom_steps(span, defaults(theme.prefs())["kicad_zoom_steps"])
             r = show_items(self.kb, h.lit, h.focus, h.context, nets=nets and h.nets, zoom=zoom,
                            zoom_out=zoom_out, layer=target, clear_old=self.net_lit, wait=wait)
             self.net_lit = r["lit"]
@@ -1516,16 +1516,19 @@ class MainFrame(wx.Frame):
         return self._history_reports.busy() or (getattr(self, "history", None) is not None and self.history.busy())
 
     def _sim_config(self):
-        """The settings Simulate and Suggest fixes run with: the board's, with this computer's resolution. The same
-        object while neither changes, so the fix search can tell that the last Simulate still applies."""
+        """The settings Simulate and Suggest fixes run with: the board's, with this computer's resolution, solver
+        choices and checks (prefs_dialog.with_checks). The same object while none changes, so the fix search can
+        tell that the last Simulate still applies."""
         from dataclasses import replace
-        from .prefs_dialog import overrides
-        base, r, over = self.settings.config, self.resolution(), overrides(theme.prefs())
-        key = (r, tuple(sorted(over.items())))
+        from .prefs_dialog import checks_off, overrides, with_checks
+        prefs = theme.prefs()
+        base, r, over = self.settings.config, self.resolution(), overrides(prefs)
+        key = (r, tuple(sorted(over.items())), tuple(sorted(checks_off(prefs))), prefs.get("esd_mm"))
         cached = getattr(self, "_sim_cfg", None)
         if cached is None or cached[0] is not base or cached[1] != key:
             cfg = base if r == 1 and not over else replace(base, analysis=replace(base.analysis,
                                                                                   resolution=float(r), **over))
+            cfg = with_checks(cfg, prefs)
             self._sim_cfg = cached = (base, key, cfg)
         return cached[2]
 
@@ -1641,6 +1644,9 @@ class MainFrame(wx.Frame):
         if simulate:
             cfg = self._sim_config()
             self._sim_resolution = self.resolution()
+        else:                               # the checks switched off and the ESD distance in Preferences
+            from .prefs_dialog import with_checks
+            cfg = with_checks(cfg, theme.prefs())
         what_if = self.whatif.GetValue()
         edits = self._what_if_edits(board, cfg) if what_if else None
         if what_if and edits is None:

@@ -1156,10 +1156,11 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   board</b>: the ordinary contour lines (0.04 mm by default) and the thicker index lines, every decade or every
   fifth isotherm (0.1 mm by default).</td></tr>
 <tr><td valign="top"><b>Thinnest / Thickest arrow line</b></td><td>the line widths of <b>Draw arrows on board</b>: each arrow is as thick as the current density at it, from the thinnest (three decades below the peak and lower) to the thickest (at the peak); 0.01 and 0.3 mm by default.</td></tr>
-<tr><td valign="top"><b>Zoom in KiCad</b></td><td>how much of the board KiCad shows around an item it zooms to (an
-  issue with <b>Zoom to it</b>, a map's marker, a cross-section's via bar): at least this many millimetres, 15 mm by
-  default; a bigger item still fits whole. KiCad zooms in steps about 1.6&times; apart, so the view is close to it,
-  not exact.</td></tr>
+<tr><td valign="top"><b>Zoom out in KiCad</b></td><td>how far KiCad zooms out around an item it shows (an issue
+  with <b>Zoom to it</b>, a map's marker, a cross-section's via bar): KiCad fits the item to the view, then zooms
+  out this many of its own steps (each about 1.6&times;), 0 to 6. At 0 (the default) you see the fit alone; an item
+  under 1 mm, such as a via, is first zoomed out to about 1 mm. It is a count of steps, not a size: KiCad's
+  interface cannot set or report how much of the board the view shows.</td></tr>
 <tr><td valign="top"><b>Author</b>, <b>Company</b></td><td>the exported report's cover lines where the board's
   <code>report:</code> section names none.</td></tr>
 <tr><td valign="top"><b>History</b></td><td><b>Keep runs</b>: every Simulate kept in the board's
@@ -1167,6 +1168,14 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   turned on); <b>Report</b>: with its report page.</td></tr>
 <tr><td valign="top"><b>Theme</b></td><td>System (follows Windows' light or dark apps), Light or Dark; applies the
   next time GroundTruth opens.</td></tr>
+<tr><td valign="top"><b>Run checks</b></td><td>one tick box per check of <a href="#checks">Run checks</a>, all
+  ticked by default: <b>Gaps and splits</b>, <b>Off a plane</b> (also a layer with no plane next to it),
+  <b>Plane edges</b>, <b>Non-ground reference</b>, <b>Layer change: stitching</b>, <b>Layer change: capacitor</b>,
+  <b>Voltage spacing</b>, <b>Capacitor ratings</b>, <b>ESD at connectors</b>, <b>Differential pairs</b> (impedance
+  and skew) and <b>Impedance targets</b>. An unticked check's issues are left out of Run checks and Simulate on this
+  computer (a voltage-aware check that is off is not run at all); the command line runs every check.
+  <b>ESD search distance</b>: how close to a connector pin an ESD / TVS part on its net must be (10 mm by default);
+  it replaces the settings file's <code>safety.esd_mm</code> here.</td></tr>
 </table>
 <p>The exported report follows the heatmap settings and names the resolution it was simulated at. The working
 toggles keep their last state for next time too: the Results tab's <b>Current arrows</b>, <b>Log scale</b> and

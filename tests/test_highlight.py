@@ -260,18 +260,19 @@ def test_a_hot_spot_in_a_pour_zooms_to_the_copper_around_it(tmp_path):
     assert area_highlight(board, cfg, 28.0, 5.0, "In1.Cu").focus == [pour.uuid]
 
 
-def test_kicad_shows_at_least_the_preferences_zoom_around_an_item(monkeypatch):
-    """The user: "the zoom is too close, can we make it a setting that can be adjusted" (15 mm by default, one for
-    every use). highlight.zoom_steps: KiCad's zoom-out steps (~1.58x each) after fitting the selection to show at
-    least that much board: ceil(log(view/span)/log 1.58): a 0.6 mm via 8 steps for 15 mm, a 3 mm part 4, an item
-    of 15 mm or more none. Session.show_issue hands KiCad that count for the Preferences' value (theme.prefs)."""
-    import math
-    from groundtruth.analysis.highlight import Highlight, ZOOM_STEP, zoom_steps
+def test_kicad_zooms_out_the_preferences_steps_after_the_fit(monkeypatch):
+    """The user: "the zoom is too close, can we make it a setting", then "15mm is too far zoomed out. And 1mm is
+    pretty much spot on" and "Let's not call it mm, maybe call it just steps?". highlight.zoom_steps: an item under
+    1 mm stepped out to about 1 mm (a 0.6 mm via 2 steps, as the 1 mm setting did), a bigger one not at all, then
+    the Preferences' steps on top (0 by default, at most ZOOM_STEPS_MAX). Session.show_issue hands KiCad that count;
+    the old millimetre preference is ignored."""
+    from groundtruth.analysis.highlight import Highlight, ZOOM_STEPS_MAX, zoom_steps
     from groundtruth.ui import main_frame, theme
-    for span, view in ((0.6, 15.0), (3.0, 15.0), (1.0, 40.0)):
-        assert zoom_steps(span, view) == math.ceil(math.log(view / span) / math.log(ZOOM_STEP))
-        assert span * ZOOM_STEP ** zoom_steps(span, view) >= view > span * ZOOM_STEP ** (zoom_steps(span, view) - 1)
-    assert zoom_steps(15.0, 15.0) == 0 and zoom_steps(40.0, 15.0) == 0 and zoom_steps(0.6) == 8
+    from groundtruth.ui.prefs_dialog import defaults
+    assert zoom_steps(0.6) == 2 and zoom_steps(0.3) == 3 and zoom_steps(1.0) == 0 and zoom_steps(5.0) == 0
+    assert zoom_steps(5.0, 3) == 3 and zoom_steps(0.6, 2) == 4 and zoom_steps(0.06, 50) == ZOOM_STEPS_MAX
+    assert defaults({})["kicad_zoom_steps"] == 0 and defaults({"kicad_zoom_mm": 15.0})["kicad_zoom_steps"] == 0
+    assert defaults({"kicad_zoom_steps": 99})["kicad_zoom_steps"] == 0
     seen = []
     monkeypatch.setattr("groundtruth.adapters.kipy_sink.show_items",
                         lambda kb, lit, focus, context, **k: seen.append(k["zoom_out"]) or
@@ -280,6 +281,6 @@ def test_kicad_shows_at_least_the_preferences_zoom_around_an_item(monkeypatch):
     h = Highlight(focus=["via"], area=(10.0, 10.0, 10.6, 10.6))
     monkeypatch.setattr(theme, "prefs", lambda: {})
     session.show_issue(h)
-    monkeypatch.setattr(theme, "prefs", lambda: {"kicad_zoom_mm": 40.0})
+    monkeypatch.setattr(theme, "prefs", lambda: {"kicad_zoom_steps": 3})
     session.show_issue(h)
-    assert seen == [zoom_steps(0.6, 15.0), zoom_steps(0.6, 40.0)] == [8, 10]
+    assert seen == [2, 5]
