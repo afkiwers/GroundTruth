@@ -39,6 +39,49 @@ class SelectableRows:
         self.list.EnableCheckBoxes()
         self.list.Bind(wx.EVT_LIST_ITEM_CHECKED, lambda e: self._ticked(e.GetIndex(), True))
         self.list.Bind(wx.EVT_LIST_ITEM_UNCHECKED, lambda e: self._ticked(e.GetIndex(), False))
+        # "Select All" above the tick column (the user: "provide a enable/disable all button"): ticked when every
+        # row is, empty when none is, the third state when some are; a click ticks every row, or unticks them when all
+        # were
+        self.all_ticks = wx.CheckBox(self, label="Select All", style=wx.CHK_3STATE)
+        self.all_ticks.SetToolTip("Tick or untick every row at once: ticked rows take part in Run checks and "
+                                  "Simulate, unticked ones keep their values but are left out")
+        self.all_ticks.Bind(wx.EVT_CHECKBOX, lambda e: self.tick_all())
+        # kept in step with the rows on idle (wx's update-UI events): every way a row changes (a tick, Add, Remove,
+        # Detect, a reload) is covered without each one calling it; a few comparisons per idle
+        self.all_ticks.Bind(wx.EVT_UPDATE_UI, lambda e: self._sync_all_ticks())
+
+    def list_head(self, hint: wx.Window) -> wx.BoxSizer:
+        """The row above the table: "Select All" at its left, over the rows' tick boxes, then the panel's `hint` (the
+        empty table's instructions)."""
+        row = wx.BoxSizer(wx.HORIZONTAL)
+        row.Add(self.all_ticks, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT, 4)
+        row.Add(hint, 1, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 8)
+        return row
+
+    def _sync_all_ticks(self):
+        """Show in "Select All" whether every row, none or some are ticked; greyed with no rows."""
+        specs = getattr(self, self._enable_attr)
+        on = sum(1 for s in specs if s.enabled)
+        state = wx.CHK_CHECKED if specs and on == len(specs) else wx.CHK_UNCHECKED if not on else wx.CHK_UNDETERMINED
+        if self.all_ticks.Get3StateValue() != state:
+            self.all_ticks.Set3StateValue(state)
+        if self.all_ticks.IsEnabled() != bool(specs):
+            self.all_ticks.Enable(bool(specs))
+
+    def tick_all(self, on=None):
+        """Tick every row (on=True), untick them (False), or by default untick all when every row is ticked and
+        tick all otherwise; saved once through the panel's _commit, which shows the table again."""
+        from dataclasses import replace
+        specs = getattr(self, self._enable_attr)
+        if on is None:
+            on = not (specs and all(s.enabled for s in specs))
+        if specs and any(s.enabled != on for s in specs):
+            rows = self.selected_rows()
+            specs[:] = [replace(s, enabled=on) for s in specs]
+            if self._commit() is False:          # refused (an invalid entry): show what is stored
+                self.refresh()
+            self.reselect(rows)
+        self._sync_all_ticks()
 
     def _show_enabled(self, i: int, spec):
         """Row i's tick (without it counting as a click), greyed when switched off."""

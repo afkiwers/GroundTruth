@@ -244,7 +244,9 @@ in the schematic: see <a href="#siglabels">Labelling a signal path</a>.</p>
 <li><b>The tick box at the start of a row</b> switches the net on or off. Switched off, it keeps everything you
   entered (in the settings file as <code>enabled: false</code>) and shows greyed, but Run checks, Simulate and the
   fix search leave it out, and it is not checked against the board. The <b>Converters</b> and <b>Bridges</b> tabs
-  have the same tick box. With every row off, Simulate says so. The command line runs a switched-off row only when
+  have the same tick box, as do DC loads, Power integrity and Signal integrity's pairs. <b>Select All</b>, above the tick
+  column of each of these tables, ticks every row, or unticks them when all were ticked; it shows a dash when only
+  some are. With every row off, Simulate says so. The command line runs a switched-off row only when
   <code>--nets</code> names it.</li>
 <li>The form on the right edits the selected row: <b>Add</b> (a new net from the form), <b>Update selected</b>
   (one row only; editing a detected net counts as reviewing it), <b>Remove selected</b>, <b>Mark reviewed</b>
