@@ -1563,6 +1563,19 @@ class MainFrame(ConfigActions, wx.Frame):
         else:
             self._help = HelpWindow(self, topic)
 
+    def show_reference(self, key: str):
+        """The help at a REFERENCES.md entry (a Run check's basis link in Preferences): the References section scrolled
+        to that row. The help window is enabled first: a modal dialog open meanwhile (Preferences) disabled the
+        windows that existed when it opened, and a disabled help could neither scroll nor be read."""
+        from .help import HelpWindow, ref_anchor
+        anchor = ref_anchor(key)
+        if self._help:
+            self._help.show("references", anchor)
+        else:
+            self._help = HelpWindow(self, "references", anchor)
+        self._help.Enable(True)
+        self._help.Raise()
+
     def on_save(self, _=None):
         """Save settings: write them in the background (the newest snapshot wins)."""
         if self.settings is not None:

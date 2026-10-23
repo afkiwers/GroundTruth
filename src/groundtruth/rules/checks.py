@@ -141,7 +141,8 @@ class _Checker:
         """The checks along one run of the route: no adjacent layer at all (no_reference), stretches without plane
         under them (off_plane at a run's ends, gap_crossing in between, a split if the plane nets on both sides
         differ), a plane of another net than the reference nets under the trace (reference_net), and stretches
-        close to a plane edge (check_edges)."""
+        close to a plane edge (check_edges). A track needs a plane next to it all along [A59]; a supply plane as its
+        reference is information only [A60]."""
         refs = reference_layers(self.board, run.layer)
         line = run.line
         if not refs:

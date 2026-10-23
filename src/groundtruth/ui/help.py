@@ -10,6 +10,7 @@ plain HTML that wx's renderer understands, which modern_page turns into sections
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -47,7 +48,7 @@ def page() -> str:
     text = PAGE.read_text(encoding="utf-8")
     for key, value in (("@BG@", pal.bg), ("@TEXT@", pal.text), ("@LINK@", pal.accent), ("@WARN@", pal.warn),
                        ("@PART_FIELDS@", field_rows()), ("@REFERENCES@", references_html()),
-                       ("@CBIAS_CHART@", cbias_table())):          # wx's simple view draws no SVG: the numbers
+                       ("@CBIAS_CHART@", cbias_table()), ("@CHECK_BASIS@", check_basis_html())):          # wx's simple view draws no SVG: the numbers
         text = text.replace(key, value)
     return text
 
@@ -167,7 +168,43 @@ def references_html() -> str:
     if path is None:
         return "<p>The list (docs/REFERENCES.md) is not installed with this copy of the plugin.</p>"
     body = re.sub(r"\A#\s[^\n]*\n", "", path.read_text(encoding="utf-8"))
-    return markdown_html(body) + f'<p><a href="{path.as_uri()}">Open REFERENCES.md</a> ({escape_html(str(path))})</p>'
+    return markdown_html(body, anchors=True) + \
+        f'<p><a href="{path.as_uri()}">Open REFERENCES.md</a> ({escape_html(str(path))})</p>'
+
+
+@functools.lru_cache(maxsize=1)
+def _reference_rows() -> dict:
+    """{key: its second column} of every table row in docs/REFERENCES.md (the source, or the assumption's text);
+    {} when the file is not installed. Read once."""
+    path = references_path()
+    if path is None:
+        return {}
+    rows = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")] if line.startswith("|") else []
+        if len(cells) >= 2 and cells[0] and not re.fullmatch(r":?-+:?", cells[0]):
+            rows[re.sub(r"[`*]", "", cells[0])] = cells[1]
+    return rows
+
+
+def reference_entry(key: str, limit: int = 220) -> str:
+    """A REFERENCES.md entry's text as plain text (Markdown marks taken out), cut to `limit` characters; "" when the
+    key is not there."""
+    text = re.sub(r"[`*]|\[([^\]]+)\]\([^)]*\)", lambda m: m.group(1) or "", _reference_rows().get(key, ""))
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+
+def check_basis_html() -> str:
+    """The Run checks' bases as Preferences shows them (prefs_dialog.CHECK_BASIS), for the help's Preferences
+    section: "Gaps and splits: Johnson 1993, A26; ..." with each key a link to its References row."""
+    from .prefs_dialog import CHECK_BASIS, CHECK_TOGGLES
+    items = []
+    for key, label, _ids, _tip in CHECK_TOGGLES:
+        refs = CHECK_BASIS.get(key, ())
+        if refs:
+            items.append(f"<b>{escape_html(label)}</b>: " +
+                         ", ".join(f'<a href="#{ref_anchor(r)}">{escape_html(r)}</a>' for r in refs))
+    return "; ".join(items)
 
 
 def escape_html(text: str) -> str:
@@ -192,10 +229,20 @@ def _inline(text: str) -> str:
     return re.sub(r"\0(\d+)\0", lambda m: codes[int(m.group(1))], text)
 
 
-def markdown_html(text: str) -> str:
+def ref_anchor(key: str) -> str:
+    """The help's anchor of a REFERENCES.md entry ("IPC-2221B" -> "ref-IPC-2221B", "Johnson 1993" ->
+    "ref-Johnson-1993", "A26" -> "ref-A26"): links to it open the References section at that row."""
+    return "ref-" + re.sub(r"[^A-Za-z0-9]+", "-", key.strip()).strip("-")
+
+
+ANCHOR = re.compile(r"ref-[A-Za-z0-9-]+")       # the anchors HelpWindow.show takes besides the TOPICS
+
+
+def markdown_html(text: str, anchors: bool = False) -> str:
     """The Markdown the docs use, as plain HTML both help views show: headings (## → h4, ### → h5), paragraphs,
     bullet lists (a line starting "- ", continued by indented lines) and pipe tables (the first row a header, the
-    second the |---| rule)."""
+    second the |---| rule). anchors: each table row's first cell (a REFERENCES.md key) gets the anchor ref_anchor
+    gives it (`name` for wx's simple view, `id` for the browser engine)."""
     out: list[str] = []
     lines = text.splitlines()
     i = 0
@@ -219,7 +266,12 @@ def markdown_html(text: str) -> str:
             html = ["<table border='1' cellpadding='3' cellspacing='0'>"]
             for k, cells in enumerate(rows):
                 tag = "th" if k == 0 else "td"
-                html.append("<tr>" + "".join(f"<{tag} valign='top'>{_inline(c)}</{tag}>" for c in cells) + "</tr>")
+                mark = ""
+                if anchors and k and cells and cells[0]:
+                    a = ref_anchor(re.sub(r"[`*]", "", cells[0]))
+                    mark = f'<a name="{a}" id="{a}"></a>'
+                html.append("<tr>" + "".join(f"<{tag} valign='top'>{mark if j == 0 else ''}{_inline(c)}</{tag}>"
+                                             for j, c in enumerate(cells)) + "</tr>")
             out.append("\n".join(html) + "</table>")
         elif line.startswith("- "):
             items = []
@@ -278,6 +330,7 @@ def sections() -> tuple[str, list[tuple[str, str, str]]]:
     text = PAGE.read_text(encoding="utf-8").replace("@PART_FIELDS@", field_rows()).replace("@REFERENCES@",
                                                                                          references_html())
     text = text.replace("@CBIAS_CHART@", cbias_svg())          # the browser view draws the chart
+    text = text.replace("@CHECK_BASIS@", check_basis_html())
     body = re.search(r"<body[^>]*>(.*)</body>", text, re.S).group(1)
     head, _, rest = body.partition("<hr>")
     intro = re.sub(r"<p><b>Contents</b></p>.*$", "", head, flags=re.S)          # the old contents list
@@ -359,14 +412,14 @@ class HelpWindow(wx.Frame):
     """The help window: modern_page in a browser engine where there is one, else page() in wx's simple HTML view
     (`self.html`); themed like the plugin either way."""
 
-    def __init__(self, parent, topic: str = "workflow"):
-        """The window over `parent`, shown at `topic`."""
+    def __init__(self, parent, topic: str = "workflow", anchor: str = ""):
+        """The window over `parent`, shown at `topic` (or at `anchor` in it: a References entry, ref_anchor)."""
         super().__init__(parent, title="GroundTruth help", size=parent.FromDIP(wx.Size(1080, 780)))
         theme.set_icon(self)
         self.SetBackgroundColour(theme.colour(theme.palette().bg))
         self.view = None                            # the browser engine's view, when there is one
         self.html = None                            # wx's simple HTML view otherwise
-        self._loaded, self._pending = False, topic
+        self._loaded, self._pending = False, self._target(topic, anchor)
         self._text = ""
         self._watch = None                          # the engine's start watched (LOAD_WAIT_MS), stopped on destroy
         self.Bind(wx.EVT_WINDOW_DESTROY, self._on_destroy)
@@ -375,7 +428,7 @@ class HelpWindow(wx.Frame):
             self._web(backend)
         if self.view is None:
             self._classic()
-        self.show(topic)
+        self.show(topic, anchor)
 
     LOAD_WAIT_MS = 8000         # the browser engine's page not there by then: the simple view instead
 
@@ -405,7 +458,7 @@ class HelpWindow(wx.Frame):
         self.view.Destroy()
         self.view = None
         self._classic()
-        wx.CallAfter(self._scroll, self._pending if self._pending in TOPICS else "top")
+        wx.CallAfter(self._scroll, self._pending or "top")
 
     def _web(self, backend):
         """The browser engine's view with modern_page; links to other pages open in the web browser (none is ever
@@ -434,9 +487,17 @@ class HelpWindow(wx.Frame):
         """The page's text (for tests and checks): what the window shows, without its markup."""
         return self.html.ToText() if self.html is not None else self._text
 
-    def show(self, topic: str):
-        """Scroll to a section (once the page is laid out) and bring the window to the front."""
-        topic = topic if topic in TOPICS else "top"
+    @staticmethod
+    def _target(topic: str, anchor: str = "") -> str:
+        """Where to go: a References entry's anchor (ref_anchor) when given, else the section (unknown: the top)."""
+        if anchor and ANCHOR.fullmatch(anchor):
+            return anchor
+        return topic if topic in TOPICS else "top"
+
+    def show(self, topic: str, anchor: str = ""):
+        """Scroll to a section, or to an anchor in one (a References entry), once the page is laid out, and bring the
+        window to the front."""
+        topic = self._target(topic, anchor)
         if self.view is not None:
             if self._loaded:
                 self._run(f"gtShow({json.dumps(topic)})")
