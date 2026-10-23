@@ -362,6 +362,7 @@ class HelpWindow(wx.Frame):
     def __init__(self, parent, topic: str = "workflow"):
         """The window over `parent`, shown at `topic`."""
         super().__init__(parent, title="GroundTruth help", size=parent.FromDIP(wx.Size(1080, 780)))
+        theme.set_icon(self)
         self.SetBackgroundColour(theme.colour(theme.palette().bg))
         self.view = None                            # the browser engine's view, when there is one
         self.html = None                            # wx's simple HTML view otherwise

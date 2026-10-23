@@ -1,6 +1,7 @@
 """Render the GroundTruth toolbar icons (PNG) for the KiCad plugin manifest.
 
-    .venv/Scripts/python tools/make_icons.py              # writes plugin/icons/groundtruth-*.png
+    .venv/Scripts/python tools/make_icons.py              # writes plugin/icons/groundtruth-*.png and the windows'
+                                                          # icon, src/groundtruth/ui/icons/groundtruth-<size>.png
     .venv/Scripts/python tools/make_icons.py --preview X  # X.png: the icons 1:1 and enlarged, light and dark
 
 The design (chosen by the user): a ground symbol inside a current loop with an arrowhead, on a navy badge. It is
@@ -17,6 +18,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 OUT = Path(__file__).resolve().parent.parent / "plugin" / "icons"
+WINDOW = Path(__file__).resolve().parent.parent / "src" / "groundtruth" / "ui" / "icons"
+WINDOW_SIZES = (16, 24, 32, 48, 256)     # Windows picks the title bar's, the taskbar's and Alt+Tab's from these
 NAVY = (18, 58, 92, 255)
 NAVY_EDGE = (10, 34, 56, 255)
 AMBER = (255, 176, 32, 255)
@@ -76,6 +79,10 @@ def write_icons():
                               ("groundtruth-add-24", 24, "add"), ("groundtruth-add-48", 48, "add"),
                               ("groundtruth-add-dark-24", 24, "add"), ("groundtruth-add-dark-48", 48, "add")):
         draw(size, badge).save(OUT / f"{name}.png")
+    # the windows' own icon (title bar, taskbar, Alt+Tab: theme.app_icons), shipped inside the package
+    WINDOW.mkdir(exist_ok=True)
+    for size in WINDOW_SIZES:
+        draw(size).save(WINDOW / f"groundtruth-{size}.png")
 
 
 def preview(path: Path):

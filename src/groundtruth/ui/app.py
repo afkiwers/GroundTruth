@@ -23,9 +23,10 @@ def _error(msg: str):
 
 
 def _icon() -> Optional[Path]:
-    """The 48 px plugin icon, from the installed plugin's folder or the repo's (None when neither has it)."""
+    """The 48 px plugin icon: the package's own (ui/icons), else the installed plugin's folder or the repo's (None
+    when none has it)."""
     here = Path(__file__).resolve()
-    for d in (here.parents[2] / "icons", here.parents[3] / "plugin" / "icons"):   # installed plugin / repo
+    for d in (here.parent / "icons", here.parents[2] / "icons", here.parents[3] / "plugin" / "icons"):
         if (d / "groundtruth-48.png").exists():
             return d / "groundtruth-48.png"
     return None
