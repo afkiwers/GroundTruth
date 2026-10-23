@@ -30,6 +30,14 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
   assumption entries for the checks without a source), then a victims picker on the Bridges tab (list of nets, add /
   bulk add, delete / bulk delete; the automatic victims shown, copied into the list on the first add, Reset to
   automatic: agreed with the user).
+- **Branch `check-basis` (2026-10-23, on `configs`):** Preferences shows each Run check's basis as links
+  (`prefs_dialog.CHECK_BASIS`: IPC-2221B Table 6-1 for Voltage spacing, Johnson 1993 / A26 for the plane checks,
+  Paul 2008 / A33 for the SI ones, and new assumptions A59 off_plane, A60 reference_net, A61 capacitor derating, A62
+  ESD distance, cited in the checks' code); a click opens the help at that row of References (`help.ref_anchor`,
+  `markdown_html(anchors=True)`, `HelpWindow.show(topic, anchor)`, the row flashes; `MainFrame.show_reference`
+  enables the help, which the modal dialog had disabled). The help's Preferences section lists the same bases
+  (`@CHECK_BASIS@`). Only Voltage spacing is judged by a published standard; the rest are rules of thumb recorded
+  as assumptions.
 - **Where things stand (2026-10-22, end of the day):** `main` 277f7c0 + this docs branch, the only branches; not
   pushed by Claude (`origin/main` was at 01bb044 when the user last pushed). **Next, asked and waiting** (the user,
   with a screenshot of the Issues tab): "add sorting when clicking on Check, severity etc. Also, add a filter where

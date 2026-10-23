@@ -55,7 +55,7 @@ EXTERNAL = ("F.Cu", "B.Cu")
 CONNECTOR_PREFIXES = ("J", "P", "X", "CN", "CON")
 ESD_WORDS = ("TVS", "ESD", "SMAJ", "SMBJ", "SMCJ", "SMF", "P6KE", "P4SMA", "1.5KE", "PESD", "TPD", "USBLC", "PRTR",
              "SP05", "RCLAMP", "NUP", "ESDA", "SRV05", "IP4220", "CDSOT", "SM712", "PGB", "TCLAMP")
-CAP_DERATING = {"ceramic": 0.5, "tantalum": 0.5, "electrolytic": 0.8}
+CAP_DERATING = {"ceramic": 0.5, "tantalum": 0.5, "electrolytic": 0.8}      # common margins, settings [A61]
 # a package's usual power rating (thick film; 0612 is the reverse-geometry 1206 of current shunts: 1 W)
 RESISTOR_WATTS = (("0201", 1 / 20), ("0402", 1 / 16), ("0603", 1 / 10), ("0805", 1 / 8), ("1206", 1 / 4),
                   ("1210", 1 / 2), ("1218", 1.0), ("2010", 3 / 4), ("2512", 1.0), ("0612", 1.0))
@@ -468,7 +468,7 @@ def is_esd(fp: Footprint) -> bool:
 def check_esd(board: Board, safety, add: Add):
     """esd_protection (see the module): per connector, its signal pins with no ESD / TVS part on the same net
     within esd_mm."""
-    reach = getattr(safety, "esd_mm", 10.0)
+    reach = getattr(safety, "esd_mm", 10.0)      # the protection beside the connector, matched by name [A62]
     named = set(getattr(safety, "esd_connectors", None) or ())
     guards: dict[str, list] = {}
     pads_on: dict[str, int] = {}

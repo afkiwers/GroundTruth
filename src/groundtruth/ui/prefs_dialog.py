@@ -53,6 +53,22 @@ CHECK_TOGGLES = (
     ("check_impedance", "Impedance targets", ("impedance",),
      "a net's characteristic impedance outside its target along part of its tracks (warning)"),
 )
+# what each check is based on: a standard, a source, or an assumption of docs/REFERENCES.md (A..), shown beside it
+# as links that open the help's References section at that entry (the user: "add the standards used to judge these
+# options ... add reference to the assumptions with clickable links that open the doc and jump to the section")
+CHECK_BASIS = {
+    "check_gap_crossing": ("Johnson 1993", "A26"),
+    "check_off_plane": ("A59", "Johnson 1993"),
+    "check_edge_proximity": ("Johnson 1993", "A26"),
+    "check_reference_net": ("A60",),
+    "check_layer_change_stitch": ("A26",),
+    "check_layer_change_decap": ("A26",),
+    "check_clearance_voltage": ("IPC-2221B",),
+    "check_cap_voltage": ("A61",),
+    "check_esd_protection": ("A62",),
+    "check_diff_pairs": ("Paul 2008", "A33"),
+    "check_impedance": ("Paul 2008",),
+}
 ESD_MM_MIN, ESD_MM_MAX = 0.5, 100.0       # the ESD search distance in Preferences (SafetySettings.esd_mm: 10 mm)
 GAP = 6                  # the dialog's spacing unit (DIP): rows and labels one apart, groups and margins two
 MIN_PANE_DIP = 200       # the scrolled pane of groups is never shorter (the dialog's minimum height)
@@ -410,10 +426,10 @@ class PreferencesDialog(wx.Dialog):
             boxes[id(grid)] = (box.GetStaticBox(), side)
             return grid
 
-        def row(grid, label: str, ctrl, tip: str):
-            """A label and its control in `grid`, both with the explanation as tooltip. Both belong to the group's
-            static box: wx 3.3 wants a StaticBoxSizer's items to be children of its box (it logs every other one
-            as an error)."""
+        def row(grid, label: str, ctrl, tip: str, extra=()):
+            """A label and its control in `grid`, both with the explanation as tooltip, and `extra` windows after
+            the control on the same line (a check's basis links). All belong to the group's static box: wx 3.3
+            wants a StaticBoxSizer's items to be children of its box (it logs every other one as an error)."""
             sb, side = boxes[id(grid)]
             ctrl.Reparent(sb)
             text = wx.StaticText(sb, label=label)
@@ -421,7 +437,15 @@ class PreferencesDialog(wx.Dialog):
             ctrl.SetToolTip(tip)
             labels[side].append(text)
             grid.Add(text, 0, wx.ALIGN_CENTER_VERTICAL)
-            grid.Add(ctrl, 1, wx.EXPAND)
+            if not extra:
+                grid.Add(ctrl, 1, wx.EXPAND)
+                return
+            line = wx.BoxSizer(wx.HORIZONTAL)
+            line.Add(ctrl, 0, wx.ALIGN_CENTER_VERTICAL)
+            for w in extra:
+                w.Reparent(sb)
+                line.Add(w, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, gap)
+            grid.Add(line, 1, wx.EXPAND)
 
         sim = group("Simulation", "left")
         self.resolution = wx.Choice(self, choices=[
@@ -602,11 +626,12 @@ class PreferencesDialog(wx.Dialog):
 
         checks = group("Run checks", "right")
         self.checks = {}
+        self.basis_links: dict[str, list[str]] = {}       # check key -> the references linked beside it
         for key, label, _ids, tip in CHECK_TOGGLES:
             self.checks[key] = wx.CheckBox(self, label="Check")
             self.checks[key].SetValue(p[key])
             row(checks, label, self.checks[key], tip + ". Unticked: Run checks and Simulate leave it out on this "
-                                                       "computer.")
+                                                       "computer.", extra=self._basis_links(key))
         self.esd_mm = wx.SpinCtrlDouble(self, min=ESD_MM_MIN, max=ESD_MM_MAX, inc=0.5, initial=p["esd_mm"])
         self.esd_mm.SetDigits(1)
         row(checks, "ESD search distance (mm)", self.esd_mm,
@@ -656,6 +681,36 @@ class PreferencesDialog(wx.Dialog):
         self.SetSize((self.GetSizer().GetMinSize().width + self.GetSize().width - self.GetClientSize().width,
                       height))
         self.CentreOnParent()
+
+    def _basis_links(self, key: str) -> list:
+        """A check's basis (CHECK_BASIS) as links: "basis" in the muted colour, then one link per entry, each opening
+        the help at its row of the References section; its tooltip is the entry's text from docs/REFERENCES.md."""
+        import wx.adv
+        from .help import reference_entry
+        keys = CHECK_BASIS.get(key, ())
+        if not keys:
+            return []
+        note = wx.StaticText(self, label="basis:")
+        note.SetName("muted")
+        out = [note]
+        accent = theme.colour(theme.palette().accent)
+        for ref in keys:
+            link = wx.adv.HyperlinkCtrl(self, wx.ID_ANY, label=ref, url="",
+                                        style=wx.adv.HL_ALIGN_LEFT | wx.NO_BORDER)
+            for set_colour in (link.SetNormalColour, link.SetVisitedColour, link.SetHoverColour):
+                set_colour(accent)
+            link.SetToolTip(f"{ref}: {reference_entry(ref) or 'see References'}\n(click: open the help there)")
+            # not skipped: the control would open its (empty) URL in the browser
+            link.Bind(wx.adv.EVT_HYPERLINK, lambda e, r=ref: self.open_reference(r))
+            out.append(link)
+        self.basis_links[key] = [w.GetLabel() for w in out[1:]]
+        return out
+
+    def open_reference(self, ref: str):
+        """A basis link: the help opens at that References entry (the window that opened the dialog shows it)."""
+        parent = self.GetParent()
+        if hasattr(parent, "show_reference"):
+            parent.show_reference(ref)
 
     def values(self) -> dict:
         """The dialog's choices, as ui.json entries (vias shown "all" is None: no limit)."""
