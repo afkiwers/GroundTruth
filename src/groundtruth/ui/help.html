@@ -815,8 +815,10 @@ their state for next time. How vias and parts are marked is set in <a href="#pre
   said so.
   A signal path: the voltage at the receivers per volt of the driver through its whole circuit (every part and
   op-amp on its nets, any topology: see <a href="#analog">Op-amp circuits</a>), each op-amp's output, and each
-  op-amp's loop gain with its crossover and phase margin; the transfer function written out above the plot (in its
-  part names) and in the summary line (the numeric form). A power stage: the hot loop's ringing (node current per A of the load
+  op-amp's loop gain with its crossover and phase margin; the transfer function written out above the plot twice:
+  <b>ideal circuit</b>, in its part names (ideal op-amps, no source resistance, receiver load or tracks: the circuit
+  as designed, so a lone series resistor is H(s) = 1 and an op-amp's own poles don't appear), and <b>full model</b>,
+  the factored form with every pole's and zero's frequency and Q (what the curves, the step and the pole plot show). A power stage: the hot loop's ringing (node current per A of the load
   pulse: exact poles from L, C_oss, the damping and a snubber), the input transfer (the current reaching the
   LISN per A of loop current: the input filter's effect), and when the fixes propose an input filter, its
   attenuation; its output impedance and the converter's input impedance −V²/P (Middlebrook: the first must stay
