@@ -23,9 +23,10 @@ def _error(msg: str):
 
 
 def _icon() -> Optional[Path]:
-    """The 48 px plugin icon, from the installed plugin's folder or the repo's (None when neither has it)."""
+    """The 48 px plugin icon: the package's own (ui/icons), else the installed plugin's folder or the repo's (None
+    when none has it)."""
     here = Path(__file__).resolve()
-    for d in (here.parents[2] / "icons", here.parents[3] / "plugin" / "icons"):   # installed plugin / repo
+    for d in (here.parent / "icons", here.parents[2] / "icons", here.parents[3] / "plugin" / "icons"):
         if (d / "groundtruth-48.png").exists():
             return d / "groundtruth-48.png"
     return None
@@ -91,7 +92,7 @@ def _connect(log):
 
 
 def _clear(log) -> int:
-    """The "Clear EMI layers" action. No window of ours is open while it talks to KiCad."""
+    """The "Clear GT drawings" action. No window of ours is open while it talks to KiCad."""
     kb, failure = _connect(log)
     if failure:
         log.mark(failure[0])
@@ -101,7 +102,7 @@ def _clear(log) -> int:
     try:
         n = clear(kb)
     except Exception as e:
-        _error(f"Could not clear the EMI layers:\n{e}")
+        _error(f"Could not clear GroundTruth's drawings:\n{e}")
         return 2
     startup.mark(f"cleared {n} item(s)", last=True)
     wx.MessageBox(f"Removed {n} GroundTruth item(s) from the board (one undo step).", "GroundTruth")

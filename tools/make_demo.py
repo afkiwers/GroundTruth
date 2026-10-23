@@ -45,7 +45,7 @@ Try it:
 5. Fixes tab > Suggest fixes: a GND stitching via next to the signal via, predicted and verified. "Draw suggestions"
    puts it on the board; "Add ticked to what-if" and Simulate "with what-if edits" show the return staying in
    narrow bands under the traces, and the cross-section shows it swapping planes right at the vias.
-6. Clear EMI layers removes everything GroundTruth drew.
+6. Clear GT drawings removes everything GroundTruth drew.
 
 Reinstalling the plugin puts the demo back as it was (copy this folder elsewhere to keep your changes).
 """

@@ -30,7 +30,7 @@
     },
     {
       "identifier": "clear",
-      "name": "Clear EMI layers",
+      "name": "Clear GT drawings",
       "description": "Remove all markers, contours and arrows GroundTruth drew on the board (one undo step)",
       "show-button": false,
       "scopes": ["pcb"],
