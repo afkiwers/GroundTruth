@@ -289,7 +289,7 @@ in `tools/dev/`, never only in the scratchpad.
   for now use an estimated curve") every class II ceramic in `flux-2` (80 capacitors, schematic sheets and board)
   has a hidden `Cbias Curve` field: an ESTIMATE from its Rated Voltage and Dielectric (`tools/dev/estimate_cbias.py`:
   C0/(1+(V/V1)²), V1 = 0.4 × rated for X7R-class, 0.3 for X5R; percent points at 10-100 % of the rating), to be
-  replaced by the makers' curves through InvenTree; before: `out/kraft_backup_2026-10-22_cbias/`.
+  replaced by the makers' curves through the HTTP lib; before: `out/kraft_backup_2026-10-22_cbias/`.
   Power stages (all found by `groundtruth detect`), rail +VDC unless noted:
 
   | Stage | Controller | Switches | Switch node | Inductor |

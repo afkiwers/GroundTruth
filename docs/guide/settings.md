@@ -46,9 +46,9 @@ Available part models are `short`, `open`, `resistor (R)`, `cap (C, ESR, ESL, op
 - **Signal route:** a route runs through a part whose model passes a signal, such as a 0R, a termination resistor (≤ 1 kΩ) or a ferrite.
 - **Plane connections:** caps, 0R and ferrites that bridge plane islands, for example decaps between GND and +3V3, become lumped branches in the solver.
 
-## Part parameters from the schematic (InvenTree fields)
+## Part parameters from the schematic (HTTP lib fields)
 
-A part's parameters can come from its symbol's fields instead of being typed in: give the parts these fields in the schematic, or name InvenTree's parameter templates so (KiCad's HTTP library hands them to the symbols as fields). One field name per parameter, matched without regard to case:
+A part's parameters can come from its symbol's fields instead of being typed in: give the parts these fields in the schematic, or name the HTTP lib's parameters so (KiCad's HTTP library hands them to the symbols as fields). One field name per parameter, matched without regard to case:
 
 | Field | Parts | Fills | A bare number is in | Example |
 |---|---|---|---|---|
@@ -60,7 +60,7 @@ A part's parameters can come from its symbol's fields instead of being typed in:
 | `Cj` | diode | a diode buck's `c_oss` | pF | `120 picofarad` |
 | `DCR` | inductor | `dcr` and the inductor model's R | mΩ | `6.9milliohm` |
 | `ESR`, `ESL`, `Cbias` | capacitor | the model's ESR, ESL, C_bias (one value, a point or a curve of 1-12) | mΩ, nH, µF | `5milliohm`, `0.4nH`, `75nF@50V` |
-| `Cbias Voltage`, `Cbias Curve`, `Dielectric` | capacitor | the voltage a single Cbias holds at; the curve as text (an InvenTree text template, wins); C0G / NP0: no curve | V, text, text | `50V`, `95nF@10V, 39nF@50V`, `X7R` |
+| `Cbias Voltage`, `Cbias Curve`, `Dielectric` | capacitor | the voltage a single Cbias holds at; the curve as text (an HTTP lib text parameter, wins); C0G / NP0: no curve | V, text, text | `50V`, `95nF@10V, 39nF@50V`, `X7R` |
 | `Capacitance`, `Inductance`, `Resistance` | C, L, R | the model's C, L, R (else the Value field) | F, H, Ω | `10uF` |
 | `Gain` | op-amp stage | the amplifier's gain (a Gain field makes the part an amplifier); `20dB` = 10 | V/V | `10`, `-2`, `20dB` |
 | `GBW`, `Bandwidth` | op-amp | GBW: the gain-bandwidth (the circuit model's dominant pole at GBW/Aol). Bandwidth: a gain block's (a part with `Gain`) one pole, else at GBW / \|gain\|; on an op-amp solved in its circuit, **its stage's bandwidth limit**: a stage wider than it is a `bandwidth_limit` issue | MHz | `10MHz` |
@@ -69,8 +69,8 @@ A part's parameters can come from its symbol's fields instead of being typed in:
 | `Aol`, `Fp2`, `PM` | op-amp | open-loop gain, a second open-loop pole or the phase margin at unity gain (the circuit model) | dB, Hz, ° | `110dB`, `20MHz`, `60` |
 | `CMRR` | op-amp | shown only: the path model is single-ended | dB | `90dB` |
 
-- **Values:** read with units as InvenTree sends them (`3.8milliohm`, `616 picofarad`, `6.9 mΩ`) or in datasheet notation (`3.8m`, `616p`, `4m7`); a bare number is in the unit above. A value of the wrong kind (`100V` for Rds(on)) is not used, and the stage's or part's note says why; a value outside the usual range is used as written, with a note. Parallel parts whose fields disagree give no value.
-- **In sync:** a stage's or part's value from the schematic is listed in its `from_schematic` (in the settings file) and is read again on every open (`groundtruth init`, the plugin) and before every run, so an InvenTree change arrives by itself once KiCad's symbols and PCB are updated. Detection fills a new stage from its parts' fields.
+- **Values:** read with units as an HTTP lib sends them (`3.8milliohm`, `616 picofarad`, `6.9 mΩ`) or in datasheet notation (`3.8m`, `616p`, `4m7`); a bare number is in the unit above. A value of the wrong kind (`100V` for Rds(on)) is not used, and the stage's or part's note says why; a value outside the usual range is used as written, with a note. Parallel parts whose fields disagree give no value.
+- **In sync:** a stage's or part's value from the schematic is listed in its `from_schematic` (in the settings file) and is read again on every open (`groundtruth init`, the plugin) and before every run, so an HTTP lib change arrives by itself once KiCad's symbols and PCB are updated. Detection fills a new stage from its parts' fields.
 - **Set here:** a value typed in GroundTruth (the forms, the Parts table, the file) is the user's: kept, and where the schematic says something else, marked `!` in the forms and the Parts table's Schematic column, and reported as the info issue `schematic_differs`. **Use schematic values** (Converters, Bridges) and **Reset filtered to suggested** (Parts) take the schematic's values back; an emptied form field takes it too.
 - The plugin's Help (**Part parameters from the schematic**) lists the same table, generated from `components/fields.PARAMS` with the usual ranges.
 

@@ -162,8 +162,8 @@ def test_a_pass_fet_joins_its_drain_and_source_not_its_gate(tmp_path):
     assert v["Q9_G"] == (34.0, "rides on VIN (+ up to 10 V of gate drive)")     # its gate rides its source
 
 
-def test_ratings_under_inventrees_names_and_as_fractions(tmp_path):
-    """kraft_flux_mini_2's parts carry InvenTree's "Rated Voltage: 50V" and "Rated Power: 1/16W"; a fraction is its
+def test_ratings_under_the_http_libs_names_and_as_fractions(tmp_path):
+    """kraft_flux_mini_2's parts carry the HTTP lib's "Rated Voltage: 50V" and "Rated Power: 1/16W"; a fraction is its
     value (1/16 W was read as 1 W before)."""
     from groundtruth.analysis.safety import resistor_rating
     from groundtruth.components.values import parse_quantity
