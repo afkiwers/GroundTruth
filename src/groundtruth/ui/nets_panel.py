@@ -150,6 +150,10 @@ class NetsPanel(SelectableRows, wx.Panel):
         self._init_rows(on_show, "nets")
         self._init_enable("nets")
         self.list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_select)
+        # several rows selected: the shared fields as shown then ({key: text}, * where they differ), else None
+        self._multi: Optional[dict] = None
+        self.list.Bind(wx.EVT_LIST_ITEM_DESELECTED,
+                       lambda e: (e.Skip(), wx.CallAfter(lambda: self and self._form_for_selection())))
 
         form = wx.FlexGridSizer(cols=2, vgap=6, hgap=8)
         form.AddGrowableCol(1)
@@ -357,7 +361,60 @@ class NetsPanel(SelectableRows, wx.Panel):
         chosen among them) and show it in full under the list."""
         self._selection_changed()
         wx.CallAfter(lambda: self and self._show_path())         # after the list has its new selection
-        n = self.nets[evt.GetIndex()]
+        wx.CallAfter(lambda: self and self._form_for_selection())
+        self._fill_one(self.nets[evt.GetIndex()])
+
+    # the form's signal fields, shared by several paths when several are selected (the user: "more than one could be
+    # selected and any edited at once. Any paras that are not the same are presented as * and ignored on update
+    # unless the user changed it"): (NetSpec field, control, how it is shown and read)
+    MIXED = "*"
+
+    def _shared_fields(self) -> list:
+        """(key, control, unit kind) of every field several paths can share; the kinds: hz, s, v, num, ohm, nh, pf,
+        int (see _show / _read)."""
+        return [("freq", self.freq, "hz"), ("rise_time", self.rise, "s"), ("amplitude_v", self.ampl, "v"),
+                ("duty", self.duty, "num"), ("fall_time", self.fall, "s?"), ("driver_ohms", self.src_r, "ohm?"),
+                ("driver_nh", self.src_l, "nh?"), ("driver_pf", self.src_c, "pf?"), ("load_ohms", self.load_r, "ohm?"),
+                ("load_pf", self.load_c, "pf?"), ("sweep_from", self.sweep_from, "hz?"),
+                ("sweep_to", self.sweep_to, "hz?"), ("max_bandwidth", self.max_bw, "hz?"),
+                ("sweep_points", self.sweep_pts, "int?")]
+
+    @staticmethod
+    def _show(value, kind: str) -> str:
+        """A field's value as the form shows it ("" for none)."""
+        if value is None:
+            return ""
+        base = kind.rstrip("?")
+        if base == "hz":
+            return format_si(value, "Hz")
+        if base == "s":
+            return format_si(value, "s")
+        if base == "int":
+            return str(value)
+        return f"{value:g}"
+
+    def _read(self, ctrl, kind: str):
+        """(the field's value, problem or ""): parsed by kind; empty is None where the field is optional (kind ends
+        in ?), a problem where it is required."""
+        text = ctrl.GetValue().strip()
+        base, optional = kind.rstrip("?"), kind.endswith("?")
+        strip = {"hz": "Hz", "s": "s", "v": "V", "nh": "nH", "pf": "pF", "ohm": "Ω"}.get(base, "")
+        if strip and text.lower().endswith(strip.lower()):
+            text = text[: -len(strip)].strip()
+        if base == "ohm" and text.lower().endswith("ohm"):
+            text = text[:-3].strip()
+        if not text:
+            return None, "" if optional else "must be a number"
+        v = parse_value(text)
+        if v is None or (base == "int" and v != int(v)):
+            return None, "must be a whole number" if base == "int" else "must be a number"
+        return (int(v) if base == "int" else v), ""
+
+    def _fill_one(self, n: NetSpec):
+        """The form shows one path (its own fields enabled again)."""
+        self._multi = None
+        for ctrl in (self.net, self.driver, self.receivers, self.through):
+            ctrl.Enable(True)
         self.net.SetValue(n.name)
         self.through.SetValue(", ".join(n.through))
         self.on_net()
@@ -376,6 +433,55 @@ class NetsPanel(SelectableRows, wx.Panel):
                         (self.max_bw, n.max_bandwidth)):
             ctrl.SetValue("" if v is None else format_si(v, "Hz"))
         self.sweep_pts.SetValue("" if n.sweep_points is None else str(n.sweep_points))
+
+    def _form_for_selection(self):
+        """After the selection settled: several rows show their shared fields (a value they differ in as *), and
+        their own fields (net, driver, receivers, pass-through) are greyed; one row shows itself."""
+        rows = self.selected_rows()
+        if len(rows) == 1 and self._multi is not None:
+            self._fill_one(self.nets[rows[0]])
+        if len(rows) < 2:
+            return
+        specs = [self.nets[i] for i in rows]
+        shown = {}
+        for key, ctrl, kind in self._shared_fields():
+            texts = {self._show(getattr(s, key), kind) for s in specs}
+            shown[key] = texts.pop() if len(texts) == 1 else self.MIXED
+            ctrl.SetValue(shown[key])
+        for ctrl in (self.net, self.driver, self.receivers, self.through):
+            ctrl.Enable(False)
+        self._multi = shown
+
+    def _update_many(self, rows: list):
+        """Update selected with several rows: every shared field the user changed (not * and not what was shown)
+        goes into each selected path; the rest of each path stays its own."""
+        changes, problems = {}, []
+        for key, ctrl, kind in self._shared_fields():
+            text = ctrl.GetValue().strip()
+            if text == self.MIXED or text == self._multi.get(key):
+                continue
+            value, problem = self._read(ctrl, kind)
+            if problem:
+                problems.append(f"{key.replace('_', ' ')}: {problem} (or * to leave each path's own)")
+            else:
+                changes[key] = value
+        if problems:
+            message_box("\n".join(problems), "GroundTruth", wx.ICON_WARNING)
+            return
+        if not changes:
+            self.parent_status(f"nothing changed in the form for the {len(rows)} selected paths")
+            return
+        for i in rows:
+            self.nets[i] = replace(self.nets[i], reviewed=True, **changes)
+        if self._commit():
+            self.reselect(rows)          # the list was rebuilt: the paths stay selected for the next edit
+            self._form_for_selection()
+
+    def parent_status(self, text: str):
+        """A line in the window's status bar, when there is one."""
+        top = self.GetTopLevelParent()
+        if hasattr(top, "SetStatusText"):
+            top.SetStatusText(text)
 
     def _optional(self, ctrl, strip: str = "") -> tuple[Optional[float], bool]:
         """(the field's number or None when empty, whether it was readable)."""
@@ -458,8 +564,8 @@ class NetsPanel(SelectableRows, wx.Panel):
         """Replace the selected net with the form's values, keeping what the form does not show (its source,
         class, enabled state, return pins and current override)."""
         rows = self.selected_rows()
-        if len(rows) > 1:
-            message_box("Select a single net to update it from the form.", "GroundTruth", wx.ICON_INFORMATION)
+        if len(rows) > 1 and self._multi is not None:
+            self._update_many(rows)
             return
         i = rows[0] if rows else -1
         spec = self._form() if rows else None
@@ -470,7 +576,8 @@ class NetsPanel(SelectableRows, wx.Panel):
                                    enabled=old.enabled,
                                    driver_return=old.driver_return, receiver_return=old.receiver_return,
                                    current_a=old.current_a)
-            self._commit()
+            if self._commit():
+                self.select_only(i)          # the list was rebuilt: the path stays selected for the next edit
 
     def on_bode(self, _):
         """"Bode": sweep the selected paths, or every ticked one when none is selected (the window runs it as a job

@@ -579,7 +579,8 @@ class BridgesPanel(SelectableRows, wx.Panel):
                           d_max=old.d_max)
             link_form(self.board, self.settings.config, new, old)
             self.bridges[i] = new
-            self._commit()
+            if self._commit():
+                self.select_only(i)          # the list was rebuilt: the bridge stays selected for the next edit
             self._show_marks(new)
 
     def on_schematic(self, _):
