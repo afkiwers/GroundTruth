@@ -517,6 +517,39 @@ def test_converters_tab_adds_a_stage_and_simulate_shows_its_hot_loop(app, conv_f
     assert "DC input J1.1" in f.results_panel.tile_text() and "A/mm²" in f.results_panel.tile_text()
 
 
+def test_setup_tabs_are_pastel_and_the_strip_changes_page(app, frame):
+    """The user: "can we colour those with pastel like colers and make them stand out". The tabs are drawn by
+    GroundTruth (ui/tabbook.py; native Windows tabs can't be coloured one by one): the six setup tabs each have a
+    hue of their own, the rest none, a gap before Parts. A tint is a light mix of the hue (stronger when selected),
+    the label a deep shade of it; a click on a tab, the arrow keys on the strip and Ctrl+PgDn change the page."""
+    from groundtruth.ui import theme
+    from groundtruth.ui.tabbook import SETUP_HUES, mix, tab_colours
+    f = frame
+    run_steps(app, f, [lambda: None])                          # the tabs are built
+    nb = f.notebook
+    labels = [nb.GetPageText(k) for k in range(nb.GetPageCount())]
+    coloured = [labels[k] for k, h in enumerate(nb.hues) if h]
+    assert coloured == ["Signal paths", "Converters", "Bridges", "DC loads", "Power integrity", "Signal integrity"]
+    assert len(set(SETUP_HUES.values())) == 6 and nb.gaps == {labels.index("Parts")}
+    assert mix("#ff0000", "#ffffff", 0.2) == "#ffcccc"
+    for pal in (theme.LIGHT, theme.DARK):
+        quiet, chosen = tab_colours("#3b82f6", False, False, pal), tab_colours("#3b82f6", True, False, pal)
+        assert quiet[0] != chosen[0] and quiet[2] is None and chosen[2] == "#3b82f6"
+        assert tab_colours(None, False, False, pal)[0] is None
+    # the strip: tabs left to right without overlap, the gap before Parts; a click shows that tab's page
+    rects = nb.strip.tab_rects()
+    assert all(a[0] + a[1] < b[0] for a, b in zip(rects, rects[1:]))
+    k = labels.index("Results")
+    nb.strip._left_down(type("E", (), {"GetX": lambda self: rects[k][0] + 5})())
+    assert nb.GetCurrentPage() is f.results_panel
+    nb.strip._key(type("E", (), {"GetKeyCode": lambda self: wx.WXK_LEFT, "Skip": lambda self: None})())
+    assert nb.GetSelection() == k - 1
+    f._step_tab(1)
+    f._step_tab(1)
+    assert nb.GetSelection() == k + 1
+    assert nb.strip.GetBestSize().height > nb.strip.GetCharHeight()
+
+
 def test_help_opens_at_the_tab_shown_and_every_link_lands(app, frame):
     """Help (top bar, F1) opens one window at the section of the tab shown, and raises it again for another tab.
     Every topic and every link inside the page has its anchor; the theme's colours are filled in."""
@@ -1366,7 +1399,8 @@ def test_the_heatmap_tab_scrolls_through_full_width_plots(app, frame):
     page_w = h.page.GetClientSize().width
     assert all(abs(c.GetSize().width - page_w) <= 2 for c in (h.canvas, h.canvas3, h.canvas2))
     assert h.canvas.GetPosition().y < h.canvas3.GetPosition().y < h.canvas2.GetPosition().y
-    assert h.canvas3.GetSize().height == h._px(section_height_in(h.board, h.current()))
+    # with its caption, as wrapped at the page's width
+    assert h.canvas3.GetSize().height == h._px(section_height_in(h.board, h.current(), page_w / h._px(1.0)))
     assert h.canvas2.GetSize().height == h._px(SPECTRUM_IN)
     assert h.page.GetVirtualSize().height > h.page.GetClientSize().height          # it scrolls
     side = h.fig3.axes[1]
@@ -1400,7 +1434,8 @@ def test_the_heatmap_tab_scrolls_through_full_width_plots(app, frame):
     size = f.GetSize()
     f.SetSize((size.width, 480))
     wait_for(app, lambda: h.page.GetClientSize().height < 300 and not h.rendering())
-    assert h.canvas3.IsShown() and h.canvas3.GetSize().height == h._px(section_height_in(h.board, h.current()))
+    assert h.canvas3.IsShown() and h.canvas3.GetSize().height == h._px(section_height_in(
+        h.board, h.current(), h.page.GetClientSize().width / h._px(1.0)))
     assert tuple(h.canvas.figure.get_size_inches() * h.canvas.figure.dpi) == pytest.approx(
         tuple(h.canvas.GetSize()), abs=2)                       # rendered at the canvas's new size
     f.SetSize(size)

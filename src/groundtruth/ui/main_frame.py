@@ -41,6 +41,7 @@ from .nets_panel import NetsPanel
 from .parts_panel import PartsPanel
 from .progress import ProgressClock, clock, release_failure
 from .results_panels import ResultsPanel, IssuesPanel
+from .tabbook import SETUP_HUES, TabBook
 
 BOARD_ARROW_SPACING_MM = 0.8   # spot spacing of the current arrows drawn on the board (arrows 0.56 mm long)
 MAX_BOARD_ARROWS = 1500        # three graphic segments each; the spacing grows beyond that
@@ -527,18 +528,24 @@ class MainFrame(wx.Frame):
         self._help = None
         self._solver = None
         self._cell_mm = None        # the last Simulate's coarsest cell at 1× (Preferences shows each level's)
-        help_id = wx.NewIdRef()
+        help_id, prev_id, next_id = wx.NewIdRef(), wx.NewIdRef(), wx.NewIdRef()
         self.Bind(wx.EVT_MENU, lambda e: self.on_help(), id=help_id)
-        self.SetAcceleratorTable(wx.AcceleratorTable([(wx.ACCEL_NORMAL, wx.WXK_F1, help_id)]))
+        self.Bind(wx.EVT_MENU, lambda e: self._step_tab(-1), id=prev_id)
+        self.Bind(wx.EVT_MENU, lambda e: self._step_tab(1), id=next_id)
+        self.SetAcceleratorTable(wx.AcceleratorTable([(wx.ACCEL_NORMAL, wx.WXK_F1, help_id),
+                                                      (wx.ACCEL_CTRL, wx.WXK_PAGEUP, prev_id),
+                                                      (wx.ACCEL_CTRL, wx.WXK_PAGEDOWN, next_id)]))
         line = wx.Panel(self, size=(-1, 1))
         line.SetBackgroundColour(theme.colour(theme.palette().border))
 
         # the tabs are built one per event-loop step (_build_pages): their ~40 native controls each cost the GUI
-        # thread ~2 ms apiece, ~0.25 s in all, which in one block is a visible stall when the window opens
-        self.notebook = wx.Notebook(self)
+        # thread ~2 ms apiece, ~0.25 s in all, which in one block is a visible stall when the window opens.
+        # TabBook (ui/tabbook.py): tabs drawn by GroundTruth, the setup tabs in pastel colours (native ones can't be)
+        self.notebook = TabBook(self)
         root = wx.BoxSizer(wx.VERTICAL)
         root.Add(top, 0, wx.EXPAND)
         root.Add(line, 0, wx.EXPAND)
+        root.Add(self.notebook.strip, 0, wx.EXPAND)
         root.Add(self.notebook, 1, wx.EXPAND)
         self.SetSizer(root)
         self._pages = [
@@ -665,9 +672,12 @@ class MainFrame(wx.Frame):
             return
         self._building = None
         theme.style_tree(panel)                 # the palette (theme.py), while it is still hidden
+        # hidden before it moves: TabBook (a wx.Simplebook) sizes a page before hiding it, and a shown page is laid
+        # out in the shown window then (213-284 ms per tab on flux-2; native tabs hid it first)
+        panel.Hide()
         panel.Reparent(self.notebook)
         setattr(self, attr, panel)
-        self.notebook.AddPage(panel, label)
+        self.notebook.AddPage(panel, label, hue=SETUP_HUES.get(attr), gap=attr == "parts")
         if self._pages:
             wx.CallLater(1, self._build_pages)
         else:
@@ -676,6 +686,12 @@ class MainFrame(wx.Frame):
             self.notebook.SetSelection(0)
             freeze_long_lived()             # garbage collection walks only what comes after (ui/gil.py)
             self.on_reload()
+
+    def _step_tab(self, step: int):
+        """Ctrl+PgUp / Ctrl+PgDn: the tab before / after (as with native tabs), round the ends."""
+        n = self.notebook.GetPageCount()
+        if n:
+            self.notebook.SetSelection((self.notebook.GetSelection() + step) % n)
 
     def pages_built(self) -> bool:
         """Every tab has been built (and the board read was started)."""
