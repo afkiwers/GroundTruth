@@ -789,11 +789,11 @@ soldered pin is not checked as a via: the pin carries the current between the la
 </ul>
 
 <hr><a name="results"></a><h3>Results tab</h3>
-<p>One view per analysed item: pick it in the <b>Route</b> list at the top, and the copper layer in <b>Layer</b>.
+<p>One view per analysed item: pick it in the <b>View</b> list at the top, and the copper layer in <b>Layer</b>.
 <b>Current arrows</b>, <b>Log scale</b> and <b>Cross-section</b> switch those parts of the view on and off and keep
 their state for next time. How vias and parts are marked is set in <a href="#prefs">Preferences</a>.</p>
 <ul>
-<li><b>Route</b> lists a signal route as its net and driver → receiver, a converter's DC path as "DC" and the
+<li><b>View</b> lists a signal route as its net and driver → receiver, a converter's DC path as "DC" and the
   path's name, a bridge's RMS map as "RMS currents", and the bridge, sweep and thermal views by name.
   <b>Layer</b>: <i>main layers</i>, or one copper layer with its share of the current in %, busiest first (the
   drawing buttons use the busiest layer for <i>main layers</i>).</li>
@@ -1042,7 +1042,7 @@ junction-to-board resistances (<code>theta_jb</code>). The thermal mesh is the s
 (draft, normal, fine) unless <a href="#prefs">Preferences</a> sets one for this computer. Both run in the
 background; <b>Cancel</b> stops them. The solve is steady state: a load that lasts a few seconds (a cranking pulse)
 heats less than shown.</p>
-<p>Thermal adds a temperature view to the Results tab's <b>Route</b> list (replacing an earlier one), its issues
+<p>Thermal adds a temperature view to the Results tab's <b>View</b> list (replacing an earlier one), its issues
 join the Issues tab, and the status line gives the hottest copper and its layer and the power in copper and parts.
 The map shows each of its cells at the hottest point the solve found in it, so a track narrower than a map cell
 shows its own temperature. The copper's heat is exactly the DC paths' I²·R, its resistivity following the
