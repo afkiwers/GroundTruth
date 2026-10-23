@@ -25,8 +25,10 @@
 
 variables:
   BOARD: "hardware/myboard.kicad_pcb"
-  # The PyPI distribution is groundtruth-pcb ("groundtruth" on PyPI is an unrelated package); or the repository:
-  GROUNDTRUTH: "groundtruth-pcb"     # e.g. "git+https://gitlab.example.com/tools/groundtruth.git"
+  # GroundTruth from its repository (it is not on PyPI). Pin a release tag, so every pipeline runs the same analysis
+  # code and a new GroundTruth arrives only when you change it: e.g. ...GroundTruth.git@0.1.42593 (the tags:
+  # https://github.com/afkiwers/GroundTruth/releases). A mirror of your own works too (git+https://gitlab.../...).
+  GROUNDTRUTH_URL: "git+https://github.com/afkiwers/GroundTruth.git@main"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 .groundtruth:
@@ -36,7 +38,7 @@ variables:
     paths: [.cache/pip]
   before_script:
     - apt-get update -qq && apt-get install -y -qq git > /dev/null
-    - pip install --quiet "$GROUNDTRUTH"
+    - pip install --quiet "groundtruth-pcb @ $GROUNDTRUTH_URL"
   artifacts:
     when: always
     expire_in: 4 weeks
@@ -93,7 +95,7 @@ emi-verify:
     GT_CONFIG: "hardware/groundtruth/configs/release.gtconfig.yaml"
     GT_THRESHOLDS: "hardware/groundtruth/release.gtthresholds.yaml"
   script:
-    - pip install --quiet "${GROUNDTRUTH}[thermal]"    # only needed for a thermal max_c criterion
+    - pip install --quiet "groundtruth-pcb[thermal] @ $GROUNDTRUTH_URL"   # only for a thermal max_c criterion
     - groundtruth verify "$BOARD" --config "$GT_CONFIG" --thresholds "$GT_THRESHOLDS" --out-dir emi --verbose
   artifacts:
     reports:
@@ -116,8 +118,7 @@ emi-thermal:
     - when: manual
       allow_failure: true
   script:
-    # from a repository instead: pip install "groundtruth-pcb[thermal] @ git+https://…"
-    - pip install --quiet "${GROUNDTRUTH}[thermal]"
+    - pip install --quiet "groundtruth-pcb[thermal] @ $GROUNDTRUTH_URL"
     - groundtruth simulate "$BOARD" --thermal --capacity --verbose
         --format text --format html --format json --out-dir emi
 
@@ -159,7 +160,7 @@ emi-check-refill:
     - when: manual
       allow_failure: true
   before_script:
-    - python3 -m pip install --quiet --break-system-packages "$GROUNDTRUTH"
+    - python3 -m pip install --quiet --break-system-packages "groundtruth-pcb @ $GROUNDTRUTH_URL"
   script:
     - groundtruth check "$BOARD" --refill-zones --format text --format gitlab-codequality --out-dir emi
   artifacts:
