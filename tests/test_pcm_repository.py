@@ -93,8 +93,9 @@ def test_the_repository_holds_the_public_half_only():
     """The repository (as committed) has no private key, and tools/release_key.pub is a 32-byte Ed25519 public key in
     hex; .gitignore keeps key files out."""
     import subprocess
-    out = subprocess.run(["git", "grep", "-l", "-e", "-----BEGIN .*PRIVATE KEY"], cwd=ROOT, capture_output=True)
-    assert out.stdout.strip() == b""
+    # the release workflow's own check over the tracked files (its PEM pattern does not match itself)
+    tracked = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True).stdout.split(b"\0")
+    assert [f for name in tracked if name for f in repo.key_inside(ROOT / name.decode())] == []
     assert re.fullmatch(r"[0-9a-f]{64}", (ROOT / "tools" / "release_key.pub").read_text().strip())
     ignore = (ROOT / ".gitignore").read_text()
     assert "*.pem" in ignore and "release_ed25519*" in ignore
@@ -121,7 +122,7 @@ def test_a_build_signs_only_with_the_key_the_servers_trust(tmp_path, monkeypatch
     pub = tmp_path / "release_key.pub"
     pub.write_text(write_key(trusted) + "\n")
     write_key(other)
-    monkeypatch.setattr(msp, "EXPECTED_PUBLIC", pub)
+    monkeypatch.setenv(msp.PUB_ENV, str(pub))
     monkeypatch.setattr(msp, "source_files", lambda working_tree=False: {"groundtruth/__init__.py": b""})
     monkeypatch.setenv(release.KEY_ENV, str(other))
     with pytest.raises(SystemExit, match="not the one the servers trust"):

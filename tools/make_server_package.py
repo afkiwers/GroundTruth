@@ -32,6 +32,13 @@ EPOCH = datetime(2026, 1, 1, tzinfo=timezone.utc)       # as make_pcm_package.py
 # the public half (hex) of the release key the installed servers trust: public, so it is in the repository; a
 # build checks its key against it (the private half never is: on the build PC, or the release workflow's secret)
 EXPECTED_PUBLIC = ROOT / "tools" / "release_key.pub"
+PUB_ENV = "GROUNDTRUTH_RELEASE_PUB"     # another trusted public half's file (the tests: their own, or none)
+
+
+def expected_public() -> Path:
+    """The trusted public half's file: the one PUB_ENV names, else EXPECTED_PUBLIC. A file that is not there: no
+    check, and a missing key is made (the tests build with throwaway keys so)."""
+    return Path(os.environ[PUB_ENV]) if os.environ.get(PUB_ENV) else EXPECTED_PUBLIC
 
 
 def git(*args: str) -> bytes:
@@ -80,7 +87,8 @@ def build(version: str, tag: str, version_text: str, working_tree: bool = False)
     half of the key the servers trust) no key is ever made, and a key that does not match it stops the build: a
     package signed by another key would be refused by every server (a PC or a CI run without the right key)."""
     from groundtruth.remote import release
-    expected = EXPECTED_PUBLIC.read_text(encoding="utf-8").strip() if EXPECTED_PUBLIC.exists() else None
+    trusted = expected_public()
+    expected = trusted.read_text(encoding="utf-8").strip() if trusted.exists() else None
     try:
         private, made = release.load_private(create=expected is None and not os.environ.get(release.KEY_ENV))
     except FileNotFoundError:
@@ -88,7 +96,7 @@ def build(version: str, tag: str, version_text: str, working_tree: bool = False)
                          f"name it in {release.KEY_ENV}); a new key would not be accepted by them")
     if expected is not None and release.public_hex(private) != expected:
         raise SystemExit(f"the release key at {release.private_key_path()} is not the one the servers trust "
-                         f"({EXPECTED_PUBLIC.name}): its packages would be refused")
+                         f"({trusted.name}): its packages would be refused")
     if made:
         print(f"made a new release key: {release.private_key_path()} (keep it, and back it up: servers installed from "
               "its packages take remote updates only from packages signed with it)", file=sys.stderr)

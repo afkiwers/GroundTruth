@@ -22,6 +22,9 @@ def _private_user_folders(tmp_path_factory, monkeypatch):
     (root / "local" / "GroundTruth").mkdir(parents=True)
     (root / "local" / "GroundTruth" / "ui.json").write_text('{"history": false}', encoding="utf-8")
     monkeypatch.setenv("LOCALAPPDATA", str(root / "local"))
+    # a package built in a test signs with a throwaway key made in that private folder: no trusted public half to
+    # match (the repository's tools/release_key.pub is the user's; tools/make_server_package.PUB_ENV)
+    monkeypatch.setenv("GROUNDTRUTH_RELEASE_PUB", str(root / "no-trusted-key.pub"))
 
 
 def make(tmp_path, gen, name="b", nets=(SIG,), capacitance=False, **analysis):

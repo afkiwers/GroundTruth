@@ -42,6 +42,13 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
   board nets (filter, multi-select) / victims with why, Add / Remove one or several, the automatic ones shown and
   copied into the list on the first change (agreed), Reset to automatic; `analysis.victims.board_auto_nets` (every
   stage's nets left out; equals find_victims for one bridge, test_stack), `SettingsFile.set_victim_nets`.
+- **Branch `release-version` (2026-10-24):** the user: "The tag should be the plugin version". The workflow passes
+  the tag to `make_pcm_package.py --version` (N.N.N, a leading v dropped, else exit 2), so the packages,
+  version.txt and the KiCad repository carry it; PC builds keep pyproject major.minor + counter (0.1.42530), so
+  releases should be 0.2.0 and up while pyproject says 0.1 (the user's installed 0.1.42530 is higher than any 0.1.x
+  tag). Also fixed: the packaging tests (test_package, test_remote_update, test_server_setup) failed since
+  `release-ci` (a build without the trusted key stops); tests now name their own trust anchor
+  (`make_server_package.PUB_ENV`, set in conftest), and the repo key check uses the workflow's own check.
 - **Branch `ci-verify` (2026-10-23, on `victims-picker`):** `groundtruth verify BOARD --config C --thresholds T
   --out-dir D` (the user: run a sim config from the console with pass/fail thresholds, results for GitLab CI before
   production artefacts; asked: a new command, JUnit results, a generic template). `report/verify.py`: TEMPLATE
