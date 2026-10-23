@@ -134,7 +134,8 @@ not the noise a converter or a bridge puts on it. That interaction has its own a
 <ul>
 <li><b>Victims of a bridge or a converter.</b> When a bridge or a power stage is simulated, GroundTruth finds the
   microcontroller, reset, crystal, Hall, debug and PWM / gate-input nets on the board by itself (or takes the ones
-  listed under <code>victims:</code> in the settings), puts them into the stage's model and computes the noise each
+  listed under <code>victims:</code> in the settings, picked with <b>Victims…</b> on the Bridges tab), puts them into
+  the stage's model and computes the noise each
   one's receiver sees at the switching edges. This does not depend on the Signal paths tab. The results are in the
   bridge's drive view, in each stage's part of the report, and as <code>victim_coupling</code> issues.</li>
 </ul>
@@ -423,6 +424,14 @@ ticked.</p>
   modelled as a <code>short</code> gets no loss: give it a resistor model);</li>
 <li><b>checks the victims</b> (see <a href="#together">above</a>) and runs the <b>sweep</b>.</li>
 </ul>
+<p><b>Victims…</b> (under the legs table; the line beside it says what is set) picks the nets the switching may
+upset, for every bridge and power stage. On the left the board's nets (type to filter, Ctrl- or Shift-click to select
+several), on the right the victims with why each is one. <b>Add →</b> adds the nets selected on the left (several at
+once, or double-click one), <b>← Remove</b> removes those selected on the right (or Delete, or double-click). Until
+you change something the victims are automatic: the reset, crystal, Hall, debug and PWM nets found by their names at
+each run, shown as <i>auto</i>. Your first Add or Remove keeps those and makes the list your own, so nothing found
+automatically drops out unnoticed; <b>Reset to automatic</b> goes back (an empty list is automatic too). OK writes
+<code>victims: nets:</code>; Undo takes it back.</p>
 <p>On the Results tab a bridge has four kinds of view: its drive (phase and bus currents, capacitor ripple,
 conducted spectrum, losses), each leg's hot loop, its <b>RMS currents</b> map, and its <b>sweep</b> (losses, RMS
 density, conducted and radiated margin against the phase current, one line per speed; a hollow marker where the
