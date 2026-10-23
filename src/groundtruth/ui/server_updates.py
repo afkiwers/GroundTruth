@@ -14,7 +14,7 @@ import time
 from typing import Callable, Optional
 
 POLL_S = 3.0                    # how often a server being updated is asked
-UPDATE_WAIT_S = 30 * 60         # how long an update is followed (a waiting server finishes its running jobs first)
+UPDATE_WAIT_S = 30 * 60         # how long an update is followed (a busy server stops its running jobs first)
 
 
 def _port(address: str, default: int = 8765) -> int:
@@ -79,7 +79,7 @@ def row_of(name: str, address: str, status: Optional[dict], error: str, mine_ver
         text += " (remote updates off: update it at the server)"
     up = status.get("update") or {}
     if up.get("state") in ("waiting", "installing"):
-        text = f"updating to {_short(up.get('version'))}: " + ("waiting for its running job(s)"
+        text = f"updating to {_short(up.get('version'))}: " + ("stopping its running job(s)"
                                                                if up["state"] == "waiting" else "installing")
         can = False
     return {"name": status.get("host") or name, "address": address, "version": _short(status.get("version")),
@@ -153,7 +153,7 @@ def update(address: str, key: str, bundle: dict, progress: Callable[[str], None]
         answer = srv.update(bundle["zip"].read_bytes(), bundle["sig"])
     except Exception as e:                          # noqa: BLE001 - refused or unreachable: said on its row
         return False, str(e).split(": ", 1)[-1] if ": " in str(e) else str(e)
-    progress("waiting for its running job(s)" if answer.get("state") == "waiting" else "installing…")
+    progress("stopping its running job(s)" if answer.get("state") == "waiting" else "installing…")
     t0 = clock()
     while clock() - t0 < UPDATE_WAIT_S:
         if stop is not None and stop.is_set():
@@ -173,5 +173,5 @@ def update(address: str, key: str, bundle: dict, progress: Callable[[str], None]
             return False, f"the update {up['state']}: {up.get('error') or '?'}"
         if up.get("state") == "waiting":
             n = len(st.get("running") or [])
-            progress(f"waiting for {n} running job(s)" if n else "waiting for its running job(s)")
+            progress(f"stopping {n} running job(s)" if n else "stopping its running job(s)")
     return False, "no answer from the updated server within 30 minutes: check it there (install_server status)"
