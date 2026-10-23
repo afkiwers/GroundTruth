@@ -232,3 +232,46 @@ def test_a_bootstrap_capacitor_sees_the_drive_not_the_rail(tmp_path):
     check_capacitors(b, cfg, voltage_model(b, cfg), cfg.safety, lambda *a, **k: found.append((a, k)))
     ((args, kw),) = [x for x in found if x[0][1] == "C7"]
     assert "sees 10 V" in args[2] and kw["severity"] == "warning"
+
+
+def test_checks_switched_off_in_preferences_are_left_out(tmp_path):
+    """Preferences > Run checks (the user: "Make sure the user can enable/disable each of the settings as needed;
+    default enabled"): every check on by default; a check id in Config.checks_off gives no issue (the safety checks
+    not run at all), the others are unchanged; prefs_dialog.with_checks turns the unticked boxes into it."""
+    pytest.importorskip("wx")
+    from dataclasses import replace
+    from groundtruth.adapters.file_source import load_board
+    from groundtruth.ui.prefs_dialog import CHECK_TOGGLES, checks_off, defaults, with_checks
+    from groundtruth.core.issues import CHECKS
+    assert checks_off({}) == frozenset() and all(defaults({})[key] for key, *_ in CHECK_TOGGLES)
+    assert all(c in CHECKS for *_, ids, _tip in CHECK_TOGGLES for c in ids)
+    _, sc, path = make(tmp_path, safety_board(gap=0.1, cap_value="100n 25V", tvs=False), "off", nets=())
+    board = load_board(path)
+    every = {i.check for i in run_checks(board, sc.config).issues}
+    assert set(SAFETY) <= every
+    for check in SAFETY:
+        cfg = replace(sc.config, checks_off=frozenset({check}))
+        assert {i.check for i in run_checks(board, cfg).issues} == every - {check}
+    cfg = with_checks(sc.config, {"check_esd_protection": False, "check_cap_voltage": False})
+    assert cfg.checks_off == {"esd_protection", "cap_voltage"}
+    assert {i.check for i in run_checks(board, cfg).issues} == every - {"esd_protection", "cap_voltage"}
+    assert with_checks(sc.config, {}) is sc.config          # nothing changed: the same object
+
+
+def test_esd_search_distance_from_preferences(tmp_path):
+    """Preferences > Run checks > ESD search distance replaces safety.esd_mm: D1 sits 2 mm from J1.1, so SIG is
+    protected at the 10 mm default and not at 1 mm; a value out of range falls back to 10 mm."""
+    pytest.importorskip("wx")
+    from groundtruth.adapters.file_source import load_board
+    from groundtruth.ui.prefs_dialog import defaults, with_checks
+    _, sc, path = make(tmp_path, safety_board(), "esd", nets=())
+    board = load_board(path)
+
+    def sig_flagged(prefs):
+        """Whether J1's SIG pin is reported without ESD protection."""
+        cfg = with_checks(sc.config, prefs)
+        return any("SIG" in i.message for i in run_checks(board, cfg).issues if i.check == "esd_protection")
+    assert defaults({})["esd_mm"] == 10.0 and defaults({"esd_mm": 1000})["esd_mm"] == 10.0
+    assert not sig_flagged({}) and not sig_flagged({"esd_mm": 10.0})
+    assert sig_flagged({"esd_mm": 1.0})
+    assert with_checks(sc.config, {"esd_mm": 1.0}).safety.esd_mm == 1.0

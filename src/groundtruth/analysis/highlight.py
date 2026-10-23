@@ -32,21 +32,23 @@ PIECE_CHECKS = ("gap_crossing", "off_plane", "edge_proximity", "reference_net")
 ROUTE_CHECKS = ("return_path_broken", "return_detour", "plane_resonance", "emi_margin")
 NEAR_MM = 1.5          # around a piece of trace: the plane zones on either side of a gap or along an edge
 SMALL_MM = 3.0         # a focus smaller than this is zoomed out twice after the fit, below SMALL_MM*3 once
-VIEW_MM = 15.0         # the board shown around a focus in KiCad, at least (the Preferences' "Zoom in KiCad")
+MIN_VIEW_MM = 1.0      # a focus smaller than this is zoomed out to about this much first (the user: "1mm is pretty
+                       # much spot on")
 ZOOM_STEP = 1.58       # KiCad's zoom out: its preset zoom levels (… 50, 80, 130, 220 …) are ~1.58x apart
 ZOOM_STEPS_MAX = 12
 
 
-def zoom_steps(span_mm: float, view_mm: float = VIEW_MM) -> int:
-    """How many of KiCad's zoom-out steps after "zoom to the selection" show at least view_mm of the board around a
-    focus span_mm across: log(view / span) / log(ZOOM_STEP), rounded up, 0 for a focus that is that big already (it
-    fits whole). KiCad's API can't set the view itself, only fit the selection and step out, so the area shown is
-    close to view_mm, not exact. The user: "the zoom is too close, can we make it a setting" (a via fitted and
-    stepped out twice showed ~1.5 mm)."""
+def zoom_steps(span_mm: float, extra: int = 0) -> int:
+    """How many of KiCad's zoom-out steps follow "zoom to the selection" for a focus span_mm across: a focus under
+    MIN_VIEW_MM is first stepped out to about that (log(1 mm / span) / log(ZOOM_STEP), rounded up: a 0.6 mm via 2),
+    then the Preferences' `extra` steps ("Zoom out in KiCad"). KiCad's API can neither set nor read the view, only
+    fit the selection and step out, so the setting is a count of KiCad's own steps, not millimetres: a millimetre
+    target computed from assumed fit margins and step sizes showed 2-4x too much board (the user: "15mm is too far
+    zoomed out. And 1mm is pretty much spot on"; "Let's not call it mm, maybe call it just steps?")."""
     import math
-    if view_mm <= 0 or span_mm >= view_mm:
-        return 0
-    return min(int(math.ceil(math.log(view_mm / max(span_mm, 0.05)) / math.log(ZOOM_STEP))), ZOOM_STEPS_MAX)
+    base = 0 if span_mm >= MIN_VIEW_MM else int(math.ceil(math.log(MIN_VIEW_MM / max(span_mm, 0.05))
+                                                           / math.log(ZOOM_STEP)))
+    return min(base + max(int(extra), 0), ZOOM_STEPS_MAX)
 PLANE_MM = 25.0        # a zone wider than this is a plane: selected after the zoom, never zoomed to
 
 

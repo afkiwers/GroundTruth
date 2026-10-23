@@ -1,6 +1,7 @@
 """Preferences (top bar, next to Help): the settings that are the user's on this computer rather than a board's
 (those live in the board's settings file): Simulate's resolution, solver threads and GPU, the thermal quality, how
-the heatmaps mark vias and parts, the report's author and company, the simulation history, the compute server, the theme. Kept in
+the heatmaps mark vias and parts, the report's author and company, the simulation history, the compute server, the
+theme, which of Run checks' checks run and the ESD search distance. Kept in
 ui.json (theme.prefs); the working toggles (current arrows, log scale, cross-section, zoom and highlight in KiCad)
 remember their state there too (remember)."""
 from __future__ import annotations
@@ -22,6 +23,37 @@ QUALITY = (FROM_FILE, "draft", "normal", "fine")
 ELECTROTHERMAL = (FROM_FILE, "off", "on")
 ET_ROUNDS = (FROM_FILE,) + tuple(str(n) for n in range(1, 11))
 ET_TOLERANCE = (FROM_FILE, "0.5 %", "1 %", "2 %", "5 %")
+# Run checks' checks the user can switch off (the user: "expose the settings ... under Preferences. Make sure the user
+# can enable/disable each of the settings as needed; default enabled"): (ui.json key, label, the check ids it covers
+# (core/issues.CHECKS), tooltip). Off: their issues are left out of Run checks and Simulate (Config.checks_off).
+CHECK_TOGGLES = (
+    ("check_gap_crossing", "Gaps and splits", ("gap_crossing",),
+     "a signal path's track crossing a gap or a split in its reference plane (error)"),
+    ("check_off_plane", "Off a plane", ("off_plane", "no_reference"),
+     "a track running without a reference plane under it (warning), or on a layer with no plane next to it at all "
+     "(error)"),
+    ("check_edge_proximity", "Plane edges", ("edge_proximity",),
+     "a track running close to the edge of its reference plane (warning)"),
+    ("check_reference_net", "Non-ground reference", ("reference_net",),
+     "a track referenced to a plane that is not ground (info)"),
+    ("check_layer_change_stitch", "Layer change: stitching", ("layer_change_stitch",),
+     "a layer change with the same reference net on both sides but no return via close by (error)"),
+    ("check_layer_change_decap", "Layer change: capacitor", ("layer_change_decap",),
+     "a layer change between different reference nets with no decoupling capacitor close by (warning)"),
+    ("check_clearance_voltage", "Voltage spacing", ("clearance_voltage",),
+     "copper of two nets closer than IPC-2221B asks for their voltage difference (error); off, it is not run "
+     "(the slowest of the checks on a big board)"),
+    ("check_cap_voltage", "Capacitor ratings", ("cap_voltage",),
+     "a capacitor's voltage over its derated rating (warning)"),
+    ("check_esd_protection", "ESD at connectors", ("esd_protection",),
+     "a connector's pins with no ESD / TVS part on their nets within the distance below (info; a warning for the "
+     "board's safety.esd_connectors)"),
+    ("check_diff_pairs", "Differential pairs", ("diff_impedance", "diff_skew"),
+     "the Signal integrity tab's pairs: impedance outside the target and skew over the limit (warnings)"),
+    ("check_impedance", "Impedance targets", ("impedance",),
+     "a net's characteristic impedance outside its target along part of its tracks (warning)"),
+)
+ESD_MM_MIN, ESD_MM_MAX = 0.5, 100.0       # the ESD search distance in Preferences (SafetySettings.esd_mm: 10 mm)
 GAP = 6                  # the dialog's spacing unit (DIP): rows and labels one apart, groups and margins two
 MIN_PANE_DIP = 200       # the scrolled pane of groups is never shorter (the dialog's minimum height)
 
@@ -87,11 +119,37 @@ def _contour_widths(prefs: dict) -> dict:
             "contour_index_mm": mm("contour_index_mm", CONTOUR_INDEX_MM)}
 
 
-def _kicad_zoom(prefs: dict) -> float:
-    """The board shown around an item in KiCad (mm, 1 to 500), else highlight.VIEW_MM (15 mm)."""
-    from ..analysis.highlight import VIEW_MM
-    v = prefs.get("kicad_zoom_mm")
-    return float(v) if isinstance(v, (int, float)) and 1.0 <= v <= 500.0 else VIEW_MM
+KICAD_ZOOM_MAX = 6      # the Preferences' "Zoom out in KiCad": KiCad's zoom-out steps after the fit, 0 to this
+
+
+def _kicad_zoom(prefs: dict) -> int:
+    """KiCad's zoom-out steps after fitting an item (0 to KICAD_ZOOM_MAX), else 0. The millimetre setting before it
+    (kicad_zoom_mm) is not carried over: its numbers meant something else."""
+    v = prefs.get("kicad_zoom_steps")
+    return int(v) if isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= KICAD_ZOOM_MAX else 0
+
+
+def _esd_mm(prefs: dict) -> float:
+    """The ESD / TVS search distance (mm, ESD_MM_MIN to ESD_MM_MAX), else SafetySettings' 10 mm."""
+    from ..config.settings import SafetySettings
+    v = prefs.get("esd_mm")
+    return float(v) if isinstance(v, (int, float)) and ESD_MM_MIN <= v <= ESD_MM_MAX else SafetySettings.esd_mm
+
+
+def checks_off(prefs: dict) -> frozenset:
+    """The check ids (core/issues.CHECKS) whose tick box in Preferences is off."""
+    p = defaults(prefs)
+    return frozenset(c for key, _label, checks, _tip in CHECK_TOGGLES if not p[key] for c in checks)
+
+
+def with_checks(cfg, prefs: dict):
+    """The settings with this computer's check choices: the checks switched off (Config.checks_off) and the ESD
+    search distance (safety.esd_mm, which Preferences replaces). The same object when nothing changes."""
+    from dataclasses import replace
+    off, esd = checks_off(prefs), _esd_mm(prefs)
+    if cfg is None or (cfg.checks_off == off and cfg.safety.esd_mm == esd):
+        return cfg
+    return replace(cfg, checks_off=off, safety=replace(cfg.safety, esd_mm=esd))
 
 
 def defaults(prefs: dict) -> dict:
@@ -118,7 +176,9 @@ def defaults(prefs: dict) -> dict:
             "history_report": bool(prefs.get("history_report", True)),
             **_arrow_range(prefs),
             **_contour_widths(prefs),
-            "kicad_zoom_mm": _kicad_zoom(prefs),
+            "kicad_zoom_steps": _kicad_zoom(prefs),
+            **{key: bool(prefs.get(key, True)) for key, *_ in CHECK_TOGGLES},
+            "esd_mm": _esd_mm(prefs),
             "compute": "server" if prefs.get("compute") == "server" else "local",
             "server": str(prefs.get("server", "") or ""),
             "server_key": str(prefs.get("server_key", "") or ""),
@@ -512,12 +572,12 @@ class PreferencesDialog(wx.Dialog):
         row(board, "Index contour line (mm)", self.contour_index,
             "Draw contours on board: the width of the index lines, every decade (1, 10, 100 ...) or every fifth "
             "isotherm, drawn thicker like a map's index contours")
-        self.kicad_zoom = wx.SpinCtrlDouble(self, min=1.0, max=500.0, inc=1.0, initial=p["kicad_zoom_mm"])
-        self.kicad_zoom.SetDigits(0)
-        row(board, "Zoom in KiCad (mm)", self.kicad_zoom,
-            "when an issue, a map's marker, a cross-section's via or a current-density tile is shown in KiCad: at "
-            "least this much of the board around it (a bigger item still fits whole; KiCad zooms in steps, so "
-            "the view is close to this, not exact)")
+        self.kicad_zoom = wx.SpinCtrl(self, min=0, max=KICAD_ZOOM_MAX, initial=p["kicad_zoom_steps"])
+        row(board, "Zoom out in KiCad (steps)", self.kicad_zoom,
+            "when an issue, a map's marker, a cross-section's via bar or a current-density tile is shown in KiCad: "
+            "KiCad fits the item to the view, then zooms out this many of its own steps (each about 1.6x) to show "
+            "more of the board around it. 0: the fit alone (an item under 1 mm, such as a via, is zoomed out to "
+            "about 1 mm first)")
 
         report = group("Report", "left")
         self.author = wx.TextCtrl(self, value=p["author"])
@@ -539,6 +599,23 @@ class PreferencesDialog(wx.Dialog):
             "show: a few MB per run")
         self.history.Bind(wx.EVT_CHECKBOX, lambda e: self.history_report.Enable(self.history.GetValue()))
         self.history_report.Enable(p["history"])
+
+        checks = group("Run checks", "right")
+        self.checks = {}
+        for key, label, _ids, tip in CHECK_TOGGLES:
+            self.checks[key] = wx.CheckBox(self, label="Check")
+            self.checks[key].SetValue(p[key])
+            row(checks, label, self.checks[key], tip + ". Unticked: Run checks and Simulate leave it out on this "
+                                                       "computer.")
+        self.esd_mm = wx.SpinCtrlDouble(self, min=ESD_MM_MIN, max=ESD_MM_MAX, inc=0.5, initial=p["esd_mm"])
+        self.esd_mm.SetDigits(1)
+        row(checks, "ESD search distance (mm)", self.esd_mm,
+            "ESD at connectors: an ESD / TVS part on a connector pin's net at most this far from the pin counts as "
+            "its protection. Replaces the settings file's safety.esd_mm on this computer (the command line keeps "
+            "reading the file's)")
+        esd = self.checks["check_esd_protection"]
+        esd.Bind(wx.EVT_CHECKBOX, lambda e: self.esd_mm.Enable(esd.GetValue()))
+        self.esd_mm.Enable(p["check_esd_protection"])
 
         look = group("Appearance", "right")
         self.theme = wx.Choice(self, choices=["System", "Light", "Dark"])
@@ -600,7 +677,9 @@ class PreferencesDialog(wx.Dialog):
                                 "arrow_max_mm": self.arrow_max.GetValue()}),
                 **_contour_widths({"contour_line_mm": self.contour_line.GetValue(),
                                    "contour_index_mm": self.contour_index.GetValue()}),
-                "kicad_zoom_mm": _kicad_zoom({"kicad_zoom_mm": self.kicad_zoom.GetValue()}),
+                "kicad_zoom_steps": _kicad_zoom({"kicad_zoom_steps": self.kicad_zoom.GetValue()}),
+                **{key: box.GetValue() for key, box in self.checks.items()},
+                "esd_mm": _esd_mm({"esd_mm": self.esd_mm.GetValue()}),
                 "via_markers": self.via_markers.GetValue(),
                 "max_vias": int(v) if v.isdigit() else None,
                 "outlines": self.outlines.GetValue(),

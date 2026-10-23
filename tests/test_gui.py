@@ -2389,6 +2389,27 @@ def test_use_all_cores_is_an_opt_in_with_its_issues_explained(app, frame, monkey
     assert "Potential issues" in ALL_CORES_INFO and "reproducible" in ALL_CORES_INFO and "memory" in ALL_CORES_INFO
 
 
+
+def test_preferences_switch_each_check_and_set_the_esd_distance(app, frame):
+    """Preferences > Run checks: a tick box per check, all ticked by default, and the ESD search distance (greyed
+    while ESD at connectors is unticked); values() hands them to ui.json."""
+    from groundtruth.ui.prefs_dialog import CHECK_TOGGLES, PreferencesDialog, checks_off, defaults
+    with PreferencesDialog(frame, defaults({})) as dlg:
+        assert set(dlg.checks) == {key for key, *_ in CHECK_TOGGLES}
+        assert all(box.GetValue() for box in dlg.checks.values())
+        assert dlg.esd_mm.GetValue() == 10.0 and dlg.esd_mm.IsEnabled()
+        esd = dlg.checks["check_esd_protection"]
+        esd.SetValue(False)
+        esd.ProcessEvent(wx.CommandEvent(wx.wxEVT_CHECKBOX, esd.GetId()))
+        assert not dlg.esd_mm.IsEnabled()
+        dlg.checks["check_diff_pairs"].SetValue(False)
+        dlg.esd_mm.SetValue(4.5)
+        v = dlg.values()
+    assert v["check_esd_protection"] is False and v["check_diff_pairs"] is False and v["esd_mm"] == 4.5
+    assert checks_off(v) == {"esd_protection", "diff_impedance", "diff_skew"}
+    with PreferencesDialog(frame, defaults(v)) as dlg:
+        assert not dlg.checks["check_diff_pairs"].GetValue() and dlg.esd_mm.GetValue() == 4.5
+
 def test_find_servers_lists_the_cluster_and_fills_the_address(app, frame, monkeypatch):
     """Preferences › Find servers: without a key it only says to enter one; the servers found are listed (the lead
     first, with its role) and the one picked goes into the address (its port only when not the default)."""

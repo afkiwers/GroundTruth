@@ -374,7 +374,8 @@ def run_checks(board: Board, config: Config, copper: Optional[CopperMap] = None,
                nets: Optional[Iterable[str]] = None) -> CheckResult:
     """Tier 1: trace each configured net from its driver to every receiver (find_route) and run the geometric
     checks along it; plus the settings checks (schematic_differs, unusual_value). nets: only these (switched-off
-    rows are checked when named). Issues deduplicated, waivers applied, sorted."""
+    rows are checked when named). The checks in config.checks_off are left out (Preferences). Issues deduplicated,
+    waivers applied, sorted."""
     nets = list(nets) if nets else None
     config = config.active(nets)            # rows switched off are not checked, unless named
     copper = copper or CopperMap(board)
@@ -399,13 +400,14 @@ def run_checks(board: Board, config: Config, copper: Optional[CopperMap] = None,
                 checker.check_transition(spec.name, la, lb, vias)
     _schematic_differs(board, config, checker, selected)
     _unusual_values(board, config, checker, selected)
+    off = getattr(config, "checks_off", frozenset())   # switched off in Preferences (Config.checks_off)
     if not selected:            # the whole board's voltage-aware checks (analysis/safety.py), not for a net's check
         from ..analysis.safety import run_safety_checks
-        run_safety_checks(board, config, copper, checker.add)
+        run_safety_checks(board, config, copper, checker.add, off)
     # signal integrity (analysis/si.py): impedance, pairs, crosstalk, via stubs of the listed nets (or the selected)
     from ..analysis.si import run_si_checks
     result.si = run_si_checks(board, config, copper, checker.add, selected)
-    issues = dedupe(checker.issues)
+    issues = dedupe([i for i in checker.issues if i.check not in off])
     for w in config.waivers:
         for i in issues:
             if i.fingerprint == w.fingerprint:
