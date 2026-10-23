@@ -289,7 +289,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         from ..analysis.tags import HELP
         self.info = InfoBox(self, "Labels (GT field)", HELP["converters"])
         left = wx.BoxSizer(wx.VERTICAL)
-        left.Add(self.hint, 0, wx.BOTTOM, 6)
+        left.Add(self.list_head(self.hint), 0, wx.EXPAND | wx.BOTTOM, 6)
         left.Add(self.list, 1, wx.EXPAND)
         left.Add(self.zoom, 0, wx.TOP, 6)
         left.Add(self.info, 0, wx.EXPAND | wx.TOP, 6)
