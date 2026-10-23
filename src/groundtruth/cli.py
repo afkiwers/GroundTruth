@@ -393,7 +393,9 @@ def _run(args, simulate: bool) -> int:
                     margin_fail.append(r)
                     print(f"FAIL: {r.net} {r.driver}->{r.receiver} {what} margin {w['margin_db']:+.1f} dB < "
                           f"{args.max_dbuv_margin:g} dB", file=sys.stderr)
-    if not args.quiet:
+    if getattr(args, "for_verify", False):      # verify's own verdict follows: only how long the run took
+        print(f"simulated in {time.time() - t0:.1f}s", file=sys.stderr)
+    elif not args.quiet:
         print(f"{'FAILED' if failed or margin_fail else 'passed'} (--fail-on {args.fail_on}) in {time.time() - t0:.1f}s",
               file=sys.stderr)
     return EXIT_ISSUES if failed or margin_fail else EXIT_OK
@@ -989,6 +991,7 @@ def cmd_verify(args) -> int:
     sim += ["--all-cores"] * args.all_cores + (["--gpu", args.gpu] if args.gpu else [])
     sim += ["--resolution", f"{args.resolution:g}"] if args.resolution else []
     sim_args = build_parser().parse_args(sim)
+    sim_args.for_verify = True               # no "FAILED (--fail-on ...)" line of its own: the cases are the verdict
     sim_args.func(sim_args)                  # its own exit code (issues at --fail-on) is not the gate: the cases are
     report = json.loads((out_dir / OUTPUT_NAMES["json"]).read_text(encoding="utf-8"))
     cases = verify.evaluate(report, doc)
