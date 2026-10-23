@@ -548,6 +548,28 @@ def test_setup_tabs_are_pastel_and_the_strip_changes_page(app, frame):
     f._step_tab(1)
     assert nb.GetSelection() == k + 1
     assert nb.strip.GetBestSize().height > nb.strip.GetCharHeight()
+    # the badges (the user: "add (#) as indicator for how many signals are actively part of the sim"): the board
+    # was read, so every setup tab has its count; switching the nets off makes Signal paths' 0, hollow, and says so
+    from dataclasses import replace
+    from groundtruth.ui.main_frame import count_tip
+    nets = f.settings.config.nets
+    k_nets = nb.FindPage(f.nets)
+    assert set(nb.badges) == {k for k, hue in enumerate(nb.hues) if hue}
+    assert nets and nb.badges[k_nets][0] == len(nets) and "take" in nb.badges[k_nets][1]
+    assert nb.badges[nb.FindPage(f.bridges)] == (0, count_tip(0, 0, "motor bridge", "motor bridges"))
+    f.settings.set_nets([replace(n, enabled=False) for n in nets])
+    f.on_config_change()
+    assert nb.badges[k_nets][0] == 0 and "switched off" in nb.badges[k_nets][1]
+    f.settings.set_nets([replace(n, enabled=True) for n in nets])
+    f.on_config_change()
+    assert nb.badges[k_nets][0] == len(nets)
+    assert count_tip(2, 5, "signal path", "signal paths") == \
+        "2 of 5 signal paths take part in Run checks and Simulate (3 switched off)"
+    assert count_tip(1, 1, "converter", "converters") == "1 converter takes part in Run checks and Simulate"
+    assert count_tip(0, 1, "converter", "converters").startswith("The 1 converter switched off")
+    # the widths make room for the badge: a tab with one is wider than its label and padding alone
+    lw, bw = nb.strip._measure()[k_nets]
+    assert bw > 0 and nb.strip.tab_rects()[k_nets][1] >= lw + bw + nb.strip.BADGE_GAP
 
 
 def test_help_opens_at_the_tab_shown_and_every_link_lands(app, frame):

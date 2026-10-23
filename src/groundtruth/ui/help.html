@@ -15,7 +15,9 @@ next one).</p>
 <li><a href="#together">What Simulate does with nets, converters and bridges</a></li>
 <li><a href="#checks">Run checks and Simulate</a></li>
 <li>The tabs (the coloured ones are what you set up before a run, those after the gap the parts and the results;
-  Ctrl+PgUp / Ctrl+PgDn move between them): <a href="#nets">Signal paths</a> · <a href="#converters">Converters</a> · <a href="#bridges">Bridges</a> ·
+  Ctrl+PgUp / Ctrl+PgDn move between them). A coloured tab's number is how many of its rows the next Run checks
+  or Simulate takes: the ticked ones. A tab drawn hollow, with a dashed outline and a grey 0, takes none (nothing
+  listed, or everything switched off); its tooltip says which. Check the numbers before a long Simulate:<a href="#nets">Signal paths</a> · <a href="#converters">Converters</a> · <a href="#bridges">Bridges</a> ·
   <a href="#dcloads">DC loads</a> · <a href="#pdn">Power integrity</a> · <a href="#si">Signal integrity</a> ·
   <a href="#parts">Parts</a> · <a href="#issues">Issues</a> · <a href="#results">Results</a> · <a href="#fixes">Fixes</a> ·
   <a href="#history">History</a></li>
@@ -56,8 +58,8 @@ immediately). The board itself is never changed, except when you place suggested
 <p><b>The top bar</b>, left to right: <b>Reload board</b> reads the board again (after you changed it in KiCad);
 <b>Refill zones</b> has KiCad refill every zone, waits until it has finished (on a complex board minutes: the status line counts them; KiCad answers nothing meanwhile) and then reloads; <b>Run checks</b>, <b>Simulate</b>,
 <b>Thermal</b> and <b>Export report…</b> (below); <b>with what-if edits</b>; <b>Cancel</b> stops the running job;
-<b>Save settings</b>; <b>Clear EMI layers</b> removes what GroundTruth drew. On the right, <b>Preferences…</b> and
-<b>Help</b>. Refill zones and Clear EMI layers are there only when GroundTruth was started from KiCad's toolbar
+<b>Save settings</b>; <b>Clear GT drawings</b> removes what GroundTruth drew. On the right, <b>Preferences…</b> and
+<b>Help</b>. Refill zones and Clear GT drawings are there only when GroundTruth was started from KiCad's toolbar
 (<b>Analyse return paths</b>); opened on a board file, it can analyse but not show or draw anything in KiCad.
 Hover over <b>Thermal</b>, <b>Export report…</b>, <b>with what-if edits</b>, <b>Preferences…</b> or <b>Help</b> for
 what it does.</p>
@@ -76,11 +78,11 @@ when it runs.</p>
   PCB editor to the Signal paths tab (see <a href="#nets">Signal paths</a>). An open GroundTruth window of the same board takes it
   and comes to the front (while it runs a Simulate or another job, once that has finished); with none open, a window opens and adds it once it has read the board. With nothing
   selected that has a net, a message says what KiCad reports as selected.</li>
-<li><b>Clear EMI layers</b> (no toolbar button) removes what GroundTruth drew on the board, without opening the
+<li><b>Clear GT drawings</b> (no toolbar button) removes what GroundTruth drew on the board, without opening the
   window, and says how many items it removed (one undo step).</li>
 </ul>
 <p>Without KiCad, <code>groundtruth-gui BOARD.kicad_pcb</code> opens the same window on a board file: everything
-analyses the same, but the KiCad parts are left out (Refill zones, Clear EMI layers, Add KiCad selection, the zoom
+analyses the same, but the KiCad parts are left out (Refill zones, Clear GT drawings, Add KiCad selection, the zoom
 and highlight options, the drawing buttons, showing rows and issues in KiCad, the Parts tab following KiCad's
 selection). Started from KiCad, the window closes by itself when KiCad exits.</p>
 <p><b>When the board is read</b>, the board must have been saved once (its settings go into the <code>groundtruth</code> folder next to it). A
@@ -1194,8 +1196,8 @@ document number come from the settings file (company and author otherwise from <
 <p>Markers, suggestions, contours and arrows go onto user layers of the board (by default User.9, User.8 and
 User.7: issues, suggestions, currents; settings: <code>drawing</code>), each in one undo step and in a group of
 its own. Drawing needs GroundTruth started from KiCad's toolbar. When a drawing layer was not enabled on the board,
-GroundTruth enables it and the status line names it (Board Setup › Board Editor Layers). <b>Clear EMI layers</b>
-(top bar, or the plugin's <b>Clear EMI layers</b> action in KiCad) removes exactly what GroundTruth drew. Vias placed from the Fixes tab are real
+GroundTruth enables it and the status line names it (Board Setup › Board Editor Layers). <b>Clear GT drawings</b>
+(top bar, or the plugin's <b>Clear GT drawings</b> action in KiCad) removes exactly what GroundTruth drew. Vias placed from the Fixes tab are real
 design changes and stay.</p>
 
 <hr><a name="labels"></a><h3>Detection labels (GT field)</h3>

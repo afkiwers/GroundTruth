@@ -454,6 +454,18 @@ class StatusBar(wx.StatusBar):
         return self._texts.get(number, "")
 
 
+def count_tip(on: int, total: int, one: str, many: str) -> str:
+    """A setup tab badge's tooltip: how many of its `total` rows (`one` / `many`: the row's name) the next run takes."""
+    if total == 0:
+        return f"No {many} listed: Run checks and Simulate leave this tab out"
+    if on == 0:
+        return f"{'The' if total == 1 else 'All'} {total} {one if total == 1 else many} switched off: Run checks "                "and Simulate leave them out"
+    what = one if on == 1 else many
+    if on == total:
+        return f"{on} {what} take{'s' if on == 1 else ''} part in Run checks and Simulate"
+    return f"{on} of {total} {many} take part in Run checks and Simulate ({total - on} switched off)"
+
+
 class MainFrame(wx.Frame):
     """The plugin window: a top bar of actions (Reload, Refill, Run checks, Simulate, Thermal, Export, Save, Clear,
     Preferences, Help), the tabs, and a status bar with a progress gauge.
@@ -515,7 +527,7 @@ class MainFrame(wx.Frame):
         self.t_cancel = button("Cancel", self.on_cancel, "danger")
         bar.AddSpacer(12)
         button("Save settings", self.on_save)
-        self.t_clear = button("Clear EMI layers", self.on_clear) if session.live else None
+        self.t_clear = button("Clear GT drawings", self.on_clear) if session.live else None
         bar.AddStretchSpacer()
         button("Preferences…", lambda e: self.on_preferences(),
                tip="your settings on this computer, for every board: Simulate's resolution, the heatmaps' via "
@@ -1179,6 +1191,7 @@ class MainFrame(wx.Frame):
         """The board's load after its tabs are filled: the status line, the zones' refill offer, and detection when
         the settings list nothing yet."""
         sp = settings.path
+        self._update_tab_counts()
         note = f" — {self.board.warnings[0]}" if self.board.warnings else ""
         self.SetStatusText(f"{Path(path).name}: {len(self.board.copper_layers)} copper layers, "
                            f"{len(self.board.footprints)} parts · settings {sp.name}{note}")
@@ -1259,6 +1272,26 @@ class MainFrame(wx.Frame):
         self.dirty = True
         self.on_save()
         self._show_stale()
+        self._update_tab_counts()
+
+    def _update_tab_counts(self):
+        """Each setup tab's badge: how many of its rows the next Run checks / Simulate takes (Config.active: the
+        ticked ones), with a tooltip; a tab with none is drawn hollow (ui/tabbook.py). The user: "make sure the user
+        doesn't accidentally simulate unintended signals". Counts of the parsed settings only: no analysis."""
+        if self.settings is None or not self.pages_built():
+            return
+        c = self.settings.config
+        a = c.active()
+        si_on = sum(1 for p in c.si.pairs if p.enabled) + len(c.si.impedance)
+        rows = {"nets": (len(a.nets), len(c.nets), "signal path", "signal paths"),
+                "converters": (len(a.converters), len(c.converters), "converter", "converters"),
+                "bridges": (len(a.bridges), len(c.bridges), "motor bridge", "motor bridges"),
+                "dc_loads": (len(a.dc_loads), len(c.dc_loads), "DC load rail", "DC load rails"),
+                "pdn": (len(a.pdn), len(c.pdn), "PDN rail", "PDN rails"),
+                "si": (si_on, len(c.si.pairs) + len(c.si.impedance), "pair or impedance target",
+                       "pairs and impedance targets")}
+        for attr, (on, total, one, many) in rows.items():
+            self.notebook.set_badge(self.notebook.FindPage(getattr(self, attr)), on, count_tip(on, total, one, many))
 
     def on_export(self):
         """Top bar "Export report…": the results shown (the last Run checks or Simulate, the thermal and capacity
@@ -2578,10 +2611,10 @@ class MainFrame(wx.Frame):
         self.SetStatusText("comparison done")
 
     def on_clear(self, _=None):
-        """Clear EMI layers: remove everything GroundTruth drew on the board, as a job."""
-        self._start("clearing the EMI layers…", lambda progress: self.session.clear(),
+        """Clear GT drawings: remove everything GroundTruth drew on the board, as a job."""
+        self._start("clearing GroundTruth's drawings…", lambda progress: self.session.clear(),
                     lambda n: self.SetStatusText(f"removed {n} groundtruth item(s) from the board"),
-                    what="clear the EMI layers", cancellable=False, kicad=True)
+                    what="clear GroundTruth's drawings", cancellable=False, kicad=True)
 
     def on_waive(self, issue, reason):
         """Waive an issue: its fingerprint and the reason go into the settings, so later runs keep it waived."""
