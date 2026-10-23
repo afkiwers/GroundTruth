@@ -1811,6 +1811,43 @@ heating.</p>
   guesses.</li>
 <li>Each assumption the model makes is listed, with its reason, under
   <a href="#references">References and assumptions</a>.</li>
+<li><b>Not validated on real hardware.</b> The solver is checked against analytic results (loop inductance
+  within 1–4 % of Wheeler's formula, the return current against image theory, plate capacitance exactly), but the
+  board-level figures have not all been compared with measurements.</li>
+</ul>
+<p><b>How the copper and the substrate count.</b> All from the board's stackup (Board Setup › Physical Stackup):</p>
+<ul>
+<li><b>Copper thickness:</b> each track's and plane's resistance, at high frequency only the skin depth's share of it
+  (resistance rises above a few MHz); a track's self-inductance (a thicker strip slightly less); the cross-sections
+  of Signal integrity. Plane cells' mutual inductances treat the copper as flat sheets.</li>
+<li><b>Dielectric thickness:</b> the layers' heights, so how far a track is from its plane: this sets how wide the
+  return current spreads under it (about 1 / (1 + (x/h)²)) and the loop inductance, the figure that matters most.</li>
+<li><b>εr and loss tangent:</b> not the current paths or the loop inductance (the magnetics depend on the geometry
+  only), but the planes' capacitance to each other (ε0·εr·A/t: the return crossing between planes, plane
+  resonances, damped by the loss tangent) and the line itself (its Z0 and speed from a cross-section with the real
+  dielectrics and solder mask: the line current at each harmonic, the delay). One εr per dielectric, not frequency
+  dependent.</li>
+</ul>
+<p><b>Victims: how they are found, how far to trust them.</b> No full-wave simulation: each switching leg's hot loop is
+solved once more on a model that also holds the victims (their tracks and pads, the victim ICs' ground pins, a stacked
+board's connector pins), at two frequencies of the edge's spectrum. Each victim net is copper in that model, driven at
+its driver through an output resistance (a pull-up's value, else <code>victims.drive_ohms</code>, 50 Ω) and loaded
+at each receiver by <code>victims.input_pf</code> (5 pF) to that receiver's own ground. The solution gives the voltage
+across each receiver's input directly: the hot loop's field in the victim's loop and the ground moving between driver
+and receiver together (peak at an edge M·I/t_r). A victim track facing a phase node with no layer between takes
+C·V/t_r through that capacitance. This works because at switching edges the board is small against the wavelength (a
+5 ns edge: mostly below ~70 MHz, a wavelength of about 2 m in FR-4), where coupling is magnetic and capacitive, which
+the quasi-static model holds.</p>
+<ul>
+<li><b>Good for:</b> finding and ranking the nets at risk, and comparing fixes (moving a reset track, a ground
+  connection, a stitching via): the differences are reliable.</li>
+<li><b>Absolute values:</b> expect a factor of about 2 (±6 dB) at best. They hang on the terminations (the 50 Ω and 5
+  pF defaults; a real input, ESD diodes or a filter capacitor change them: set <code>drive_ohms</code> /
+  <code>input_pf</code>), on two frequencies only (ringing elsewhere can be missed), on no cable or common-mode
+  currents (often the real coupling path), and above roughly 100–300 MHz (fast GaN edges, long tracks) on the
+  quasi-static limit.</li>
+<li><b>No upset prediction:</b> the warning levels (0.3 V noise, 1 mA injected) are rules of thumb. For a marginal
+  case, measure: a near-field probe, or the reset line on a scope while the bridge switches.</li>
 </ul>
 <hr><a name="references"></a><h3>References and assumptions</h3>
 <p>The sources of the formulas, methods and theorems GroundTruth calculates with, and the assumptions of its models.
