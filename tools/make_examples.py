@@ -31,7 +31,7 @@ net, its source and load, and the part models. Or from the command line:
 | Folder | Shows |
 |---|---|
 {rows}
-| `gitlab-ci.yml` | A GitLab pipeline: the checks on every merge request, the simulation with its HTML report on main (README "CI"). |
+| `gitlab-ci.yml` | A GitLab pipeline: the checks on every merge request, the simulation with its HTML report on main ([CI guide](../docs/guide/ci.md)). |
 | `release.gtthresholds.yaml` | The documented thresholds template for `groundtruth verify` (the CI release gate in `gitlab-ci.yml`): every criterion, edit the limits. |
 
 The boards are made by `tools/make_examples.py` from `tests/boardgen.py` (the boards the tests simulate); the files
