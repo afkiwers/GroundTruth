@@ -5,7 +5,7 @@ KiCad 10+ return-path / EMI analysis: a KiCad IPC plugin (wxPython) **and** a CI
 [docs/HANDOFF.md](docs/HANDOFF.md) from its top "Current state" block: current status, the work in progress, open
 problems and the next steps (the dated entries below it are newest first).
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains the physics, data flow and design decisions.
-User-facing docs: [README.md](README.md).
+User-facing docs: [README.md](README.md) (the front page, short) and the guides in [docs/guide/](docs/guide/) (install, settings, power, analyses, CLI, CI, ...): put new user documentation into the guide it belongs to.
 
 ## Environment (Windows 11, PowerShell + Git Bash)
 

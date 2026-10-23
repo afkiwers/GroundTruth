@@ -12,7 +12,7 @@ net, its source and load, and the part models. Or from the command line:
 | `series_path/` | A signal path across four nets: U1 → 33 Ω R1 → 1 µH L1 → 100 nF C1 (an AC-coupling capacitor, named in the net's Pass through) → U2. Each part's impedance counts at its place; the inductor resonates with the load near 60 MHz and blocks the current above. |
 | `rc_filter/` | The series path with a 1 nF capacitor C9 from SIG_B to GND after R1: an RC low-pass. Above its corner (~5 MHz) the current returns through C9: a current loop of its own, shorter than the whole path. |
 | `termination/` | The series path with a 50 Ω resistor R9 from SIG_D to GND just beyond the receiver: a parallel termination as a part. It gives what `load_ohms: 50` on the net gives (within 0.5 dB). |
-| `gitlab-ci.yml` | A GitLab pipeline: the checks on every merge request, the simulation with its HTML report on main (README "CI"). |
+| `gitlab-ci.yml` | A GitLab pipeline: the checks on every merge request, the simulation with its HTML report on main ([CI guide](../docs/guide/ci.md)). |
 | `release.gtthresholds.yaml` | The documented thresholds template for `groundtruth verify` (the CI release gate in `gitlab-ci.yml`): every criterion, edit the limits. |
 
 The boards are made by `tools/make_examples.py` from `tests/boardgen.py` (the boards the tests simulate); the files
