@@ -11,6 +11,7 @@ from dataclasses import replace
 from typing import Optional
 
 import wx
+from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 
 from ..components.values import format_si, parse_value
 from ..config.settings import ConfigError, NetSpec
@@ -428,7 +429,7 @@ class NetsPanel(SelectableRows, wx.Panel):
             problems.append("sweep points must be a whole number or empty")
         extra["sweep_points"] = int(pts) if ok and pts is not None and pts == int(pts) else None
         if problems:
-            wx.MessageBox("\n".join(problems), "groundtruth", wx.ICON_WARNING)
+            message_box("\n".join(problems), "groundtruth", wx.ICON_WARNING)
             return None
         return NetSpec(name, driver, receivers, f, tr, a, d if d else 0.5, through=self._through(), **extra)
 
@@ -438,7 +439,7 @@ class NetsPanel(SelectableRows, wx.Panel):
         try:
             self.settings.set_nets(self.nets)
         except ConfigError as e:
-            wx.MessageBox("\n".join(e.messages), "groundtruth", wx.ICON_WARNING)
+            message_box("\n".join(e.messages), "groundtruth", wx.ICON_WARNING)
             self.nets = list(self.settings.config.nets)
             self.refresh()
             return False
@@ -458,7 +459,7 @@ class NetsPanel(SelectableRows, wx.Panel):
         class, enabled state, return pins and current override)."""
         rows = self.selected_rows()
         if len(rows) > 1:
-            wx.MessageBox("Select a single net to update it from the form.", "GroundTruth", wx.ICON_INFORMATION)
+            message_box("Select a single net to update it from the form.", "GroundTruth", wx.ICON_INFORMATION)
             return
         i = rows[0] if rows else -1
         spec = self._form() if rows else None
@@ -477,7 +478,7 @@ class NetsPanel(SelectableRows, wx.Panel):
         the sweep runs on the settings."""
         names = self._row_names(self.selected_rows()) or [n.name for n in self.nets if n.enabled]
         if not names:
-            wx.MessageBox("Add a signal path first (or tick one).", "GroundTruth", wx.ICON_INFORMATION)
+            message_box("Add a signal path first (or tick one).", "GroundTruth", wx.ICON_INFORMATION)
             return
         self._on_bode(list(dict.fromkeys(names)))
 
@@ -509,7 +510,7 @@ class NetsPanel(SelectableRows, wx.Panel):
     def _detected(self, found):
         """Detection finished: let the user pick which of the new candidates to add."""
         if not found:
-            wx.MessageBox("No candidate nets found.", "groundtruth")
+            message_box("No candidate nets found.", "groundtruth")
             return
         with DetectDialog(self, found, self.nets) as dlg:
             if dlg.ShowModal() == wx.ID_OK:

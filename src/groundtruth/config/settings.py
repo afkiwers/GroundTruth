@@ -1055,8 +1055,12 @@ def net_problems(spec: NetSpec) -> list[str]:
         period = 1.0 / spec.freq
         fall = spec.fall_time if spec.fall_time is not None else spec.rise_time
         if spec.rise_time > spec.duty * period or (fall > 0 and fall > (1 - spec.duty) * period):
-            out.append(f"rise_time / fall_time must fit the signal's high and low times ({spec.duty * period:.3g} s / "
-                       f"{(1 - spec.duty) * period:.3g} s at {spec.freq:g} Hz, duty {spec.duty:g})")
+            # a trapezoid's edges must fit in its high and low times; said with the numbers to change
+            f3 = lambda v, u: format_si(float(f"{v:.3g}"), u)       # noqa: E731
+            out.append(f"the edges don't fit the signal: rise {f3(spec.rise_time, 's')} / fall {f3(fall, 's')}, but at "
+                       f"{f3(spec.freq, 'Hz')} and {spec.duty * 100:g} % duty it is high for "
+                       f"{f3(spec.duty * period, 's')} and low for {f3((1 - spec.duty) * period, 's')}. Shorten the rise "
+                       f"/ fall time to at most that, or lower the frequency")
     if not spec.amplitude_v > 0:
         out.append("amplitude_v must be above 0 V")
     if spec.current_a is not None and not spec.current_a > 0:

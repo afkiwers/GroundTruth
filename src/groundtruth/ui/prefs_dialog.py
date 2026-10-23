@@ -10,6 +10,7 @@ import math
 from typing import Optional
 
 import wx
+from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 
 from . import theme
 
@@ -481,7 +482,7 @@ class PreferencesDialog(wx.Dialog):
                                                                         self.FromDIP(wx.Size(16, 16))),
                                style=wx.BORDER_NONE)
         info.SetToolTip("What 'Use all cores' changes, and its potential issues")
-        info.Bind(wx.EVT_BUTTON, lambda e: wx.MessageBox(ALL_CORES_INFO, "Use all cores", wx.ICON_INFORMATION,
+        info.Bind(wx.EVT_BUTTON, lambda e: message_box(ALL_CORES_INFO, "Use all cores", wx.ICON_INFORMATION,
                                                          self))
         hs.Add(self.all_cores, 0, wx.ALIGN_CENTER_VERTICAL)
         hs.Add(info, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, self.FromDIP(6))
@@ -772,7 +773,7 @@ class PreferencesDialog(wx.Dialog):
             self.test.Enable()
             self.test.SetLabel("Test connection")
         if summary is None:
-            wx.MessageBox(error, "Compute server: not reachable", wx.ICON_WARNING)
+            message_box(error, "Compute server: not reachable", wx.ICON_WARNING)
             return
         from .server_info import ServerInfoDialog
         dlg = ServerInfoDialog(self if self else None, address, summary)
@@ -784,7 +785,7 @@ class PreferencesDialog(wx.Dialog):
         only servers with this key answer. Asked in a background thread (it listens for two seconds)."""
         key = self.server_key.GetValue().strip()
         if not key:
-            wx.MessageBox("Enter the access key first: only the servers that use it answer (the key shows in the "
+            message_box("Enter the access key first: only the servers that use it answer (the key shows in the "
                           "server's window, or with install_server.cmd key on the server).", "Find servers",
                           wx.ICON_INFORMATION)
             return
@@ -826,7 +827,7 @@ class PreferencesDialog(wx.Dialog):
         self.find.Enable()
         self.find.SetLabel("Find servers")
         if not found:
-            wx.MessageBox((f"The search failed: {error}" if error else
+            message_box((f"The search failed: {error}" if error else
                            "No compute server with this access key answered on this network.") +
                           "\n\nCheck the key, that the server runs (install_server.cmd status on it) and that this "
                           "computer is on the same subnet; a server elsewhere can still be used by its address.",
