@@ -69,7 +69,18 @@ jobs:
           status=stable
           if [ "$PRERELEASE" = "true" ]; then status=testing; fi
           # the tag is the version: a build number (0.1.42600, make_pcm_package.py --print-version); another form stops it
-          GROUNDTRUTH_RELEASE_KEY="$key" python tools/make_pcm_package.py --status "$status" --version "$TAG"             --out dist
+          GROUNDTRUTH_RELEASE_KEY="$key" python tools/make_pcm_package.py --status "$status" --version "$TAG" \
+            --out dist
+
+      - name: Build the Python wheel with the release's number (the CI install)
+        # pyproject.toml's version set to the tag in this checkout only: the wheel's metadata, and so `groundtruth
+        # --version` and the reports of a CI run, carry the same number as the KiCad and server packages
+        run: |
+          python -m pip install build
+          version="${TAG#v}"
+          sed -i "s/^version = \".*\"/version = \"$version\"/" pyproject.toml
+          grep -q "^version = \"$version\"" pyproject.toml
+          python -m build --wheel --outdir dist
 
       - name: No private key in the packages
         run: python tools/make_pcm_repository.py check-no-key dist
