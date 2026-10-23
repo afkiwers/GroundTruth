@@ -1803,7 +1803,7 @@ The user (screenshot of KiCad's Plugin and Content Manager, Installed tab): "cre
 the plugin throug the manager". `tools/make_pcm_package.py` → `out/dist/groundtruth-<ver>-<commit>-pcm.zip` from
 `git archive HEAD plugin src/groundtruth` (uncommitted edits, e.g. the user's demo play, never get in; the name
 says the commit): `metadata.json` (identifier io.github.iwers.groundtruth, type plugin, license MIT, author as
-the user gave it: "afkiwers & his good old mate claude", contact email iwers11@gmail.com), versions [{0.1.0 from pyproject, status testing, kicad_version 10.0, runtime "ipc"}],
+the user gave it: "afkiwers & his trusty AI sidekick claude 🤝🤖", contact email iwers11@gmail.com), versions [{0.1.0 from pyproject, status testing, kicad_version 10.0, runtime "ipc"}],
 `plugins/` (plugin.json, entry scripts, icons, requirements.txt, groundtruth package, demo), `resources/icon.png`
 (make_icons.draw(64)). Layout and the runtime field from dev-docs.kicad.org/en/addons; metadata validated with
 jsonschema against https://go.kicad.org/pcm/schemas/v1 (it caught: author.contact required, tags lowercase with
