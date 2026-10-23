@@ -44,9 +44,10 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
   stage's nets left out; equals find_victims for one bridge, test_stack), `SettingsFile.set_victim_nets`.
 - **Branch `release-version` (2026-10-24):** the user: "The tag should be the plugin version". The workflow passes
   the tag to `make_pcm_package.py --version` (N.N.N, a leading v dropped, else exit 2), so the packages,
-  version.txt and the KiCad repository carry it; PC builds keep pyproject major.minor + counter (0.1.42530), so
-  releases should be 0.2.0 and up while pyproject says 0.1 (the user's installed 0.1.42530 is higher than any 0.1.x
-  tag). Also fixed: the packaging tests (test_package, test_remote_update, test_server_setup) failed since
+  version.txt and the KiCad repository carry it. One numbering for everything (the user: "I want the original
+  version number to stay as is and add tags manually using this build number"): the tag is a build number,
+  pyproject major.minor + the 10-minute counter (`make_pcm_package.py --print-version`, e.g. 0.1.42591); another
+  major.minor than pyproject's is refused. Also fixed: the packaging tests (test_package, test_remote_update, test_server_setup) failed since
   `release-ci` (a build without the trusted key stops); tests now name their own trust anchor
   (`make_server_package.PUB_ENV`, set in conftest), and the repo key check uses the workflow's own check.
 - **Branch `ci-verify` (2026-10-23, on `victims-picker`):** `groundtruth verify BOARD --config C --thresholds T

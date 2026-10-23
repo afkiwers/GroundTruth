@@ -108,8 +108,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", type=Path, default=ROOT / "out" / "dist")
     ap.add_argument("--status", default="testing", choices=("stable", "testing", "development"))
-    ap.add_argument("--version", help="the version to give the package (a release: its tag, e.g. 0.2.0), instead of "
-                                      "pyproject's major.minor and the build's counter; KiCad's form N.N.N")
+    ap.add_argument("--version", help="the version to give the package instead of the build's own (a release: its "
+                                      "tag, a build number of this same scheme, e.g. 0.1.42600; --print-version "
+                                      "shows the current one)")
+    ap.add_argument("--print-version", action="store_true",
+                    help="print the version a build gets now (pyproject's major.minor and the counter) and stop: the "
+                         "number to tag a release with")
     ap.add_argument("--working-tree", action="store_true",
                     help="pack the files as they are on disk (uncommitted changes included; the demo always from the "
                          "last commit) instead of the last commit")
@@ -121,11 +125,23 @@ def main() -> int:
     # counts 10-minute steps since 2026-01-01 (the schema allows up to 6 digits: until 2045).
     build = int((datetime.now(timezone.utc) - EPOCH).total_seconds() // 600)
     version = f"{major_minor}.{build}"
-    if args.version:                    # a release: its tag is the version (the user: "The tag should be the plugin
-        import re                       # version"); the PCM schema's pattern, a leading v allowed and dropped
+    if args.print_version:
+        print(version)
+        return 0
+    if args.version:
+        # a release: its tag is the version, a build number of this same scheme (the user: "The tag should be the plugin
+        # version", "I want the original version number to stay as is and add tags manually using this build number");
+        # the PCM schema's pattern, a leading v dropped, and pyproject's major.minor, so one numbering holds for all
+        import re
         version = args.version.strip().lstrip("vV")
         if not re.fullmatch(r"\d{1,4}\.\d{1,4}\.\d{1,6}", version):
-            print(f"--version {args.version!r}: KiCad needs major.minor.patch, e.g. 0.2.0", file=sys.stderr)
+            print(f"--version {args.version!r}: KiCad needs major.minor.patch, e.g. {major_minor}.{build}",
+                  file=sys.stderr)
+            return 2
+        if not version.startswith(major_minor + "."):
+            print(f"--version {version}: not the build numbering ({major_minor}.<build>, pyproject.toml says "
+                  f"{major_minor}); tag the release with a build number, e.g. {major_minor}.{build} (--print-version)",
+                  file=sys.stderr)
             return 2
     commit = git("rev-parse", "--short", "HEAD").decode().strip()
     changed = [line for line in git("status", "--porcelain", "--", "plugin", "src/groundtruth").decode().splitlines()
