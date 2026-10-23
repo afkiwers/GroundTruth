@@ -414,6 +414,9 @@ class PathChain:
     parts: list[str]
     receivers: list[str]
     shunts: list[str] = field(default_factory=list)
+    # every 2-pin part hanging off the path, by the path's net it sits on (path order): [(net, ["R307 10k → GND",
+    # "✗ C309 100n → GND (DNP)"])]: capacitors, pull-ups / -downs, to any other net; DNP ones marked (path_branches)
+    branches: list = field(default_factory=list)
     error: str = ""
 
     def text(self) -> str:
@@ -437,7 +440,34 @@ def path_chain(board: Board, config: Config, spec) -> PathChain:
     chain.parts = [_part_text(board, config, r) for r in route.parts]
     chain.shunts = [f"{_part_text(board, config, fp.reference)} to {ret.net}"
                     for fp, _, _, ret in shunt_parts(board, config, route, set(config.reference_nets))]
+    chain.branches = path_branches(board, config, route)
     return chain
+
+
+DNP_MARK = "✗"
+
+
+def path_branches(board: Board, config: Config, route: Route) -> list:
+    """What hangs off a path, for the Signal paths tab (the user: "add branches to let's say GND or other nets to also
+    show capacitors, pullups/downs. mark the ones ... that are DNP"): per net of the path, in path order, every 2-pin
+    part with one pin on it and the other on another net, not one of the path's series parts, DNP ones included and
+    marked. Display only: the solver's shunts (shunt_parts) leave DNP parts out and take reference nets only."""
+    order = list(dict.fromkeys(n for n in [route.driver.net, *route.nets, route.receiver.net] if n))
+    series = set(route.parts)
+    found: dict[str, list[str]] = {n: [] for n in order}
+    for fp in board.footprints:
+        if fp.reference in series:
+            continue
+        nets = [p.net for p in fp.pads if p.net]
+        if len(fp.pads) != 2 or len(set(nets)) != 2:
+            continue
+        on = [n for n in nets if n in found]
+        if len(on) != 1:                    # both pins on the path: a series part of another branch, not a shunt
+            continue
+        other = next(n for n in nets if n != on[0])
+        text = f"{_part_text(board, config, fp.reference)} → {other}"
+        found[on[0]].append(f"{DNP_MARK} {text} (DNP)" if fp.dnp else text)
+    return [(n, sorted(found[n], key=lambda s: s.lstrip(DNP_MARK + " "))) for n in order if found[n]]
 
 
 def _pour_ports(g: _Graph, tree, items, poly, net: str, layer: str) -> dict[int, Point]:
