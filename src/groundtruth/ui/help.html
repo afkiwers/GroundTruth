@@ -176,8 +176,9 @@ current). A path on one net is simply a path without parts.</p>
 follows it: <code>U302.3 → U301 ×1 → R303 4k7 → U1102.9</code>, op-amps with their gain; worked out in the
 background, "no route: …" when the copper or a part doesn't connect), <b>Freq</b>, <b>Rise</b>, <b>Ampl.</b> and
 <b>Class</b> (the kind of signal detection took it for). Under the table, the selected path in full: its chain
-and the parts across it to ground or a rail (a load resistor, a filter capacitor), which take their share of the
-current in Simulate. Status is <i>manual</i> (entered by
+and its <b>Branches</b>: per net of the path, every two-pin part hanging off it to another net (a filter capacitor
+or a pull-down to GND, a pull-up to a rail), marked ✗ … (DNP) when it is not fitted. Those to a reference net (not DNP)
+take their share of the current in Simulate. Status is <i>manual</i> (entered by
 you), <i>auto, REVIEW</i> (found by detection, not checked yet: the row is <font color="@WARN@">orange</font>) or
 <i>auto, reviewed</i>.</p>
 <p>Where Detect misses a path, takes it for a supply, guesses its driver wrong or stops at an op-amp, label the path
