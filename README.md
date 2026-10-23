@@ -1,3 +1,8 @@
+> [!WARNING]
+> **Vibe-coded, for illustrative purposes only.** GroundTruth was written largely with an AI assistant. Many of its
+> results look reasonable, but they have not all been validated on real hardware: don't base design or compliance
+> decisions on them alone.
+
 # GroundTruth — return-path and EMI analysis for KiCad
 
 GroundTruth finds where the return currents of fast signals and switching power stages really flow on a KiCad 10+
