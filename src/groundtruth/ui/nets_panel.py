@@ -212,7 +212,7 @@ class NetsPanel(SelectableRows, wx.Panel):
         right.Add(form, 0, wx.EXPAND)
         right.Add(btns, 0, wx.TOP, 8)
         left = wx.BoxSizer(wx.VERTICAL)
-        left.Add(self.hint, 0, wx.BOTTOM, 6)
+        left.Add(self.list_head(self.hint), 0, wx.EXPAND | wx.BOTTOM, 6)
         left.Add(self.list, 1, wx.EXPAND)
         # the selected path in full (selectable text: a part reference can be copied from it)
         self.path_text = wx.TextCtrl(self, style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_NO_VSCROLL)

@@ -261,7 +261,7 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
         right.Add(btns, 0, wx.TOP | wx.EXPAND, 8)
         right.Add(about, 0, wx.TOP | wx.EXPAND, 8)
         left = wx.BoxSizer(wx.VERTICAL)
-        left.Add(self.hint, 0, wx.BOTTOM, 6)
+        left.Add(self.list_head(self.hint), 0, wx.EXPAND | wx.BOTTOM, 6)
         left.Add(self.list, 1, wx.EXPAND)
         s = wx.BoxSizer(wx.HORIZONTAL)
         s.Add(left, 3, wx.EXPAND | wx.ALL, 6)

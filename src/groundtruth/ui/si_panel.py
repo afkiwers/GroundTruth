@@ -176,7 +176,7 @@ class SiPanel(SelectableRows, wx.Panel):
         right.Add(lbtns, 0, wx.TOP | wx.EXPAND, 6)
         right.Add(about, 0, wx.TOP | wx.EXPAND, 8)
         left = wx.BoxSizer(wx.VERTICAL)
-        left.Add(self.hint, 0, wx.BOTTOM, 6)
+        left.Add(self.list_head(self.hint), 0, wx.EXPAND | wx.BOTTOM, 6)
         left.Add(heading("Differential pairs"), 0, wx.BOTTOM, 4)
         left.Add(self.list, 3, wx.EXPAND)
         left.Add(heading("Impedance targets"), 0, wx.TOP | wx.BOTTOM, 4)

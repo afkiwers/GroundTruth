@@ -164,7 +164,7 @@ class BridgesPanel(SelectableRows, wx.Panel):
         right.Add(fw, 1, wx.EXPAND)
         right.Add(btns, 0, wx.TOP | wx.EXPAND, 8)
         left = wx.BoxSizer(wx.VERTICAL)
-        left.Add(self.hint, 0, wx.BOTTOM, 6)
+        left.Add(self.list_head(self.hint), 0, wx.EXPAND | wx.BOTTOM, 6)
         left.Add(self.list, 2, wx.EXPAND)
         left.Add(wx.StaticText(self, label="Legs of the bridge in the form:"), 0, wx.TOP, 6)
         left.Add(self.leg_list, 1, wx.EXPAND | wx.TOP, 2)
