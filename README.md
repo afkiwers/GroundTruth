@@ -724,7 +724,7 @@ The `groundtruth` command line needs neither KiCad nor a display, so a board rep
        --out-dir results
    ```
 
-5. **The pipeline.** Copy [examples/gitlab-ci.yml](examples/gitlab-ci.yml) to `.gitlab-ci.yml`, set `BOARD`, and in `emi-verify` set `GT_CONFIG` and `GT_THRESHOLDS`. Pin `GROUNDTRUTH_URL` to a GroundTruth release (below).
+5. **The pipeline.** Copy [examples/gitlab-ci.yml](examples/gitlab-ci.yml) to `.gitlab-ci.yml`, set `BOARD`, and in `emi-verify` set `GT_CONFIG` and `GT_THRESHOLDS`. Set `GROUNDTRUTH_VERSION` to a GroundTruth release (below).
 
 The repository then holds:
 
@@ -742,21 +742,23 @@ hardware/
 
 ### Installing GroundTruth in a job
 
-GroundTruth is not on PyPI; a job installs it from its repository, pinned to a release tag so that every pipeline runs the same analysis code and a new GroundTruth arrives only when you change the tag ([releases](https://github.com/afkiwers/GroundTruth/releases)):
+GroundTruth is not on PyPI. Every [release](https://github.com/afkiwers/GroundTruth/releases) has a Python wheel attached, with the release's number (the same as its KiCad package's); a job installs that one, so every pipeline runs the same analysis code and a new GroundTruth arrives only when you change the number:
 
 ```sh
-pip install "groundtruth-pcb @ git+https://github.com/afkiwers/GroundTruth.git@0.1.42593"
-pip install "groundtruth-pcb[thermal] @ git+https://github.com/afkiwers/GroundTruth.git@0.1.42593"   # with Thermal
+pip install "groundtruth-pcb @ https://github.com/afkiwers/GroundTruth/releases/download/0.1.42593/groundtruth_pcb-0.1.42593-py3-none-any.whl"
+pip install "groundtruth-pcb[thermal] @ https://github.com/afkiwers/GroundTruth/releases/download/0.1.42593/groundtruth_pcb-0.1.42593-py3-none-any.whl"   # with Thermal
+groundtruth --version                               # groundtruth 0.1.42593
 ```
 
-It needs Python 3.11 or newer and `git` in the image (`python:3.12-slim` plus `apt-get install git`, as in the example). The `[thermal]` extra is only needed for a temperature criterion (`thermal: max_c`) or `simulate --thermal`. `--refill-zones` needs KiCad's own command line: use the `kicad/kicad:10.0` image for that job (the example's `emi-check-refill`). A runner with an NVIDIA GPU can speed up the solver (`emi-simulate-gpu`).
+It needs Python 3.11 or newer (`python:3.12-slim` is enough; no git). The newest code instead, between releases: `pip install "groundtruth-pcb @ git+https://github.com/afkiwers/GroundTruth.git@main"` (its version says `0.1.dev0`). The `[thermal]` extra is only needed for a temperature criterion (`thermal: max_c`) or `simulate --thermal`. `--refill-zones` needs KiCad's own command line: use the `kicad/kicad:10.0` image for that job (the example's `emi-check-refill`). A runner with an NVIDIA GPU can speed up the solver (`emi-simulate-gpu`).
 
 ### A minimal release gate
 
 ```yaml
 variables:
   BOARD: hardware/myboard.kicad_pcb
-  GROUNDTRUTH_URL: "git+https://github.com/afkiwers/GroundTruth.git@0.1.42593"
+  GROUNDTRUTH_VERSION: "0.1.42593"
+  GROUNDTRUTH_WHEEL: "https://github.com/afkiwers/GroundTruth/releases/download/${GROUNDTRUTH_VERSION}/groundtruth_pcb-${GROUNDTRUTH_VERSION}-py3-none-any.whl"
 
 stages: [test, build]
 
@@ -768,8 +770,7 @@ emi-verify:
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   before_script:
-    - apt-get update -qq && apt-get install -y -qq git > /dev/null
-    - pip install --quiet "groundtruth-pcb @ $GROUNDTRUTH_URL"
+    - pip install --quiet "groundtruth-pcb @ $GROUNDTRUTH_WHEEL"
   script:
     - groundtruth verify "$BOARD"
         --config hardware/groundtruth/configs/release.gtconfig.yaml
@@ -845,7 +846,7 @@ results: emi/groundtruth-verify-junit.xml
 
 ### Keeping the gate meaningful
 
-- **Pin GroundTruth.** A newer GroundTruth can compute a slightly different figure; with a pinned tag, the numbers change only when you move the tag (and you can rerun the gate on the same commit to compare).
+- **Pin GroundTruth.** A newer GroundTruth can compute a slightly different figure; with a pinned release, the numbers change only when you change it (and you can rerun the gate on the same commit to compare). The JUnit file's properties and the JSON report name the GroundTruth version that judged.
 - **Same resolution.** Set the limits from a run at the resolution the gate uses (`--resolution N`, default 1).
 - **Accept issues in the settings, not the thresholds.** A waiver (the Issues tab's Waive, `waivers:` in the settings) says why one issue is fine; a baseline (`check --baseline`) accepts all known ones. Neither counts in `issues:`.
 - **No what-if edits.** Verify judges the board as it is: the configuration's what-if edits are never applied.
@@ -869,7 +870,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install "groundtruth-pcb @ git+https://github.com/afkiwers/GroundTruth.git@0.1.42593"
+      - run: pip install "groundtruth-pcb @ https://github.com/afkiwers/GroundTruth/releases/download/0.1.42593/groundtruth_pcb-0.1.42593-py3-none-any.whl"
       - run: >
           groundtruth verify hardware/myboard.kicad_pcb
           --config hardware/groundtruth/configs/release.gtconfig.yaml
