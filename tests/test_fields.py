@@ -211,3 +211,17 @@ def test_the_help_shows_the_references_with_every_source_and_assumption(tmp_path
     assert "<td valign='top'><i>Y</i></td>" in h.references_html()
     monkeypatch.setattr(h, "REFERENCES", (tmp_path / "none.md",))
     assert "not installed" in h.references_html()
+
+
+def test_the_part_parameters_guide_lists_every_field_the_code_reads():
+    """docs/guide/part-fields.md (the list for a parts database, by tab): every field of components/fields.PARAMS and
+    the controller's Control Mode appears as a table row, so a new parameter can't be left out of it; and each section
+    lists a field once."""
+    from pathlib import Path
+    from groundtruth.components.fields import CONTROL_MODE, PARAMS
+    text = (Path(__file__).resolve().parents[1] / "docs" / "guide" / "part-fields.md").read_text(encoding="utf-8")
+    for name in [p.field for p in PARAMS] + [CONTROL_MODE]:
+        assert f"| `{name}` |" in text, name
+    for section in text.split("\n## ")[1:]:
+        rows = [line.split("|")[1].strip() for line in section.splitlines() if line.startswith("| `")]
+        assert len(rows) == len(set(rows)), section.splitlines()[0]

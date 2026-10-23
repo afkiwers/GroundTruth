@@ -48,6 +48,8 @@ Available part models are `short`, `open`, `resistor (R)`, `cap (C, ESR, ESL, op
 
 ## Part parameters from the schematic (HTTP lib fields)
 
+Every parameter by the tab that uses it, to add to a parts database: [Part parameters](part-fields.md).
+
 A part's parameters can come from its symbol's fields instead of being typed in: give the parts these fields in the schematic, or name the HTTP lib's parameters so (KiCad's HTTP library hands them to the symbols as fields). One field name per parameter, matched without regard to case:
 
 | Field | Parts | Fills | A bare number is in | Example |
