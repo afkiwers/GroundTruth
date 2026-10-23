@@ -1462,7 +1462,7 @@ listing each server's version now and after); each row shows how far its
 update is. A server takes it only when it was installed with remote updates on (asked on its first install, or
 <code>install_server.cmd install --remote-update on</code>), the package is signed with the release key of the
 build PC its last manual install came from (every manual install resets that key), and the package is newer than
-what it runs. A busy server finishes its running jobs first; queued jobs wait. It restarts by itself, and goes back
+what it runs. A busy server cancels its running jobs at once (their owners see why and run them again on the new version); queued jobs wait and run after it. It restarts by itself, and goes back
 to its old version if the new one does not stay up. A development copy of the plugin carries no server package:
 its buttons stay off.</p>
 
