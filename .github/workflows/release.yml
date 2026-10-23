@@ -68,7 +68,8 @@ jobs:
           (umask 077; printf '%s\n' "$RELEASE_KEY" > "$key")
           status=stable
           if [ "$PRERELEASE" = "true" ]; then status=testing; fi
-          GROUNDTRUTH_RELEASE_KEY="$key" python tools/make_pcm_package.py --status "$status" --out dist
+          # the tag is the version: a build number (0.1.42600, make_pcm_package.py --print-version); another form stops it
+          GROUNDTRUTH_RELEASE_KEY="$key" python tools/make_pcm_package.py --status "$status" --version "$TAG"             --out dist
 
       - name: No private key in the packages
         run: python tools/make_pcm_repository.py check-no-key dist
