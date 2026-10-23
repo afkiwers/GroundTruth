@@ -82,6 +82,9 @@ driver 527 / CUDA 12.0). The notes below were written on the old laptop (user `i
                                                   # solve): gain, -3 dB, poles/zeros; --json, --plots
 .venv/Scripts/groundtruth history BOARD [--compare 1 [2]]   # the runs kept in <board folder>/groundtruth/history/
                                                   # (every plugin Simulate; CLI: simulate --history)
+.venv/Scripts/groundtruth simulate BOARD --config groundtruth/configs/X.gtconfig.yaml   # a saved configuration
+                                                  # (config/scenario.py, the plugin's Configuration menu) for this
+                                                  # run only: its nets/stages/bridges/run settings, the parts shared
 .venv/Scripts/groundtruth detect BOARD --settings X --write   # nets AND power stages (converters), unreviewed
 .venv/Scripts/groundtruth-gui board.kicad_pcb          # plugin window on a file (no KiCad needed)
 .venv/Scripts/groundtruth serve [--port 8765] [--workers 1] [--keep-hours 24]   # the compute server (remote/,

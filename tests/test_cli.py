@@ -48,6 +48,24 @@ def test_report_formats(tmp_path, slotted):
     assert data["summary"]["error"] == 1
 
 
+def test_config_runs_a_saved_configuration_without_changing_the_settings(tmp_path, slotted):
+    """--config: a saved configuration (config/scenario.py) takes the place of the settings' nets for that run only.
+    The slotted board's SIG crosses a slot (exit 1); a configuration with its net switched off runs clean (0), and
+    the settings file is unchanged; an invalid configuration is refused (2)."""
+    from groundtruth.config import scenario
+    _, sc, path = slotted
+    before = sc.path.read_text(encoding="utf-8")
+    scen = scenario.extract(sc.doc, "SIG off")
+    scen["nets"][0]["enabled"] = False
+    cfg = scenario.save(tmp_path / "off.gtconfig.yaml", scen)
+    assert run("check", path, "-q") == 1
+    assert run("check", path, "-q", "--config", cfg) == 0
+    assert sc.path.read_text(encoding="utf-8") == before
+    bad = tmp_path / "bad.gtconfig.yaml"
+    bad.write_text("nets: []\n", encoding="utf-8")
+    assert run("check", path, "-q", "--config", bad) == 2
+
+
 def test_baseline_suppresses_known_issues(tmp_path, slotted):
     _, _, path = slotted
     base = tmp_path / "baseline.json"
