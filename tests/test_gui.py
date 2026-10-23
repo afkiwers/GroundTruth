@@ -2311,6 +2311,33 @@ def test_the_signal_paths_tab_shows_each_chain_and_the_selected_path(app, frame)
     assert f.nets.nets[0].driver in f.nets.path_text.GetValue()
 
 
+def test_the_path_box_is_made_taller_by_dragging_its_grip(app, frame):
+    """Signal paths tab: dragging the grip under the path box makes the box taller (at most 70 % of the tab) and
+    the height is kept in ui.json for the next time."""
+    import wx
+    from groundtruth.ui import theme
+    f = frame
+    run_steps(app, f, [])
+    grip, box = f.nets.path_grip, f.nets.path_text
+    h0 = box.GetSize().height
+
+    def mouse(kind, y, down=True):
+        """A mouse event of KIND on the grip at client y."""
+        e = wx.MouseEvent(kind)
+        e.SetPosition(wx.Point(5, y))
+        e.SetLeftDown(down)
+        e.SetEventObject(grip)
+        grip.GetEventHandler().ProcessEvent(e)
+
+    mouse(wx.wxEVT_LEFT_DOWN, 2)
+    mouse(wx.wxEVT_MOTION, 62)
+    mouse(wx.wxEVT_LEFT_UP, 62, down=False)
+    run_steps(app, f, [])
+    assert box.GetSize().height >= h0 + 50, (h0, box.GetSize().height)
+    assert box.GetSize().height <= f.nets.GetClientSize().height * 0.7 + 1
+    assert theme.prefs().get("path_height") == box.GetMinSize().height
+
+
 def test_the_bode_button_sweeps_the_selected_path_over_its_own_range(app, frame):
     """Signal paths tab: Sweep from / to / points in the form (Update selected keeps them in the settings), "Bode"
     sweeps the selected path as a job (no Simulate) and the Results tab shows its Bode / poles and zeros view, the
