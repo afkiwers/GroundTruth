@@ -636,7 +636,9 @@ def test_configurations_back_to_last_settings_and_undo(app, frame, monkeypatch):
     from groundtruth.config.settings import SettingsFile
     f = frame
     run_steps(app, f, [lambda: None])
-    idle = lambda: wait_for(app, lambda: not f.busy(), timeout=60)     # noqa: E731
+    # quiet for 0.3 s (run_steps): wait_for's timer can ask the loop to end twice, and the second ended the next
+    # wait at once, before that load was done (the test failed every other run)
+    idle = lambda: run_steps(app, f, [lambda: None])                     # noqa: E731
     on = lambda: [n.enabled for n in f.settings.config.nets]            # noqa: E731
     nets = f.notebook.FindPage(f.nets)
     assert not f._undo.can_undo() and not f.t_undo.IsEnabled() and on() == [True]
