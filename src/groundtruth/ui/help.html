@@ -1385,7 +1385,11 @@ window: an edit or a tick on any tab, a tab's Detect…, a waived issue, a loade
 Their tooltips name the step. In a text field, Ctrl+Z undoes the typing in that field instead. Greyed while a job
 runs.</p>
 <p>On the command line, <code>groundtruth check | simulate | bode BOARD --config FILE</code> runs a saved
-configuration in place of the settings file's (for that run only; the file is not changed), e.g. in CI.</p>
+configuration in place of the settings file's (for that run only; the file is not changed), e.g. in CI.
+<code>groundtruth verify BOARD --config FILE --thresholds T.gtthresholds.yaml</code> is the release gate built on it:
+the configuration simulated and judged against pass / fail criteria (margins, loop inductance, efficiency, issue
+counts, temperature), one JUnit test per criterion for GitLab, exit 0 pass, 1 fail, 2 when the common settings file
+or one of the two files is missing or invalid (README "Release gate").</p>
 
 <hr><a name="settings"></a><h3>The settings file</h3>
 <p>GroundTruth keeps everything for a board in one folder next to it, <code>groundtruth</code>, so the KiCad

@@ -664,6 +664,7 @@ groundtruth compare board.kicad_pcb              # the board with and without th
 groundtruth simulate board.kicad_pcb --history   # also keep the run in groundtruth/history/
 groundtruth simulate board.kicad_pcb --config groundtruth/configs/adc.gtconfig.yaml   # a saved configuration, this run only
 groundtruth history board.kicad_pcb [--compare 1 [2]]   # the runs kept (1 = the newest), or two compared
+groundtruth verify board.kicad_pcb --config groundtruth/configs/release.gtconfig.yaml     --thresholds groundtruth/release.gtthresholds.yaml --out-dir results   # the CI release gate (below)
 groundtruth bode board.kicad_pcb [--nets N ...] [--from 1Hz --to 10MHz --points 400] [--json] [--plots]
                                   # the signal paths' Bode sweeps alone (seconds, no field solve): gain, -3 dB,
                                   # poles and zeros; groundtruth-bode.json, a Bode and a pole-zero PNG per path
@@ -690,6 +691,13 @@ These options apply to `check` and `simulate`:
 The exit code is **0** when the run passes, **1** when there are issues at or above `--fail-on` (or the EMI margin gate fails), and **2** for a configuration or parse error. `init`, `detect`, `info`, `suggest`, `compare` and `history` return 0 or 2.
 
 Issue fingerprints are built from the check, the net and the offending items' KiCad UUIDs, so they stay the same when unrelated parts of the board change.
+
+**Release gate: `groundtruth verify`.** It runs a saved configuration (the plugin's **Configuration ▾ → Save configuration as…**, committed in `groundtruth/configs/`) on the board with its common settings file, and judges the result against a thresholds file of pass / fail criteria. The common settings file must exist next to the board (`--settings` names another); without it, or with an invalid configuration or thresholds file, verify exits with **2**. The thresholds file (`*.gtthresholds.yaml`; the documented template is [examples/release.gtthresholds.yaml](examples/release.gtthresholds.yaml), and `groundtruth verify --write-template FILE` writes the same) sets, all optional:
+- `issues:` the most errors, warnings and infos, and per check (`checks: {gap_crossing: 0, clearance_voltage: 0}`); waived issues never count;
+- `nets:`, `converters:`, `bridges:` with a `default` and per-name entries (a name's values replace the default's): `radiated_margin_db` and (stages, bridges) `conducted_margin_db` (at least, dB), `return_path_ratio` (nets: the return loop's inductance against an ideal plane, at most), `loop_inductance_nh`, `overshoot_v`, `current_density_a_mm2` (at most), `efficiency_pct` (at least);
+- `thermal: {max_c}`: the hottest copper or part (verify then runs Thermal; needs the `[thermal]` extra).
+
+Each criterion is one JUnit test case in `--out-dir/groundtruth-verify-junit.xml` (GitLab: `artifacts:reports:junit`, the pipeline's Tests tab): passed, failed with the value measured against the limit, or skipped when the run gives no such figure. An item that failed to simulate fails, and so does a name in the thresholds that the run does not have. Unknown keys in the thresholds file are an error, so a misspelt one can't switch a criterion off. The job log gets a summary of the failures. The exit code is **0** when every criterion passed and **1** when one failed. It also takes `--refill-zones`, `--history`, `-v`, `--gpu`, `--resolution` and `--all-cores` as `simulate` does, and writes the run's `groundtruth-report.json` beside the JUnit file. The `emi-verify` job in [examples/gitlab-ci.yml](examples/gitlab-ci.yml) runs it on tags and the default branch; let the production jobs wait for it (`needs: [emi-verify]`).
 
 Example boards to try (an op-amp stage in a signal path, series parts across nets, an RC filter, a termination),
 each ready to simulate with its settings file: [examples/](examples/README.md). For a GitLab pipeline, see
