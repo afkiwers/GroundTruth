@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 import wx
+from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 
 from . import theme
 from .undo import UndoStack
@@ -278,7 +279,7 @@ class ConfigActions:
         if not name:
             return
         path = scenario.folder_for(self.settings.path) / scenario.file_name(name)
-        if path.exists() and path != Path(self._active.get("file", "")) and wx.MessageBox(
+        if path.exists() and path != Path(self._active.get("file", "")) and message_box(
                 f"A configuration {path.name} exists already. Replace it?", "GroundTruth",
                 wx.YES_NO | wx.NO_DEFAULT) != wx.YES:
             return
@@ -393,5 +394,5 @@ class ConfigActions:
             self.on_save()
             self._reload_tabs(f"{label.lower()}: done" + (f" · {len(notes)} note(s)" if notes else ""))
             if notes:
-                wx.MessageBox(f"{label}:\n\n" + "\n\n".join(notes), "GroundTruth", wx.ICON_INFORMATION)
+                message_box(f"{label}:\n\n" + "\n\n".join(notes), "GroundTruth", wx.ICON_INFORMATION)
         self._start("loading the configuration…", work, done, what=label.lower(), cancellable=False)

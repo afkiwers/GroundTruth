@@ -13,6 +13,7 @@ from dataclasses import replace
 from typing import Optional
 
 import wx
+from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 
 from ..components.values import format_si, parse_value
 from ..config.settings import ConfigError, DiffPairSpec, ImpedanceTarget
@@ -289,13 +290,13 @@ class SiPanel(SelectableRows, wx.Panel):
         from ..config.settings import _si_from_data
         p, n = self.p.GetValue().strip(), self.n.GetValue().strip()
         if not p or not n or p == n:
-            wx.MessageBox("Give the pair's two nets (P and N), or press Find pairs.", "GroundTruth",
+            message_box("Give the pair's two nets (P and N), or press Find pairs.", "GroundTruth",
                           wx.ICON_INFORMATION)
             return None
         if self.board is not None:
             missing = [x for x in (p, n) if x not in set(self.board.nets)]
             if missing:
-                wx.MessageBox(f"No net {', '.join(missing)} on this board.", "GroundTruth", wx.ICON_WARNING)
+                message_box(f"No net {', '.join(missing)} on this board.", "GroundTruth", wx.ICON_WARNING)
                 return None
         data = {"p": p, "n": n, "name": self.name.GetValue().strip(), "zdiff": self.zdiff.GetValue().strip() or None,
                 "tol": (self.tol.GetValue().strip() or "10") + "%", "rise_time": self.edge.GetValue().strip() or "1n",
@@ -303,7 +304,7 @@ class SiPanel(SelectableRows, wx.Panel):
         errors: list[str] = []
         si = _si_from_data({"pairs": [data]}, errors)
         if errors or not si.pairs:
-            wx.MessageBox("\n".join(errors) or "The pair could not be read.", "GroundTruth", wx.ICON_WARNING)
+            message_box("\n".join(errors) or "The pair could not be read.", "GroundTruth", wx.ICON_WARNING)
             return None
         return si.pairs[0]
 
@@ -313,7 +314,7 @@ class SiPanel(SelectableRows, wx.Panel):
         try:
             self.settings.set_si_pairs(self.pairs)
         except ConfigError as e:
-            wx.MessageBox("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
+            message_box("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
             self.pairs = list(self.settings.config.si.pairs)
             return False
         self.refresh()
@@ -331,13 +332,13 @@ class SiPanel(SelectableRows, wx.Panel):
         from ..analysis.si import detect_pairs
         new = detect_pairs(self.board, self.settings.config)
         if not new:
-            wx.MessageBox("Every pair found by its nets' names is listed already." if self.pairs else
+            message_box("Every pair found by its nets' names is listed already." if self.pairs else
                           "No two routed nets are named like a pair (_P/_N, +/-, CAN_H/CAN_L, DP/DM, X and X*): add "
                           "one by hand (P net, N net, then Add).", "GroundTruth", wx.ICON_INFORMATION)
             return
         self.pairs += new
         if self._commit():
-            wx.MessageBox(f"Added {len(new)} pair(s): {', '.join(d.label for d in new)}. Review each one's impedance "
+            message_box(f"Added {len(new)} pair(s): {', '.join(d.label for d in new)}. Review each one's impedance "
                           "and edge (from its interface when its name tells), then Run checks.", "GroundTruth",
                           wx.ICON_INFORMATION)
 
@@ -352,7 +353,7 @@ class SiPanel(SelectableRows, wx.Panel):
         """Replace the selected pair with the form's values (its on/off state kept; reviewed from now on)."""
         rows = self.selected_rows()
         if len(rows) != 1:
-            wx.MessageBox("Select a single pair to update it from the form.", "GroundTruth", wx.ICON_INFORMATION)
+            message_box("Select a single pair to update it from the form.", "GroundTruth", wx.ICON_INFORMATION)
             return
         spec = self._form()
         if spec:
@@ -373,7 +374,7 @@ class SiPanel(SelectableRows, wx.Panel):
         try:
             self.settings.set_si_targets(self.targets)
         except ConfigError as e:
-            wx.MessageBox("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
+            message_box("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
             self.targets = list(self.settings.config.si.impedance)
             return False
         self.refresh()
@@ -387,12 +388,12 @@ class SiPanel(SelectableRows, wx.Panel):
                 "z0": self.t_z0.GetValue().strip(), "tol": (self.t_tol.GetValue().strip() or "10") + "%",
                 "layers": [x.strip() for x in self.t_layers.GetValue().split(",") if x.strip()]}
         if not data["z0"]:
-            wx.MessageBox("Give the target's Z0 (e.g. 50).", "GroundTruth", wx.ICON_INFORMATION)
+            message_box("Give the target's Z0 (e.g. 50).", "GroundTruth", wx.ICON_INFORMATION)
             return
         errors: list[str] = []
         si = _si_from_data({"impedance": [data]}, errors)
         if errors or not si.impedance:
-            wx.MessageBox("\n".join(errors) or "The target could not be read.", "GroundTruth", wx.ICON_WARNING)
+            message_box("\n".join(errors) or "The target could not be read.", "GroundTruth", wx.ICON_WARNING)
             return
         self.targets.append(si.impedance[0])
         self._commit_targets()
@@ -421,7 +422,7 @@ class SiPanel(SelectableRows, wx.Panel):
                 raise ValueError("crosstalk between 0 and 100 %, stub factor and cut spacing above 0")
             self.settings.set_si_limits(xt, stub, step)
         except (ValueError, ConfigError) as e:
-            wx.MessageBox(str(e) if isinstance(e, ValueError) else "\n".join(e.messages), "GroundTruth",
+            message_box(str(e) if isinstance(e, ValueError) else "\n".join(e.messages), "GroundTruth",
                           wx.ICON_WARNING)
             return
         self.on_change()

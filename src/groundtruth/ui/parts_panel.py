@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import wx
+from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 import wx.grid as gridlib
 
 from ..components.defaults import ref_prefix, suggest_model
@@ -340,7 +341,7 @@ class PartsPanel(wx.Panel):
             name = next(p for p, c in PARAM_COL.items() if c == col)
             val = parse_value(text)
             if val is None and text:
-                wx.MessageBox(f"Cannot read {text!r} as a number", "groundtruth", wx.ICON_WARNING)
+                message_box(f"Cannot read {text!r} as a number", "groundtruth", wx.ICON_WARNING)
                 wx.CallAfter(lambda: self and self._update_row(ref))     # the old value back
                 return
             params = dict(model.params)
@@ -368,7 +369,7 @@ class PartsPanel(wx.Panel):
         points, problems = parse_bias(text)
         problems += check_points(points, model.get("C"))
         if problems:
-            wx.MessageBox(f"{ref}: " + "\n".join(problems) + "\n\n" + BIAS_HELP, "groundtruth", wx.ICON_WARNING)
+            message_box(f"{ref}: " + "\n".join(problems) + "\n\n" + BIAS_HELP, "groundtruth", wx.ICON_WARNING)
             return None
         new = ComponentModel(model.kind, dict(model.params), model.note, list(model.pins),
                              [k for k in model.from_schematic if k != "C_bias"], model.bias)
@@ -384,7 +385,7 @@ class PartsPanel(wx.Panel):
         try:
             self.settings.set_component(ref, model)
         except ConfigError as e:
-            wx.MessageBox(f"{ref}: " + "\n".join(e.messages), "groundtruth", wx.ICON_WARNING)
+            message_box(f"{ref}: " + "\n".join(e.messages), "groundtruth", wx.ICON_WARNING)
             return False
         return True
 
@@ -393,13 +394,13 @@ class PartsPanel(wx.Panel):
         board's defaults apply); unreadable text is refused and the old values shown again."""
         values, problems = values_from_data(text, ref)
         if problems:
-            wx.MessageBox("\n".join(problems) + "\n\n" + PIN_HELP, "groundtruth", wx.ICON_WARNING)
+            message_box("\n".join(problems) + "\n\n" + PIN_HELP, "groundtruth", wx.ICON_WARNING)
         else:
             try:
                 self.settings.set_component_pins(ref, values)
                 self.on_change()
             except ConfigError as e:
-                wx.MessageBox(f"{ref}: " + "\n".join(e.messages), "groundtruth", wx.ICON_WARNING)
+                message_box(f"{ref}: " + "\n".join(e.messages), "groundtruth", wx.ICON_WARNING)
         wx.CallAfter(lambda: self and self._update_row(ref))
 
     def on_pin_defaults(self, _=None):
@@ -418,12 +419,12 @@ class PartsPanel(wx.Panel):
             dlg.Destroy()
         values, problems = values_from_data(text, "Pin defaults")
         if problems:
-            wx.MessageBox("\n".join(problems), "groundtruth", wx.ICON_WARNING)
+            message_box("\n".join(problems), "groundtruth", wx.ICON_WARNING)
             return
         try:
             self.settings.set_pin_defaults(values)
         except ConfigError as e:
-            wx.MessageBox("\n".join(e.messages), "groundtruth", wx.ICON_WARNING)
+            message_box("\n".join(e.messages), "groundtruth", wx.ICON_WARNING)
             return
         self.on_change()
 
@@ -431,7 +432,7 @@ class PartsPanel(wx.Panel):
         """Set every filtered part to the chosen model kind (after asking), keeping the parameters it has."""
         kind = MODEL_KINDS[self.bulk.GetSelection()]
         refs = self._visible()
-        if wx.MessageBox(f"Set {len(refs)} part(s) to '{kind}'?", "groundtruth", wx.YES_NO) != wx.YES:
+        if message_box(f"Set {len(refs)} part(s) to '{kind}'?", "groundtruth", wx.YES_NO) != wx.YES:
             return
         for ref in refs:
             old = self.settings.config.components[ref].model
