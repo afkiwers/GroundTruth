@@ -104,19 +104,19 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
   reads all 80 as curves (none at half their rating any more): C304 / C342 98.7 nF at 3.3 V, C315 (1 µF 100 V X5R)
   228 nF at 55 V, C324 (10 µF 100 V X7S) 3.47 µF at 55 V, C302 (22 µF 35 V X5R) 2.73 µF at 28 V; still unknown:
   U303's six pins' capacitors. The estimates ignore package and capacitance density; the makers' curves go into
-  InvenTree's Cbias Curve (the prompt for that session was given to the user), which then comes with the library.
+  the HTTP lib's Cbias Curve (the prompt for that session was given to the user), which then comes with the library.
 - **Branch `dc-bias` (2026-10-22, from `main` f12cacd; into `main` at the user's "commit and merge", a fast-forward,
   branch deleted; the full suite was still running at the merge):** its full suite: 1107 passed, 1 skipped, 2 failed,
   both fixed on `dc-bias-fixes` (merged right after): `simulate --history` used the run's capacitor table where
   `_keep_run` had none (a NameError; now passed in), and a GUI test read the Parts tab's ESR cell by its old column
-  number (C in circuit moved it; now `PARAM_COL["ESR"]`). the user, of InvenTree part 60 (100 nF
+  number (C in circuit moved it; now `PARAM_COL["ESR"]`). the user, of the HTTP lib part 60 (100 nF
   100 V X7R 0603, Cbias 75nF "estimate at 50% of rated voltage") used 33 times on kraft: "cbias is saved as a single
   value, this is probably not ideal as it will be used with different DC voltages. We should find a more generic way
   for caps", then "i like this approach -> (Give the field its voltage ...)", "rather than having a real value we
   could use an array like this (90nF@10V 75nF@50V, 20nF@70V)", unknown nets "The max of C304 will be the Opamps
   input voltage. Worst case the opamp is a rail-to-rail IC so in this case it would be 3.3 V. Why can't you use
   that?", half the rated voltage without a voltage, a help section "Cbias" with a chart of a made-up curve, 3-4
-  points, the InvenTree string and the min / max number of points; also "this should be called out in the help"
+  points, the HTTP lib string and the min / max number of points; also "this should be called out in the help"
   (a FET's fields are stage parameters, not the Parts table's). Plan: `C:\Users\iwers\.claude\plans\composed-juggling-tide.md`.
   - `components/bias.py` (the curve: one point C0/(1+(V/V1)²) [A56], 2-12 points PCHIP [Fritsch 1980], percent
     points, the limits), `analysis/bias.py` (`cap_voltages`: safety.voltage_model + an IC's supply ≤ 18 V for its
@@ -133,7 +133,7 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
     99.9 nF at 3.3 V), the step's rise 775 µs → 1.03 ms; conv1 conducted −25.9 → −26.2 dB, conv2 −14.2 → −15.0 dB,
     single harmonics up to ±4 dB; conv1's loop 11.2 → 13.2 kHz, PM 77 → 84°, GM 22.8 → 19.6 dB (its 22 µF output
     ceramics at 28 V: 9.25 µF from their half-rating point); the fix advisor's filter values follow. 6 capacitors at
-    an unknown voltage (U303's SS, ITH, DRVCC), 80 taken at half their rating: the user's InvenTree parts can get
+    an unknown voltage (U303's SS, ITH, DRVCC), 80 taken at half their rating: the user's HTTP lib parts can get
     a Cbias Curve (their posted datasheet chart gives ~42 nF at 50 V for part 60, not 75 nF).
   - Asked meanwhile, next on its own branch: the Issues tab sortable by its columns, a filter of the checks shown
     (one or more; the #numbers kept), and a click zooming KiCad to the copper for every check (the user:
@@ -189,7 +189,7 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
   - The user, then: "do that for me": the user's flux-2 settings' two ADC paths got `sweep_from: 1Hz` and
     `max_bandwidth: 1kHz` (only those two lines changed; backup `out/kraft_backup_2026-10-21_settings/`); `groundtruth
     bode` from them: −3 dB at 451 / 452 Hz (within the limit), rise 775 µs, settling 1.38 ms, U301 / U305 loops 89°
-    (one pole: the board's symbols don't have the Aol / Fp2 / PM fields the user added in InvenTree yet: Update
+    (one pole: the board's symbols don't have the Aol / Fp2 / PM fields the user added in the HTTP lib yet: Update
     symbols from library, then Update PCB from Schematic). "forget about it" for the PCB-EMI folder and CE2264's FET
     fields (dropped). Full suite on the branch: 1095 passed, 1 skipped, 1 failed (the bridges tab's GUI timing check,
     0.71 s / 0.5 under load: passes alone; `out/step/full_suite.log`). After the user updated the schematic and
@@ -348,7 +348,7 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
 - **Branch `kelvin-rtn` (2026-10-21, from `main` 75be1dd, `main` merged in at 3f83a74; into `main` at the user's "merge", a fast-forward):** the
   user's CE2264 hybrid generator board (`C:\Users\andre\Documents\gitlab\ce2264-hybrid-generator`, a Currawong
   project: the BLDC starter-generator bridge, EPC2302 GaN pairs, NCP51810 drivers, motor Plettenberg ORBIT SG1).
-  - The EPC symbols of the user's InvenTree library name the Kelvin source `RTN`: four nets, so `fet_terms` read no
+  - The EPC symbols of the user's HTTP lib library name the Kelvin source `RTN`: four nets, so `fet_terms` read no
     transistor and the bridge had no legs. `detect.KELVIN_FN` takes `RTN`, `GR`, `G_RTN` too. Test: test_detect.
   - At the user's "add the proper fields to the schematic to be recognised as a BLDC": GT labels set in that project
     (`label_project.py`): the phase sheet's two high-side FET symbols `hb_hs`, two low-side `hb_ls` (one sheet used
@@ -811,7 +811,7 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
     745 passed, 1 skipped.
 - **Branch `control-loop` (M5, merged 7074837 on 2026-10-17 at the user's "update docs and handoff, commit and merge, make installers"; full suite on 3a2a3c6: 762 passed, 1 skipped)**, at the user's "Go for it": `analysis/loop.py` (a buck's
   and, at the user's "Add boost support too", a boost's loop gain: parts from the board, the controller's figures
-  from its InvenTree symbol fields, which the user asked for: "Those parameters could come straight from the
+  from its the HTTP lib symbol fields, which the user asked for: "Those parameters could come straight from the
   schematic"); tests/test_loop.py (11). See ARCHITECTURE "Control loop". Full suite on 4bb6f9b (before the boost):
   752 passed, 1 skipped; on a1b8888 (boost, M4 leftovers): 758 passed, 1 skipped.
   - **kraft's schematic and board changed in place** at the user's "add those yourself" (KiCad closed first at the
@@ -872,7 +872,7 @@ scratchpad is gone (reusable scripts are in `tools/dev/`).
   tuning_delay check (ARCHITECTURE "Signal integrity"). Type 1 = Differential confirmed (the user switched Test, "switched to diff").
 - **M2 (merged 3d580e4)**: `analysis/safety.py` (net voltages; clearance_voltage by IPC-2221B Table 6-1,
   cap_voltage, esd_protection in Run checks; resistor_power and vds_rating after Simulate), settings `safety:`,
-  fields Rated Voltage and Rated Power (InvenTree's names, as on kraft's parts; Voltage / Power read too;
+  fields Rated Voltage and Rated Power (the HTTP lib's names, as on kraft's parts; Voltage / Power read too;
   parse_quantity now reads "1/16W" as 0.0625 W, it read 1 W), tests/test_safety.py. Run checks runs without nets
   (the board-wide checks). See ARCHITECTURE "Voltage-aware safety checks" for the design and the kraft results. Full
   suite on the branch: 697 passed, 3 failed (2 GUI timing under load, passing alone; 1 CLI test fixed after). Open
@@ -1361,7 +1361,7 @@ were suggested from web research and general knowledge; the user checks stock an
   L301 -> **Coilcraft XAL1510-103** (10 µH, 6.8 mΩ, Isat 26 A; needs ~5 mm more room: move C304/C315/R309/R310,
   keep Q301/Q302 and the input caps), L302 -> XAL1010-103 (drop-in); 8 × 22 µF 50 V X7R 1210 per stage (TDK
   C3225X7R1H226M250AC) -> stage 2 0.086 % nominal / 0.133 % at the tolerance corner, stage 1 ≈ 0.08-0.09 %.
-  The user's InvenTree part **CL32B106KMVNNWE** (10 µF 63 V X7R 1210, ~5-6.5 µF at 28 V): 8 + hybrid bulk ≈ 40 mV
+  The user's HTTP lib part **CL32B106KMVNNWE** (10 µF 63 V X7R 1210, ~5-6.5 µF at 28 V): 8 + hybrid bulk ≈ 40 mV
   (0.14 %) on stage 1; a second LC stage (1 µH + a few 4.7 µF 50 V 1206, feedback divider R306 before it) gets
   < 5 mV and also removes the GaN spikes. Ceramics are expensive for the user: low-ESR aluminium polymer
   (~12 mΩ, 4 parts) also beats the big ceramics (~16 mV).
@@ -2267,16 +2267,16 @@ Plan: 1 losses from the drive waveform, 2 RMS current density battery → motor 
   - The user's: C_bias of C324/C326/C329/C332 (10 µF at 51.8 V) and a C_oss for D501.
 
 ### Part parameters from schematic fields (2026-10-08, session 7, branch `part-fields` from `fix-cascaded`)
-- **The request.** The user: "My parts' meta data (fields) in the schematic come from Inventree using HTTP libs ...
+- **The request.** The user: "My parts' meta data (fields) in the schematic come from an HTTP lib ...
   use these values to pre-populate them ... when the user changes a parameter inside groundtruth it is saved but
   flagged ... with a little exclamation mark".
 - **Their decisions:**
-  - one concrete generic field name per parameter, no aliases; they rename their InvenTree parameter templates;
-  - InvenTree sends units ("Rds": "3.8milliohm"); a bare number takes the datasheet unit per field, with a
+  - one concrete generic field name per parameter, no aliases; they rename their HTTP lib parameters;
+  - the HTTP lib sends units ("Rds": "3.8milliohm"); a bare number takes the datasheet unit per field, with a
     plausibility check;
   - flags also as an info issue and in the reports;
   - values stay in sync with the schematic on every open and run;
-  - the Help gets a table of every accepted field, for setting up InvenTree.
+  - the Help gets a table of every accepted field, for setting up the HTTP lib.
 - **Done:** see ARCHITECTURE `components/fields.py`. Tests: `tests/test_fields.py`, and the GUI test
   `test_schematic_fields_fill_the_forms_and_a_value_set_here_is_flagged`.
 - **On kraft_flux_mini_2 today:** the fields are named `Rds`, `DC Resistance`, `Capacitance`, `ESR`, `Resistance`.
@@ -2332,7 +2332,7 @@ Plan: 1 losses from the drive waveform, 2 RMS current density battery → motor 
 
 ### Op-amps in signal paths (2026-10-11, branch `opamp` from `signal-override`; done, NOT merged)
 - The user: "some signal paths have an opamp in the line, can we add a function to approximate opamps ... simply,
-  amplification factor and maybe optional datasheet parameters that could be pulled in via inventree. like
+  amplification factor and maybe optional datasheet parameters that could be pulled in via the HTTP lib. like
   bandwidth, common mode rejection etc. if optional parameters are not defined its simply an amplifier." Design
   agreed ("yes"):
   - The op-amp splits the path into stages. Input side: driver → path → op-amp input (load: Cin ∥ Rin), its
@@ -2343,7 +2343,7 @@ Plan: 1 losses from the drive waveform, 2 RMS current density battery → motor 
     +IN/IN+/INP and OUT): gain (V/V, required, negative = inverting), optional gbw (bandwidth = GBW/|gain|),
     bandwidth (closed-loop -3 dB, wins), z_out (default 1 Ω), c_in (default 2 pF), r_in (default open), slew
     (V/s: caps each output harmonic at SR/2πf, applied to the currents as a factor), cmrr (dB: stored and shown,
-    NO effect: the path model is single-ended; tell the user so). Schematic fields (InvenTree): Gain (per design,
+    NO effect: the path model is single-ended; tell the user so). Schematic fields (the HTTP lib): Gain (per design,
     "20dB" = 10), GBW, Bandwidth, Zout, Cin, Rin, Slew Rate ("20V/us"), CMRR. A symbol with a Gain field gets the
     amplifier model automatically (defaults.suggest_model).
 - **Done (session 10):** the part model (`components/models.py`: kind `amplifier`, `amp_gain`, `amp_z_in`,

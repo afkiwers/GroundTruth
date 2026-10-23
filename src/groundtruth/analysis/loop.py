@@ -1,6 +1,6 @@
 """A buck or boost stage's control loop (the plan's M5): the loop gain T(s), its crossover, phase margin and gain margin, as an
 exact rational function of s (so its poles and zeros are exact) from the parts on the board and the controller's
-figures in its symbol fields (InvenTree parameters: components/fields.py "controller" rows, and "Control Mode").
+figures in its symbol fields (HTTP lib parameters: components/fields.py "controller" rows, and "Control Mode").
 
 The parts (`find_loop`): the controller is the IC with a pin on the stage's switch node (SW1 of a dual controller: the
 digit picks the channel, ITH1 / V_FB1 / SENSE1±); its compensation pin (ITH / COMP / VC) carries a series R-C to
@@ -117,7 +117,7 @@ class LoopParts:
     sense_parts: list = field(default_factory=list)
     params: dict = field(default_factory=dict)       # controller figures (SI) with their sources
     notes: list = field(default_factory=list)
-    missing: list = field(default_factory=list)      # InvenTree fields the model needs and the part lacks
+    missing: list = field(default_factory=list)      # HTTP lib fields the model needs and the part lacks
 
 
 def _norm(fn: str) -> str:

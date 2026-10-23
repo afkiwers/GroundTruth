@@ -10,7 +10,7 @@ The Bode views (Simulate, the Signal paths tab's **Bode**, `groundtruth bode`) s
 
 ## Capacitance at DC bias
 
-A class II ceramic (X7R, X5R …) loses capacitance as the DC voltage across it rises. A part's `Cbias` (schematic field, InvenTree parameter, or the Parts tab's **C at bias**) is its DC-bias curve: one value (`75nF`, taken at half the part's Rated Voltage), one point (`75nF@50V`: the curve C0 / (1 + (V/V1)²) through it) or 1-12 points (`95nF@10V, 66nF@30V, 39nF@50V, 20nF@80V`, or `-5%@10V, …`: a monotone cubic through them). InvenTree's numeric templates can't hold the `@`: use a text template **Cbias Curve** (it wins), or **Cbias** with **Cbias Voltage**. Every run gives each capacitor its capacitance at the worst DC voltage across it (`analysis/bias.py`): a net's voltage from its name, PDN rails, the power stages and bridges, the settings' `safety: voltages:`, through series parts; else at most the supply of a low-voltage IC on it (an op-amp's, an MCU's: ≤ 18 V), else at most a divider's top; else 0 V (the nominal C, named in a note). C0G / NP0, tantalum and electrolytics keep their C. The Parts tab's **C in circuit**, the report's *Capacitors at their DC bias* table and the JSON's `capacitors_at_bias` show what was used; the plugin's help (Cbias) has a worked chart.
+A class II ceramic (X7R, X5R …) loses capacitance as the DC voltage across it rises. A part's `Cbias` (schematic field, HTTP lib parameter, or the Parts tab's **C at bias**) is its DC-bias curve: one value (`75nF`, taken at half the part's Rated Voltage), one point (`75nF@50V`: the curve C0 / (1 + (V/V1)²) through it) or 1-12 points (`95nF@10V, 66nF@30V, 39nF@50V, 20nF@80V`, or `-5%@10V, …`: a monotone cubic through them). The HTTP lib's numeric parameters can't hold the `@`: use a text template **Cbias Curve** (it wins), or **Cbias** with **Cbias Voltage**. Every run gives each capacitor its capacitance at the worst DC voltage across it (`analysis/bias.py`): a net's voltage from its name, PDN rails, the power stages and bridges, the settings' `safety: voltages:`, through series parts; else at most the supply of a low-voltage IC on it (an op-amp's, an MCU's: ≤ 18 V), else at most a divider's top; else 0 V (the nominal C, named in a note). C0G / NP0, tantalum and electrolytics keep their C. The Parts tab's **C in circuit**, the report's *Capacitors at their DC bias* table and the JSON's `capacitors_at_bias` show what was used; the plugin's help (Cbias) has a worked chart.
 
 ## Frequency responses: Bode plots, poles and zeros
 
@@ -104,7 +104,7 @@ safety:
   (10 V) above it, and on through gate resistors (≤ 100 Ω) to the driver's pins. A part's own pads against each
   other don't count (its maker spaces and rates them); a track against them does. An error; a warning when the
   other net's voltage is not known (taken as 0 V; give it under `voltages`).
-- `cap_voltage`: a capacitor's voltage against its rating (its **Rated Voltage** field, InvenTree's name, or
+- `cap_voltage`: a capacitor's voltage against its rating (its **Rated Voltage** field, the HTTP lib's name, or
   Voltage; else "50V" in its value), derated by kind: over the rating an error, over the derated value a warning.
   Capacitors at 10 V or more without a rating: one info issue naming them.
 - `esd_protection`: a connector's pins (not ground, not unconnected) with no ESD / TVS part (by its value or

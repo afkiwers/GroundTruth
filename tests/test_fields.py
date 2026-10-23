@@ -1,4 +1,4 @@
-"""Part parameters from schematic fields (components/fields.py): an InvenTree part's parameters reach the symbol as
+"""Part parameters from schematic fields (components/fields.py): an HTTP lib part's parameters reach the symbol as
 fields ("Rds": "3.8milliohm"); GroundTruth reads one concrete field name per parameter, keeps the values linked to
 the schematic (from_schematic, refreshed on every open and run) and flags a value set here that differs."""
 from dataclasses import replace
@@ -22,7 +22,7 @@ from groundtruth.config.settings import SettingsFile
     ("4R7", "ohm", 1, 4.7), ("1.5MOhm", "ohm", 1, 1.5e6), ("616 picofarad", "F", 1e-12, 616e-12), ("616p", "F", 1e-12, 616e-12),
     ("616", "F", 1e-12, 616e-12), ("10uF/16V", "F", 1, 10e-6), ("2.2 µF", "F", 1, 2.2e-6), ("38 nanocoulomb", "C", 1e-9, 38e-9),
     ("38nC", "C", 1e-9, 38e-9), ("2.1V", "V", 1, 2.1), ("0.4 nH", "H", 1e-9, 0.4e-9), ("1e-9", "F", 1e-12, 1e-9)])
-def test_values_as_inventree_and_datasheets_write_them(text, quantity, assumed, value):
+def test_values_as_an_http_lib_and_datasheets_write_them(text, quantity, assumed, value):
     v, _ = parse_quantity(text, quantity, assumed)
     assert v == pytest.approx(value, rel=1e-9)
 
@@ -113,7 +113,7 @@ def test_linked_values_follow_the_schematic_and_overrides_are_kept_and_flagged(t
     assert "c_oss" not in c2.from_schematic and "dcr" in c2.from_schematic
     assert c2.q_oss == pytest.approx(38e-9) and "q_oss" in c2.from_schematic      # emptied: the schematic's again
     sc.set_converters([c2])
-    # InvenTree changes L1's DCR and Q2's Coss: the linked DCR follows, the user's C_oss stays
+    # The HTTP lib changes L1's DCR and Q2's Coss: the linked DCR follows, the user's C_oss stays
     board2, _, _ = make(tmp_path, buck(**{**FIELDS, "L1": {"DCR": "8.1m"}, "Q2": {**FIELDS["Q2"], "Coss": "700p"}}),
                         "sync2", nets=())
     changes = sc.merge_board(board2)
@@ -196,8 +196,9 @@ def test_the_help_shows_the_references_with_every_source_and_assumption(tmp_path
     keys = [line.split("|")[1].strip() for line in md.splitlines()
             if line.startswith("| ") and not line.startswith(("| Key", "| Id", "|---"))]
     assert len(keys) > 90
-    for key in keys:
-        assert f"<td valign='top'>{key}</td>" in section, key
+    for key in keys:                    # each row with its anchor (Preferences' basis links jump there)
+        a = h.ref_anchor(key)
+        assert f"<td valign='top'><a name=\"{a}\" id=\"{a}\"></a>{key}</td>" in section, key
     assert "<i>IBM J. Res. Develop.</i>" in section and "<code>[Grover 1946]</code>" in section
     assert not re.search(r"\*\*|\| ---|^#", section, re.M)                 # no Markdown left over
     assert section.count('href="#references"') == 0 and text.count('href="#references"') >= 3
@@ -210,3 +211,17 @@ def test_the_help_shows_the_references_with_every_source_and_assumption(tmp_path
     assert "<td valign='top'><i>Y</i></td>" in h.references_html()
     monkeypatch.setattr(h, "REFERENCES", (tmp_path / "none.md",))
     assert "not installed" in h.references_html()
+
+
+def test_the_part_parameters_guide_lists_every_field_the_code_reads():
+    """docs/guide/part-fields.md (the list for a parts database, by tab): every field of components/fields.PARAMS and
+    the controller's Control Mode appears as a table row, so a new parameter can't be left out of it; and each section
+    lists a field once."""
+    from pathlib import Path
+    from groundtruth.components.fields import CONTROL_MODE, PARAMS
+    text = (Path(__file__).resolve().parents[1] / "docs" / "guide" / "part-fields.md").read_text(encoding="utf-8")
+    for name in [p.field for p in PARAMS] + [CONTROL_MODE]:
+        assert f"| `{name}` |" in text, name
+    for section in text.split("\n## ")[1:]:
+        rows = [line.split("|")[1].strip() for line in section.splitlines() if line.startswith("| `")]
+        assert len(rows) == len(set(rows)), section.splitlines()[0]

@@ -57,11 +57,11 @@ KiCad (IPC) ─kipy_source──┘        + settings file        └── anal
   `from_schematic`; `suggest_model(fp, fields=False)` is the plain suggestion (what a field replaces as a default).
   `is_electrolytic(fp)`.
 - `components/values.py`: `parse_value` (schematic notation: 4k7, 1R5, 22u0, 100n, 10uF/16V; DNP/NC → None),
-  `parse_quantity(text, quantity, assumed)` (a part parameter as a symbol field holds it: InvenTree's pint strings
+  `parse_quantity(text, quantity, assumed)` (a part parameter as a symbol field holds it: an HTTP lib's unit strings (pint's names)
   "3.8milliohm", "616 picofarad", "6.9 mΩ", datasheet "3.8m", "4m7"; a unit of another quantity is refused, a bare
   number takes `assumed`, a number with an exponent is SI), `parse_impedance_at` (ferrite "600R@100MHz" → (Ω, Hz)),
   `format_si`.
-- `components/fields.py`: part parameters from the schematic (session 7, the user's InvenTree parts reach the
+- `components/fields.py`: part parameters from the schematic (session 7, the user's HTTP lib parts reach the
   symbols as fields through KiCad's HTTP library). `PARAMS`: one concrete field name per parameter (Rds(on), Coss,
   Qoss, Vsd, Vf, Cj, DCR, ESR, ESL, Cbias, Capacitance, Inductance, Resistance), with the quantity, the unit a bare
   number is in, the usual range (outside it: used, with a note), an example and what it feeds; the plugin's help table and the README's come
@@ -671,7 +671,7 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   The report shows the path per net (stretches, parts with |Z| at the worst harmonic, currents, receiver voltage).
 - **Op-amp stages** (part model `amplifier`, `_amplified_route`, `_stage_routes`, `emi/path.amplified_path`,
   `PathAmp`; 2026-10-11, the user: "simply, amplification factor and maybe optional datasheet parameters ...
-  pulled in via inventree"). The route passes an amplifier from its input pin to its output pin
+  pulled in via the HTTP lib"). The route passes an amplifier from its input pin to its output pin
   (`amplifier_pins`: the Parts tab's `pins`, else GT `amp_in`/`amp_out` labels, else the pin names +IN/IN+/INP and
   OUT of a single op-amp). The path is cut there into stages: the source (or the op-amp before) drives a stage,
   whose end is the next op-amp's input (`amp_z_in`: c_in 2 pF ∥ r_in) or the receivers; the next stage is driven by
@@ -1294,8 +1294,8 @@ The plan's M2. No new solve: what each net's voltage asks of the copper and the 
   R309 / R310 (8 mΩ, 0612) 0.21 / 0.19 W, Q601 0.19 W, R328 / R329 0.05 W: nothing over 50 % of a rating.
 
 ## Control loop (`analysis/loop.py`, M5, branch `control-loop`; boosts at the user's "Add boost support too")
-The plan's M5, at the user's "Go for it"; the controller's figures as InvenTree fields at the user's "Those
-parameters could come straight from the schematic and are part of the symbol that comes from InvenTree".
+The plan's M5, at the user's "Go for it"; the controller's figures as HTTP lib fields at the user's "Those
+parameters could come straight from the schematic and are part of the symbol that comes from the HTTP lib".
 - Fields (components/fields.py, parts "controller"): Vref, EA gm (quantity "S": mho / S with prefixes in `_special`),
   EA Ro, EA Gain, EA GBW, Vsense Max, ITH Range, Current Sense Gain, Slope Compensation ("V/s": a prefixed volt now
   parses, "50mV/us"), Ramp; `CONTROL_MODE` "Control Mode" (text). LTC7890 (from the datasheet as quoted by a search:
@@ -1340,7 +1340,7 @@ parameters could come straight from the schematic and are part of the symbol tha
   those yourself"; backup `out/kraft_backup_2026-10-17/`): Control Mode peak current, Vref 0.8V, EA gm 1.8mmho,
   Vsense Max 50mV (ILIM floating: 45/50/55 mV), ITH Range 1V (first an estimate; then read off the datasheet's
   Figure 13 "Maximum Current Sense Threshold vs V_ITHx": every ILIM line from 0 mV at 0.4 V to its maximum at 1.4 V;
-  analog.com and Mouser refuse automated downloads and the InvenTree copy needs a login, but
+  analog.com and Mouser refuse automated downloads and the HTTP lib's copy needs a login, but
   web.archive.org/web/2024id_/<the analog.com URL> serves the PDF, and r.jina.ai/<URL> its text); U502 COT,
   U503 internal. `tools/dev/loop_check.py` (out/m5 settings from real_settings.py): conv1 f_c 11.2 kHz, PM 77°,
   GM 22.6 dB; conv2 29 kHz, 91°, 20 dB (slope compensation assumed half the down-slope). The crossover scales

@@ -161,9 +161,9 @@ def test_an_rc_filters_corner_moves_with_its_capacitors_dc_voltage(tmp_path):
 
 def test_the_helps_chart_draws_the_plugins_curve_through_its_points():
     """The help's Cbias section (the user: "draw a chart with a fake curve and place 3-4 points ... create the string
-    that would go into inventree's parameter and draw some line in between that show how the plugin would
+    that would go into the HTTP lib's parameter and draw some line in between that show how the plugin would
     approximate it. Also mention what the min/max number of samples can be"): the browser view's SVG has the four
-    points as dots on the solid curve (vertices of its polyline), the curve is components/bias.c_at's, the InvenTree
+    points as dots on the solid curve (vertices of its polyline), the curve is components/bias.c_at's, the HTTP lib
     text under it parses back to those points, the limits are said; wx's simple view has the numbers as a table."""
     import re
     from groundtruth.ui import help as h

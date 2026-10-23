@@ -123,7 +123,7 @@ def test_the_options_name_parts_predictions_and_what_they_clear(base):
 
 
 def test_a_switch_rating_limits_the_overshoot(tmp_path):
-    """With a Vds field on the switch (InvenTree's rating), the overshoot target is the smaller of the rule's
+    """With a Vds field on the switch (the HTTP lib's rating), the overshoot target is the smaller of the rule's
     share of V_in and 80 % of the rating less V_in."""
     from groundtruth.analysis.fix_advisor import targets
     gen = hot_loop_board(20.0, connector=True)

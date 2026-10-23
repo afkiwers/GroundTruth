@@ -212,7 +212,7 @@ thresholds (a reset pin's glitch filter, a supervisor's threshold).
 
 Simulate gives each buck or boost stage with a controller on the board its loop gain T(s): crossover, phase margin, gain
 margin, the Bode plot and the poles and zeros (exact: the model is a rational function of s). The parts come from
-the board, the controller's figures from its symbol fields (InvenTree parameters):
+the board, the controller's figures from its symbol fields (HTTP lib parameters):
 
 - **the controller**: the IC with a pin on the stage's switch node (SW1 of a dual controller picks channel 1: ITH1,
   V_FB1, SENSE1±), by pin names (FB / VFB / VOSENSE, ITH / COMP / VC, SENSE± / ISNS± / CS±);
