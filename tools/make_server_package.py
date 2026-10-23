@@ -5,8 +5,9 @@ and a version.txt), from HEAD. The version matches the KiCad package built at th
 (tools/make_pcm_package.py): the server and the users' plugins must run the same analysis code.
 
 Signed (remote/release.py): the package holds release_key.pub, the public half of this PC's release key (made on the
-first build, kept in %LOCALAPPDATA%\\GroundTruth\\release\\, never in the repository), which a server trusts from its
-install on; `<zip>.sig` beside the zip is the key's Ed25519 signature of the zip's bytes. The KiCad package carries
+first build, kept in %LOCALAPPDATA%\\GroundTruth\\release\\, never in the repository; on GitHub the release workflow's
+secret, .github/workflows/release.yml), which a server trusts from its install on; the build checks the key against
+tools/release_key.pub (the trusted public half) and never makes a new one while that file exists; `<zip>.sig` beside the zip is the key's Ed25519 signature of the zip's bytes. The KiCad package carries
 such a signed server package of its own build, for the plugin's remote update of the servers.
 
     .venv/Scripts/python tools/make_server_package.py
@@ -14,6 +15,7 @@ such a signed server package of its own build, for the plugin's remote update of
 from __future__ import annotations
 
 import io
+import os
 import subprocess
 import sys
 import tarfile
@@ -27,6 +29,9 @@ FILES = {"tools/server_setup.py": "server_setup.py", "tools/install_server.cmd":
          "tools/install_server.command": "install_server.command",
          "tools/SERVER_README.md": "README.md", "plugin/requirements.txt": "requirements.txt"}
 EPOCH = datetime(2026, 1, 1, tzinfo=timezone.utc)       # as make_pcm_package.py: the same version for both
+# the public half (hex) of the release key the installed servers trust: public, so it is in the repository; a
+# build checks its key against it (the private half never is: on the build PC, or the release workflow's secret)
+EXPECTED_PUBLIC = ROOT / "tools" / "release_key.pub"
 
 
 def git(*args: str) -> bytes:
@@ -71,9 +76,19 @@ def source_files(working_tree: bool = False) -> dict[str, bytes]:
 def build(version: str, tag: str, version_text: str, working_tree: bool = False) -> tuple[str, bytes, str]:
     """(the package's folder name, the zip's bytes, its signature hex): the files (source_files), version.txt with
     `version_text` (the same text as the KiCad package's of this build), release_key.pub and the signature of the
-    zip by this PC's release key (made on the first build)."""
+    zip by this PC's release key (made on the first build). With tools/release_key.pub in the repository (the public
+    half of the key the servers trust) no key is ever made, and a key that does not match it stops the build: a
+    package signed by another key would be refused by every server (a PC or a CI run without the right key)."""
     from groundtruth.remote import release
-    private, made = release.load_private(create=True)
+    expected = EXPECTED_PUBLIC.read_text(encoding="utf-8").strip() if EXPECTED_PUBLIC.exists() else None
+    try:
+        private, made = release.load_private(create=expected is None and not os.environ.get(release.KEY_ENV))
+    except FileNotFoundError:
+        raise SystemExit(f"no release key at {release.private_key_path()}: copy the key the servers trust there (or "
+                         f"name it in {release.KEY_ENV}); a new key would not be accepted by them")
+    if expected is not None and release.public_hex(private) != expected:
+        raise SystemExit(f"the release key at {release.private_key_path()} is not the one the servers trust "
+                         f"({EXPECTED_PUBLIC.name}): its packages would be refused")
     if made:
         print(f"made a new release key: {release.private_key_path()} (keep it, and back it up: servers installed from "
               "its packages take remote updates only from packages signed with it)", file=sys.stderr)

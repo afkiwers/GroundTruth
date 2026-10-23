@@ -13,3 +13,6 @@ dist/
 *-backups/
 fp-info-cache
 .history/
+# a release key (private half) must never be committed: the release workflow takes it from an Actions secret
+*.pem
+release_ed25519*
