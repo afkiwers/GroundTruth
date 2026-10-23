@@ -65,9 +65,11 @@ class HistoryPanel(wx.Panel):
     """The History tab (see the module): the list of runs, a note field, the buttons, and the comparison of two
     runs (a table and the text of what changed)."""
 
-    def __init__(self, parent):
-        """The tab, empty until set_history; its background thread is started here."""
+    def __init__(self, parent, on_load=None):
+        """The tab, empty until set_history; its background thread is started here. on_load(run): the window loads
+        that run's configuration (ui/config_menu.py; None: no such button)."""
         super().__init__(parent)
+        self.on_load = on_load
         self.history: Optional[History] = None
         self.runs: list[Run] = []
         self.cell_mm: Optional[float] = None     # the newest kept run's 1x cell (mm): Preferences' Resolution sizes
@@ -85,6 +87,9 @@ class HistoryPanel(wx.Panel):
                 ("report", "Open report", "the run's report page in the web browser"),
                 ("board", "Open board copy", "the board as it was simulated, unpacked to a temporary file and opened "
                                              "with the program Windows uses for .kicad_pcb files"),
+                ("load", "Load its configuration", "put the selected run's nets, stages, bridges, loads, rails, "
+                                                   "pairs, what-if edits and run settings back on the tabs (the "
+                                                   "part models stay as they are now; Undo takes it back)"),
                 ("folder", "Open folder", "the history folder in Explorer"),
                 ("delete", "Delete…", "remove the selected runs (and board copies no other run uses)")):
             b = theme.Button(self, label)
@@ -228,6 +233,7 @@ class HistoryPanel(wx.Panel):
         self.buttons["compare"].Enable(len(sel) == 2 or (one and self.runs.index(sel[0]) + 1 < len(self.runs)))
         self.buttons["report"].Enable(one and self.reports.get(sel[0].id) is not None)
         self.buttons["board"].Enable(one)
+        self.buttons["load"].Enable(one and self.on_load is not None)
         self.buttons["folder"].Enable(bool(self.runs))
         self.buttons["delete"].Enable(bool(sel))
         self.note.Enable(one)
@@ -246,6 +252,8 @@ class HistoryPanel(wx.Panel):
             self._open_if_there(self.reports[sel[0].id], f"the report of {run_label(sel[0].id)}")
         elif key == "board" and len(sel) == 1:
             self._open_board(history, sel[0])
+        elif key == "load" and len(sel) == 1 and self.on_load is not None:
+            self.on_load(sel[0])
         elif key == "compare":
             self._compare(history, sel)
         elif key == "delete" and sel:

@@ -55,12 +55,15 @@ next one).</p>
   (Fixes tab) propose vias and capacitors, try them as what-if edits, place the vias.</li>
 <li><b>Thermal</b> and <b>Current capacity</b> for power stages and bridges, after Simulate.</li>
 </ol>
-<p>Every edit on the tabs is saved to the settings file at once (<b>Save settings</b> writes it
-immediately). The board itself is never changed, except when you place suggested vias or draw on the board.</p>
+<p>Every edit on the tabs is saved to the settings file at once, and <b>Undo</b> (Ctrl+Z) takes it back. What is
+set up can be kept as a <b>configuration</b> and loaded again later to run the same simulation (see
+<a href="#configs">Configurations and Undo</a>). The board itself is never changed, except when you place suggested
+vias or draw on the board.</p>
 <p><b>The top bar</b>, left to right: <b>Reload board</b> reads the board again (after you changed it in KiCad);
 <b>Refill zones</b> has KiCad refill every zone, waits until it has finished (on a complex board minutes: the status line counts them; KiCad answers nothing meanwhile) and then reloads; <b>Run checks</b>, <b>Simulate</b>,
 <b>Thermal</b> and <b>Export report…</b> (below); <b>with what-if edits</b>; <b>Cancel</b> stops the running job;
-<b>Save settings</b>; <b>Clear GT drawings</b> removes what GroundTruth drew. On the right, <b>Preferences…</b> and
+<b>Configuration ▾</b> (save and load configurations, Back to last settings), <b>Undo</b> and <b>Redo</b>
+(<a href="#configs">Configurations and Undo</a>); <b>Clear GT drawings</b> removes what GroundTruth drew. On the right, <b>Preferences…</b> and
 <b>Help</b>. Refill zones and Clear GT drawings are there only when GroundTruth was started from KiCad's toolbar
 (<b>Analyse return paths</b>); opened on a board file, it can analyse but not show or draw anything in KiCad.
 While a job runs the buttons are greyed, except while the board is read (at start, after Reload or Refill, and
@@ -1333,6 +1336,45 @@ op-amp labels, and lists as problems a GT word that is not a label (a typing err
 doesn't have, and an op-amp with <code>amp_in</code> but no <code>amp_out</code> (or the other way round). If a
 labelled path still doesn't appear in Detect…, check that every net of the path is joined to the next by a 2-pin
 part or a labelled op-amp.</p>
+
+<hr><a name="configs"></a><h3>Configurations, Back to last settings, Undo</h3>
+<p>The settings are what the tabs show; every change is saved at once, and the window opens with them as they were
+left (the last configuration). To keep a set-up and come back to it (these paths, this bridge's operating point,
+these ticks, these run settings), save it as a <b>configuration</b>: a file of its own that holds what is simulated
+and how. Loading it later puts exactly that back on the tabs, so the same simulation runs again.</p>
+<table border="0" cellpadding="4">
+<tr><td valign="top"><b>In a configuration</b></td><td>the rows of Signal paths, Converters, Bridges, DC loads,
+  Power integrity and Signal integrity (pairs, targets, limits), each with its tick; the what-if edits; the run
+  settings (<code>analysis</code>: emission limits, distance, frequencies, solver; <code>thermal</code>;
+  <code>victims</code>).</td></tr>
+<tr><td valign="top"><b>Shared by all</b></td><td>the part models (Parts tab, from the schematic's fields), through-hole
+  pin values, reference nets, the board stack, safety voltages, the check rules and severities, waived issues,
+  drawing and report options: facts about the board that do not change between simulations.</td></tr>
+</table>
+<p>The top bar's <b>Configuration ▾</b>:</p>
+<ul>
+<li><b>Save configuration as…</b>: a name (and a note); written to <code>groundtruth\configs\&lt;name&gt;.gtconfig.yaml</code>
+  beside the settings, and then the configuration in use: the window's title shows its name, with a * once the
+  tabs differ from the file.</li>
+<li><b>Save configuration</b>: the one in use, written again with the tabs as they are.</li>
+<li><b>Load configuration…</b>: a configuration file (any folder). Its sections replace the tabs' (one it lacks is
+  emptied: a configuration says exactly what is simulated); the part models stay as they are now. Parts whose models
+  changed since the configuration was saved, or that are gone, are named after loading, and so are nets or parts the
+  board does not have.</li>
+<li><b>Load from a past run ▸</b>: the configuration of one of the newest kept runs (the
+  <a href="#history">History tab</a> has the same as <b>Load its configuration</b>). The run's part models are
+  not put back: for that, its whole settings file is in the run's folder.</li>
+<li><b>Back to last settings</b>: the settings as they were before the last load. Each load keeps the settings it
+  replaces (<code>configs\.before-load.gtconfig.yaml</code>), so choosing it again goes back to the configuration
+  left: it toggles.</li>
+<li><b>Save settings now</b>: writes the settings file at once (it is written after every change anyway).</li>
+</ul>
+<p><b>Undo</b> and <b>Redo</b> (Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z) step through every change of the settings in this
+window: an edit or a tick on any tab, a tab's Detect…, a waived issue, a loaded configuration (one step), up to 50 steps.
+Their tooltips name the step. In a text field, Ctrl+Z undoes the typing in that field instead. Greyed while a job
+runs.</p>
+<p>On the command line, <code>groundtruth check | simulate | bode BOARD --config FILE</code> runs a saved
+configuration in place of the settings file's (for that run only; the file is not changed), e.g. in CI.</p>
 
 <hr><a name="settings"></a><h3>The settings file</h3>
 <p>GroundTruth keeps everything for a board in one folder next to it, <code>groundtruth</code>, so the KiCad
