@@ -62,6 +62,33 @@ def _leaf(net: str) -> str:
     return net.split("/")[-1]
 
 
+def auto_nets(board: Board, config: Config, skip: set) -> dict[str, str]:
+    """{net: why} of the nets found as victims when the settings list none: routed nets whose name says reset,
+    crystal, Hall sensor, debug or PWM / gate input (NET_PATTERNS), not the reference nets and not those in `skip`
+    (the switching stages' own nets)."""
+    routed = {t.net for t in board.tracks}
+    out = {}
+    for net in board.nets:
+        if net in skip or net not in routed or net in config.reference_nets:
+            continue
+        why = next((w for w, rx in NET_PATTERNS if re.search(rx, _leaf(net), re.I)), None)
+        if why:
+            out[net] = why
+    return out
+
+
+def board_auto_nets(board: Board, config: Config) -> dict[str, str]:
+    """The automatic victim nets of the whole board (the Bridges tab's victims picker): auto_nets with every
+    switching stage's nets left out (every converter and every bridge leg, their rails and grounds), so it lists
+    what any stage's Simulate would look at; one stage's own run leaves out only its own (find_victims)."""
+    from .detect import power_nets
+    stages = config.stages()
+    skip = set(power_nets(board, config, stages)) if stages else set()
+    skip |= {s.rail for s in stages} | {s.ground for s in stages}
+    skip |= {b.rail for b in config.bridges} | {b.ground for b in config.bridges}
+    return auto_nets(board, config, skip)
+
+
 def find_victims(board: Board, config: Config, stages: list, rail: str, ground: str,
                  input_connector: list) -> VictimSet:
     """The parts and nets to look at for switching stages (a bridge's legs, or one power stage): the settings'
@@ -87,14 +114,7 @@ def find_victims(board: Board, config: Config, stages: list, rail: str, ground: 
     if not v.nets:
         # the stages' own nets (rail, switch nodes, gate drive, input path): their drive circuit, not their victims
         from .detect import power_nets
-        bridge_nets = set(power_nets(board, config, stages)) | {rail, ground}
-        routed = {t.net for t in board.tracks}
-        for net in board.nets:
-            if net in bridge_nets or net not in routed or net in config.reference_nets:
-                continue
-            why = next((w for w, rx in NET_PATTERNS if re.search(rx, _leaf(net), re.I)), None)
-            if why:
-                out.nets[net] = why
+        out.nets.update(auto_nets(board, config, set(power_nets(board, config, stages)) | {rail, ground}))
     ref_pin = v.reference or (input_connector[1] if len(input_connector) == 2 else "")
     out.reference, out.reference_set = (board.find_pin(ref_pin) if ref_pin else None), bool(v.reference)
     if out.reference is None:                      # the first low side's (or integrated stage's) ground pad
