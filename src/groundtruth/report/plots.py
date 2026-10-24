@@ -1096,15 +1096,18 @@ def draw_section(fig: Figure, board: Board, rr) -> None:
         if t["fraction"] < MIN_LABEL:
             continue
         text = share(t["fraction"]) + ("" if near else f", {dist:.0f} mm away")
-        width = (_width_in(text, FS_MARK, bold=True) + 0.14) / span_in * L     # with its box and offset, in mm
+        width = (_width_in(text, FS_MARK, bold=True) + 0.2) / span_in * L      # with its box and offset, in mm
         leftward = sp + width > L and sp - width >= 0                           # near the receiver: left of the bar
         a, b = (sp - width, sp) if leftward else (sp, sp + width)
         level = next((k for k, spans in enumerate(taken) if all(b <= u or a >= v for u, v in spans)), len(taken))
         if level == len(taken):
             taken.append([])
         taken[level].append((a, b))
-        # inside the side view, beside the bar, one row lower for each label that would overlap one before
-        side.annotate(text, (sp, r0 - 0.3), textcoords="offset points", xytext=(-4 if leftward else 4,
+        # inside the side view, beside the bar, one row lower for each label that would overlap one before; a clear
+        # gap from the bar (half its width + 4 pt), or the green bar and the box's green edge read as a "1" ("36 %"
+        # looked like "136 %")
+        gap = (4.0 if near else 2.0) / 2 + 4
+        side.annotate(text, (sp, r0 - 0.3), textcoords="offset points", xytext=(-gap if leftward else gap,
                       -2 - FS_MARK * 1.6 * level), va="top", ha="right" if leftward else "left", fontsize=FS_MARK,
                       color="#ffffff", fontweight="bold", zorder=5,
                       bbox={"boxstyle": "round,pad=0.15", "fc": "#101018", "ec": CARRIER, "lw": 0.6, "alpha": 0.8})

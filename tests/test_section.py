@@ -141,3 +141,27 @@ def test_a_bar_in_the_side_view_points_at_its_via_on_the_board(tmp_path):
     kind, what, text = mark_ref_at(fig, side, px, py)
     assert kind == "via" and text.startswith("signal via")
     assert (what["x"], what["y"]) == pytest.approx(tuple(route_via.position))
+
+
+def test_a_hairpin_s_two_legs_each_keep_their_own_return(tmp_path):
+    """A route folding back on itself, its legs 1.5 mm apart over one plane (h = 0.235 mm; the cut ±20 h = 4.7 mm
+    would cross the other leg): each cut ends halfway to the other leg [A63], so each leg shows its own return,
+    near (2/π)·atan(0.75/h) = 81 % of it, instead of the two legs' opposite returns cancelling to about 0 (the
+    user's SW_CLK on refboard)."""
+    from boardgen import BoardGen
+    g = BoardGen(layers=4, size=(40.0, 20.0))
+    g.ic("U1", (5.0, 8.0), "SIG")
+    g.ic("U2", (12.0, 12.5), "SIG")
+    g.track((5.0, 8.0), (30.0, 8.0), "SIG", "F.Cu")
+    g.track((30.0, 8.0), (30.0, 9.5), "SIG", "F.Cu")
+    g.track((30.0, 9.5), (12.0, 9.5), "SIG", "F.Cu")
+    g.track((12.0, 9.5), (12.0, 12.5), "SIG", "F.Cu")
+    g.plane("GND", "In1.Cu")
+    for x, y in ((5.0, 9.6), (12.0, 14.1)):
+        g.via((x, y), "GND")
+    board, res, rr, setup = _run(tmp_path, g, "hairpin")
+    sec = rr.section
+    total = sec["I"].sum(axis=0).real
+    s = sec["s_mm"]
+    legs = ((s > 12) & (s < 22)) | ((s > 32) & (s < 40))        # the middles of both legs
+    assert total[legs].min() > 0.6 and total[legs].max() < 1.05, (total[legs].min(), total[legs].max())
