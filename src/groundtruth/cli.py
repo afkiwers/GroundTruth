@@ -82,6 +82,13 @@ def _settings(board, board_arg: str, settings_arg: Optional[str], config_arg: Op
                 print(f"configuration {config_arg}: {note}", file=sys.stderr)
         except ConfigError as e:
             raise CliError("invalid configuration:\n  " + "\n  ".join(e.messages)) from e
+    from dataclasses import replace
+    from .analysis.tags import follow_labels
+    converters, moved = follow_labels(board, sc.config.converters)    # a re-annotated board: its GT labels
+    if moved:
+        sc.config = replace(sc.config, converters=converters)         # this run only (the plugin saves it)
+        for note in moved:
+            print(f"parts renamed: {note}", file=sys.stderr)
     errors = validate(sc.config, board)
     if errors:
         raise CliError("settings does not match the board:\n  " + "\n  ".join(errors))
