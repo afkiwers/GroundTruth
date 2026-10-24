@@ -94,6 +94,7 @@ def route_section(sol, st, route: Route, own: Optional[set] = None, half_mm: flo
     u = -half_mm + (np.arange(m) + 0.5) * du                 # midpoint rule across the cut
     x = p[:, 0, None] + u[None, :] * normal[:, 0, None]      # (stations, samples), board mm
     y = p[:, 1, None] + u[None, :] * normal[:, 1, None]
+    keep = _own_stretch(pieces, s, u, x, y, d)
     I = np.zeros((len(st.names), n), complex)
     for li, g in enumerate(st.grids):
         kx, ky = sol.node_field(li, d)                       # complex, A/m per A, at the nodes
@@ -109,10 +110,31 @@ def route_section(sol, st, route: Route, own: Optional[set] = None, half_mm: flo
             return (map_coordinates(v.real, coords, order=1, mode="constant", cval=0.0)
                     + 1j * map_coordinates(v.imag, coords, order=1, mode="constant", cval=0.0)).reshape(x.shape)
         along = at(kx) * t[:, 0, None] + at(ky) * t[:, 1, None]   # K . t: the component along the route
-        I[li] = -along.sum(axis=1) * du * 1e-3                # A/m × m
+        I[li] = -(along * keep).sum(axis=1) * du * 1e-3       # A/m × m
     return {"s_mm": s.astype(np.float32), "layers": list(st.names), "I": I.astype(np.complex64),
             "half_mm": float(half_mm), "f": float(sol.f), "signal": runs, "vias": changes,
             "via_at": via_xy, "length_mm": float(length)}
+
+
+def _own_stretch(pieces: list, s: np.ndarray, u: np.ndarray, x: np.ndarray, y: np.ndarray, d: float) -> np.ndarray:
+    """Which points of each cut belong to its own stretch of the route (stations × samples, bool): those nearer to
+    the route around the station than to any other part of it. Where the route folds back (a hairpin, a meander),
+    a full-width cut would also cross the other leg, whose return flows the other way, and the two cancel (the
+    user's SW_CLK on refboard: nothing on any layer 1.3-2.4 mm along it); so each cut ends halfway to the other leg
+    (a Voronoi split of the plane between the route's stretches [A63]). On a straight route every point is kept:
+    its nearest route point is the station itself, or near a bend at most |u| along the route from it."""
+    from scipy.spatial import cKDTree
+    step = d / 2
+    pts, ss = [], []
+    for s0, s1, a, b, _ in pieces:                     # the route as points every half grid cell, with their s
+        k = max(1, int(math.ceil((s1 - s0) / step)))
+        f = np.arange(k + 1) / k
+        pts.append(a[None, :] + (b - a)[None, :] * f[:, None])
+        ss.append(s0 + (s1 - s0) * f)
+    tree = cKDTree(np.concatenate(pts))
+    _, nearest = tree.query(np.stack([x.ravel(), y.ravel()], axis=1))
+    s_near = np.concatenate(ss)[nearest].reshape(x.shape)
+    return np.abs(s_near - s[:, None]) <= np.abs(u)[None, :] + 2 * d
 
 
 def station_at(x: float, y: float, route_xy: list) -> Optional[tuple[float, float]]:
