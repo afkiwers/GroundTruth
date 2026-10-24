@@ -26,6 +26,12 @@ Six values per part, each one falling back on its own (`params_for`), from the m
     bond     any lumped part (SMD or not): the solder between its pads and its metal, µm of SAC305 (built in
              simulate.SOLDER_UM, 75; 0 for a perfect bond). Its resistance per area joins every grid node under the
              pads to the part's side (simulate.part_lid, [A65]). Added 2026-10-24 (the user: "Add now").
+    entry    a power-stage switch (or diode, integrated stage): how its current enters the copper. "tab": each side's
+             metal (a silicon FET's drain tab, a diode's cathode) soldered over its pads like a lumped part's, the
+             current handing over where the copper brings it; "even": spread evenly over each pin's copper [A51] (a
+             chip-scale GaN FET, whose die spreads it over its bars). Built in: "tab" for a side with a pad at least
+             simulate.TAB_MM wide, else "even" (simulate.switch_lids). Added 2026-10-25 (the user: "I won't always
+             use GANs").
 
 A plated hole's inner layers are always joined to its plating (made with the board): solder only joins the pin to
 the plating. So a partly filled hole does not cut a layer off: it takes the pin's thick conductor out of part of the
@@ -48,7 +54,7 @@ import numpy as np
 from ..solver.kernel import filament_mutual
 from ..solver.peec import SIGMA_CU, VIA_PLATING
 
-KEYS = ("pin", "pin_d", "pin_r", "fill", "joint", "contact", "bond")
+KEYS = ("pin", "pin_d", "pin_r", "fill", "joint", "contact", "bond", "entry")
 # resistivity at 20 °C, Ω·m: copper 100 % IACS [IEC 60028]; brass C26000 ~28 %; phosphor bronze C51000 ~15 %;
 # beryllium copper C17200 ~22 %; tellurium copper C14500 ~93 % (the alloys' conductivities [CDA])
 MATERIALS = {"copper": 1.72e-8, "brass": 6.2e-8, "bronze": 1.15e-7, "becu": 7.8e-8, "tellurium": 1.85e-8}
@@ -58,7 +64,8 @@ SOLDER_RHO = 1.3e-7             # SAC305 (~13 % IACS), Ω·m: the solder between
 PIN_CLEARANCE_MM = 0.25         # a lead's diameter is the hole's less this (a usual lead-to-hole clearance [A18])
 NOTE_A = 3.0                    # a connector pin carrying this much without a contact value gets a note
 SOURCES = ("GT field", "part setting", "board default", "built in")
-WORD = re.compile(r"^(pin_d|pin_r|pin|fill|joint|contact|bond)\s*[:=]\s*(.+)$", re.I)
+WORD = re.compile(r"^(pin_d|pin_r|pin|fill|joint|contact|bond|entry)\s*[:=]\s*(.+)$", re.I)
+ENTRIES = ("tab", "even")        # a power-stage switch's pads: soldered to one metal per side, or fed evenly [A65]
 
 
 def _material(text: str) -> Optional[str]:
@@ -92,6 +99,9 @@ def parse_value(key: str, text) -> tuple[Optional[object], str]:
         except ValueError:
             return None, f"pin_d: {s!r} is not a diameter in mm (e.g. 1.0)"
         return (d, "") if d > 0 else (None, f"pin_d: {s} must be above 0")
+    if key == "entry":
+        e = s.lower()
+        return (e, "") if e in ENTRIES else (None, f"entry: {s!r} is not tab or even")
     if key == "bond":
         try:
             t = float(re.sub(r"(?i)\s*(µm|um)$", "", s))
@@ -156,7 +166,7 @@ def values_from_data(data, where: str) -> tuple[dict, list[str]]:
 def format_value(key: str, value) -> str:
     """A value as the settings and the Parts tab write it (read back by parse_value)."""
     from ..components.values import format_si
-    if key == "pin":
+    if key in ("pin", "entry"):
         return str(value)
     if key == "fill":
         return f"{value * 100:g}"
@@ -185,6 +195,8 @@ class PinParams:
     joint: float = 0.0                  # Ω per pin
     contact: float = 0.0                # Ω per pin
     bond: Optional[float] = None        # µm of solder between any lumped part's pads and its metal (None: built in)
+    entry: Optional[str] = None         # a stage switch's pads: "tab" (one soldered metal per side), "even" (spread
+                                        # evenly over its pins, a chip-scale die), None: by the pads' size (TAB_MM)
     source: dict = field(default_factory=dict, compare=False, hash=False)   # key -> one of SOURCES
 
     @property
@@ -210,7 +222,7 @@ class PinParams:
             if v is None or not self.given(k):
                 continue
             text = {"fill": f"{v * 100:g} %", "pin_d": f"{v:g} mm", "pin": str(v),
-                    "bond": f"{v:g} µm of solder"}.get(k, f"{v * 1e3:g} mΩ")
+                    "bond": f"{v:g} µm of solder", "entry": f"{v} pads"}.get(k, f"{v * 1e3:g} mΩ")
             out.append(f"{k} {text} ({self.source[k]})")
         return ", ".join(out) or "built in (copper filling the hole, a perfect joint, no contact resistance)"
 

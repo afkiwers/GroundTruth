@@ -265,6 +265,9 @@ class StackBuild:
         self.branches: list[Branch] = []
         self.pairs: list[PlanePair] = []
         self.n_lids = 0                     # the parts' lids made so far (part_lid: each one's number)
+        # (reference, net) -> the lid of that part's side: a current fed in or taken out at those pads goes through
+        # its metal (power._area_shares, power.switch_filaments), the lumped parts' and the tab switches' (switch_lids)
+        self.side_lids: dict[tuple[str, str], LidNode] = {}
         self._plane: Optional[PlaneStack] = None
         # a through-hole pin whose solder does not reach its part's side: the layer its current enters the board on
         # (pins.feed_layer; power._pad_node takes it instead of the part's side)
@@ -503,6 +506,8 @@ class BoardModel:
                 continue
             st.branches.append(Branch(lid_a, lid_b, part_impedance(model), fp.reference, "part"))
             st.branches += bonds_a + bonds_b
+            st.side_lids[(fp.reference, pa.net)], st.side_lids[(fp.reference, pb.net)] = lid_a, lid_b
+        switch_lids(st, board, config, plane_nets, pin_params, snap)
         # Plane-pair capacitance from the physical stackup (εr, insulation thickness, loss tangent): the dielectrics
         # between two planes in series (Stackup.epsilon_series [Pozar 2012])
         if capacitance:
@@ -656,6 +661,41 @@ def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optiona
     rc = BOND_RC if bond_um is None else SOLDER_RHO * max(bond_um, BOND_MIN_UM) * 1e-6
     r = rc / (max(float(areas.sum()), 1e-3) * 1e-6) * len(nodes)            # N bonds in parallel: the side's joint
     return lid, [Branch(n, lid, (lambda f, r=r: complex(r)), ref, "bond") for n in nodes]
+
+
+TAB_MM = 1.0                # a switch's side with a pad this wide (its narrower side, mm) is a tab [A65]
+
+
+def switch_lids(st: StackBuild, board: Board, config: Config, plane_nets: set[str], pin_params, snap: float):
+    """Every power stage's switches (power.elements_of: FETs, catch diodes, integrated stages) whose side is a tab:
+    that side's metal as a lid soldered over its pads (part_lid, its bonds added to the model, st.side_lids), so the
+    stage's currents hand over where the copper brings them, as at a lumped part. A side is a tab by the part's pin
+    value `entry` (analysis/pins.py), else when one of its pads is at least TAB_MM wide: a silicon FET's drain tab
+    (LFPAK, PowerPAK, D2PAK), a diode's cathode. Narrower pads (a chip-scale GaN FET's bars and bumps, an IC's
+    pins) keep the even spread over each pin's copper [A51]: there the die spreads the current over them. The lid
+    floats otherwise (no part branch): the tab joins its pads' copper, and power._area_shares feeds it."""
+    from .power import ConverterError, elements_of
+    done = set(st.side_lids)
+    for spec in config.stages():
+        try:
+            elements = elements_of(board, spec)
+        except ConverterError:
+            continue
+        for el in elements:
+            entry = pin_params(el.ref).entry
+            if entry == "even":
+                continue
+            for pads in (el.a, el.b):
+                net = pads[0].net
+                if net not in plane_nets or (el.ref, net) in done:
+                    continue
+                done.add((el.ref, net))
+                if entry != "tab" and max(min(p.size) for p in pads) < TAB_MM:
+                    continue
+                lid, bonds = part_lid(st, pads, el.ref, snap, pin_params(el.ref).bond)
+                if lid is not None:
+                    st.branches += bonds
+                    st.side_lids[(el.ref, net)] = lid
 
 
 def part_impedance(model) -> Callable[[float], complex]:

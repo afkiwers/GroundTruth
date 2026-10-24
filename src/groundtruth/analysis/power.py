@@ -437,8 +437,9 @@ def switch_filaments(st: StackBuild, z_phys: dict, elements: list[Element]
 
     Per element: from every `a` pad's grid node up to PACKAGE_H_MM, across to the package centre, across to above
     every `b` pad and down to its node; each pad carries a share of the element's current by its pin's copper area
-    (pad_weights: overlapping pads of one pin count once [A51]). The filaments start and end exactly at the
-    injection nodes, so the loop (filaments + copper) is closed."""
+    (pad_weights: overlapping pads of one pin count once [A51]). A side soldered as a tab (st.side_lids,
+    simulate.switch_lids [A65]) takes all of its current at its lid, the filament standing over the lid's cell. The
+    filaments start and end exactly at the injection nodes, so the loop (filaments + copper) is closed."""
     g0 = st.grids[0]
 
     def P(x, y, z):
@@ -455,14 +456,19 @@ def switch_filaments(st: StackBuild, z_phys: dict, elements: list[Element]
         cx = float(np.mean([p.position[0] for p in pads]))
         cy = float(np.mean([p.position[1] for p in pads]))
         centre = P(cx, cy, z_top)
+        lids = getattr(st, "side_lids", {})
         for group, sign in ((el.a, -1.0), (el.b, 1.0)):
+            lid = lids.get((el.ref, group[0].net))
             areas = np.array(pad_weights(group))
-            for p, area in zip(group, areas):
-                n = _pad_node(st, p, side)
+            # a tab: its whole current at the lid, one filament (as wide as its widest pad); else one per pad
+            feeds = [(max(group, key=lambda p: min(p.size)), 1.0)] if lid is not None else \
+                [(p, float(area / areas.sum())) for p, area in zip(group, areas)]
+            for p, frac in feeds:
+                n = lid if lid is not None else _pad_node(st, p, side)
                 if n is None:
                     raise SolverError(f"{p.pin} ({p.net}): no {p.net} copper reaches the pad in the model (an unrouted "
                                       "net or unfilled zones?)")
-                share = el.weight * float(area / areas.sum())
+                share = el.weight * frac
                 inj.append((n, sign * share))     # the current leaves the copper at a pads, enters at b pads
                 x, y = g0.xy(*n[1:])
                 base, top = P(x, y, st.z[n[0]]), P(x, y, z_top)
@@ -1528,11 +1534,18 @@ def _area_shares(st: StackBuild, pads: list[Pad], side: str, total: float) -> li
     """Injections spreading `total` A over the pads' pins by their copper area (pin_area: overlapping pads of one pin
     count once [A51]) and over each pin's own grid nodes evenly, each node once (a pin is fed over its whole area,
     like a lead frame). Summed per pad before 2026-10-21: EPC2306's pin 2 (a bar under three tabs) took 42 % of
-    the FET's source current for its 34 % of the copper, the overlap fed twice."""
+    the FET's source current for its 34 % of the copper, the overlap fed twice. A part's side the model solders
+    over its pads (st.side_lids: a lumped part's, a tab switch's, simulate.switch_lids [A65]) takes its pins' share
+    into its lid instead: the copper then decides where it enters."""
     pins = _by_pin(pads)
     areas = {pin: pin_area(ps) for pin, ps in pins.items()}
+    lids = getattr(st, "side_lids", {})
     out = []
     for pin, ps in pins.items():
+        lid = lids.get((ps[0].footprint, ps[0].net))
+        if lid is not None:
+            out.append((lid, total * areas[pin] / sum(areas.values())))
+            continue
         nodes: list[tuple] = []
         for p in ps:
             got = _pad_nodes(st, p, side)

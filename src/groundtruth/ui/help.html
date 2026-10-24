@@ -1283,6 +1283,12 @@ an example in <a href="#siglabels">Labelling a signal path</a>.</p>
   <code>bond:0</code> a perfect bond): each side of the part is soldered over the whole of its pads, so the current
   hands over to the part where the copper brings it to the pad, within a few tenths of a millimetre of the edge it
   arrives at; a thicker joint spreads that handover further across the pad</td></tr>
+<tr><td colspan="2"><b>A power stage's switch</b> (a FET, a catch diode, an integrated stage):</td></tr>
+<tr><td><code>entry:tab</code></td><td>how the stage's current enters the copper at its pads: <code>tab</code>, each
+  side's metal soldered over its pads (a silicon FET's drain tab: the current hands over at the edge it arrives at);
+  <code>even</code>, spread evenly over each pin's copper (a chip-scale GaN FET, whose die spreads it over its
+  bars). When not given: <code>tab</code> for a side with a pad at least 1 mm wide, else <code>even</code>. Its
+  <code>bond</code> sets the solder of a tab</td></tr>
 </table>
 <p>An id ties a stage's parts together: <code>conv1_hs</code>, <code>conv1_ls</code>, <code>conv1_L</code>; a
 bridge leg's id is its phase: <code>hbA_hs</code>, <code>hbB_ls</code>. A sheet used once per phase carries the same
@@ -1709,7 +1715,10 @@ smaller but dense, which a regular grid lets it apply with FFTs.</p>
   <li>a part is its model's Z(f) plus 0.3 nH mounting inductance between its two sides' metal (a terminal, a FET's
     drain or source), each soldered over the whole of its pads (75 µm of solder, a few tenths of a mΩ on a large
     pad): the current hands over to the part where the copper brings it to the pad, mostly at the edge it arrives
-    at, falling off across the pad, not at a few points of it.</li>
+    at, falling off across the pad, not at a few points of it. A power stage's switch with a tab (a pad at least
+    1 mm wide on a side: a silicon FET's drain, a diode's cathode) is soldered over its pads the same way, so the
+    stage's currents enter the copper where it brings them; a chip-scale GaN FET's narrow bars keep their current
+    spread evenly over each pin's copper, which its die does (the pin value <code>entry</code> overrides).</li>
   </ul>
   The integrals use Gauss–Legendre quadrature near by, filaments far away, and numerical integration for the self
   term.</li>

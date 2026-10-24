@@ -30,8 +30,9 @@ PIN_HELP = ("Through-hole pins, comma separated: contact:0.5m (the mating contac
             "joint, Ω per pin), fill:75 (% of the hole soldered, from the side opposite the part), pin:brass (hole = "
             "copper filling the hole, copper, brass, bronze, becu, tellurium), pin_d:1.0 (mm), pin_r:0.1m (Ω through "
             "the board); for any part with a model, SMD too: bond:50 (µm of solder between its pads and its metal; "
-            "built in 75, 0 = a perfect bond). Each value: the part's GT field, else its Pins cell, else Pin "
-            "defaults…, else built in.")
+            "built in 75, 0 = a perfect bond); a power stage's switch: entry:tab (each side's metal soldered over "
+            "its pads) or entry:even (spread over its pins, a GaN die; built in: tab for a pad 1 mm wide or more). "
+            "Each value: the part's GT field, else its Pins cell, else Pin defaults…, else built in.")
 PARAM_COL = {"R": 4, "C": 5, "C_bias": 6, "L": 8, "ESR": 9, "ESL": 10}
 SCHEMATIC_COL = COLS.index("Schematic")    # ◆ the parameters taken from the symbol's fields, ! set here and different
 NOTE_COL = COLS.index("Note")
@@ -99,7 +100,8 @@ class PartsPanel(wx.Panel):
                                          "controller's fields (Rds(on), Coss …) go to its power stage: Converters "
                                          "tab. Schematic: ◆ values from the symbol's fields, ! set here and "
                                          "different. Pins: a part's own pin values (through-hole: contact:0.5m, "
-                                         "joint:50u, fill:75, pin:brass; any part: bond:50, µm of solder; hover "
+                                         "joint:50u, fill:75, pin:brass; any part: bond:50, µm of solder; a "
+                                         "stage's switch: entry:tab|even; hover "
                                          "Pin defaults… for all). Edits are "
                                          "saved to the settings.")
         hint.SetName("muted")
@@ -242,9 +244,11 @@ class PartsPanel(wx.Panel):
                                       theme.colour(_DIFFERS[theme.palette().dark]) if p in differs else normal)
         g.SetCellBackgroundColour(row, 3, theme.colour("#4a3a1f" if theme.palette().dark else "#ffdcc8")
                                   if m.missing_params() else normal)
-        # through-hole pins have every pin value; any part with a model that conducts (a lumped part) its solder `bond`
+        # through-hole pins have every pin value; any part with a model that conducts (a lumped part) its solder
+        # `bond`, a power stage's switch its `entry` (simulate.switch_lids)
         pins = (fp is not None and any(p.pad_type == "thru_hole" for p in fp.pads)) or bool(e.tht) or \
-            (m is not None and m.kind != "open")
+            (m is not None and m.kind != "open") or \
+            any(ref in s.parts for s in self.settings.config.stages())
         g.SetReadOnly(row, PINS_COL, not pins)
         g.SetCellBackgroundColour(row, PINS_COL, normal if pins else theme.colour(theme.palette().panel))
 

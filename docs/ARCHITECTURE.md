@@ -545,6 +545,17 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   The bonds' I²R is the joints', not the copper's: `power.dc_summary` gives each DC path `r_joints_mohm` and
   `joints` (per part), takes it out of `r_copper_mohm`, and Thermal heats it at the part ("solder joints, DC …"),
   so the copper heat maps still carry exactly the copper's loss (PA-4: the buck's hot loop 1.5 % in its joints).
+  **Tab switches** (2026-10-25, the user: "I won't always use GANs"): a power stage's switch (`power.elements_of`:
+  FETs, catch diodes, integrated stages) whose side has a pad at least `simulate.TAB_MM` = 1 mm wide is soldered the
+  same way (`simulate.switch_lids`: a lid per side, no part branch; `st.side_lids[(ref, net)]`, the lumped parts'
+  lids there too). Every current a stage feeds in or takes out at those pads goes into the lid
+  (`power._area_shares`: DC paths, ripple, bridges' RMS, PDN ports, DC loads; `switch_filaments`: the hot loop's
+  filament stands over the lid's cell), so the copper decides where it enters. Narrower pads keep the even spread
+  over each pin's copper [A51]: a chip-scale GaN FET's bars (EPC2306: 0.37-0.47 mm) sit on a lateral die that
+  spreads the current over them. The pin value `entry: tab | even` overrides the size. On refboard only D501
+  (SOD-123F, 1.1 mm leads) becomes a tab. tests/test_pad_bond.py: a current taken out at a lid follows Berger's
+  contact like one through a part; the test buck's Q1 drain pad (1.2 mm, fed from the left) at 1 A: 8.35 A/mm²
+  at its left edge, 0.17 in its middle as a tab, against 8.49 / 4.16 spread evenly.
 - Return injection: return pad's own-net node on its layer, then the same net on another layer (note), then
   any plane copper within 5 mm (note).
 - Loop L was verified to change < 1 % from d = h/2 to 2h on the route model.
