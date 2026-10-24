@@ -44,6 +44,7 @@ import atexit
 import copy
 import math
 import queue
+import sys
 import threading
 import time
 import weakref
@@ -145,6 +146,29 @@ def _kernel_mac() -> Optional[Callable]:
                     kernel_mac = None
                 _MAC.append(kernel_mac)
     return _MAC[0]
+
+
+USE_BASIS32 = True              # GMRES's basis in single precision (solver/_mac.gs_*) when numba is installed ...
+BASIS32_MIN_TOL = 1e-6          # ... for tolerances this loose or looser: down to 1e-7 it takes the same iterations as
+                                # complex128, at 1e-8 3x more (tests/test_speed.py; the solver's default is 1e-5) [A66]
+_GS: list = []                  # [(gs_project, gs_combine) or None] once looked up
+
+
+def _gs_kernels() -> Optional[tuple]:
+    """The compiled single-precision-basis Gram-Schmidt (solver/_mac.py: gs_project, gs_combine), or None (numba
+    missing or USE_BASIS32 off: the basis stays complex128, BLAS does the projections)."""
+    if not (USE_BASIS32 and USE_NUMBA):
+        return None
+    if not _GS:
+        with _MAC_LOCK:
+            if not _GS:
+                try:
+                    from ._mac import gs_combine, gs_project
+                    kernels = (gs_project, gs_combine)
+                except Exception:       # noqa: BLE001 - no numba, or one that does not load: complex128 and BLAS
+                    kernels = None
+                _GS.append(kernels)
+    return _GS[0]
 
 
 # --------------------------------------------------------------------------- grid
@@ -1298,7 +1322,9 @@ def hosted_splu(S, **kwargs) -> HostedLU:
 FILL_PER_UNKNOWN = {"sheet": 70, "diag": 35}    # SuperLU fill per branch unknown, before a model's first
                                                 # factorisation is measured (refboard: 65 board-wide, 15-31
                                                 # route models at 1x, rounded up) [A38]
-LU_COMMIT = 6.5                                 # SuperLU commits ~6.5x its fill (ARCHITECTURE "Memory use") [A38]
+LU_COMMIT = 6.5                                 # SuperLU commits ~6.5x its fill on Windows (ARCHITECTURE "Memory
+                                                # use") [A38] ...
+LU_RESIDENT = 2.0                               # ... and keeps at most ~2x it resident elsewhere [A67]
 GATE_SHARE = 0.8                                # of the available memory a factorisation may plan to commit
 GATE_WAIT_S = 1.0                               # a waiting factorisation looks at the memory again this often
 _STACKS: "weakref.WeakSet[PlaneStack]" = weakref.WeakSet()     # every stack alive: their caches can be freed
@@ -1308,9 +1334,18 @@ def lu_bytes(stack: "PlaneStack") -> int:
     """About the memory one factorisation of this model commits: its fill as measured on its largest factorisation
     so far (`lu_nnz`), else as estimated from its unknowns (FILL_PER_UNKNOWN; fill grows faster than the unknowns
     on finer grids, so the estimate is low at high resolutions until the first one is measured), x 16 bytes x
-    LU_COMMIT [A38]."""
+    lu_commit() [A38] [A67]."""
     nnz = getattr(stack, "lu_nnz", 0) or FILL_PER_UNKNOWN.get(stack.precond_mode, 70) * stack.nb
-    return int(nnz * 16 * LU_COMMIT)
+    return int(nnz * 16 * lu_commit())
+
+
+def lu_commit() -> float:
+    """What a factorisation takes of the memory the system counts, per byte of its fill: on Windows the commit
+    (SuperLU's arrays grow by doubling and every page allocated is committed, touched or not: LU_COMMIT [A38]); on
+    macOS and Linux only the pages touched are resident, at most twice the fill while an array grows (LU_RESIDENT
+    [A67]). Before 2026-10-25 every platform planned with Windows' 6.5: the M2 server ran its 8x jobs one solve at a
+    time (docs/SPEED.md 4.3)."""
+    return LU_COMMIT if sys.platform == "win32" else LU_RESIDENT
 
 
 def free_factorisations() -> int:
@@ -2154,16 +2189,19 @@ class PlaneStack:
         counted for this model; what it computes does not change."""
         c = _stats._active[0]
         if c is None:
-            return self._solve_here(f, rhs_top, J, tol, max_cycles, guess, None)
-        mark = _stats.thread_mark()
-        t0 = time.perf_counter()
-        times = _stats.SolveTimes()
-        try:
-            out = self._solve_here(f, rhs_top, J, tol, max_cycles, guess, times)
-        except SolverError:
-            c.solved(self, None, time.perf_counter() - t0, mark, times, failed=True)
-            raise
-        c.solved(self, out[2], time.perf_counter() - t0, mark, times)
+            out = self._solve_here(f, rhs_top, J, tol, max_cycles, guess, None)
+        else:
+            mark = _stats.thread_mark()
+            t0 = time.perf_counter()
+            times = _stats.SolveTimes()
+            try:
+                out = self._solve_here(f, rhs_top, J, tol, max_cycles, guess, times)
+            except SolverError:
+                c.solved(self, None, time.perf_counter() - t0, mark, times, failed=True)
+                raise
+            c.solved(self, out[2], time.perf_counter() - t0, mark, times)
+        # the most iterations a solve of this model took: the basis its next solves plan for (simulate.basis_rows)
+        self.its_max = max(getattr(self, "its_max", 0), out[2])
         return out
 
     def _solve_here(self, f, rhs_top, J, tol, max_cycles, guess, times) -> tuple:
@@ -2460,6 +2498,26 @@ class _HostVectors:
         return np.empty((rows, n), complex)
 
     @staticmethod
+    def put(V, j, v):
+        """Store v as basis vector j."""
+        V[j] = v
+
+    @staticmethod
+    def row(V, j):
+        """Basis vector j (a complex vector the operator takes)."""
+        return V[j]
+
+    def for_tol(self, tol: float):
+        """The vector work for a solve to `tol`: this one (a complex128 basis serves every tolerance)."""
+        return self
+
+    def grow(self, V, rows, used):
+        """A basis of `rows` rows holding the first `used` of V."""
+        out = self.basis(rows, V.shape[1])
+        out[:used] = V[:used]
+        return out
+
+    @staticmethod
     def copy(v):
         """A complex copy of v."""
         return v.astype(complex)
@@ -2490,40 +2548,133 @@ class _HostVectors:
 _HOST_VECTORS = _HostVectors()
 
 
-class _TimedVectors(_HostVectors):
-    """_HostVectors with the basis work (Gram-Schmidt's projections, the cycle's combination) timed into a solve's
-    time split (solver/stats.py); the same arithmetic."""
+class _Basis32:
+    """A Krylov basis in single precision: its real and imaginary parts as two (rows, n) float32 planes."""
+    __slots__ = ("re", "im")
 
-    def __init__(self, times: _stats.SolveTimes):
-        """Time into `times`."""
-        self.times = times
+    def __init__(self, rows: int, n: int):
+        """Uninitialised rows."""
+        self.re = np.empty((rows, n), np.float32)
+        self.im = np.empty((rows, n), np.float32)
+
+    def __len__(self) -> int:
+        """Its rows."""
+        return self.re.shape[0]
+
+
+class _Basis32Vectors(_HostVectors):
+    """_HostVectors with the Krylov basis stored in single precision (_Basis32) and every product with it in
+    double precision (solver/_mac.gs_project, gs_combine): half the basis memory (a 2 M-unknown model's 101 rows
+    3.2 -> 1.6 GB per solve) and half the bytes each Gram-Schmidt pass reads (~32 % of an iteration's time on the
+    M2, docs/SPEED.md). Mixed-precision GMRES [Lindquist 2020] [Aliaga 2023]: each basis vector is rounded to
+    ~6e-8 relative, so the Arnoldi relation holds to that and the recurrence's residual can drift from the true
+    one below it; _gmres stops on the true residual (double precision) and restarts from it, so the answer meets
+    the tolerance as before (1e-5 by default, two orders above the rounding) [A66]."""
+
+    def __init__(self, kernels: tuple):
+        """With the compiled (gs_project, gs_combine)."""
+        self._project, self._combine = kernels
+
+    @staticmethod
+    def basis(rows, n):
+        """An uninitialised single-precision basis of `rows` rows."""
+        return _Basis32(rows, n)
+
+    def for_tol(self, tol: float):
+        """This one down to BASIS32_MIN_TOL; complex128 (_HostVectors) for a tighter tolerance, which a
+        single-precision basis reaches only slowly (its rounding, ~6e-8, is then within two decades of it)."""
+        return self if tol >= BASIS32_MIN_TOL else _HOST_VECTORS
+
+    @staticmethod
+    def put(V, j, v):
+        """Store v as basis vector j, rounded to single precision."""
+        V.re[j] = v.real
+        V.im[j] = v.imag
+
+    @staticmethod
+    def row(V, j):
+        """Basis vector j as a complex128 vector."""
+        out = np.empty(V.re.shape[1], complex)
+        out.real = V.re[j]
+        out.imag = V.im[j]
+        return out
+
+    def grow(self, V, rows, used):
+        """A basis of `rows` rows holding the first `used` of V."""
+        out = _Basis32(rows, V.re.shape[1])
+        out.re[:used] = V.re[:used]
+        out.im[:used] = V.im[:used]
+        return out
 
     def project(self, V, j, w):
-        """_HostVectors.project, timed."""
+        """(Vᴴ·w, w − V·Vᴴ·w) over the first j+1 basis rows, in double precision on the stored rows."""
+        wr, wi = np.ascontiguousarray(w.real), np.ascontiguousarray(w.imag)
+        hr, hi = np.empty(j + 1), np.empty(j + 1)
+        self._project(V.re, V.im, j + 1, wr, wi, hr, hi)
+        out = np.empty(len(w), complex)
+        out.real, out.imag = wr, wi
+        return hr + 1j * hi, out
+
+    def combine(self, y, V, k):
+        """sum_i y[i] V[i] over the first k basis vectors, in double precision."""
+        n = V.re.shape[1]
+        xr, xi = np.empty(n), np.empty(n)
+        y = np.asarray(y, complex)
+        self._combine(V.re, V.im, k, np.ascontiguousarray(y.real), np.ascontiguousarray(y.imag), xr, xi)
+        out = np.empty(n, complex)
+        out.real, out.imag = xr, xi
+        return out
+
+
+def host_vectors() -> _HostVectors:
+    """The CPU's GMRES vector work: the single-precision basis when its compiled kernels load (_gs_kernels),
+    else complex128 with BLAS."""
+    k = _gs_kernels()
+    return _Basis32Vectors(k) if k is not None else _HOST_VECTORS
+
+
+class _TimedVectors:
+    """A vector class (`base`) with the basis work (Gram-Schmidt's projections, the cycle's combination) timed into
+    a solve's time split (solver/stats.py); the same arithmetic."""
+
+    def __init__(self, times: _stats.SolveTimes, base=None):
+        """Time `base`'s basis work (host_vectors() when None) into `times`."""
+        self.times = times
+        self.base = base if base is not None else host_vectors()
+
+    def __getattr__(self, name):
+        """Everything else is the base's."""
+        return getattr(self.base, name)
+
+    def for_tol(self, tol: float):
+        """The base's choice for `tol` (_Basis32Vectors.for_tol), timed the same way."""
+        base = self.base.for_tol(tol)
+        return self if base is self.base else _TimedVectors(self.times, base)
+
+    def project(self, V, j, w):
+        """The base's project, timed."""
         t0 = time.perf_counter()
-        out = _HostVectors.project(V, j, w)
+        out = self.base.project(V, j, w)
         self.times.gs += time.perf_counter() - t0
         return out
 
     def combine(self, y, V, k):
-        """_HostVectors.combine, timed."""
+        """The base's combine, timed."""
         t0 = time.perf_counter()
-        out = _HostVectors.combine(y, V, k)
+        out = self.base.combine(y, V, k)
         self.times.gs += time.perf_counter() - t0
         return out
 
 
 class _HostMath:
     """PlaneStack.solve's matrix work in numpy and SciPy (gpu.TorchMath is the device twin)."""
-    vec = _HOST_VECTORS
 
     def __init__(self, stack: "PlaneStack", times: Optional[_stats.SolveTimes] = None):
         """The math for solves on `stack`; `times`: the solve's time split while statistics are collected
         (solver/stats.py), the basis work then timed too."""
         self.st = stack
         self.times = times
-        if times is not None:
-            self.vec = _TimedVectors(times)
+        self.vec = _TimedVectors(times) if times is not None else host_vectors()
 
     @staticmethod
     def dev(v):
@@ -2583,7 +2734,7 @@ def gmres_restart(n: int) -> int:
 
 def _gmres(op: Callable, b, tol: float, max_cycles: int = 8,
            restart: Optional[int] = None, bnorm: Optional[float] = None,
-           max_its: Optional[int] = None, vec=_HOST_VECTORS, extra_cycles: int = 0) -> tuple:
+           max_its: Optional[int] = None, vec=None, extra_cycles: int = 0) -> tuple:
     """Restarted GMRES [Saad 1986] [Saad 2003] with classical Gram-Schmidt + reorthogonalisation [Giraud 2005] (BLAS
     gemv on the basis, no copies).
     Stops when the true residual ‖b - op(x)‖ ≤ tol·bnorm (default ‖b‖; a warm start passes the norm of the
@@ -2595,7 +2746,14 @@ def _gmres(op: Callable, b, tol: float, max_cycles: int = 8,
 
     The small least-squares problem is kept triangular with Givens rotations [Saad 2003], so each iteration costs
     O(j) for it: np.linalg.lstsq on the whole Hessenberg matrix every iteration took 18 ms at j = 120 and 44 ms at 200,
-    more than the rest of an iteration on long solves."""
+    more than the rest of an iteration on long solves.
+
+    `vec`: the vector work (host_vectors() when None: on the CPU the basis is kept in single precision when numba
+    is installed, _Basis32Vectors; gpu.TorchVectors on a device)."""
+    if vec is None:
+        vec = host_vectors()
+    if hasattr(vec, "for_tol"):         # the CPU's: single precision for the usual tolerances (gpu: complex128)
+        vec = vec.for_tol(tol)
     n = len(b)
     if bnorm is None:
         bnorm = vec.norm(b)
@@ -2627,10 +2785,11 @@ def _gmres(op: Callable, b, tol: float, max_cycles: int = 8,
         sn = np.zeros(restart, complex)
         g = np.zeros(restart + 1, complex)                # rotated right-hand side; |g[j+1]| = residual
         g[0] = beta
-        V[0] = r / beta
+        vec.put(V, 0, r / beta)
         k = 0
+        aim = tol * bnorm               # the recurrence's residual at which the true one is checked (lowered on a miss)
         for j in range(restart):
-            w = op(V[j])
+            w = op(vec.row(V, j))
             w_norm = vec.norm(w)
             h, w = vec.project(V, j, w)        # h = Vᴴ·w (on the CPU), w -= V·h
             hn = vec.norm(w)
@@ -2665,14 +2824,22 @@ def _gmres(op: Callable, b, tol: float, max_cycles: int = 8,
             g[j] = cs[j] * g[j]
             its += 1
             k = j + 1
-            if abs(g[j + 1]) <= 0.5 * tol * bnorm or hn <= 1e-14 * np.linalg.norm(h) or \
-                    (max_its is not None and its >= max_its):
+            if hn <= 1e-14 * np.linalg.norm(h) or (max_its is not None and its >= max_its):
                 break
+            if abs(g[j + 1]) <= aim:
+                # The recurrence says the tolerance is met: check the true residual at once (one product) and stop
+                # when it agrees, else go on in this cycle towards half the residual. With right preconditioning
+                # the two agree in exact arithmetic [Saad 2003, §9.3]; before 2026-10-25 the cycle went on to
+                # 0.5·tol first, ~3-8 % more iterations (docs/SPEED.md).
+                y = solve_triangular(H[:k, :k], g[:k])
+                xt = x + vec.combine(y, V, k)
+                rt = b - op(xt)
+                if vec.norm(rt) <= tol * bnorm:
+                    return xt, its, True
+                aim = 0.5 * abs(g[j + 1])
             if j + 1 >= len(V):                # full: twice the rows (at most restart + 1), the written ones copied
-                grown = vec.basis(min(restart + 1, 2 * len(V)), n)
-                grown[: j + 1] = V[: j + 1]
-                V = grown
-            V[j + 1] = w / hn
+                V = vec.grow(V, min(restart + 1, 2 * len(V)), j + 1)
+            vec.put(V, j + 1, w / hn)
         while k and H[k - 1, k - 1] == 0:    # an all-zero last column (exact breakdown): nothing to add from it
             k -= 1
         # end of a cycle: the least-squares coefficients by back substitution, the update, and the true residual

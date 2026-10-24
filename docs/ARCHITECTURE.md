@@ -814,6 +814,14 @@ and working set = Task Manager's "Memory", sampled every 50 ms; a census of the 
   Simulate's models for Suggest fixes only while they take < 1/4 of the free memory (`keep_models`,
   `SimulationResult.model_bytes` / `drop_models`), else Suggest fixes simulates its own baseline.
 - **Groups** (session 10): when the factorisations kept at once would not fit in the free memory, the models are solved in groups, one after the other (`solve_groups`): whole components of runs sharing a stack, the board-wide model last, so every number is the same. refboard, 7 nets and stages: committed peak 19.4 → 10.4 GB, working set 3.5 → 2.4 GB (12 groups on a 17 GB laptop).
+- **M1 of the speed work** (2026-10-25, branch `speed-m1`, docs/SPEED.md 5.2): the planning counts what each
+  platform really takes (`peec.lu_commit`: 6.5x the fill on Windows [A38], ~2x resident on macOS / Linux [A67]) and
+  the basis a model's iterations need (`simulate.basis_rows`, `PlaneStack.its_max`; 16 rows for a DC solve before it
+  is measured); each round's solves are admitted by memory (`simulate.Admission`, the largest first) instead of
+  every round capped by the largest model of the run (`memory_threads`, now only reported). The Krylov basis is
+  single precision (`peec._Basis32Vectors`, `solver/_mac.gs_project`: float32 planes, float64 arithmetic,
+  [A66]) for tolerances ≥ `BASIS32_MIN_TOL` 1e-6: half its memory. `_gmres` stops on the true residual as soon as the
+  recurrence meets the tolerance.
 - **Left** (the next steps): SuperLU's committed slack (~6.5x its fill) dominates the committed peak; only a
   different sparse solver (PARDISO, UMFPACK, a complex-symmetric LDLᵀ) would remove it, a new dependency. The
   working-set peak is mostly the live factorisations' fill (1.4 GB of 3.4 GB on the large board), then the

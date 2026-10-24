@@ -44,7 +44,9 @@ def show(st: dict, n_models: int):
     info = st.get("info", {})
     lim = info.get("memory_limit") or {}
     print(f"  threads: setting {info.get('threads_setting')}, {info.get('threads_cpu')} by cores, "
-          f"{info.get('threads_memory')} by memory (available {info.get('available_gb')} GB, largest solve: "
+          f"{info.get('threads_memory')} by memory"
+          + (" for the largest, each round admitted by memory" if info.get("admission") else "")
+          + f" (available {info.get('available_gb')} GB, largest solve: "
           f"{lim.get('model')} ~{lim.get('gb')} GB); groups {info.get('groups')}; memory gate: "
           f"{info.get('gate_freed', 0)} cached factorisations freed, {info.get('gate_waits', 0)} waits; "
           f"retried alone {info.get('retried_alone', 0)}, unsolved for memory {info.get('unsolved_for_memory', 0)}")
@@ -52,12 +54,13 @@ def show(st: dict, n_models: int):
                                    for p in st.get("phases", [])))
     rounds = st.get("rounds", [])
     if rounds:
-        print("  rounds:  #  step     tasks threads   wall s   busy s  use   tasks by model")
+        # at once: the most solves that ran side by side (memory admission, since 2026-10-25; the threads before)
+        print("  rounds:  #  step     tasks threads at once   wall s   busy s  use   tasks by model")
         for r in rounds:
             use = r["busy_s"] / (r["threads"] * r["wall_s"]) if r.get("wall_s") and r.get("threads") else 0.0
             kinds = ", ".join(f"{k} {v}" for k, v in sorted(r.get("by_kind", {}).items()))
-            print(f"          {r['round']:2d}  {r['step']:8s} {r['tasks']:5d} {r['threads']:7d} {r['wall_s']:8.1f} "
-                  f"{r['busy_s']:8.1f} {100 * use:3.0f} %  {kinds}")
+            print(f"          {r['round']:2d}  {r['step']:8s} {r['tasks']:5d} {r['threads']:7d} "
+                  f"{r.get('at_once', r['threads']):7d} {r['wall_s']:8.1f} {r['busy_s']:8.1f} {100 * use:3.0f} %  {kinds}")
     models = st.get("models", [])
     print(f"  models ({len(models)}, the costliest {min(n_models, len(models))}; factorise s includes the memory "
           f"gate's wait; an iteration's time in ms and where it went):")

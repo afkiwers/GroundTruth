@@ -234,6 +234,47 @@ Expected, compounded: job A 974 s → ~650 s (#1-2) → ~530 s (#3-4) → **~370
 ~2 800 s → ~2 300 s → **~1 550-1 750 s with M3 (26-29 min)**. On a machine with more free memory (the Dell) #1
 goes further (three or four solves at once).
 
+### 5.2 M1 as built (branch `speed-m1`, 2026-10-25)
+
+- **#1 Memory-true accounting.** `peec.lu_commit()`: SuperLU's factor is Windows' commit (6.5x the fill, [A38])
+  only on Windows; macOS and Linux count resident pages, at most ~2x the fill while an array grows (`LU_RESIDENT`,
+  [A67]). `simulate.basis_rows`: a solve plans the basis rows its model's most iterations so far need (x1.5, in the
+  basis's doubling steps; `PlaneStack.its_max`), 16 rows for a DC solve before its model was measured, the full
+  restart length otherwise. Each round's solves are admitted by memory (`simulate.Admission` in `run_parallel`):
+  each plans `solve_bytes` at its frequency against 80 % of the memory available when the round starts, the
+  largest first, on the cores' threads; a solve that does not fit waits, one larger than everything runs alone.
+  Before, every round ran on `memory_threads` of the largest model of the whole run (both 8x jobs: one at a time).
+  The statistics keep per round how many ran at once (`at_once`; `run_stats.py` prints it).
+- **#2 / #3 Less memory per solve, faster Gram-Schmidt: the Krylov basis in single precision.** Two float32
+  planes; every product with them in float64 (`solver/_mac.gs_project`, `gs_combine`: numba, nogil, in column
+  blocks; mixed-precision GMRES [Lindquist 2020] [Aliaga 2023], [A66]). Half the basis memory (a 2 M-unknown route
+  model's 101 rows: 3.2 → 1.6 GB per solve) and half the bytes per pass. On this laptop a 64-row pass over 1 M
+  unknowns: 87-97 ms single-threaded against `zgemv` on the complex128 basis 103 ms on one core, 90 ms on four;
+  the laptop's memory bus (~20 GB/s) is already full with one core, the M2's (~100 GB/s; `zgemv` reached ~32 GB/s
+  there) is not. Iterations as with complex128 down to 1e-7 (tests/test_speed.py), 3x more at 1e-8: used for
+  tolerances ≥ 1e-6 (`BASIS32_MIN_TOL`; the solver's default 1e-5), complex128 below. Splitting `zgemv` over Python
+  threads was 4x slower (strided copies); interleaved complex64 in numba 3x slower than BLAS (no vectorisation).
+- **#4 The true-residual stop.** `_gmres` checks the true residual when the recurrence's first meets the tolerance
+  and stops there (it went on to half the tolerance first): 3-4 fewer iterations per solve on refboard.
+
+Measured on this laptop (refboard, 1x, `main` 9716e21 against the branch, one after the other; `out/speed/m1/`):
+
+| Job | main | speed-m1 | Results |
+|---|---|---|---|
+| A, the six nets | 246 s | 215 s (−13 %) | largest difference 0.022 dB (SW_CLK's emissions; its route solve 32 → 29 iterations); the same 40 issues |
+| B, the four converters | 1 074 s | 905 s (−16 %) | conducted within 0.005 dB, the issues' margins within 0.0003 dB |
+
+The laptop (a few GB available beside its other programs) runs its large solves one at a time either way: these are
+mostly #3 and #4. The 0.022 dB
+is the size of a solve stopping at the tolerance instead of half of it (the same as `main` showed for an equally
+valid factorisation choice, ARCHITECTURE "Memory use"). Job B's issue list differs only in the voltage clearance
+check, which does not use the solver: the same pairs named the other way round, one of +VDC's three pairs folded
+into another (an iteration order between processes; noted in HANDOFF). `result_diff.py` reads `f_3db` as a dB value
+and matches issues by position: its "680 dB" lines are 1e-6 relative and a reordering.
+
+**On the M2** (the measurement M1 is for): jobs A and B at 8x with a server package from this branch, against 4.3's
+974 s and 4 520 s.
+
 ## 6. Researched, not planned (the user's choice, 2026-10-24)
 
 - **Board-wide model capped at 4x** (a setting, default min(resolution, 4)): −25-45 % at 8x, −60 % and more at 16x; 8x

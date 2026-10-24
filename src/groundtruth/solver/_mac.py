@@ -13,6 +13,7 @@ as with full kernels (6 layers, 462 x 528: 16.1 ms against 15.2).
 
 Imported only when numba is installed (the plugin's requirements have it, a plain CLI install may not):
 peec.py falls back to numpy."""
+import numpy as np
 from numba import njit
 
 
@@ -31,3 +32,69 @@ def kernel_mac(Kq, F, out):   # pragma: no cover - compiled
                     acc += Kq[qi, qj, t, s] * F[s, i, j]
                 out[t, i, j] = acc
     return out
+
+
+# --------------------------------------------------------------------------- Gram-Schmidt on a single-precision basis
+# GMRES's Krylov basis stored as two float32 planes, real and imaginary (peec._Basis32Vectors), read here with the
+# arithmetic in float64: half the memory of a complex128 basis and half the bytes each Gram-Schmidt pass reads, the
+# products as accurate as before on the stored vectors (mixed-precision GMRES [Lindquist 2020] [Aliaga 2023]).
+# Planes, not complex64: LLVM vectorises the separate real loops (interleaved complex ran 3x slower than BLAS);
+# in column blocks so the vector's block stays in cache while every basis row passes over it. fastmath only for
+# reassociation and fused multiply-adds (the reductions vectorise); the order is fixed by the compiled code, so the
+# same inputs give the same bits on the same machine.
+GS_BLOCK = 8192
+_FAST = {"reassoc", "contract"}
+
+
+@njit(cache=True, nogil=True, fastmath=_FAST)
+def _dot2(vr, vi, wr, wi):   # pragma: no cover - compiled
+    """(Re, Im) of conj(v)·w for one basis row's block (vr, vi float32) and the vector's (wr, wi float64)."""
+    a = 0.0
+    b = 0.0
+    for k in range(vr.shape[0]):
+        x = np.float64(vr[k])
+        y = np.float64(vi[k])
+        a += x * wr[k] + y * wi[k]
+        b += x * wi[k] - y * wr[k]
+    return a, b
+
+
+@njit(cache=True, nogil=True, fastmath=_FAST)
+def _axpy2(hr, hi, vr, vi, wr, wi, sign):   # pragma: no cover - compiled
+    """w += sign·h·v over one basis row's block (h complex as hr, hi; v float32 planes; w float64 planes)."""
+    for k in range(vr.shape[0]):
+        x = np.float64(vr[k])
+        y = np.float64(vi[k])
+        wr[k] += sign * (hr * x - hi * y)
+        wi[k] += sign * (hr * y + hi * x)
+
+
+@njit(cache=True, nogil=True)
+def gs_project(Vr, Vi, m, wr, wi, hr, hi):   # pragma: no cover - compiled
+    """One classical Gram-Schmidt pass over the first m basis rows: h = Vᴴ·w, then w -= V·h (w in place)."""
+    n = wr.shape[0]
+    for i in range(m):
+        hr[i] = 0.0
+        hi[i] = 0.0
+    for k0 in range(0, n, GS_BLOCK):
+        k1 = min(k0 + GS_BLOCK, n)
+        for i in range(m):
+            a, b = _dot2(Vr[i, k0:k1], Vi[i, k0:k1], wr[k0:k1], wi[k0:k1])
+            hr[i] += a
+            hi[i] += b
+    for k0 in range(0, n, GS_BLOCK):
+        k1 = min(k0 + GS_BLOCK, n)
+        for i in range(m):
+            _axpy2(hr[i], hi[i], Vr[i, k0:k1], Vi[i, k0:k1], wr[k0:k1], wi[k0:k1], -1.0)
+
+
+@njit(cache=True, nogil=True)
+def gs_combine(Vr, Vi, k, yr, yi, xr, xi):   # pragma: no cover - compiled
+    """x = Σ_i y[i]·V[i] over the first k basis rows (x zeroed first)."""
+    n = xr.shape[0]
+    xr[:] = 0.0
+    xi[:] = 0.0
+    for k0 in range(0, n, GS_BLOCK):
+        k1 = min(k0 + GS_BLOCK, n)
+        for i in range(k):
+            _axpy2(yr[i], yi[i], Vr[i, k0:k1], Vi[i, k0:k1], xr[k0:k1], xi[k0:k1], 1.0)
