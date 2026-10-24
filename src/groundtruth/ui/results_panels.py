@@ -504,6 +504,13 @@ class ResultsPanel(wx.Panel):
         tool_row = wx.BoxSizer(wx.HORIZONTAL)
         tool_row.Add(self.toolbar, 0, wx.EXPAND)
         tool_row.Add(self.readout, 1, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
+        # a Bode view's H(s) to the clipboard, plain text and LaTeX (shown for Bode views only, _fit_page)
+        self.copy_tf = theme.Button(self, "Copy H(s)")
+        self.copy_tf.SetToolTip("Copies the transfer functions shown above the Bode plot: as plain text with the "
+                                "poles' and zeros' values, and as LaTeX")
+        self.copy_tf.Bind(wx.EVT_BUTTON, self.on_copy_tf)
+        self.copy_tf.Hide()
+        tool_row.Add(self.copy_tf, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
         s.Add(tool_row, 0, wx.EXPAND)
         s.Add(self.page, 1, wx.EXPAND)
         plots = wx.BoxSizer(wx.VERTICAL)
@@ -523,6 +530,22 @@ class ResultsPanel(wx.Panel):
     def set_rules(self, rules):
         """The settings' rules, which judge the tiles' figures (ok / warn / error)."""
         self.rules = rules
+
+    def on_copy_tf(self, _=None):
+        """Copy H(s): the shown Bode view's transfer functions to the clipboard (plots.transfer_clipboard)."""
+        from ..report.plots import transfer_clipboard
+        text = transfer_clipboard(self._tf_view) if getattr(self, "_tf_view", None) is not None else ""
+        if not text:
+            self.readout.SetLabel("this view has no transfer function to copy")
+            return
+        if wx.TheClipboard.Open():
+            try:
+                wx.TheClipboard.SetData(wx.TextDataObject(text))
+            finally:
+                wx.TheClipboard.Close()
+            self.readout.SetLabel("H(s) copied: plain text and LaTeX")
+        else:
+            self.readout.SetLabel("the clipboard is busy: try again")
 
     def _show_tiles(self, rr):
         """The view's KPI tiles. The tiles already there show the new figures (Tile.update); only missing ones are
@@ -846,6 +869,10 @@ class ResultsPanel(wx.Panel):
             text = self._summary(rr)
             if text != self.metrics.GetLabel():
                 self.metrics.SetLabel(text)
+            self._tf_view = rr if rr.kind == "bode" else None
+            if self.copy_tf.IsShown() != (self._tf_view is not None):
+                self.copy_tf.Show(self._tf_view is not None)
+                self.Layout()
             want = self.section_shown(rr)
             if want != self.canvas3.IsShown():
                 self._blank_canvases()
@@ -949,6 +976,9 @@ class ResultsPanel(wx.Panel):
         inch = self._px(1.0)
         if rr.kind in CURVE_KINDS:              # the curves: the page's height, as a map would get at most
             maps = max(h - 6, MAPS_MIN_PX)
+            if rr.kind == "bode":             # and room for long H(s) formulas above a Bode plot
+                from ..report.plots import bode_height_in
+                maps = max(maps, self._px(bode_height_in(rr, w / inch, 0.0)))
         else:
             maps = self._px(heatmap_height_in(rr, w / inch, max(h - 6, MAPS_MIN_PX) / inch, layer, vectors, scale))
         heights = ((self.canvas, max(maps, MAPS_MIN_PX)),

@@ -3124,6 +3124,19 @@ def test_a_routes_bode_view_draws_its_curves_and_poles(app, frame):
         f.results_panel._hover(MouseEvent("motion_notify_event", canvas, x, y))
         assert canvas.GetToolTipText() == marks[0][3] and " at " in marks[0][3] and "KiCad" not in marks[0][3]
         assert f.results_panel.readout.GetLabel() == marks[0][3]
+    # Copy H(s) (the user: "it would be good if one could copy them"): shown for a Bode view, the formulas as
+    # plain text and LaTeX on the clipboard
+    from groundtruth.report.plots import transfer_clipboard
+    assert f.results_panel.copy_tf.IsShown()
+    f.results_panel.on_copy_tf()
+    text = transfer_clipboard(view)
+    assert "H(s) =" in text and "LaTeX:" in text and r"\frac" in text
+    if wx.TheClipboard.Open():
+        try:
+            data = wx.TextDataObject()
+            assert wx.TheClipboard.GetData(data) and data.GetText() == text
+        finally:
+            wx.TheClipboard.Close()
 
 
 def test_a_selection_is_shown_in_kicad_once_it_settles(app):

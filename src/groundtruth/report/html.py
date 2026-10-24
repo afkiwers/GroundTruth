@@ -1060,7 +1060,7 @@ def _responses(owner: str, responses, figs) -> str:
     if not responses:
         return ""
     from ..analysis.transfer import BodeView, fmt_root, gain_figures, gain_text, pz_rows, unit_groups
-    from .plots import draw_bode, draw_pz
+    from .plots import bode_height_in, draw_bode, draw_pz
     rows = []
     for r in responses:
         how = "exact" if r.exact else (f"fitted (max {r.fit_error_db:.2f} dB)" if r.fit_error_db is not None
@@ -1073,7 +1073,8 @@ def _responses(owner: str, responses, figs) -> str:
     out = ["<h4>Frequency response, poles and zeros</h4>"]
     # one Bode plot per magnitude unit (ratios in dB, impedances in Ω: unit_groups), one pole-zero map for all
     for name, group in unit_groups(owner, responses):
-        out.append(_img(figs.png(f"{name} Bode", draw_bode, BodeView(name, group), size=(9.5, 5.0)),
+        view = BodeView(name, group)
+        out.append(_img(figs.png(f"{name} Bode", draw_bode, view, size=(9.5, bode_height_in(view, 9.5, 5.0))),
                         f"{name}: magnitude and phase; × poles and ○ zeros at their natural frequencies"))
     out.append(_img(figs.png(f"{owner} poles and zeros", draw_pz, BodeView(owner, responses), size=(9.5, 4.0)),
                     f"{owner}: poles and zeros in the s-plane (Hz; symmetric log axes)"))

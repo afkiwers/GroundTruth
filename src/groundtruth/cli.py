@@ -490,10 +490,10 @@ def cmd_bode(args) -> int:
         from types import SimpleNamespace
         from matplotlib.backends.backend_agg import FigureCanvasAgg
         from matplotlib.figure import Figure
-        from .report.plots import STEP_IN, draw_bode, draw_pz, draw_step, has_step
+        from .report.plots import STEP_IN, bode_height_in, draw_bode, draw_pz, draw_step, has_step
         for v in bode_views(SimpleNamespace(routes=[r for r in results if not r.error], converters=[], pdn=[])):
             stem = "".join(c if c.isalnum() or c in "-_" else "_" for c in v.owner).strip("_")
-            plots = [("bode", draw_bode, (9.5, 5.0)), ("pz", draw_pz, (9.5, 4.0))]
+            plots = [("bode", draw_bode, (9.5, bode_height_in(v, 9.5, 5.0))), ("pz", draw_pz, (9.5, 4.0))]
             if has_step(v):
                 plots.append(("step", draw_step, (9.5, STEP_IN)))
             for what, draw, size in plots:
