@@ -167,6 +167,10 @@ def merge_parts(config: Config, nets: Optional[list], parts: list[SimulationResu
     build = next(((p.solver or {}).get("build") for p in parts if (p.solver or {}).get("build")), "")
     if build:
         result.solver["build"] = build
+    # each part's solver statistics (solver/stats.py), as the parts ran them: each on its own server and models
+    part_stats = [(p.solver or {}).get("stats") for p in parts if (p.solver or {}).get("stats")]
+    if part_stats:
+        result.solver["stats"] = {"parts": part_stats}
     issues = list(main.checks.issues) + [i for p in parts for i in p.part.get("issues", [])]
     route_issues = [i for p in parts for i in p.part.get("route_issues", [])]
     stage_issues = [i for p in parts for i in p.part.get("stage_issues", [])]

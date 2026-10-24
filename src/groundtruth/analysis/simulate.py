@@ -55,7 +55,7 @@ from ..rules.checks import CheckResult, run_checks
 from ..solver.peec import (EPS0, gmres_restart, Branch, Grid, LidNode, PlaneLayer, PlanePair, PlaneStack,
                            RouteExcitation, Solution, SolverError, TraceSegment, build_grid, thread_budget,
                            track_impedance, via_impedance)
-from ..solver import gpu, peec
+from ..solver import gpu, peec, stats
 from .progress import Phases
 from .pins import SOLDER_RHO, column_conductance, feed_layer, params_cache, segment_impedance, solder_span
 from .route import SHUNT_KINDS, Route, RouteSegment, RouteVia, return_pad, shunt_parts, signal_nets  # noqa: F401
@@ -2168,6 +2168,7 @@ def finish_route(model: BoardModel, setup: RouteSetup) -> RouteResult:
             raise SolverError(f"no ideal plane near {pad.pin}")
 
         nd, nr = ideal_node(setup.drv_ret), ideal_node(setup.rcv_ret)
+        stats.label(ist.plane, "ideal reference", setup.spec.name)      # the run's solver statistics (stats.py)
         ideal = RouteExcitation(ist.plane, make_chain(route, ist, nd, nr, model.z_phys), nd, nr).solve(s0.f)
         res.ideal = {"f": s0.f, "L_nH": ideal.L_loop * 1e9, "m_mm2": _m(ideal) * 1e6, "layers": setup.route_refs}
         res.l_ratio = s0.L_loop / ideal.L_loop if ideal.L_loop > 0 else None
@@ -2984,6 +2985,35 @@ def solve_cost(run: ModelRun) -> float:
     return max(run.exc.stack.nb / 1e5, 0.05)
 
 
+def run_kind(s, r) -> str:
+    """What run r of setup s solves on, for the solver statistics (solver/stats.py): "board-wide", "conducted" (a
+    power stage's input-path model when it has one of its own), "victims", "DC" (a stage's DC paths), else the
+    setup's own model ("route", "power-stage" = a stage's hot loop, a DC load's "DC", "PDN")."""
+    if r is getattr(s, "cavity", None):
+        return "board-wide"
+    if r is s.fine:
+        return getattr(s, "model_label", "route")
+    if r is getattr(s, "cond", None):
+        return "conducted" if r.exc.stack is not s.fine.exc.stack else getattr(s, "model_label", "route")
+    if r is getattr(s, "victim_run", None):
+        return "victims"
+    dc = [x for _, _, x in getattr(s, "dc_runs", ())] + [x for _, x in getattr(s, "dc_ripple", {}).values()]
+    hot = getattr(s, "dc_hot", None)
+    if hot:
+        dc.append(hot[2])
+    if any(r is x for x in dc):
+        return "DC"
+    return getattr(s, "model_label", "other")
+
+
+def _memory_limit(stacks: list) -> Optional[tuple]:
+    """(the model whose solve memory_threads plans with: the largest solve_bytes, those bytes), None without models."""
+    if not stacks:
+        return None
+    st = max(stacks, key=solve_bytes)
+    return st, solve_bytes(st)
+
+
 def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0, free_done: bool = False,
                  relief: Optional[MemoryRelief] = None):
     """Solve every route (and power stage): the planned frequencies first, then refinement rounds. Each round's
@@ -3015,8 +3045,23 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
     t = getattr(config.analysis, "threads", "auto")
     auto = not (isinstance(t, (int, float)) and t >= 1)    # "auto" (a number is the user's choice)
     avail0 = available_bytes()          # before this run's own factorisations take any of it
+    threads_cpu = threads
     if auto:
         threads = memory_threads(threads, [r.exc.stack for _, r in runs], avail0)
+    c = stats.active()
+    if c is not None:
+        # the run's solver statistics: every model named by what it is and who uses it, and how the threads were
+        # planned (the model memory_threads divided the free memory by)
+        for s, r in runs:
+            name, kind = getattr(s.spec, "name", None) or getattr(s.spec, "label", ""), run_kind(s, r)
+            for st in (r.exc.stack, r.exc.stack._base):
+                if st is not None:
+                    c.label(st, kind, name)
+        lim = _memory_limit([r.exc.stack for _, r in runs])
+        c.info.update({"threads_setting": str(t), "threads_cpu": threads_cpu, "threads_memory": threads,
+                       "available_gb": None if avail0 is None else round(avail0 / 2 ** 30, 2),
+                       "memory_limit": None if lim is None else {"model": c.entry(lim[0])["label"],
+                                                                 "gb": round(lim[1] / 2 ** 30, 2)}})
 
     def unsolved(task, error: MemoryError):
         """The relief's last rung: the frequency is left unsolved, with a note (as a SolverError in solve_at)."""
@@ -3060,6 +3105,7 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
     if ph is not None:
         ph.start(planned, rest=rest)
     done = [0.0, 0]
+    busy = [0.0]                        # the round's solves' seconds summed (solver statistics)
     lock = threading.Lock()
 
     def run(task):
@@ -3071,10 +3117,32 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
                 frac, k = done[0] / max(planned, 1e-9), done[1] + 1
             ph.report(f"{s.spec.name}: {f / 1e6:.4g} MHz, {kind} model ({r.build.nodes} nodes), "
                       f"solve {k} of ≤ {max(n_planned, k)}", frac)
+        t0 = time.perf_counter()
         solve_at(s, r, f)
         with lock:
             done[0] += solve_cost(r)
             done[1] += 1
+            busy[0] += time.perf_counter() - t0
+
+    rounds = [0]
+
+    def parallel(tasks: list, group: int, step: str):
+        """One round's solves in parallel (run_parallel, by frequency); with solver statistics its figures: the
+        tasks by model kind, the threads, the wall time and the solves' summed time (their difference: threads
+        waiting for the round's slowest solve)."""
+        t0 = time.perf_counter()
+        with lock:
+            busy[0] = 0.0
+        run_parallel(sorted(tasks, key=lambda t: t[2]), run, threads, relief)
+        if c is not None:
+            kinds: dict[str, int] = {}
+            for s, r, _ in tasks:
+                k = run_kind(s, r)
+                kinds[k] = kinds.get(k, 0) + 1
+            c.round(round=rounds[0], group=group, step=step, tasks=len(tasks), by_kind=kinds,
+                    threads=min(threads, len(tasks)), wall_s=round(time.perf_counter() - t0, 2),
+                    busy_s=round(busy[0], 2))
+        rounds[0] += 1
 
     stacks = list({id(r.exc.stack): r.exc.stack for _, r in runs}.values())
 
@@ -3100,11 +3168,11 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
     if free_done:
         groups = solve_groups(runs, threads, available_bytes())
     hooked: set[int] = set()
-    for group in groups:
+    for gi, group in enumerate(groups):
         next_round()
         first = [(s, r, f) for s, r in group for f in r.planned if f not in r.sols]
         threads = plan(threads)
-        run_parallel(sorted(first, key=lambda t: t[2]), run, threads, relief)
+        parallel(first, gi, "planned")
         for s in setups:        # its own model's planned solves are done (they come first: solve_groups)
             hook = getattr(s, "planned_solved", None)
             if hook is not None and id(s) not in hooked and any(r is s.fine for _, r in group):
@@ -3126,7 +3194,7 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
                 break
             next_round()
             threads = plan(threads)
-            run_parallel(sorted(wanted, key=lambda t: t[2]), run, threads, relief)
+            parallel(wanted, gi, "refine")
             pending = list({id(r): (s, r) for s, r, _ in wanted}.values())
             free(pending)
         if len(groups) > 1:
@@ -3269,11 +3337,16 @@ def simulate(board: Board, config: Config, nets: Optional[list[str]] = None,
     full = config
     # every capacitor with a DC-bias curve at its own DC voltage (analysis/bias.py), for every solver below
     from .bias import at_dc
-    config, cap_bias, bias_notes = at_dc(board, config.active(nets))
-    with gpu.use(getattr(config.analysis, "gpu", "auto")) as run:
-        result = _simulate(board, config, nets, progress, copper, model, keep_factorisations, part,
-                           full if part is not None else None)
+    # what the solver does and where the time goes, kept with the result (solver/stats.py, docs/SPEED.md)
+    with stats.collect() as st:
+        config, cap_bias, bias_notes = at_dc(board, config.active(nets))
+        stats.mark("capacitor bias")
+        with gpu.use(getattr(config.analysis, "gpu", "auto")) as run:
+            result = _simulate(board, config, nets, progress, copper, model, keep_factorisations, part,
+                               full if part is not None else None)
     result.solver = run.summary()
+    if st is not None:
+        result.solver["stats"] = st.as_dict()
     result.cap_bias = cap_bias
     result.notes += bias_notes
     return result
@@ -3301,6 +3374,7 @@ def _simulate(board: Board, config: Config, nets: Optional[list[str]], progress:
         checks = run_checks(board, full or config, model.copper, part.get("job_nets"))
     else:
         checks = run_checks(board, config, model.copper, nets)
+    stats.mark("checks")
     result = SimulationResult(checks, model=model, notes=stack_notes)
     if getattr(config.analysis, "all_cores", False):
         result.notes.append(f"Use all cores: {solver_threads(config)} solver threads, up to {ALL_CORES_K} frequencies "
@@ -3357,12 +3431,19 @@ def _simulate(board: Board, config: Config, nets: Optional[list[str]], progress:
             psetups, result.pdn, p_issues = prepare_pdn(model, pl)
         issues.extend(p_issues)
     everything = setups + csetups + dsetups + psetups
+    stats.mark("models")
     # finishing: the ideal reference (a route-model solve), emissions, the power stages' DC paths and maps
     finish_cost = sum(solve_cost(s.fine) * (1.0 if isinstance(s, ConverterSetup) else 1.5) for s in everything)
     relief = MemoryRelief()
     gate0 = (peec.GATE.freed, peec.GATE.waits)
     result.groups = solve_setups(everything, config, ph, rest=finish_cost, free_done=not keep_factorisations,
                                  relief=relief)
+    sc = stats.active()
+    if sc is not None:      # what memory made the solves do (memory_notes says it in words)
+        sc.info.update({"groups": result.groups, "gate_freed": peec.GATE.freed - gate0[0],
+                        "gate_waits": peec.GATE.waits - gate0[1], "retried_alone": relief.shorts,
+                        "least_fill_everywhere": relief.low, "unsolved_for_memory": relief.unsolved})
+    stats.mark("solves")
     # factorisations past SuperLU's size limit, made with diagonal pivots instead (peec._factorise_diagonal)
     runs_all = [r for s in everything for r in [s.fine, getattr(s, "cavity", None), *getattr(s, "extra_runs", ())]
                 if r is not None and getattr(r, "exc", None) is not None]
@@ -3407,6 +3488,7 @@ def _simulate(board: Board, config: Config, nets: Optional[list[str]], progress:
     # rung 2 here switches every live model: finishing makes models of its own (a route's ideal reference, a stage's
     # DC paths), and this run's are the ones that matter now
     run_parallel(setups + csetups + dsetups + psetups, finish, solver_threads(config), MemoryRelief(on_short=unfinished))
+    stats.mark("finishing")
     for s in psetups:
         issues.extend(s.issues)
     if bsetups:
@@ -3421,6 +3503,7 @@ def _simulate(board: Board, config: Config, nets: Optional[list[str]], progress:
                 issues.extend(bs.issues)
         finally:
             sys.setswitchinterval(saved)
+        stats.mark("bridges")
     result.setups = setups
     result.converter_setups = csetups
     result.dc_load_setups = dsetups
@@ -3436,14 +3519,23 @@ def _simulate(board: Board, config: Config, nets: Optional[list[str]], progress:
             compact_dc_branch(s.res)
         result.part = {"issues": issues, "route_issues": route_issues, "stage_issues": stage_issues,
                        "checks": bool(part.get("checks"))}
+        stats.mark("issues")
         if ph is not None:
-            ph.report("done", 1.0)
+            ph.report(_done_message(), 1.0)
         return result
     result.issues = finish_issues(result, issues, route_issues, stage_issues,
                                   [s.res for s in csetups] + list(result.dc_loads), config, board)
+    stats.mark("issues")
     if ph is not None:
-        ph.report("done", 1.0)
+        ph.report(_done_message(), 1.0)
     return result
+
+
+def _done_message() -> str:
+    """A Simulate's last progress message: "done", with the solver statistics' one-line summary while they are
+    collected (solver/stats.py; the Server jobs tab shows it as a server job's last step)."""
+    c = stats.active()
+    return "done" if c is None else f"done: {c.summary_line()}"
 
 
 def finish_issues(result: SimulationResult, issues: list, route_issues: list, stage_issues: list, converters: list,

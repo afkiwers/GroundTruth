@@ -39,9 +39,9 @@ def main() -> int:
     stats = []
     orig_solve = peec.PlaneStack._solve
 
-    def _solve(self, f, op, rhs_top, J, tol, max_cycles, guess, m):
+    def _solve(self, f, op, rhs_top, J, tol, max_cycles, guess, m, times=None):
         """PlaneStack._solve at the requested tolerance; records the block residuals of the answer."""
-        out = orig_solve(self, f, op, rhs_top, J, args.tol, args.cycles, guess, m)
+        out = orig_solve(self, f, op, rhs_top, J, args.tol, args.cycles, guess, m, times)
         x = out[3]
         b = np.concatenate([rhs_top.astype(complex), J[self.keep].astype(complex)])
         r = b - _HostMath(self).matvec(op, x)

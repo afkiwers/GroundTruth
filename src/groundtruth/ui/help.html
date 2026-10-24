@@ -1620,7 +1620,10 @@ power stages: one big item can't be split further.</p>
   the first moments is not lost; then it says when they were last checked.
   Ended jobs move to <b>Past jobs</b> (shown, failed, cancelled, no longer on the server) and stay there until you
   remove them; select one for its details below (drag the line above the details to make them taller): where and how long it ran and, for a failure, the error in full
-  (the server's own message and traceback, kept with the job). <b>Copy details</b> puts them on the clipboard.
+  (the server's own message and traceback, kept with the job). A finished Simulate's <i>Last step</i> sums up what the
+  solver did: its solves, GMRES iterations and factorisations with their time, and how many solves ran at once
+  (and, when memory limited them, which model's). The same figures, per model, are kept with the run in the History
+  (its run.json). <b>Copy details</b> puts them on the clipboard.
   The list is checked against the servers every 30 seconds: a job of this computer that a server still has but the
   list lost is listed again (<i>listed again from the server</i>; its result can be fetched but not shown, since the
   board and settings it ran with are not here). Several GroundTruth windows can be open at once: they share the list.</li>
