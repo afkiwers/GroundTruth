@@ -902,7 +902,7 @@ def _pieces(st: StackBuild, elements: list[Element]) -> str:
                 g[label] = g.get(label, 0) + 1          # footprints may repeat a pad number (EPC: 5 × pad 7)
     for b in plane.branches:
         if b.kind == "part":
-            k = int(plane.full_label[plane.nid[b.a]])
+            k = int(plane.full_label[plane.node_id(b.a)])          # a part's end is its lid (simulate.part_lid)
             if k in groups:
                 groups[k].setdefault(b.name, 1)
     if len(groups) < 2:

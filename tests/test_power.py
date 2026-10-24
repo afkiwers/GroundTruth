@@ -690,15 +690,13 @@ def test_a_boosts_ground_return_splits_by_kirchhoff(tmp_path):
     assert via_current(3.0, 9.5) == pytest.approx(i_in, rel=0.01)                 # out at the input connector
 
 
-def _split_strip_r(tmp_path, name, joined, d=0.1, branches=None, monkeypatch=None):
+def _split_strip_r(tmp_path, name, joined, d=0.1):
     """DC resistance (mΩ) of split_strip_board (R1 = 1 mΩ across the gap, or the joined reference strip) fed over
-    its end pads, on a grid of d mm; `branches`: simulate.MAX_PART_BRANCHES for this build."""
+    its end pads, on a grid of d mm; also the path's parts and the model's part and bond branches."""
     from boardgen import split_strip_board
     from groundtruth.analysis import simulate
     from groundtruth.analysis.power import _area_shares, dc_path
     from groundtruth.components.models import ComponentModel
-    if branches is not None:
-        monkeypatch.setattr(simulate, "MAX_PART_BRANCHES", branches)
     board, sc, _ = make(tmp_path, split_strip_board(joined=joined), name, nets=())
     if not joined:
         sc.set_component("R1", ComponentModel("resistor", {"R": 1e-3}))
@@ -706,26 +704,33 @@ def _split_strip_r(tmp_path, name, joined, d=0.1, branches=None, monkeypatch=Non
     inj = _area_shares(st, [board.find_pin("U1.1")], "F.Cu", 1.0) + \
         _area_shares(st, [board.find_pin("U2.1")], "F.Cu", -1.0)
     path, _ = dc_path(st, inj, 1.0, "strip")
-    return path["r_mohm"], path["parts"], [b for b in st.plane.branches if b.kind == "part"]
+    return (path["r_mohm"], path["parts"], [b for b in st.plane.branches if b.kind == "part"],
+            [b for b in st.plane.branches if b.kind == "bond"])
 
 
-def test_a_part_is_joined_to_the_copper_over_its_whole_pads(tmp_path, monkeypatch):
-    """A 1 mΩ part whose pads span two 4 mm × 35 µm strips (a shunt, a FET's drain and source rows) adds its own
-    1 mΩ less the copper it replaces: the 0.6 mm gap and about half of each 0.8 mm deep pad, 0.123 mΩ/mm, so
-    ≈ 0.83 mΩ over the joined strip. Spread over its pads (8 parallel branches of 8·Z) it does, on two grids; joined
-    at one node per side (as before) the current crowded into a point: ≈ +0.6 mΩ more, growing on a finer grid
-    (refboard's Q601: the whole input current at one spot of its drain pad)."""
-    ref, _, _ = _split_strip_r(tmp_path, "joined", True)
-    r, parts, branches = _split_strip_r(tmp_path, "split", False)
-    assert len(branches) == 8 and {b.name for b in branches} == {"R1"}
-    assert r - ref == pytest.approx(0.83, abs=0.04)
+def test_a_part_is_joined_to_the_copper_over_its_whole_pads(tmp_path):
+    """A 1 mΩ part whose pads (0.8 mm deep, 3.8 mm wide) span two 4 mm × 35 µm strips at their 0.6 mm gap (a shunt, a
+    FET's drain and source rows). Each side's metal is soldered to every node under its pads (simulate.part_lid,
+    [A65]), so the current hands over at the pad's outer edge, within the transfer length λ = √(r_c / R_sheet)
+    ≈ 0.14 mm, as a transmission-line contact [Berger 1972]: the part adds its 1 mΩ and two contacts of
+    (R_sheet·λ/w)·coth(depth/λ) ≈ 0.018 mΩ and bypasses the gap and both pads' copper, 2.2 mm at 0.123 mΩ/mm: ≈ +0.766
+    mΩ over the joined strip; on two grids. Before 2026-10-13 one node per side crowded the current into a point
+    (+1.45 mΩ); until 2026-10-24 up to 8 sampled nodes per side (+0.84: about half of each pad's copper used)."""
+    from groundtruth.analysis.simulate import BOND_RC
+    rs = 1 / (5.8e7 * 35e-6)                                                    # Ω per square
+    lam = math.sqrt(BOND_RC / rs)
+    contact = rs * lam / 3.8e-3 / math.tanh(0.8e-3 / lam)
+    expect = (1e-3 + 2 * contact - rs * 2.2e-3 / 4e-3) * 1e3                   # mΩ
+    ref, _, _, _ = _split_strip_r(tmp_path, "joined", True)
+    r, parts, branches, bonds = _split_strip_r(tmp_path, "split", False)
+    assert len(branches) == 1 and branches[0].name == "R1"
+    assert len(bonds) > 100 and {b.name for b in bonds} == {"R1"}           # every node under both pads
+    assert r - ref == pytest.approx(expect, abs=0.025)                         # 0.1 mm cells: λ is 1.4 of them
     assert parts[0]["name"] == "R1" and parts[0]["current_a"] == pytest.approx(1.0, rel=1e-6)
     assert parts[0]["r_mohm"] == pytest.approx(1.0, rel=0.01)                  # the part's own share of R
-    ref_f, _, _ = _split_strip_r(tmp_path, "joined_f", True, d=0.05)
-    r_f, _, _ = _split_strip_r(tmp_path, "split_f", False, d=0.05)
-    assert (r_f - ref_f) == pytest.approx(r - ref, abs=0.03)                    # converged in the grid
-    r1, _, one = _split_strip_r(tmp_path, "point", False, branches=1, monkeypatch=monkeypatch)
-    assert len(one) == 1 and r1 - ref > r - ref + 0.4                          # the old point contact
+    ref_f, _, _, _ = _split_strip_r(tmp_path, "joined_f", True, d=0.05)
+    r_f, _, _, _ = _split_strip_r(tmp_path, "split_f", False, d=0.05)
+    assert (r_f - ref_f) == pytest.approx(expect, abs=0.015)                   # closer on the finer grid
 
 
 def test_the_stages_dc_currents_add_up_on_one_board_model(tmp_path):
