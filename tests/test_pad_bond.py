@@ -73,6 +73,22 @@ def test_a_tighter_contact_hands_over_sooner_and_a_lid_is_no_grid_node():
     assert back == lid and back.lid == 7 and tuple(back) == (0, 3, 4)
 
 
+def test_the_bond_is_a_pin_value_of_any_part():
+    """`bond` (µm of solder) reads and writes like the other pin values, from the GT field's words, a part's
+    settings entry or the board's defaults, the most specific first (analysis/pins.py)."""
+    from types import SimpleNamespace
+    from groundtruth.analysis.pins import format_values, params_for, parse_words, values_from_data
+    assert parse_words("conv_in, bond:50") == ({"bond": 50.0}, [])
+    assert parse_words("bond: 25um")[0] == {"bond": 25.0} and parse_words("bond:0")[0] == {"bond": 0.0}
+    assert parse_words("bond:-3")[1] and parse_words("bond:thick")[1]
+    assert format_values({"bond": 50.0, "contact": 5e-4}) == "contact:500µΩ, bond:50"
+    assert values_from_data({"bond": "40"}, "x") == ({"bond": 40.0}, [])
+    cfg = SimpleNamespace(components={"Q1": SimpleNamespace(tht={"bond": 30.0})}, tht={"bond": 60.0})
+    assert params_for(None, cfg, "Q1").bond == 30.0 and params_for(None, cfg, "Q1").source["bond"] == "part setting"
+    assert params_for(None, cfg, "Q2").bond == 60.0
+    assert params_for(None, SimpleNamespace(components={}, tht={}), "Q2").bond is None       # built in (75)
+
+
 def test_a_bond_to_a_lid_without_a_return_leaves_it_floating():
     """A lid that only bonds to copper (no part branch out) carries no current: the injections still have to balance
     on the copper itself."""

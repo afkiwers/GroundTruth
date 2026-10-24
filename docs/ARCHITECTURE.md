@@ -540,7 +540,8 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   refboard at 2x, the stages' DC currents together (`tools/dev/pad_density.py --part Q601`, `out/speed/q601_*_2x.json`):
   Q601's drain pad densest 67.7 → 22.5 A/mm² (a sampled corner → the edge the current arrives at, falling to ~0
   across the pad), its drain fingers 59.6 → ≤ 10, the view's peak 66.4 → 57.6 A/mm² (now elsewhere).
-  `part_pairs` is left for the PDN's ideal source.
+  A part's own joint: the pin value `bond` (µm of solder; 0 a perfect bond, taken as 0.1 µm; analysis/pins.py, its
+  GT field, the Parts tab's Pins cell or Pin defaults…). `part_pairs` is left for the PDN's ideal source.
 - Return injection: return pad's own-net node on its layer, then the same net on another layer (note), then
   any plane copper within 5 mm (note).
 - Loop L was verified to change < 1 % from d = h/2 to 2h on the route model.

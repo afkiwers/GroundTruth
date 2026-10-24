@@ -29,7 +29,9 @@ BIAS_HELP = ("C at bias: the capacitor's DC-bias curve, 1 to 12 points: 75nF (on
 PIN_HELP = ("Through-hole pins, comma separated: contact:0.5m (the mating contact, Ω per pin), joint:50u (the solder "
             "joint, Ω per pin), fill:75 (% of the hole soldered, from the side opposite the part), pin:brass (hole = "
             "copper filling the hole, copper, brass, bronze, becu, tellurium), pin_d:1.0 (mm), pin_r:0.1m (Ω through "
-            "the board). Each value: the part's GT field, else its Pins cell, else Pin defaults…, else built in.")
+            "the board); for any part with a model, SMD too: bond:50 (µm of solder between its pads and its metal; "
+            "built in 75, 0 = a perfect bond). Each value: the part's GT field, else its Pins cell, else Pin "
+            "defaults…, else built in.")
 PARAM_COL = {"R": 4, "C": 5, "C_bias": 6, "L": 8, "ESR": 9, "ESL": 10}
 SCHEMATIC_COL = COLS.index("Schematic")    # ◆ the parameters taken from the symbol's fields, ! set here and different
 NOTE_COL = COLS.index("Note")
@@ -96,8 +98,9 @@ class PartsPanel(wx.Panel):
                                          "DC voltage across it, what a run uses (Cbias in the help). A FET's or "
                                          "controller's fields (Rds(on), Coss …) go to its power stage: Converters "
                                          "tab. Schematic: ◆ values from the symbol's fields, ! set here and "
-                                         "different. Pins: a through-hole part's own pin values (contact:0.5m, "
-                                         "joint:50u, fill:75, pin:brass; hover Pin defaults… for all). Edits are "
+                                         "different. Pins: a part's own pin values (through-hole: contact:0.5m, "
+                                         "joint:50u, fill:75, pin:brass; any part: bond:50, µm of solder; hover "
+                                         "Pin defaults… for all). Edits are "
                                          "saved to the settings.")
         hint.SetName("muted")
         s = wx.BoxSizer(wx.VERTICAL)
@@ -239,9 +242,11 @@ class PartsPanel(wx.Panel):
                                       theme.colour(_DIFFERS[theme.palette().dark]) if p in differs else normal)
         g.SetCellBackgroundColour(row, 3, theme.colour("#4a3a1f" if theme.palette().dark else "#ffdcc8")
                                   if m.missing_params() else normal)
-        tht = fp is not None and any(p.pad_type == "thru_hole" for p in fp.pads)
-        g.SetReadOnly(row, PINS_COL, not tht and not e.tht)      # only a part with through-hole pins has any
-        g.SetCellBackgroundColour(row, PINS_COL, normal if tht or e.tht else theme.colour(theme.palette().panel))
+        # through-hole pins have every pin value; any part with a model that conducts (a lumped part) its solder `bond`
+        pins = (fp is not None and any(p.pad_type == "thru_hole" for p in fp.pads)) or bool(e.tht) or \
+            (m is not None and m.kind != "open")
+        g.SetReadOnly(row, PINS_COL, not pins)
+        g.SetCellBackgroundColour(row, PINS_COL, normal if pins else theme.colour(theme.palette().panel))
 
     def _schematic(self, ref: str, m: ComponentModel) -> tuple[list[str], dict]:
         """(the model parameters linked to the part's schematic fields, {parameter: Reading} set here and

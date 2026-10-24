@@ -690,9 +690,10 @@ def test_a_boosts_ground_return_splits_by_kirchhoff(tmp_path):
     assert via_current(3.0, 9.5) == pytest.approx(i_in, rel=0.01)                 # out at the input connector
 
 
-def _split_strip_r(tmp_path, name, joined, d=0.1):
+def _split_strip_r(tmp_path, name, joined, d=0.1, bond=None):
     """DC resistance (mΩ) of split_strip_board (R1 = 1 mΩ across the gap, or the joined reference strip) fed over
-    its end pads, on a grid of d mm; also the path's parts and the model's part and bond branches."""
+    its end pads, on a grid of d mm; also the path's parts and the model's part and bond branches. `bond`: R1's
+    solder thickness, µm (its pin value; None: built in)."""
     from boardgen import split_strip_board
     from groundtruth.analysis import simulate
     from groundtruth.analysis.power import _area_shares, dc_path
@@ -700,6 +701,8 @@ def _split_strip_r(tmp_path, name, joined, d=0.1):
     board, sc, _ = make(tmp_path, split_strip_board(joined=joined), name, nets=())
     if not joined:
         sc.set_component("R1", ComponentModel("resistor", {"R": 1e-3}))
+        if bond is not None:
+            sc.set_component_pins("R1", {"bond": bond})
     st = simulate.BoardModel(board, sc.config).build((2.0, 6.0, 30.0, 14.0), ["F.Cu"], {"PWR", "OUT"}, d, False)
     inj = _area_shares(st, [board.find_pin("U1.1")], "F.Cu", 1.0) + \
         _area_shares(st, [board.find_pin("U2.1")], "F.Cu", -1.0)
@@ -731,6 +734,21 @@ def test_a_part_is_joined_to_the_copper_over_its_whole_pads(tmp_path):
     ref_f, _, _, _ = _split_strip_r(tmp_path, "joined_f", True, d=0.05)
     r_f, _, _, _ = _split_strip_r(tmp_path, "split_f", False, d=0.05)
     assert (r_f - ref_f) == pytest.approx(expect, abs=0.015)                   # closer on the finer grid
+
+
+def test_a_parts_solder_thickness_sets_its_contact(tmp_path):
+    """R1's pin value `bond` (µm of SAC305, analysis/pins.py): 0 is a perfect bond (no contact: +0.729 mΩ, the part
+    less the bypassed copper), 300 µm a joint four times the built-in one (λ = 0.28 mm: two contacts of
+    (R_sheet·λ/w)·coth(depth/λ) ≈ 0.037 mΩ each, +0.802) [Berger 1972]."""
+    from groundtruth.analysis.pins import SOLDER_RHO
+    rs = 1 / (5.8e7 * 35e-6)
+    ref, _, _, _ = _split_strip_r(tmp_path, "joined", True)
+    for um, name in ((0.0, "perfect"), (300.0, "thick")):
+        lam = math.sqrt(SOLDER_RHO * max(um, 0.1) * 1e-6 / rs)
+        contact = rs * lam / 3.8e-3 / math.tanh(0.8e-3 / lam)
+        expect = (1e-3 + 2 * contact - rs * 2.2e-3 / 4e-3) * 1e3
+        r, _, _, _ = _split_strip_r(tmp_path, name, False, bond=um)
+        assert r - ref == pytest.approx(expect, abs=0.025), um
 
 
 def test_the_stages_dc_currents_add_up_on_one_board_model(tmp_path):

@@ -496,8 +496,9 @@ class BoardModel:
             # node under that side's pads (part_lid): the copper decides where the current hands over to the part.
             # Until 2026-10-24 the part joined up to 8 sampled nodes per side (the pads' corners first): each a point
             # sink, refboard's Q601 drain read 54 A/mm² at a corner its current only reaches by crowding (the user)
-            lid_a, bonds_a = part_lid(st, [p for p in fpads if p.net == pa.net], fp.reference, snap)
-            lid_b, bonds_b = part_lid(st, [p for p in fpads if p.net == pb.net], fp.reference, snap)
+            bond = pin_params(fp.reference).bond         # the part's own solder thickness (pins.py), else built in
+            lid_a, bonds_a = part_lid(st, [p for p in fpads if p.net == pa.net], fp.reference, snap, bond)
+            lid_b, bonds_b = part_lid(st, [p for p in fpads if p.net == pb.net], fp.reference, snap, bond)
             if lid_a is None or lid_b is None:
                 continue
             st.branches.append(Branch(lid_a, lid_b, part_impedance(model), fp.reference, "part"))
@@ -622,16 +623,19 @@ def part_pairs(st: StackBuild, pads_a: list, pads_b: list) -> list[tuple]:
 
 SOLDER_UM = 75.0            # the solder between an SMD pad and the part's metal after reflow, µm [A65]
 BOND_RC = SOLDER_RHO * SOLDER_UM * 1e-6     # that joint's resistance per area, Ω·m²: ρ·t across its thickness [A65]
+BOND_MIN_UM = 0.1           # a perfect bond (the part's `bond:0`) as this thin a joint: a finite branch impedance
 
 
-def part_lid(st: StackBuild, pads: list, ref: str, snap: float) -> tuple[Optional[LidNode], list[Branch]]:
+def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optional[float] = None
+             ) -> tuple[Optional[LidNode], list[Branch]]:
     """One side of a lumped part (its pads of one net): the part's metal on that side as a node of its own (its lid,
     peec.LidNode, over the pads' area-weighted centre) and a `bond` branch from every grid node of their net under
     the pads (pad_nodes; the nearest node when no node is under a pad smaller than a cell) to the lid. The bonds share
-    the side's solder joint, BOND_RC over the pads' area [A65], in parallel (each N times it). The metal itself is
-    taken as a perfect conductor: the current hands over where the copper brings it, within the transfer length
-    √(BOND_RC / R_sheet) of where it reaches the pad [Berger 1972] (~0.14 mm in 35 µm copper). (None, []) when no node
-    of the pads' net is near."""
+    the side's solder joint, SOLDER_RHO × its thickness over the pads' area [A65], in parallel (each N times it):
+    `bond_um` µm (the part's pin value `bond`, analysis/pins.py; 0 a perfect bond, as BOND_MIN_UM), else SOLDER_UM.
+    The metal itself is taken as a perfect conductor: the current hands over where the copper brings it, within the
+    transfer length √(r_c / R_sheet) of where it reaches the pad [Berger 1972] (~0.14 mm in 35 µm copper at 75 µm).
+    (None, []) when no node of the pads' net is near."""
     from ..geometry.shapes import pad_shape
     nodes = pad_nodes(st, pads)
     if not nodes:
@@ -649,7 +653,8 @@ def part_lid(st: StackBuild, pads: list, ref: str, snap: float) -> tuple[Optiona
     lid = LidNode(k, min(max(int(round((cx - g.x0) / g.d)), 0), g.nx - 1),
                   min(max(int(round((cy - g.y0) / g.d)), 0), g.ny - 1), st.n_lids)
     st.n_lids += 1
-    r = BOND_RC / (max(float(areas.sum()), 1e-3) * 1e-6) * len(nodes)       # N bonds in parallel: the side's joint
+    rc = BOND_RC if bond_um is None else SOLDER_RHO * max(bond_um, BOND_MIN_UM) * 1e-6
+    r = rc / (max(float(areas.sum()), 1e-3) * 1e-6) * len(nodes)            # N bonds in parallel: the side's joint
     return lid, [Branch(n, lid, (lambda f, r=r: complex(r)), ref, "bond") for n in nodes]
 
 

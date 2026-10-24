@@ -1278,6 +1278,11 @@ an example in <a href="#siglabels">Labelling a signal path</a>.</p>
   given), <code>copper</code>, <code>brass</code>, <code>bronze</code>, <code>becu</code>, <code>tellurium</code></td></tr>
 <tr><td><code>pin_d:1.0</code></td><td>the pin's diameter, mm (with a material; default the hole less 0.25 mm)</td></tr>
 <tr><td><code>pin_r:0.1m</code></td><td>the pin's own resistance through the board, Ω (instead of a material's)</td></tr>
+<tr><td colspan="2"><b>Any part with a model</b> (SMD too: a FET, a capacitor, a shunt):</td></tr>
+<tr><td><code>bond:50</code></td><td>the solder between the part's pads and its metal, µm (75 when not given,
+  <code>bond:0</code> a perfect bond): each side of the part is soldered over the whole of its pads, so the current
+  hands over to the part where the copper brings it to the pad, within a few tenths of a millimetre of the edge it
+  arrives at; a thicker joint spreads that handover further across the pad</td></tr>
 </table>
 <p>An id ties a stage's parts together: <code>conv1_hs</code>, <code>conv1_ls</code>, <code>conv1_L</code>; a
 bridge leg's id is its phase: <code>hbA_hs</code>, <code>hbB_ls</code>. A sheet used once per phase carries the same
