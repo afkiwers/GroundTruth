@@ -272,8 +272,22 @@ check, which does not use the solver: the same pairs named the other way round, 
 into another (an iteration order between processes; noted in HANDOFF). `result_diff.py` reads `f_3db` as a dB value
 and matches issues by position: its "680 dB" lines are 1e-6 relative and a reordering.
 
-**On the M2** (the measurement M1 is for): jobs A and B at 8x with a server package from this branch, against 4.3's
-974 s and 4 520 s.
+**On the M2** (2026-10-25, build 0.1.42747 from 113ae1c, the same board and settings as 4.3):
+
+| Job | M0 (4.3) | M1 | What changed |
+|---|---|---|---|
+| A, the six nets (`runs/2026-10-25_07-46-51`) | 974 s | **652 s (−33 %)** | the 18 board-wide solves 3 at once (721 → 438 s; 226 → 314 ms per iteration side by side); the largest solve planned at 3.3 GB (8.0); peak 13.3 → 9.8 GB; no cached factorisation freed (4); 3 730 → 3 487 iterations; CPU 16 → 26 % |
+| B, the four converters (`runs/2026-10-25_08-48-10`) | 4 520 s | **3 512 s (−22 %)** | up to 3 solves at once; no cached factorisation freed (74, 16 of them made again); 14 243 → 12 781 iterations; board-wide rounds 2 194 s (63 %): SuperLU 47 %, Gram-Schmidt 31 % of an iteration |
+
+Job A ran with 10.1 GB available at its start (15.8 in 4.3), job B with 17.9 GB; job B swapped in 4.1 GB (the
+Mac's free memory fell to 4.4 GB; the process peaked at 11.6 GB).
+
+What job B still loses: **13 groups** (`solve_groups`) solved one after the other, as before. They are planned once,
+before any model is factorised, with 4 threads x the largest run's estimate in flight (the DC model's, 8.7 GB from
+`FILL_PER_UNKNOWN` against the ~2.6 GB it takes once measured). With admission in each round that in-flight term
+is one solve, not four. The groups make the three converters' conducted bands refine one stage at a time: 18 rounds
+of a single solve, ~470 s. Estimated with the groups planned for one solve in flight: job B −300 to −400 s, job A
+−50 to −80 s (its four route rounds of one solve would be one).
 
 ## 6. Researched, not planned (the user's choice, 2026-10-24)
 
