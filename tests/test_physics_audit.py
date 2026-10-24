@@ -132,4 +132,10 @@ def test_PA4_the_hot_loop_s_switching_current_heats_the_copper(tmp_path):
     if name in res.dc_ripple_via:
         db, amps = res.dc_ripple_via[name]
         vias = sum(r * a * a for (_, _, r), a in zip(db.via_ends, amps))
-    assert heat + vias == pytest.approx(hot[0]["loss_w"], rel=0.005)
+    # that is the loss less the parts' solder joints (C1's, Q1's, Q2's bonds [A65]), which Thermal heats at the parts
+    i2 = hot[0]["current_a"] ** 2
+    joints = sum(j["r_mohm"] for j in hot[0]["joints"]) * 1e-3 * i2
+    assert joints == pytest.approx(hot[0]["r_joints_mohm"] * 1e-3 * i2, rel=1e-6)
+    assert 0 < joints < 0.05 * hot[0]["loss_w"]
+    assert heat + vias == pytest.approx(hot[0]["r_copper_mohm"] * 1e-3 * i2, rel=0.005)
+    assert heat + vias + joints == pytest.approx(hot[0]["loss_w"], rel=0.005)

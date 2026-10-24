@@ -154,12 +154,14 @@ def _si2(value: float, unit: str) -> str:
 
 def dc_resistance(path: dict) -> str:
     """A DC path's resistance, with the copper's and each series part's share when parts are on the path (a
-    current-sense shunt would otherwise read as copper)."""
+    current-sense shunt would otherwise read as copper) and the parts' solder joints' share when it shows."""
     text = f"{path['r_mohm']:.2f} mΩ"
     parts = path.get("parts") or []
-    if parts:
+    joints = path.get("r_joints_mohm") or 0.0
+    if parts or joints >= 0.005:
         text += (f" (copper {path['r_copper_mohm']:.2f}, "
-                 + ", ".join(f"{p['name']} {p['r_mohm']:.2f}" for p in parts) + ")")
+                 + ", ".join([f"{p['name']} {p['r_mohm']:.2f}" for p in parts]
+                             + ([f"solder joints {joints:.2f}"] if joints >= 0.005 else [])) + ")")
     return text
 
 

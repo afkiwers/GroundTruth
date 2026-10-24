@@ -206,7 +206,9 @@ def test_dc_output_path_and_ground_return_of_a_buck(tmp_path):
     assert sum(via_current(x, 24.5) for x in (16.0, 19.5, 23.0)) == pytest.approx(3.0 * 0.75, rel=0.01)
     # 3 A in a 1 mm × 35 µm track (86 A/mm², more at the bends) is flagged
     assert any(i.check == "current_density" and "output L1 → J2.1" in i.message for i in res.issues)
-    assert out["parts"] == [] and out["r_copper_mohm"] == pytest.approx(out["r_mohm"])
+    # no series part: R is the copper's and the solder joints' it crosses (L1's, J2's pads [A65]), a small share
+    assert out["parts"] == [] and out["r_copper_mohm"] + out["r_joints_mohm"] == pytest.approx(out["r_mohm"])
+    assert 0 <= out["r_joints_mohm"] < 0.05 * out["r_mohm"]
 
 
 def test_a_connector_pin_is_a_solid_conductor_not_a_plated_via(tmp_path):
@@ -297,11 +299,13 @@ def test_dc_path_resistance_names_a_series_shunt(tmp_path):
     assert [p["name"] for p in out["parts"]] == ["R10"]
     assert out["parts"][0]["r_mohm"] == pytest.approx(10.0, rel=1e-3)
     assert out["parts"][0]["current_a"] == pytest.approx(3.0, rel=1e-3)
-    # the part's share is 10 mΩ to ~1e-6 relative: it is spread over its pads as parallel branches of n·R
-    # (simulate.part_pairs), and an uneven split between them adds a hair to its Σ|I_b|²·R
-    assert out["r_mohm"] == pytest.approx(out["r_copper_mohm"] + 10.0, rel=1e-5)
+    # the part's share is its 10 mΩ (one branch between its soldered sides, simulate.part_lid); its joints' is apart
+    assert out["parts"][0]["r_mohm"] == pytest.approx(10.0, rel=1e-6)
+    assert "R10" in [j["name"] for j in out["joints"]]
+    assert out["r_mohm"] == pytest.approx(out["r_copper_mohm"] + 10.0 + out["r_joints_mohm"], rel=1e-9)
+    assert 0 < out["r_joints_mohm"] < 0.5
     assert 3.0 < out["r_copper_mohm"] < 6.0                              # the track, as without the shunt
-    assert "(copper " in dc_resistance(out) and "R10 10.00)" in dc_resistance(out)
+    assert "(copper " in dc_resistance(out) and "R10 10.00, solder joints " in dc_resistance(out)
 
 
 def test_suggest_stitches_an_unstitched_capacitor_ground(tmp_path):

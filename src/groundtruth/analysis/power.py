@@ -1690,12 +1690,19 @@ def dc_summary(st: StackBuild, sol: Solution, current: float, name: str, plating
                             "capacity_a": cap, "load_pct": 100.0 * a_ / cap if cap > 0 else None}
     top = sorted(vias.values(), key=lambda v: -v["current_a"])      # every via with ≥ 1 % of the current
     # Series parts on the path (a current-sense shunt, a fuse, a surge stopper's model) are in R: their share is
-    # |I_b|²·Re(Z_b) per A² (Tellegen [Tellegen 1952]: the path's R is the sum over all branches), the rest is copper
-    # and vias
+    # |I_b|²·Re(Z_b) per A² (Tellegen [Tellegen 1952]: the path's R is the sum over all branches), so is each part's
+    # solder joints' (its bond branches), the rest is copper and vias
     parts: dict[str, dict] = {}
     flow: dict[str, complex] = {}           # a part's parallel branches (simulate.part_pairs): their currents add
     flow_d: dict[str, complex] = {}
+    joints: dict[str, float] = {}           # the parts' solder joints (simulate.part_lid's bonds [A65]): R share, Ω
     for b, cur, cd in zip(st.plane.branches, sol.I_branch, i_d):
+        if b.kind == "bond":
+            # not the copper's: a part's terminal bridges its own pad, so current crosses its joints even where the
+            # part itself carries none (a capacitor at DC); Thermal heats them at the part
+            joints[b.name] = joints.get(b.name, 0.0) + ((float(abs(cur)) ** 2 + (k_r * float(abs(cd))) ** 2)
+                                                        * gain * complex(b.z(DC_F)).real)
+            continue
         if b.kind != "part":
             continue
         flow[b.name] = flow.get(b.name, 0j) + complex(cur)
@@ -1705,9 +1712,13 @@ def dc_summary(st: StackBuild, sol: Solution, current: float, name: str, plating
         p["r_mohm"] += (float(abs(cur)) ** 2 + (k_r * float(abs(cd))) ** 2) * gain * complex(b.z(DC_F)).real * 1e3
     parts = {n: p for n, p in parts.items() if math.hypot(abs(flow[n]), k_r * abs(flow_d[n])) >= 0.01}
     r_parts = sum(p["r_mohm"] for p in parts.values()) * 1e-3
+    r_joints = sum(joints.values())
     out = {"name": name, "current_a": current, "r_mohm": r * 1e3,
            "drop_mv": (r_mean + r_rip) * current * 1e3,
-           "loss_w": r * current * current, "r_copper_mohm": (r - r_parts) * 1e3,
+           "loss_w": r * current * current, "r_copper_mohm": (r - r_parts - r_joints) * 1e3,
+           "r_joints_mohm": r_joints * 1e3,
+           "joints": [{"name": n, "r_mohm": v * 1e3} for n, v in sorted(joints.items(), key=lambda kv: -kv[1])
+                      if v * current * current >= 1e-6],
            "parts": sorted(parts.values(), key=lambda p: -p["r_mohm"]),
            "peak_a_mm2": best[0], "peak_layer": best[1], "peak_at": best[2],
            "sustained_a_mm2": best_s[0], "sustained_layer": best_s[1], "sustained_at": best_s[2],
@@ -2533,8 +2544,9 @@ def cm_estimate(spec: ConverterSpec, res: "ConverterResult", standard: str, cls:
 
 
 def _r_text(path: dict) -> str:
-    """'R mΩ', and the copper's share when series parts (a shunt, a fuse) are on the path."""
-    return f"{path['r_mohm']:.2f} mΩ" + (f" ({path['r_copper_mohm']:.2f} in copper)" if path.get("parts") else "")
+    """'R mΩ', and the copper's share when series parts (a shunt, a fuse) or their solder joints take some of it."""
+    shown = path.get("parts") or (path.get("r_joints_mohm") or 0.0) >= 0.005
+    return f"{path['r_mohm']:.2f} mΩ" + (f" ({path['r_copper_mohm']:.2f} in copper)" if shown else "")
 
 
 def dc_view(c: "ConverterResult", name: str) -> "ConverterResult":
