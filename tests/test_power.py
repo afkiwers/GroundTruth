@@ -302,7 +302,9 @@ def test_dc_path_resistance_names_a_series_shunt(tmp_path):
     # the part's share is its 10 mΩ (one branch between its soldered sides, simulate.part_lid); its joints' is apart
     assert out["parts"][0]["r_mohm"] == pytest.approx(10.0, rel=1e-6)
     assert "R10" in [j["name"] for j in out["joints"]]
-    assert out["r_mohm"] == pytest.approx(out["r_copper_mohm"] + 10.0 + out["r_joints_mohm"], rel=1e-9)
+    # Tellegen's sum against the loop impedance: equal to the solve's rounding (GMRES to 1e-5 with a single-precision
+    # basis [A66]: ~5e-8; 1e-9 before the basis was single precision and GMRES stopped at half the tolerance)
+    assert out["r_mohm"] == pytest.approx(out["r_copper_mohm"] + 10.0 + out["r_joints_mohm"], rel=1e-7)
     assert 0 < out["r_joints_mohm"] < 0.5
     assert 3.0 < out["r_copper_mohm"] < 6.0                              # the track, as without the shunt
     assert "(copper " in dc_resistance(out) and "R10 10.00, solder joints " in dc_resistance(out)

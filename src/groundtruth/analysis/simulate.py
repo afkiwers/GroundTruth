@@ -3224,8 +3224,9 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
             for s, r, _ in tasks:
                 k = run_kind(s, r)
                 kinds[k] = kinds.get(k, 0) + 1
+            # a round of one solve (or one thread) runs without the gate (run_parallel): at_once from the threads
             c.round(round=rounds[0], group=group, step=step, tasks=len(tasks), by_kind=kinds,
-                    threads=min(threads, len(tasks)), at_once=gate.peak if gate is not None else
+                    threads=min(threads, len(tasks)), at_once=gate.peak if gate is not None and gate.peak else
                     min(threads, len(tasks)), wall_s=round(time.perf_counter() - t0, 2), busy_s=round(busy[0], 2))
         rounds[0] += 1
 
