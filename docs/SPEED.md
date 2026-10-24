@@ -90,6 +90,20 @@ it, so the times are high; the shares are what counts):
 - route models (75-80k nodes): 103-127 ms per iteration: L_p 44 % (FFTs 22-26 %), preconditioner 25 % (SuperLU
   14 %), Gram-Schmidt 14 %.
 
+Job B at 2x on this laptop (`out/speed/laptop_jobB_2x.json`, 1.7 GB available): 2 406 s.
+
+- threads: 4 by cores, **1 by memory** (the DC model's solve budgeted at 5.21 GB); 13 groups (the factorisations
+  kept at once did not fit); CPU 24 % of all cores.
+- **The memory gate freed cached factorisations 57 times**, and they were made again: the board-wide model made 28
+  factorisations (311 s, ~11 s each) of which **14 were repeats** (~155 s); its LISN-derived stacks redid their
+  low-rank updates too. Where memory is short, freeing to make room costs real time.
+- the board-wide model (65 764 nodes) is ~56 % of the run: conv1's and conv2's 11 solves took ~2 640 iterations each
+  (two borrows past their budget re-factorised); two refinement rounds of three solves took 357 and 400 s.
+- the conducted-band models (159-182k nodes) ~490 s of GMRES (FFT-bound: L_p 37-39 %); hot loops and victims models
+  ~240 s; **the DC paths 32 s** (16 solves): at 2x the DC model costs little time, its weight is the memory estimate
+  that makes the whole run single-threaded.
+- totals: 79 factorisations 430 s, 68 low-rank updates 8 s, 109 solves, 9 736 iterations 1 824 s.
+
 ### 4.2 Per piece at 4x (`tools/dev/solver_bench.py`, this laptop, 2 FFT threads)
 
 `out/speed/bench_jobA_4x.log` (job A, `--only SPI_SCK`; ms per call, the shortest of three):
