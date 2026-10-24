@@ -1096,7 +1096,8 @@ def _responses(owner: str, responses, figs) -> str:
         out.append(f"<p><b>{e(r.name.split(': ', 1)[-1])}</b></p>")
         if sym:
             out.append(f"<div class='tf'>{sym['mathml']}</div><p class='note'>The ideal circuit in its part names "
-                       "(ideal op-amps, parts without their parasitics, an ideal source).</p>")
+                       "(ideal op-amps, parts without their parasitics, an ideal source)"
+                       + (f"; {e(sym['note'])}" if sym.get("note") else "") + ".</p>")
         if nf:
             out.append(f"<p class='note'>The full circuit (tracks, parasitics, the op-amp model): "
                        f"<code>{e(nf['text'])}</code></p>")

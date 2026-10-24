@@ -1550,7 +1550,7 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
         out.append(r)
     sym = symbolic_transfer(net.schematic)
     if sym is not None and out:
-        out[0].symbolic = {"text": sym.text, "latex": sym.latex, "mathml": sym.mathml}
+        out[0].symbolic = {"text": sym.text, "latex": sym.latex, "mathml": sym.mathml, "note": "; ".join(sym.notes)}
     # each op-amp's loop gain and phase margin (emi/mna.Circuit.loop_gain): a loop that rings or oscillates shows
     from .transfer import PM_WARN, fmt_hz, phase_margin
     for name in net.circuit.opamps:

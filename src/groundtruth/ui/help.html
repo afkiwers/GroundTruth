@@ -818,7 +818,8 @@ their state for next time. How vias and parts are marked is set in <a href="#pre
   op-amp on its nets, any topology: see <a href="#analog">Op-amp circuits</a>), each op-amp's output, and each
   op-amp's loop gain with its crossover and phase margin; the transfer function written out above the plot twice:
   <b>ideal circuit</b>, in its part names (ideal op-amps, no source resistance, receiver load or tracks: the circuit
-  as designed, so a lone series resistor is H(s) = 1 and an op-amp's own poles don't appear), and <b>full model</b>,
+  as designed, so a lone series resistor is H(s) = 1 and an op-amp's own poles don't appear; parts marked DNP stay
+  in it and its label names them, to redo it without them elsewhere), and <b>full model</b>,
   the factored form with every pole's and zero's frequency and Q (what the curves, the step and the pole plot show).
   A long one is written as K·N(s)/D(s) with N(s) and D(s) over several lines. <b>Copy H(s)</b> (beside the plot's
   toolbar) puts both on the clipboard, as plain text with the values and as LaTeX. A power stage: the hot loop's ringing (node current per A of the load

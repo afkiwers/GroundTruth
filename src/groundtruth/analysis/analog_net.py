@@ -405,7 +405,9 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
                     None if (kind == "macromodel") else float(ch.params.get("gain") if ch.params.get("gain")
                                                               is not None else 1.0))
                    for (nm, kind), ch in zip(opamps, amps.values())],
-        "in": gnd(drv.net), "out": gnd(rcv.net)}
+        "in": gnd(drv.net), "out": gnd(rcv.net),
+        # parts marked DNP: kept in the circuit (the design as drawn), named in a note so H(s) can be redone without
+        "dnp": sorted(ref for ref in parts if (fp := board.footprint(ref)) is not None and fp.dnp)}
     return AnalogNetwork(ckt, out, nets, opamps, sorted(parts), tracks, notes, node_of, schematic, amp_out, lines,
                          part_nodes, {nm: dict(ch.params) for nm, ch in amps.items()})
 

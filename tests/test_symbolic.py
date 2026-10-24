@@ -71,3 +71,13 @@ def test_a_gain_block_and_too_many_parts():
     many = {"parts": [(f"R{i}", "resistor", "IN" if i == 0 else f"n{i}", f"n{i + 1}", {"R": 1e3})
                       for i in range(MAX_PARTS + 1)], "opamps": [], "in": "IN", "out": f"n{MAX_PARTS + 1}"}
     assert symbolic_transfer(many) is None
+
+
+def test_a_dnp_part_stays_in_h_and_is_named_in_a_note():
+    """A part marked DNP is solved as drawn (H(s) keeps it, so it can be compared with and without elsewhere) and
+    named in the transfer function's note; without DNP parts there is no note."""
+    sk = dict(SK, dnp=["C2"])
+    tf = symbolic_transfer(sk)
+    assert "C_{2}" in tf.latex or "C2" in tf.text
+    assert tf.notes == ["C2 not populated (DNP), included in H(s)"]
+    assert symbolic_transfer(SK).notes == []
