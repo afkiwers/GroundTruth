@@ -792,6 +792,33 @@ and working set = Task Manager's "Memory", sampled every 50 ms; a census of the 
   Building the models one route at a time instead of all first would lower the peak further, at the price of the
   shared factorisations between routes on the same board-wide model.
 
+### Solver statistics (`solver/stats.py`, 2026-10-24, branch `speed-stats`)
+The user asked for research on cutting computation time ([SPEED.md](SPEED.md): the same refboard job 66 s at 1x and
+5 538 s at 8x on the M2 server). `simulate()` runs under `stats.collect()`: a `Collector` the solver's hooks add to
+while it is active (outside one each hook is one list lookup; `stats.ENABLED = False` switches it off; nested
+collects share the outer one).
+- Per model (a PlaneStack; its counts kept on the stack in `_stats_entry`, checked to be this collector's and this
+  stack's, since `with_branches` copies `__dict__`): `_factorise` the factorisations (seconds including the Schur
+  complement's assembly and the memory gate's wait, fill), `operator` those made again after being freed and the
+  time a thread waited for another's factorisation of its frequency, a derived stack's Woodbury updates (the base's
+  own factorisation counted on the base); `solve` the solves, iterations, failures, borrowed preconditioners and
+  borrows past their budget; for CPU solves `_HostMath` / `_TimedVectors` / `Lp_matvec` / `_conv` split each
+  iteration's time (system product, its L_p product, its FFTs and multiply-add; the preconditioner, its SuperLU
+  triangular solves; Gram-Schmidt). A solve's GMRES seconds are its wall time less what its thread spent
+  factorising and waiting meanwhile (`stats.thread_mark`).
+- `solve_setups` names every model by `run_kind` (board-wide, route, power-stage, conducted, victims, DC, ...) and
+  its users, notes how the threads were planned (by cores, by memory, the model whose `solve_bytes` limited them) and
+  per round the tasks by kind, threads, wall and summed solve seconds; `finish_route` names the ideal references;
+  `_simulate` marks the phases (capacitor bias, checks, models, solves, finishing, bridges, issues) and the memory
+  gate's and the relief's counts.
+- `Collector.as_dict` is plain data in `result.solver["stats"]` (with the process's CPU time, sampled and peak
+  memory, swap, the machine); the history writes it into every kept run's run.json; `merge_parts` keeps each
+  part's; the last progress message adds `summary_line()` (the Server jobs tab's "Last step"). Results are
+  bit-identical with and without it (tests/test_stats.py).
+- Tools: `tools/dev/run_stats.py` prints a run's statistics; `profile_sim.py --json --resolution --no-profile`;
+  `solver_bench.py --resolution --models` with a Gram-Schmidt step and k right-hand sides together;
+  `export_schur.py` saves the preconditioner's matrices for other sparse solvers.
+
 ### Validation (tests)
 - Microstrip over a solid plane: return profile `K(y) = h/π(h²+y²)` within 6 %, loop L within 3 % of
   Wheeler, |m| = length·h.
