@@ -198,6 +198,55 @@ class NetsPanel(SelectableRows, wx.Panel):
             form.Add(text, 0, wx.ALIGN_CENTER_VERTICAL)
             form.Add(ctrl, 1, wx.EXPAND)
 
+    def _path_grip(self):
+        """A thin strip under the path box (the user: "should be able to change the height of this window to view
+        more complex structures"): dragging it sets the box's height, between three lines and 70 % of the tab; the
+        height is kept in ui.json ("path_height") when the drag ends."""
+        grip = wx.Window(self, size=wx.Size(-1, 7))
+        grip.SetCursor(wx.Cursor(wx.CURSOR_SIZENS))
+        grip.SetToolTip("Drag to make the path box taller or shorter")
+        drag = {}
+
+        def paint(evt):
+            """Three dots in the middle: the usual sign of a grip."""
+            dc = wx.PaintDC(grip)
+            dc.SetBrush(wx.Brush(wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT)))
+            dc.SetPen(wx.TRANSPARENT_PEN)
+            w, h = grip.GetClientSize()
+            for dx in (-6, 0, 6):
+                dc.DrawCircle(w // 2 + dx, h // 2, 1)
+
+        def down(evt):
+            """Start of a drag: the mouse is captured, the start height and position noted."""
+            drag["y"] = grip.ClientToScreen(evt.GetPosition()).y
+            drag["h"] = self.path_text.GetSize().height
+            grip.CaptureMouse()
+
+        def move(evt):
+            """While dragging: the box's new height, then the tab laid out again."""
+            if "y" not in drag or not evt.Dragging():
+                return
+            h = drag["h"] + grip.ClientToScreen(evt.GetPosition()).y - drag["y"]
+            h = max(self._path_min_h, min(h, int(self.GetClientSize().height * 0.7)))
+            self.path_text.SetMinSize(wx.Size(-1, h))
+            self.Layout()
+
+        def up(evt=None):
+            """End of a drag: release the mouse and remember the height."""
+            if "y" not in drag:
+                return
+            drag.clear()
+            if grip.HasCapture():
+                grip.ReleaseMouse()
+            theme.save_prefs(path_height=int(self.path_text.GetMinSize().height))
+
+        grip.Bind(wx.EVT_PAINT, paint)
+        grip.Bind(wx.EVT_LEFT_DOWN, down)
+        grip.Bind(wx.EVT_MOTION, move)
+        grip.Bind(wx.EVT_LEFT_UP, up)
+        grip.Bind(wx.EVT_MOUSE_CAPTURE_LOST, lambda e: drag.clear())
+        return grip
+
     def _form_layout(self):
         """The buttons, the help box and the tab's layout (the last build step)."""
         form, on_add_selection = self._form_sizer, self._on_add_selection
@@ -220,11 +269,15 @@ class NetsPanel(SelectableRows, wx.Panel):
         left.Add(self.list_head(self.hint), 0, wx.EXPAND | wx.BOTTOM, 6)
         left.Add(self.list, 1, wx.EXPAND)
         # the selected path in full (selectable text: a part reference can be copied from it)
-        self.path_text = wx.TextCtrl(self, style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_NO_VSCROLL)
-        self.path_text.SetMinSize(wx.Size(-1, 3 * self.GetCharHeight() + 8))
+        self.path_text = wx.TextCtrl(self, style=wx.TE_MULTILINE | wx.TE_READONLY)
+        self._path_min_h = 3 * self.GetCharHeight() + 8
+        self.path_text.SetMinSize(wx.Size(-1, max(self._path_min_h, int(theme.prefs().get("path_height") or 0))))
         self.path_text.SetToolTip("The selected path as the route follows it: driver → series parts and op-amps "
-                                  "(×gain) → receivers, and the parts across it to ground or a rail")
+                                  "(×gain) → receivers, and its branches (✗: DNP). Drag the grip below to make it "
+                                  "taller or shorter")
         left.Add(self.path_text, 0, wx.EXPAND | wx.TOP, 6)
+        self.path_grip = self._path_grip()
+        left.Add(self.path_grip, 0, wx.EXPAND)
         left.Add(self.zoom, 0, wx.TOP, 6)
         from ..analysis.tags import HELP
         self.info = InfoBox(self, "How paths are found (net and pin names, GT labels)", HELP["nets"])
