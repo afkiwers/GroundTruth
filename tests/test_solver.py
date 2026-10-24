@@ -408,6 +408,32 @@ def test_solve_groups_keep_shared_models_together_and_the_board_wide_last():
     assert [len(g) for g in solve_groups(runs, 1, avail)] == [3, 2]
 
 
+def test_groups_count_what_models_really_keep_and_one_solve_in_flight_when_admitted():
+    """solve_groups / kept_bytes (2026-10-25, docs/SPEED.md 5.2): a derived model keeps no factorisation of its own
+    (its solves update its base's), a model solved at one frequency without refining keeps one, a refining one
+    OPERATOR_CACHE; with the rounds admitted by memory one solve is in flight, not `threads` (refboard's job B ran as
+    13 groups on the M2 because four of its DC model's estimate filled the room)."""
+    from types import SimpleNamespace as NS
+    from groundtruth.analysis import simulate as sim
+
+    def stack(nb, base=None):
+        return NS(nb=nb, n_nodes=nb // 3, precond_mode="sheet", _base=base)
+    dc, wide = stack(30_000), stack(30_000)
+    derived = stack(30_000, base=wide)
+    s = NS(cavity=None, spectrum_run=None, cond=None)
+    run = lambda st, fs: NS(exc=NS(stack=st), planned=list(fs))      # noqa: E731
+    dc_runs = [(s, run(dc, [10.0])) for _ in range(4)]
+    assert sim.kept_bytes(dc_runs) == sim.factor_bytes(dc)                 # one frequency: one factorisation
+    r_wide, r_derived = run(wide, [1e8]), run(derived, [1e8, 2e8, 3e8])
+    s.spectrum_run = r_wide
+    assert sim.kept_bytes([(s, r_wide), (s, r_derived)]) == sim.peec.OPERATOR_CACHE * sim.factor_bytes(wide)
+    runs = dc_runs + [(s, r_wide), (s, r_derived)]
+    need = sim.run_bytes(r_wide)
+    avail = int((sim.kept_bytes(runs) + need) / sim.MEMORY_SHARE) + 1
+    assert len(sim.solve_groups(runs, 4, avail, admitted=True)) == 1          # room for everything with one solve
+    assert len(sim.solve_groups(runs, 4, avail)) > 1                          # four in flight: no room
+
+
 def test_freeing_finished_models_between_rounds_keeps_every_number(tmp_path):
     """Simulate frees the factorisations of models no run still refines after each round (solve_setups free_done):
     on the layer-change board with plane capacitance every number is the same as keeping them all (a freed one is

@@ -2827,7 +2827,25 @@ def _stacks_of(run) -> list:
     return [st] if st._base is None else [st, st._base]
 
 
-def solve_groups(runs: list, threads: int, available: Optional[int]) -> list[list]:
+def kept_bytes(runs: list) -> int:
+    """The factorisation memory runs [(setup, run)] keep while they are solved: per base model OPERATOR_CACHE
+    factorisations, or as many as the distinct frequencies its runs plan when none of them refines (a DC model:
+    one); none for a derived model (its solves update its base's factorisations, PlaneStack.with_branches)."""
+    freqs: dict[int, set] = {}
+    refines: set[int] = set()
+    bases: dict[int, PlaneStack] = {}
+    for s, r in runs:
+        st = r.exc.stack if r.exc.stack._base is None else r.exc.stack._base
+        bases[id(st)] = st
+        freqs.setdefault(id(st), set()).update(getattr(r, "planned", None) or ())
+        if r is getattr(s, "spectrum_run", None) or r is getattr(s, "cond", None):
+            refines.add(id(st))
+    return sum(factor_bytes(st) * (peec.OPERATOR_CACHE if k in refines or not freqs[k]
+                                   else min(peec.OPERATOR_CACHE, len(freqs[k])))
+               for k, st in bases.items())
+
+
+def solve_groups(runs: list, threads: int, available: Optional[int], admitted: bool = False) -> list[list]:
     """The runs [(setup, run)] in groups solved one after the other, so that the factorisations alive at once fit
     in MEMORY_SHARE of the available memory: one group (everything together, as before) when they fit or the
     available memory is unknown.
@@ -2836,8 +2854,12 @@ def solve_groups(runs: list, threads: int, available: Optional[int]) -> list[lis
     split, so every model sees the same rounds as when everything is solved together and every number stays the
     same (a run's refinement depends only on its own model's solutions and its setup's planned ones). The
     components with a board-wide model (shared by every route and stage) come last: their refinement weighs the
-    route and stage models' planned solves (band_moments, the ringing). Peak per group: OPERATOR_CACHE
-    factorisations kept per model, plus `threads` being made."""
+    route and stage models' planned solves (band_moments, the ringing). Peak per group: the factorisations its
+    models keep (held: OPERATOR_CACHE per model, one for a model solved at one frequency only, none of its own for a
+    derived model, whose solves are low-rank updates of its base's), plus the solves in flight: `threads` of the
+    largest, or one when each round's solves are admitted by memory (`admitted`: solve_setups' Admission keeps the
+    rest within the memory then available). Until 2026-10-25 every model counted OPERATOR_CACHE and four in flight:
+    refboard's job B at 8x ran as 13 groups one after the other on the M2 (docs/SPEED.md 5.2)."""
     if available is None or len(runs) < 2:
         return [runs]
     parent: dict[int, int] = {}
@@ -2855,14 +2877,17 @@ def solve_groups(runs: list, threads: int, available: Optional[int]) -> list[lis
     comps: dict[int, list] = {}
     for s, r in runs:
         comps.setdefault(root(id(r.exc.stack)), []).append((s, r))
-    boardwide = lambda c: any(r is s.cavity for s, r in c)
-    order = [c for c in comps.values() if not boardwide(c)] + [c for c in comps.values() if boardwide(c)]
+    boardwide = lambda c: any(r is s.cavity for s, r in c)                                   # noqa: E731
+    own = lambda c: any(r is getattr(s, "fine", None) for s, r in c)                         # noqa: E731
+    refining = lambda c: any(r is getattr(s, "cond", None) for s, r in c)                   # noqa: E731
+    # the setups' own models first (a stage's conducted refinement weighs the ringing its hot loop's planned solves
+    # give: planned_solved), then the refining conducted bands together (in one group they refine side by side, not
+    # one stage after the other: refboard's job B, docs/SPEED.md 5.2), then the rest; the board-wide model last
+    rank = lambda c: 3 if boardwide(c) else 0 if own(c) else 1 if refining(c) else 2        # noqa: E731
+    order = sorted(comps.values(), key=rank)            # stable: the runs' own order within a rank
 
-    def held(c) -> int:
-        """The factorisation memory a component keeps (OPERATOR_CACHE per stack)."""
-        stacks = {id(x): x for _, r in c for x in _stacks_of(r)}.values()
-        return sum(peec.OPERATOR_CACHE * factor_bytes(x) for x in stacks)
-    in_flight = threads * max(run_bytes(r) for _, r in runs)
+    held = kept_bytes
+    in_flight = (1 if admitted else threads) * max(run_bytes(r) for _, r in runs)
     room = MEMORY_SHARE * available - in_flight
     if sum(held(c) for c in order) <= room or len(order) < 2:
         return [runs]
@@ -3252,7 +3277,7 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
     # in groups only when freeing between them lowers the peak and the factorisations kept would not fit otherwise
     groups = [runs]
     if free_done:
-        groups = solve_groups(runs, threads, available_bytes())
+        groups = solve_groups(runs, threads, available_bytes(), admitted=auto)
     hooked: set[int] = set()
     for gi, group in enumerate(groups):
         next_round()
