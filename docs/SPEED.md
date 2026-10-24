@@ -23,6 +23,8 @@ on 192.0.2.145 (the M2: 8 cores, 4 performance and 4 efficiency, 24 GB, fanless)
 
 The same job took **84x longer at 8x than at 1x**, while its work grows about 20-25x (8x the unknowns, about 2.4x
 the GMRES iterations, factorisations about n^1.5). From 2x to 4x the time grew 2.4x, from 4x to 8x 12-15x.
+**Measured since (4.3):** the same 8x job, solve for solve, took 974 s on the M2 with 15.8 GB free: most of the 84x
+was the Mac's state during those runs (memory beside other programs), not the computation.
 
 ## 2. Where a Simulate's time goes
 
@@ -127,7 +129,31 @@ model included, built in 91 s):
 
 ### 4.3 The M2 at 8x (jobs A and B with the statistics)
 
-To be filled once the M2 runs the `speed-stats` build (`out/dist/groundtruth-0.1.42666-732c474-pcm.zip`).
+**Job A** (2026-10-24 18:28, build 0.1.42666, `history/runs/2026-10-24_18-28-14`): **974 s**. Every solve took the
+same iterations as in the 10:15 and 12:57 runs of the same board (5 538 and 7 195 s): the same computation, 5.7-7.4x
+faster. The code added since does not speed anything up, so this morning's runs lost that time to the Mac's state,
+most likely memory: this run peaked at 13.3 GB with one solve at a time; it started with 15.8 GB free and swapped
+196 MB, where the morning's had other programs beside them (~4 GB free in the user's screenshot). The clean 8x run
+is 14.8x the 1x run (66 s), within the ~20-25x of the work itself. Section 1's "84x" was mostly the machine.
+
+- threads: 4 by cores, **1 by memory** (13.97 GB available, the route model's solve budgeted at 8.03 GB); every round
+  one solve; CPU 1 212 s in 969 s wall (16 % of the 8 cores). The memory gate freed cached factorisations 4 times.
+- phases: models 41 s (4 %), **solves 885 s (91 %)**, finishing 36 s (4 %).
+- 18 factorisations 108 s (the board-wide model's 8 in 82 s: ~10 s each, 68.9 M fill; ~4x quicker than this
+  laptop's 4x one); 40 solves, 3 730 GMRES iterations **878 s**.
+- board-wide model (256 077 nodes, 954 976 unknowns): 23 solves (5 of them shunt loops), 2 820 iterations, 226 ms
+  each: **SuperLU's triangular solves 53 %**, Gram-Schmidt 27 %, the L_p product 10 % (FFTs 4 %: eight cores).
+- route models (585-697k nodes, 1.7-2.0 M unknowns): 222-280 ms per iteration: **Gram-Schmidt 36-42 %**, SuperLU
+  21-25 %, L_p 24-26 %. Ideal references (236-391k nodes): SuperLU 22-28 %, L_p 26-34 %, Gram-Schmidt 17-21 %.
+- memory: up to 11.8 GB sampled, 13.3 GB peak, 9.1 GB free at the least.
+
+What it means for the plan: on the M2 the time is GMRES iterations in one thread; their largest parts are SuperLU's
+triangular solves (M3 aims there) and Gram-Schmidt over a basis of up to 100 vectors of 1-2 M unknowns (also the
+largest piece of a solve's memory: ~2-3 GB on a route model). With 13 GB already used by one solve, two or three at
+once (M1 #1) fit on the 24 GB Mac only with less memory per solve (the basis first) and nothing else open; the
+estimates of section 5 are re-based on 974 s for job A.
+
+**Job B**: running (started 2026-10-24 evening); to compare with 10-19's 4 030 s.
 
 ## 5. Options and estimated savings
 
