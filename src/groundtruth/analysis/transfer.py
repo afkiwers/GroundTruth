@@ -185,7 +185,14 @@ def normal_form(poles, zeros, k: complex, f_max: Optional[float] = None) -> dict
         text += ";  " + ", ".join(values)
     if more:
         text += f";  {more} more above"
-    return {"k": kval, "m": m, "poles": ps, "zeros": zs, "beyond": more, "text": text, "latex": latex}
+    # the LaTeX in pieces, for a drawing that breaks a long H(s) over lines (plots.draw_bode): K, then the
+    # numerator's and the denominator's factors (s^m among them)
+    kl = ktext.replace("e", r"\times 10^{") + ("}" if "e" in ktext else "")
+    sl = "s" if abs(m) == 1 else f"s^{{{abs(m)}}}"
+    pieces = {"k": kl, "num": ([sl] if m > 0 else []) + [l for _, l in num],
+              "den": [l for _, l in den] + ([sl] if m < 0 else [])}
+    return {"k": kval, "m": m, "poles": ps, "zeros": zs, "beyond": more, "text": text, "latex": latex,
+            "latex_parts": pieces}
 
 
 SETTLE_BAND = 0.02             # the step response's settling band: ±2 % of its final value [Ogata 2010]

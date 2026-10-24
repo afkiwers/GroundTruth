@@ -1443,6 +1443,119 @@ def _signed_hz(v: float, _pos=None) -> str:
     return ("−" if v < 0 else "") + _hz(abs(v) / 1e6)
 
 
+EQ_SCALE = 2.0                 # the Bode view's H(s) lines: this many times the text size
+
+
+def transfer_lines(view) -> list[tuple[str, str, str, str]]:
+    """The H(s) lines a Bode view shows, from its first response: [(label, latex, plain text, values)], the ideal
+    circuit's in part names (analysis/symbolic.py) and the full model's normal form with its poles' and zeros'
+    frequencies and Q (analysis/transfer.normal_form); values "" where there are none. draw_bode draws them,
+    transfer_clipboard copies them."""
+    resp = [r for r in getattr(view, "responses", ()) if len(r.f)]
+    if not resp:
+        return []
+    out = []
+    sym = next((r.symbolic for r in resp if getattr(r, "symbolic", None)), None)
+    if sym and sym.get("latex"):
+        out.append(("ideal circuit", sym["latex"], sym.get("text") or "", ""))
+    nf = getattr(resp[0], "normal", None)
+    if nf and nf.get("latex") and (nf.get("poles") or nf.get("zeros")):
+        plain, _, vals = nf["text"].partition(";  ")
+        out.append(("full model", nf["latex"], plain, vals))
+    return out
+
+
+BODE_PLOTS_IN = 3.0            # inches the Bode plot's two axes keep at least under the formulas
+
+
+def bode_height_in(view, w_in: float, default: float) -> float:
+    """The height a Bode figure `w_in` wide needs (at least `default`): the formulas over it (transfer_lines) may
+    take two inches and more, and the plots keep BODE_PLOTS_IN. An estimate from the factors' count without
+    drawing anything (the plugin calls it on the GUI thread): a first-order factor about 0.85 in wide at the
+    formulas' size, a quadratic one 1.55 in [A64]."""
+    lines = transfer_lines(view)
+    if not lines:
+        return default
+    room = max(w_in - 1.2, 1.0)
+    per_char = 0.55 * FS_TEXT / 72
+    need = 0.6 + 0.45 + BODE_PLOTS_IN                     # title and key, the frequency axis, the plots
+    for label, tex, _plain, vals in lines:
+        parts = _long_form(view, label)
+        if parts:
+            widths = [1.55 if "^2" in f else 0.85 for f in parts.get("num", []) + parts.get("den", [])]
+            if sum(widths) + 1.6 > room / 0.7:         # drawn over lines (draw_bode, _draw_long_form)
+                rows = 1
+                for group in (parts.get("num", []), parts.get("den", [])):
+                    used = 0.0
+                    for f in group:
+                        w = (1.55 if "^2" in f else 0.85) * 0.8
+                        if used and used + w > room - 0.8:
+                            rows, used = rows + 1, 0.0
+                        used += w
+                    rows += 1 if group else 0
+                need += rows * 0.6
+            else:
+                need += 0.95
+        else:
+            need += 0.85 if r"\frac" in tex else 0.45
+        if vals:
+            need += _lh(FS_TEXT) * -(-len(vals) // max(20, int(room / per_char))) + 0.08
+    return max(default, need)
+
+
+def _long_form(view, label: str) -> Optional[dict]:
+    """The full model's H(s) in pieces (transfer.normal_form's latex_parts) when `label` is that line, else None."""
+    if label != "full model":
+        return None
+    resp = [r for r in getattr(view, "responses", ()) if len(r.f)]
+    nf = getattr(resp[0], "normal", None) if resp else None
+    return (nf or {}).get("latex_parts")
+
+
+def _draw_long_form(fig: Figure, renderer, parts: dict, label: str, left_in: float, y: float,
+                    room: float) -> float:
+    """A long H(s) as  H(s) = K·N(s)/D(s)  and under it N(s) = … and D(s) = …, each a product of its factors
+    broken into lines that fit `room` inches, at the formulas' size (draw_bode). Returns the height drawn (in)."""
+    w_in, h_in = fig.get_size_inches()
+    size = FS_TEXT * EQ_SCALE * 0.8
+    num, den = parts.get("num") or [], parts.get("den") or []
+    head = r"\mathrm{" + label.replace(" ", r"\ ") + r":}\ H(s) = " + parts.get("k", "") \
+        + (r" \dfrac{N(s)}{D(s)}" if num else r" \dfrac{1}{D(s)}")
+    rows = [head]
+    for name, factors in (("N(s)", num), ("D(s)", den)):
+        if not factors:
+            continue
+        line = rf"\quad {name} = "
+        for f in factors:
+            f = f.replace(r"\frac", r"\dfrac").replace(r"\left(", "(").replace(r"\right)", ")")
+            probe = fig.text(0, 0, f"${line}{f}$", fontsize=size)
+            wide = probe.get_window_extent(renderer).width / fig.dpi > room
+            probe.remove()
+            if wide and not line.rstrip().endswith(("=", r"\qquad")):     # this factor on the next line
+                rows.append(line)
+                line = r"\qquad "
+            line += f
+        rows.append(line)
+    drawn = 0.0
+    for row in rows:
+        t = fig.text(left_in / w_in, 1 - (y + drawn) / h_in, f"${row}$", ha="left", va="top", fontsize=size,
+                     transform=fig.transFigure)
+        drawn += t.get_window_extent(renderer).height / fig.dpi + 0.04
+    return drawn
+
+
+def transfer_clipboard(view) -> str:
+    """The Bode view's H(s) as text to paste elsewhere (the user: "it would be good if one could copy them"): each
+    line in plain text with its values, then the same in LaTeX (for a document, a wiki or a notebook)."""
+    lines = transfer_lines(view)
+    if not lines:
+        return ""
+    owner = getattr(view, "owner", "")
+    plain = [f"{label}: {text}" + (f"  ({vals})" if vals else "") for label, _, text, vals in lines]
+    latex = [f"% {label}" + (f": {vals}" if vals else "") + "\n" + tex for label, tex, _, vals in lines]
+    return "\n".join(([owner] if owner else []) + plain + ["", "LaTeX:"] + latex) + "\n"
+
+
 def draw_bode(fig: Figure, view) -> None:
     """A Bode plot of a view's responses (analysis/transfer.BodeView): magnitude on top (dB, or Ω on a log axis for
     impedances), the unwrapped phase below, on one log frequency axis; each response in its colour, its poles (×)
@@ -1503,30 +1616,48 @@ def draw_bode(fig: Figure, view) -> None:
     # the ideal circuit's H(s) in part names (ideal op-amps, no source, load or tracks: a lone series resistor is
     # H = 1), and the full model's H(s) in normal form with its poles' and zeros' frequencies and Q (what the curves,
     # the step and the pole plot show)
-    first = resp[0] if resp else None
-    sym = next((r.symbolic for r in resp if getattr(r, "symbolic", None)), None)
-    nf = getattr(first, "normal", None) if first is not None else None
-    lines = []
-    if sym and sym.get("latex"):
-        lines.append((r"\mathrm{ideal\ circuit:}\ " + sym["latex"], ""))
-    if nf and nf.get("latex") and (nf.get("poles") or nf.get("zeros")):
-        vals = nf["text"].split(";  ", 1)[1] if ";  " in nf["text"] else ""
-        lines.append((r"\mathrm{full\ model:}\ " + nf["latex"], vals))
+    # Drawn at twice the text size (the user: "the equations are hard to read; they need to be bigger"): a fraction
+    # of fractions with subscripts shrinks its inner levels, so the formula itself is set large; each line's height
+    # is measured from the drawn text, not guessed
     extra, y = 0.0, 0.08
-    for tex, vals in lines:
-        tex = tex.replace(r"\left(", "(").replace(r"\right)", ")")      # sizes mathtext does not need
+    renderer = fig.canvas.get_renderer() if hasattr(fig.canvas, "get_renderer") else None
+    room = w_in - left_in - right_in                       # inches the formulas may take
+    for label, tex, _plain, vals in transfer_lines(view):
+        # every fraction at full size (\dfrac): mathtext sets \frac smaller, and a fraction inside a fraction
+        # (s/ωp, s²/ωp²) smaller again, too small to read
+        tex = (r"\mathrm{" + label.replace(" ", r"\ ") + r":}\ " + tex.replace(r"\frac", r"\dfrac")) \
+            .replace(r"\left(", "(").replace(r"\right)", ")")                 # sizes mathtext does not need
+        t = None
         try:
-            fig.text(left_in / w_in, 1 - y / h_in, f"${tex}$", ha="left", va="top", fontsize=FS_TEXT * 1.4,
-                     transform=fig.transFigure)
-            step = 0.5
-            if vals:                                       # the factors' values on a short line under the formula
-                fig.text(left_in / w_in, 1 - (y + 0.48) / h_in, vals, ha="left", va="top", fontsize=FS_TICK,
-                         transform=fig.transFigure, color="0.4")
-                step += _lh(FS_TICK) + 0.04
-            y += step
-            extra += step
+            t = fig.text(left_in / w_in, 1 - y / h_in, f"${tex}$", ha="left", va="top", fontsize=FS_TEXT * EQ_SCALE,
+                         transform=fig.transFigure)
+            box = t.get_window_extent(renderer) if renderer is not None else None
+            if box is not None and box.width / fig.dpi > room:      # too wide (many poles): smaller, to fit
+                size = FS_TEXT * EQ_SCALE * room / (box.width / fig.dpi)
+                parts = _long_form(view, label) if size < FS_TEXT * 1.4 else None
+                if parts:                   # still too small to read: H(s) = K·N(s)/D(s), N and D over lines
+                    t.remove()
+                    t = None
+                    height = _draw_long_form(fig, renderer, parts, label, left_in, y, room)
+                else:
+                    t.set_fontsize(max(FS_TEXT, size))
+                    box = t.get_window_extent(renderer)
+            if t is not None:
+                height = box.height / fig.dpi if box is not None else 0.75
         except ValueError:                  # math text it can't parse: the summary line shows the plain text
+            if t is not None:
+                t.remove()
             continue
+        step = height + 0.08
+        if vals:                                           # the factors' values under the formula, wrapped to fit
+            import textwrap
+            per_line = max(20, int(room / (0.55 * FS_TEXT / 72)))          # characters of about 0.55 em
+            wrapped = textwrap.fill(vals, per_line)
+            fig.text(left_in / w_in, 1 - (y + step) / h_in, wrapped, ha="left", va="top", fontsize=FS_TEXT,
+                     transform=fig.transFigure, color="0.4")
+            step += _lh(FS_TEXT) * (wrapped.count("\n") + 1) + 0.08
+        y += step
+        extra += step
     _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TICK) + 0.08, header + 0.06 + extra, hspace=0.08)
 
 
