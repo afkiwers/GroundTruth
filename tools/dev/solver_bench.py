@@ -100,7 +100,10 @@ def bench_stack(name, st, f, threads, solve_exc=None, k=3, gs_rows=50):
               + parts["preconditioner Dinv products"] * 2)
     for key, v in parts.items():
         print(f"  {key:44s} {v * 1e3:9.2f} ms")
-    fill = getattr(st, "lu_nnz", 0)
+    fill = getattr(st._base if st._base is not None else st, "lu_nnz", 0)    # a derived stack: its base's
+    if st._base is not None:
+        print(f"  (a derived stack: {st.nb - st._base.nb} branch(es) on its base by a low-rank update; the time "
+              f"below includes the base's factorisation)")
     print(f"  {'one GMRES iteration without Gram-Schmidt':44s} {per_it * 1e3:9.2f} ms   factorisation at "
           f"{f / 1e6:.4g} MHz: {t_fact:.2f} s, fill {fill / 1e6:.1f} M entries ({fill * 16 / 2 ** 20:.0f} MB)")
     if solve_exc is not None:

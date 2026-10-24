@@ -109,6 +109,22 @@ it, so the times are high; the shares are what counts):
 - Several right-hand sides together save little: stacked FFTs nothing, SuperLU's k-column solve 9-26 %. Lock-step
   solves (#5) are worth less than estimated first.
 
+`out/speed/bench_jobB_conv1_4x.log` (job B, conv1's own models; its models, the whole-board DC model and the victims
+model included, built in 91 s):
+
+| | Hot loop (302 180 nodes, `diag`) | Input path, conducted band (313 753 nodes, `diag`, + the LISN) |
+|---|---|---|
+| L_p product (FFTs + multiply-add) | 177 (125 + 42) | 167 (117 + 38) |
+| SuperLU triangular solve | 65 | 78 |
+| sparse products | 58 | 53 |
+| Gram-Schmidt step (28 / 27 vectors) | 44 | 42 |
+| one iteration, about | 345 | 340 |
+| one factorisation | 5.3 s (11.7 M) = ~15 iterations | 5.2 s (with the LISN's low-rank update) |
+
+- A converter's own models are **FFT-bound** like the route models; their factorisations are cheap (~15
+  iterations' worth at 4x), so fewer factorisations (#6) help job B less than estimated first, and a faster FFT
+  (pyFFTW / MKL, section 6) more. Building the models is a phase of its own (91 s here at 4x: M0's "models").
+
 ### 4.3 The M2 at 8x (jobs A and B with the statistics)
 
 To be filled once the M2 runs the `speed-stats` build (`out/dist/groundtruth-0.1.42665-477ef5a-pcm.zip`).
@@ -126,7 +142,7 @@ left, they don't add.
 | 3 | GIL-free Gram-Schmidt (numba nogil) | rounding | S | lets #1 scale: +10-25 % parallel efficiency | M1 |
 | 4 | GMRES checks the true residual when its estimate first meets the tolerance (not 0.5·tol or the cycle's end) | ≤ tol | S | −3-8 % | M1 |
 | 5 | Lock-step solves of one model at one frequency (batched FFTs, k-column SuperLU solves; identical LISN branches share a derived stack) | rounding | M | −15-25 % / −8-12 % estimated first; **−2-6 %** after 4.2 (stacked FFTs gain nothing, k-column solves 9-26 % of solve_S) | M2 |
-| 6 | Fewer inductive-model factorisations: a borrowed preconditioner with D(f) at the solve frequency and a rescaled Schur solve, the window widened as far as measured iterations allow; deterministic sharing within a round | ≤ tol | M | −3-8 % / −5-15 % | M2 |
+| 6 | Fewer inductive-model factorisations: a borrowed preconditioner with D(f) at the solve frequency and a rescaled Schur solve, the window widened as far as measured iterations allow; deterministic sharing within a round | ≤ tol | M | −3-8 % / −5-15 % estimated first; job B **−2-5 %** after 4.2 (its models factorise in ~15 iterations' worth); more on the board-wide model (~137) | M2 |
 | 7 | A faster sparse solver behind a backend interface: MKL PARDISO complex symmetric on Windows (ctypes on the `mkl` wheel, as pypardiso does for real matrices; pypardiso itself has no complex support), Apple Accelerate on macOS 15.5+ (complex LU / LDLᵀ, reusable symbolic analysis, multithreaded), PyAMG for the resistive and inductive models (already installed with Thermal); SuperLU stays the fallback | rounding (multithreaded order: reproducibility to keep or note) | L, new dependency | −10-30 % of what is left estimated first; after 4.2 **−30-50 % of the board-wide work** if factorisations get 3-5x and triangular solves 2x faster; half the factor memory, analysis once per model, exact memory planning, no 32-bit limit | M3 |
 
 Expected: M1 → A ~30-50 min, B ~22-35 min with ≥ 16 GB free (the M2 at ~4 GB free ~60-85 / ~38-50 min); M1+M2 → A
