@@ -127,7 +127,7 @@ model included, built in 91 s):
 
 ### 4.3 The M2 at 8x (jobs A and B with the statistics)
 
-To be filled once the M2 runs the `speed-stats` build (`out/dist/groundtruth-0.1.42665-477ef5a-pcm.zip`).
+To be filled once the M2 runs the `speed-stats` build (`out/dist/groundtruth-0.1.42666-732c474-pcm.zip`).
 
 ## 5. Options and estimated savings
 
