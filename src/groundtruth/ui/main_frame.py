@@ -1641,6 +1641,13 @@ class MainFrame(ConfigActions, wx.Frame):
                           "Power integrity tab).", "groundtruth")
             self.notebook.SetSelection(self.notebook.FindPage(self.converters))
             return False
+        from ..analysis.tags import follow_labels
+        converters, moved = follow_labels(self.board, self.settings.config.converters)
+        if moved:                           # a re-annotated board: the converters follow their GT labels (undoable)
+            self.converters.converters = converters
+            if self.converters._commit():
+                self.SetStatusText("parts renamed on the board, the converters follow their GT labels: "
+                                   + "; ".join(moved))
         errors = validate(self.settings.config, self.board)
         if errors:
             message_box("\n".join(errors), "groundtruth: settings does not match the board", wx.ICON_WARNING)

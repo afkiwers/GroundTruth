@@ -481,3 +481,72 @@ def _read_tags(board: Board) -> BoardTags:
             what = "leg" if st.kind == "hb" else "converter"
             out.problems.append(f"{what} {st.name}: label {' and '.join(missing)} too ({st.describe()} labelled)")
     return out
+
+
+_STAGE_IN_NAME = re.compile(r"conv([a-z0-9.+]*)$", re.I)            # "buck conv3" -> "3" (detection's names)
+
+
+def follow_labels(board: Board, converters: list) -> tuple[list, list[str]]:
+    """Converters whose switches no longer sit where their roles need them (the board was re-annotated: U502
+    became U501) take the parts their GT labels now name (the user's refboard after 2026-10-23: "I can't simulate the
+    converters anymore"). A converter is matched to the labelled stage by the id in its name ("buck conv3" ->
+    conv3_*); one whose parts still fit, or without a labelled stage, is left as it is; the new parts must fit too.
+    Returns (the converters, one note per converter changed: "buck conv3: U502 → U501")."""
+    from dataclasses import replace
+    stages = {st.ident.lower(): st for st in board_tags(board).of("conv")}
+    nets = set(board.nets)
+    out, notes = [], []
+    for c in converters:
+        m = _STAGE_IN_NAME.search(c.name.strip())
+        st = stages.get(m.group(1).lower()) if m else None
+        if st is None or _roles_fit(board, c):
+            out.append(c)
+            continue
+        # a high side / a converter IC's switch: either label (a controller IC with its switch inside is "sw")
+        new = replace(c, high_side=(st.refs("hs") or st.refs("sw")) if c.high_side else [],
+                      low_side=st.refs("ls") if c.low_side else [],
+                      switch=(st.refs("sw") or st.refs("hs")) if c.switch else [])
+        if new.switch_node and new.switch_node not in nets:                 # an auto-named net renamed with its part
+            new = replace(new, switch_node=_switch_net(board, st) or new.switch_node)
+        if not _roles_fit(board, new):
+            out.append(c)
+            continue
+        moved = {o: n for role in ("high_side", "low_side", "switch")
+                 for o, n in zip(getattr(c, role), getattr(new, role)) if o != n}
+        old_l = re.search(r"\b(\S+) L;", c.note or "")                      # detection's note names the inductor
+        if old_l and st.refs("l") and old_l.group(1) != st.refs("l")[0]:
+            moved[old_l.group(1)] = st.refs("l")[0]
+        note = c.note or ""
+        if moved:                                       # every old reference at once, so U502 -> U501 and
+            note = re.sub(r"\b(" + "|".join(map(re.escape, moved)) + r")\b",   # U503 -> U502 don't chain
+                          lambda k: moved[k.group(1)], note)
+        if new.switch_node != c.switch_node:
+            note = note.replace(c.switch_node or "", new.switch_node)
+        out.append(replace(new, note=note))
+        notes.append(f"{c.name}: " + ", ".join(f"{o} → {n}" for o, n in moved.items())
+                     + (f", switch node {new.switch_node}" if new.switch_node != c.switch_node else "")
+                     + " (its GT labels)")
+    return out, notes
+
+
+def _roles_fit(board: Board, c) -> bool:
+    """Every switch of the converter is on the board with pads on the nets its role joins (as settings.validate
+    checks: high side rail-switch node, low side switch node-ground, an IC's switch rail-ground)."""
+    ends = {"high_side": (c.rail, c.switch_node), "low_side": (c.switch_node, c.ground), "switch": (c.rail, c.ground)}
+    for role, want in ends.items():
+        for ref in getattr(c, role):
+            fp = board.footprint(ref)
+            if fp is None or not {n for n in want if n} <= fp.nets():
+                return False
+    return True
+
+
+def _switch_net(board: Board, st: StageTags) -> Optional[str]:
+    """The stage's switch node: the net its labelled inductor shares with its labelled switches."""
+    sw = set().union(*[board.footprint(r).nets() for r in st.refs("hs", "ls", "sw") if board.footprint(r)])
+    for r in st.refs("l"):
+        fp = board.footprint(r)
+        hit = sorted(fp.nets() & sw) if fp else []
+        if len(hit) == 1:
+            return hit[0]
+    return None
