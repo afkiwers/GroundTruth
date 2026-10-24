@@ -2913,7 +2913,8 @@ def test_the_parts_tab_edits_through_hole_pin_values(app, tmp_path, monkeypatch)
         f.notebook.SetSelection(f.notebook.FindPage(f.parts))
         g = f.parts.grid
         row, smd = f.parts.rows.index("J1"), f.parts.rows.index("C1")
-        assert not g.IsReadOnly(row, PINS_COL) and g.IsReadOnly(smd, PINS_COL)
+        # a through-hole connector has every pin value; an SMD capacitor (a model that conducts) its solder `bond`
+        assert not g.IsReadOnly(row, PINS_COL) and not g.IsReadOnly(smd, PINS_COL)
 
         def edit(text):
             """Type into J1's Pins cell, as the grid reports it."""

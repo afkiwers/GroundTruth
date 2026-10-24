@@ -437,8 +437,9 @@ def switch_filaments(st: StackBuild, z_phys: dict, elements: list[Element]
 
     Per element: from every `a` pad's grid node up to PACKAGE_H_MM, across to the package centre, across to above
     every `b` pad and down to its node; each pad carries a share of the element's current by its pin's copper area
-    (pad_weights: overlapping pads of one pin count once [A51]). The filaments start and end exactly at the
-    injection nodes, so the loop (filaments + copper) is closed."""
+    (pad_weights: overlapping pads of one pin count once [A51]). A side soldered as a tab (st.side_lids,
+    simulate.switch_lids [A65]) takes all of its current at its lid, the filament standing over the lid's cell. The
+    filaments start and end exactly at the injection nodes, so the loop (filaments + copper) is closed."""
     g0 = st.grids[0]
 
     def P(x, y, z):
@@ -455,14 +456,19 @@ def switch_filaments(st: StackBuild, z_phys: dict, elements: list[Element]
         cx = float(np.mean([p.position[0] for p in pads]))
         cy = float(np.mean([p.position[1] for p in pads]))
         centre = P(cx, cy, z_top)
+        lids = getattr(st, "side_lids", {})
         for group, sign in ((el.a, -1.0), (el.b, 1.0)):
+            lid = lids.get((el.ref, group[0].net))
             areas = np.array(pad_weights(group))
-            for p, area in zip(group, areas):
-                n = _pad_node(st, p, side)
+            # a tab: its whole current at the lid, one filament (as wide as its widest pad); else one per pad
+            feeds = [(max(group, key=lambda p: min(p.size)), 1.0)] if lid is not None else \
+                [(p, float(area / areas.sum())) for p, area in zip(group, areas)]
+            for p, frac in feeds:
+                n = lid if lid is not None else _pad_node(st, p, side)
                 if n is None:
                     raise SolverError(f"{p.pin} ({p.net}): no {p.net} copper reaches the pad in the model (an unrouted "
                                       "net or unfilled zones?)")
-                share = el.weight * float(area / areas.sum())
+                share = el.weight * frac
                 inj.append((n, sign * share))     # the current leaves the copper at a pads, enters at b pads
                 x, y = g0.xy(*n[1:])
                 base, top = P(x, y, st.z[n[0]]), P(x, y, z_top)
@@ -902,7 +908,7 @@ def _pieces(st: StackBuild, elements: list[Element]) -> str:
                 g[label] = g.get(label, 0) + 1          # footprints may repeat a pad number (EPC: 5 × pad 7)
     for b in plane.branches:
         if b.kind == "part":
-            k = int(plane.full_label[plane.nid[b.a]])
+            k = int(plane.full_label[plane.node_id(b.a)])          # a part's end is its lid (simulate.part_lid)
             if k in groups:
                 groups[k].setdefault(b.name, 1)
     if len(groups) < 2:
@@ -1528,11 +1534,18 @@ def _area_shares(st: StackBuild, pads: list[Pad], side: str, total: float) -> li
     """Injections spreading `total` A over the pads' pins by their copper area (pin_area: overlapping pads of one pin
     count once [A51]) and over each pin's own grid nodes evenly, each node once (a pin is fed over its whole area,
     like a lead frame). Summed per pad before 2026-10-21: EPC2306's pin 2 (a bar under three tabs) took 42 % of
-    the FET's source current for its 34 % of the copper, the overlap fed twice."""
+    the FET's source current for its 34 % of the copper, the overlap fed twice. A part's side the model solders
+    over its pads (st.side_lids: a lumped part's, a tab switch's, simulate.switch_lids [A65]) takes its pins' share
+    into its lid instead: the copper then decides where it enters."""
     pins = _by_pin(pads)
     areas = {pin: pin_area(ps) for pin, ps in pins.items()}
+    lids = getattr(st, "side_lids", {})
     out = []
     for pin, ps in pins.items():
+        lid = lids.get((ps[0].footprint, ps[0].net))
+        if lid is not None:
+            out.append((lid, total * areas[pin] / sum(areas.values())))
+            continue
         nodes: list[tuple] = []
         for p in ps:
             got = _pad_nodes(st, p, side)
@@ -1690,12 +1703,19 @@ def dc_summary(st: StackBuild, sol: Solution, current: float, name: str, plating
                             "capacity_a": cap, "load_pct": 100.0 * a_ / cap if cap > 0 else None}
     top = sorted(vias.values(), key=lambda v: -v["current_a"])      # every via with ≥ 1 % of the current
     # Series parts on the path (a current-sense shunt, a fuse, a surge stopper's model) are in R: their share is
-    # |I_b|²·Re(Z_b) per A² (Tellegen [Tellegen 1952]: the path's R is the sum over all branches), the rest is copper
-    # and vias
+    # |I_b|²·Re(Z_b) per A² (Tellegen [Tellegen 1952]: the path's R is the sum over all branches), so is each part's
+    # solder joints' (its bond branches), the rest is copper and vias
     parts: dict[str, dict] = {}
     flow: dict[str, complex] = {}           # a part's parallel branches (simulate.part_pairs): their currents add
     flow_d: dict[str, complex] = {}
+    joints: dict[str, float] = {}           # the parts' solder joints (simulate.part_lid's bonds [A65]): R share, Ω
     for b, cur, cd in zip(st.plane.branches, sol.I_branch, i_d):
+        if b.kind == "bond":
+            # not the copper's: a part's terminal bridges its own pad, so current crosses its joints even where the
+            # part itself carries none (a capacitor at DC); Thermal heats them at the part
+            joints[b.name] = joints.get(b.name, 0.0) + ((float(abs(cur)) ** 2 + (k_r * float(abs(cd))) ** 2)
+                                                        * gain * complex(b.z(DC_F)).real)
+            continue
         if b.kind != "part":
             continue
         flow[b.name] = flow.get(b.name, 0j) + complex(cur)
@@ -1705,9 +1725,13 @@ def dc_summary(st: StackBuild, sol: Solution, current: float, name: str, plating
         p["r_mohm"] += (float(abs(cur)) ** 2 + (k_r * float(abs(cd))) ** 2) * gain * complex(b.z(DC_F)).real * 1e3
     parts = {n: p for n, p in parts.items() if math.hypot(abs(flow[n]), k_r * abs(flow_d[n])) >= 0.01}
     r_parts = sum(p["r_mohm"] for p in parts.values()) * 1e-3
+    r_joints = sum(joints.values())
     out = {"name": name, "current_a": current, "r_mohm": r * 1e3,
            "drop_mv": (r_mean + r_rip) * current * 1e3,
-           "loss_w": r * current * current, "r_copper_mohm": (r - r_parts) * 1e3,
+           "loss_w": r * current * current, "r_copper_mohm": (r - r_parts - r_joints) * 1e3,
+           "r_joints_mohm": r_joints * 1e3,
+           "joints": [{"name": n, "r_mohm": v * 1e3} for n, v in sorted(joints.items(), key=lambda kv: -kv[1])
+                      if v * current * current >= 1e-6],
            "parts": sorted(parts.values(), key=lambda p: -p["r_mohm"]),
            "peak_a_mm2": best[0], "peak_layer": best[1], "peak_at": best[2],
            "sustained_a_mm2": best_s[0], "sustained_layer": best_s[1], "sustained_at": best_s[2],
@@ -2533,8 +2557,9 @@ def cm_estimate(spec: ConverterSpec, res: "ConverterResult", standard: str, cls:
 
 
 def _r_text(path: dict) -> str:
-    """'R mΩ', and the copper's share when series parts (a shunt, a fuse) are on the path."""
-    return f"{path['r_mohm']:.2f} mΩ" + (f" ({path['r_copper_mohm']:.2f} in copper)" if path.get("parts") else "")
+    """'R mΩ', and the copper's share when series parts (a shunt, a fuse) or their solder joints take some of it."""
+    shown = path.get("parts") or (path.get("r_joints_mohm") or 0.0) >= 0.005
+    return f"{path['r_mohm']:.2f} mΩ" + (f" ({path['r_copper_mohm']:.2f} in copper)" if shown else "")
 
 
 def dc_view(c: "ConverterResult", name: str) -> "ConverterResult":

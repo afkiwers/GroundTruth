@@ -952,8 +952,40 @@ class Branch:
     b: tuple[int, int, int]
     z: Callable[[float], complex]
     name: str = ""
-    kind: str = "part"        # part | via | track (a bridge: Grid.bridges)
+    kind: str = "part"        # part | via | track (a bridge: Grid.bridges) | bond (a solder joint: LidNode)
     radius: float = 1.5e-4    # via barrel radius (m), for its coupling to the signal via
+
+
+class LidNode(tuple):
+    """A circuit node that is no grid node: the metal of one side of a lumped part (a capacitor's terminal, a FET's
+    drain or source) that its pads are soldered to (analysis/simulate.part_lid). Every grid node under those pads is
+    joined to it by a `bond` branch, so the copper decides where the current hands over to the part [Berger 1972].
+
+    As a tuple it is the (layer, i, j) of the grid cell it sits over: its position for the loop moment and its layer
+    for whatever reads one (transfers, maps). `lid` numbers it within its model: two lids over one cell stay two
+    nodes (equality and hash go by the number), and a grid node never equals a lid."""
+
+    def __new__(cls, layer: int, i: int, j: int, lid: int):
+        """The lid numbered `lid`, over cell (i, j) of layer `layer`."""
+        t = super().__new__(cls, (int(layer), int(i), int(j)))
+        t.lid = int(lid)
+        return t
+
+    def __getnewargs__(self):
+        """What pickle passes to __new__ (a tuple subclass with an argument of its own)."""
+        return (self[0], self[1], self[2], self.lid)
+
+    def __eq__(self, other):
+        """The same lid: the same number (and cell)."""
+        return isinstance(other, LidNode) and other.lid == self.lid and tuple.__eq__(self, other)
+
+    def __ne__(self, other):
+        """Not the same lid (a grid node never is one)."""
+        return not self.__eq__(other)
+
+    def __hash__(self):
+        """By the lid's number: apart from every grid node's tuple."""
+        return hash(("lid", self.lid))
 
 
 @dataclass
@@ -1025,6 +1057,7 @@ class Solution:
     W_y: Optional[np.ndarray] = None        # solutions; None: every strip full width)
     A_cu: Optional[np.ndarray] = None       # (N, nx, ny) the nodes' copper area / d² (the stack's; None: solutions
                                             # pickled before 2026-10-19, whose densities are the strips' mean)
+    V_lid: Optional[np.ndarray] = None      # the potentials of the stack's LidNodes (its parts' metal), in order
 
     def state_for(self, stack: "PlaneStack") -> np.ndarray:
         """The solver's unknown vector [branch currents; node potentials] of this solution on `stack`, the stack
@@ -1033,7 +1066,9 @@ class Solution:
         if self.state is not None:
             return self.state
         Ib = np.concatenate([self.I_x[tuple(stack.xa.T)], self.I_y[tuple(stack.ya.T)], self.I_cap, self.I_branch])
-        return np.concatenate([Ib, self.V[np.nonzero(stack.node)][stack.keep]])
+        n_lid = stack.n_nodes - stack.n_grid
+        lids = self.V_lid if self.V_lid is not None and len(self.V_lid) == n_lid else np.zeros(n_lid, complex)
+        return np.concatenate([Ib, np.concatenate([self.V[np.nonzero(stack.node)], lids])[stack.keep]])
 
     @property
     def L_loop(self) -> float:
@@ -1462,7 +1497,11 @@ class PlaneStack:
         self.nid = -np.ones(node.shape, int)            # (layer, i, j) -> node number, -1 off copper
         idx = np.nonzero(node)
         self.nid[idx] = np.arange(len(idx[0]))
-        self.n_nodes = len(idx[0])
+        self.n_grid = len(idx[0])
+        # the parts' lids (LidNode: no grid node) are numbered after the grid's, in the order of their numbers
+        lids = sorted({e.lid for b in branches for e in (b.a, b.b) if isinstance(e, LidNode)})
+        self.lid_nid = {k: self.n_grid + n for n, k in enumerate(lids)}
+        self.n_nodes = self.n_grid + len(lids)
         self.xa, self.ya = np.argwhere(self.xb), np.argwhere(self.yb)
         self.nxb, self.nyb = len(self.xa), len(self.ya)
         self.ns = self.nxb + self.nyb
@@ -1484,18 +1523,18 @@ class PlaneStack:
                                         p.c_per_area * cell * share[ii, jj], np.full(len(ii), p.tan_delta)]))
         self.cap = np.concatenate(cap) if cap else np.zeros((0, 6))
         self.ncap = len(self.cap)
-        # branches whose ends are both on copper (and different): the others would join nothing
-        self.branches = [b for b in branches if self.nid[b.a] >= 0 and self.nid[b.b] >= 0 and b.a != b.b]
+        # branches whose ends are both on copper or a lid (and different): the others would join nothing
+        self.branches = [b for b in branches if self.node_id(b.a) >= 0 and self.node_id(b.b) >= 0 and b.a != b.b]
         self.nbr = len(self.branches)
         self.nb = self.ns + self.ncap + self.nbr
         cu = self.cap[:, :4].astype(int)
         self.a_nodes = np.concatenate([self.nid[tuple(self.xa.T)], self.nid[tuple(self.ya.T)],
                                        self.nid[cu[:, 0], cu[:, 2], cu[:, 3]],
-                                       np.array([self.nid[b.a] for b in self.branches], int)]).astype(int)
+                                       np.array([self.node_id(b.a) for b in self.branches], int)]).astype(int)
         self.b_nodes = np.concatenate([self.nid[self.xa[:, 0], self.xa[:, 1] + 1, self.xa[:, 2]],
                                        self.nid[self.ya[:, 0], self.ya[:, 1], self.ya[:, 2] + 1],
                                        self.nid[cu[:, 1], cu[:, 2], cu[:, 3]],
-                                       np.array([self.nid[b.b] for b in self.branches], int)]).astype(int)
+                                       np.array([self.node_id(b.b) for b in self.branches], int)]).astype(int)
         r = np.arange(self.nb)
         self.A = sp.csr_matrix((np.concatenate([np.ones(self.nb), -np.ones(self.nb)]),
                                 (np.concatenate([r, r]), np.concatenate([self.a_nodes, self.b_nodes]))),
@@ -1610,17 +1649,21 @@ class PlaneStack:
         self.ArT = self.Ar.T.tocsr()
 
     def node_id(self, node: tuple[int, int, int]) -> int:
-        """The node number of (layer, i, j), -1 when it is not on copper."""
+        """The node number of (layer, i, j), -1 when it is not on copper; of a LidNode its own number (after the
+        grid's), -1 when no branch of this stack names it."""
+        if isinstance(node, LidNode):
+            return self.lid_nid.get(node.lid, -1)
         return int(self.nid[node])
 
     def with_branches(self, extra: list[Branch]) -> "PlaneStack":
         """This stack plus a few branches (candidate vias / parts). Shares grids and kernels; solves reuse
         this stack's factorisations through a low-rank (Woodbury) update [Woodbury 1950]."""
-        extra = [b for b in extra if self.nid[b.a] >= 0 and self.nid[b.b] >= 0 and b.a != b.b]
+        # (a branch to a lid this stack does not have joins nothing here: new lids need a model of their own)
+        extra = [b for b in extra if self.node_id(b.a) >= 0 and self.node_id(b.b) >= 0 and b.a != b.b]
         if not extra:
             return self
-        a = np.array([self.nid[b.a] for b in extra])
-        b = np.array([self.nid[b.b] for b in extra])
+        a = np.array([self.node_id(b.a) for b in extra])
+        b = np.array([self.node_id(b.b) for b in extra])
         if np.any(self.full_label[a] != self.full_label[b]):   # joins islands: references change
             return PlaneStack(self.layers, self.branches + extra, self.pairs, self.sigma, self.precond_mode)
         # a shallow copy shares the grids, kernels and node numbering; only the branch list, the incidence matrix
@@ -2244,7 +2287,7 @@ class RouteExcitation:
             raise SolverError("no current is injected")
         ids = []
         for node, amps, what in terms:
-            n = stack.nid[node]
+            n = stack.node_id(node)
             if n < 0:
                 raise SolverError(f"{what} is not on plane copper")
             ids.append((int(n), amps))
@@ -2307,7 +2350,7 @@ class RouteExcitation:
         I_x[tuple(st.xa.T)] = Ib[: st.nxb]
         I_y[tuple(st.ya.T)] = Ib[st.nxb: st.ns]
         Vg = np.zeros((st.N, st.nx, st.ny), complex)
-        Vg[np.nonzero(st.node)] = V
+        Vg[np.nonzero(st.node)] = V[:st.n_grid]                 # the grid's nodes; the parts' lids after them
         # loop impedance: drop along the filaments + Σ J·V over the injections (current enters at +, leaves at -)
         v_inj = sum(amps * V[n] for n, amps in self.injections)
         Z = complex(_trace_resistance(self.trace, f, st.sigma, self.trace_t) + v_inj
@@ -2315,7 +2358,8 @@ class RouteExcitation:
         # copies: views of Ib would keep the whole unknown vector x alive (Ib is a view of it). Not x itself either:
         # Solution.state_for rebuilds it from these when the fix search wants a warm start
         return Solution(f, I_x, I_y, Vg, Ib[st.ns + st.ncap:].copy(), Z, st.moment(self.trace, Ib), its,
-                        Ib[st.ns: st.ns + st.ncap].copy(), W_x=st.W_x, W_y=st.W_y, A_cu=getattr(st, "A_cu", None))
+                        Ib[st.ns: st.ns + st.ncap].copy(), W_x=st.W_x, W_y=st.W_y, A_cu=getattr(st, "A_cu", None),
+                        V_lid=V[st.n_grid:].copy())
 
 
 def MultiPlaneProblem(layers: list[PlaneLayer], trace: list[TraceSegment], inject_driver: tuple[int, int, int],

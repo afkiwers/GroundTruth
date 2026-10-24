@@ -395,6 +395,8 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
             for path in getattr(res, "dc", []) or []:
                 for p in path.get("parts", []):
                     add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"in DC load {res.net}")
+                for p in path.get("joints", []):        # its solder joints (power.dc_summary) at the part
+                    add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"solder joints, DC load {res.net}")
             if res.net in loads:
                 from .dcload import pin_currents
                 for pin, amps in pin_currents(loads[res.net]).items():
@@ -501,6 +503,8 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
         for path in getattr(res, "dc", []) or []:
             for p in path.get("parts", []):
                 add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"in DC {path['name']}")
+            for p in path.get("joints", []):            # its solder joints (power.dc_summary) at the part
+                add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"solder joints, DC {path['name']}")
     # each fed pin's solder joint and mating contact (analysis/pins.py): I²·R at its part, with the pin's current
     # summed over the stages and rails through it (a connector feeding two converters)
     for pin, amps in sorted(pin_amps.items()):

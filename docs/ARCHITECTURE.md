@@ -518,15 +518,44 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   loop's switch filaments (`switch_filaments`) share a part's current over its pins by each pin's copper area, the
   union of its pads (`pin_area`, `pad_weights`, [A51]; since 2026-10-21: the pads' sizes were summed before, and an
   EPC2306's source pin 2, a bar under three tabs, took 42 % of the source current for 34 % of the copper, so the GND
-  vias beside it read high), evenly over the pin's nodes, each once. Since 2026-10-13 a part is spread over the whole area of all its pads on each
-  side (`simulate.part_pairs`): up to MAX_PART_BRANCHES = 8 nodes under the pads per side (farthest-point sampled),
-  paired side by side across the part, each branch n·Z so the n in parallel are Z. Before, one branch joined the
-  first pad's centre on each side, so a wide part (a FET's drain pad and fingers, an inductor's terminals, a
-  shunt) fed its current into one grid node: a spreading resistance that grew on finer grids (validated:
-  `test_a_part_is_joined_to_the_copper_over_its_whole_pads`, two strips joined by a full-width 1 mΩ part:
-  +0.84 mΩ over the strip, expected ≈ 0.83; one branch gave +1.45 mΩ at 0.1 mm, +1.55 at 0.05 mm). Consumers sum
-  a part's branches: transfers (fraction), dc_summary (current; losses per branch add up), _cap_shares,
-  bridge_rms (RMS add, conductances add).
+  vias beside it read high), evenly over the pin's nodes, each once.
+- **A lumped part is soldered over its whole pads** (2026-10-24, branch `pad-bond`, `simulate.part_lid`, [A65]; the
+  user, of refboard's Q601 drain pad at 54 A/mm² in a corner: "the pad is under a Mosfet surface can be assumed is
+  equally conductive with a perfect bond to the copper. So I would expect the current density to go down towards
+  the right as the current comes in from the left"). Each side's metal (a terminal, a FET's drain or source) is a
+  node of its own, a `peec.LidNode` (numbered after the grid's nodes; as a tuple the cell over the pads' centre, so
+  the moment and whatever reads a branch's layer and position keep working), joined to every grid node of its net
+  under that side's pads by a `bond` branch; the bonds share the solder joint, 75 µm of SAC305 over the pads' area
+  (9.8 × 10⁻¹² Ω·m²), in parallel. The part's Z(f) + 0.3 nH runs between its two lids (one `part` branch). The
+  copper then decides where the current hands over: within the transfer length √(r_c / R_sheet) (~0.14 mm in 35 µm
+  copper) of where it reaches the pad, falling off across it as a transmission-line contact [Berger 1972]
+  (tests/test_pad_bond.py: a 2.1 mm strip bonded over 10 mm with λ = 1 mm reads I(u) within 0.001 of
+  I₀·sinh((L−u)/λ)/sinh(L/λ) and the feed-to-part voltage within 0.01 % of R_strip + (R_sheet·λ/w)·coth(L/λ)).
+  `transfers` leaves the bonds out (they are the part's own); the consumers that sum a part's `part` branches see
+  one. From 2026-10-13 a part joined up to MAX_PART_BRANCHES = 8 nodes per side, farthest-point sampled (the
+  pads' corners first: each a point sink, Q601's corner), and before that one node per side. On the split strip
+  (`test_a_part_is_joined_to_the_copper_over_its_whole_pads`, a 1 mΩ part over 0.8 mm deep pads) the part adds
+  +0.78 mΩ at 0.1 mm cells against the contact model's 0.766 (the current hands over at the pads' outer edges, so
+  their copper is bypassed); the 8 sampled nodes read +0.84 (about half of each pad's copper used), one node +1.45.
+  refboard at 2x, the stages' DC currents together (`tools/dev/pad_density.py --part Q601`, `out/speed/q601_*_2x.json`):
+  Q601's drain pad densest 67.7 → 22.5 A/mm² (a sampled corner → the edge the current arrives at, falling to ~0
+  across the pad), its drain fingers 59.6 → ≤ 10, the view's peak 66.4 → 57.6 A/mm² (now elsewhere).
+  A part's own joint: the pin value `bond` (µm of solder; 0 a perfect bond, taken as 0.1 µm; analysis/pins.py, its
+  GT field, the Parts tab's Pins cell or Pin defaults…). `part_pairs` is left for the PDN's ideal source.
+  The bonds' I²R is the joints', not the copper's: `power.dc_summary` gives each DC path `r_joints_mohm` and
+  `joints` (per part), takes it out of `r_copper_mohm`, and Thermal heats it at the part ("solder joints, DC …"),
+  so the copper heat maps still carry exactly the copper's loss (PA-4: the buck's hot loop 1.5 % in its joints).
+  **Tab switches** (2026-10-25, the user: "I won't always use GANs"): a power stage's switch (`power.elements_of`:
+  FETs, catch diodes, integrated stages) whose side has a pad at least `simulate.TAB_MM` = 1 mm wide is soldered the
+  same way (`simulate.switch_lids`: a lid per side, no part branch; `st.side_lids[(ref, net)]`, the lumped parts'
+  lids there too). Every current a stage feeds in or takes out at those pads goes into the lid
+  (`power._area_shares`: DC paths, ripple, bridges' RMS, PDN ports, DC loads; `switch_filaments`: the hot loop's
+  filament stands over the lid's cell), so the copper decides where it enters. Narrower pads keep the even spread
+  over each pin's copper [A51]: a chip-scale GaN FET's bars (EPC2306: 0.37-0.47 mm) sit on a lateral die that
+  spreads the current over them. The pin value `entry: tab | even` overrides the size. On refboard only D501
+  (SOD-123F, 1.1 mm leads) becomes a tab. tests/test_pad_bond.py: a current taken out at a lid follows Berger's
+  contact like one through a part; the test buck's Q1 drain pad (1.2 mm, fed from the left) at 1 A: 8.35 A/mm²
+  at its left edge, 0.17 in its middle as a tab, against 8.49 / 4.16 spread evenly.
 - Return injection: return pad's own-net node on its layer, then the same net on another layer (note), then
   any plane copper within 5 mm (note).
 - Loop L was verified to change < 1 % from d = h/2 to 2h on the route model.

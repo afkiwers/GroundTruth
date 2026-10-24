@@ -52,17 +52,17 @@ from ..emi.spectrum import analysis_band, microstrip, offset_stripline, trapezoi
 from ..geometry.copper import CopperMap, reference_layers
 from ..geometry.shapes import arc_points
 from ..rules.checks import CheckResult, run_checks
-from ..solver.peec import (EPS0, gmres_restart, Branch, Grid, PlaneLayer, PlanePair, PlaneStack, RouteExcitation,
-                           Solution, SolverError, TraceSegment, build_grid, thread_budget, track_impedance,
-                           via_impedance)
+from ..solver.peec import (EPS0, gmres_restart, Branch, Grid, LidNode, PlaneLayer, PlanePair, PlaneStack,
+                           RouteExcitation, Solution, SolverError, TraceSegment, build_grid, thread_budget,
+                           track_impedance, via_impedance)
 from ..solver import gpu, peec
 from .progress import Phases
-from .pins import column_conductance, feed_layer, params_cache, segment_impedance, solder_span
+from .pins import SOLDER_RHO, column_conductance, feed_layer, params_cache, segment_impedance, solder_span
 from .route import SHUNT_KINDS, Route, RouteSegment, RouteVia, return_pad, shunt_parts, signal_nets  # noqa: F401
 from .section import corridor_mm, route_section
 
 MOUNT_L = 0.3e-9            # pad + escape inductance added to lumped parts (vias are modelled explicitly) [A21]
-MAX_PART_BRANCHES = 8       # a lumped part is spread over its pads as up to this many parallel branches
+MAX_PART_BRANCHES = 8       # part_pairs (the PDN's source): spread over its pads as up to this many parallel branches
 INJECT_MAX_MM = 3.0         # return pin must be within this distance of its net's copper
 INJECT_FALLBACK_MM = 5.0    # ...or of any plane copper
 GRID_MIN_MM, GRID_MAX_MM = 0.05, 0.25
@@ -264,6 +264,10 @@ class StackBuild:
         self.d = d
         self.branches: list[Branch] = []
         self.pairs: list[PlanePair] = []
+        self.n_lids = 0                     # the parts' lids made so far (part_lid: each one's number)
+        # (reference, net) -> the lid of that part's side: a current fed in or taken out at those pads goes through
+        # its metal (power._area_shares, power.switch_filaments), the lumped parts' and the tab switches' (switch_lids)
+        self.side_lids: dict[tuple[str, str], LidNode] = {}
         self._plane: Optional[PlaneStack] = None
         # a through-hole pin whose solder does not reach its part's side: the layer its current enters the board on
         # (pins.feed_layer; power._pad_node takes it instead of the part's side)
@@ -491,19 +495,19 @@ class BoardModel:
                 continue
             pa = fpads[0]
             pb = next(p for p in fpads if p.net != pa.net)
-            # spread over the whole area of every pad on each side (a FET's five drain pads, an inductor's wide
-            # terminals): the current enters the copper there, not at one pad's centre, which crowded it into a
-            # point (refboard's Q601: all of the input current at one spot of its 4 x 3 mm drain pad)
-            pairs = part_pairs(st, [p for p in fpads if p.net == pa.net], [p for p in fpads if p.net == pb.net])
-            if not pairs:                   # no grid node under the pads: the nearest ones, as before
-                na = next((n for n in (st.node(l, *pa.position, pa.net, snap) for l in pa.layers) if n), None)
-                nb = next((n for n in (st.node(l, *pb.position, pb.net, snap) for l in pb.layers) if n), None)
-                pairs = [(na, nb)] if na and nb and na != nb else []
-            z = part_impedance(model)
-            n = len(pairs)                  # n branches of n·Z in parallel: the part's own Z
-            for na, nb in pairs:
-                st.branches.append(Branch(na, nb, z if n == 1 else (lambda f, z=z, n=n: n * z(f)), fp.reference,
-                                          "part"))
+            # each side's metal (a terminal, a FET's drain or source) is one node, its lid, soldered to every grid
+            # node under that side's pads (part_lid): the copper decides where the current hands over to the part.
+            # Until 2026-10-24 the part joined up to 8 sampled nodes per side (the pads' corners first): each a point
+            # sink, refboard's Q601 drain read 54 A/mm² at a corner its current only reaches by crowding (the user)
+            bond = pin_params(fp.reference).bond         # the part's own solder thickness (pins.py), else built in
+            lid_a, bonds_a = part_lid(st, [p for p in fpads if p.net == pa.net], fp.reference, snap, bond)
+            lid_b, bonds_b = part_lid(st, [p for p in fpads if p.net == pb.net], fp.reference, snap, bond)
+            if lid_a is None or lid_b is None:
+                continue
+            st.branches.append(Branch(lid_a, lid_b, part_impedance(model), fp.reference, "part"))
+            st.branches += bonds_a + bonds_b
+            st.side_lids[(fp.reference, pa.net)], st.side_lids[(fp.reference, pb.net)] = lid_a, lid_b
+        switch_lids(st, board, config, plane_nets, pin_params, snap)
         # Plane-pair capacitance from the physical stackup (εr, insulation thickness, loss tangent): the dielectrics
         # between two planes in series (Stackup.epsilon_series [Pozar 2012])
         if capacitance:
@@ -620,6 +624,78 @@ def part_pairs(st: StackBuild, pads_a: list, pads_b: list) -> list[tuple]:
     a.sort(key=lambda n: float(np.dot(st.xy(n), perp)))
     b.sort(key=lambda n: float(np.dot(st.xy(n), perp)))
     return [(na, nb) for na, nb in zip(a, b) if na != nb]
+
+
+SOLDER_UM = 75.0            # the solder between an SMD pad and the part's metal after reflow, µm [A65]
+BOND_RC = SOLDER_RHO * SOLDER_UM * 1e-6     # that joint's resistance per area, Ω·m²: ρ·t across its thickness [A65]
+BOND_MIN_UM = 0.1           # a perfect bond (the part's `bond:0`) as this thin a joint: a finite branch impedance
+
+
+def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optional[float] = None
+             ) -> tuple[Optional[LidNode], list[Branch]]:
+    """One side of a lumped part (its pads of one net): the part's metal on that side as a node of its own (its lid,
+    peec.LidNode, over the pads' area-weighted centre) and a `bond` branch from every grid node of their net under
+    the pads (pad_nodes; the nearest node when no node is under a pad smaller than a cell) to the lid. The bonds share
+    the side's solder joint, SOLDER_RHO × its thickness over the pads' area [A65], in parallel (each N times it):
+    `bond_um` µm (the part's pin value `bond`, analysis/pins.py; 0 a perfect bond, as BOND_MIN_UM), else SOLDER_UM.
+    The metal itself is taken as a perfect conductor: the current hands over where the copper brings it, within the
+    transfer length √(r_c / R_sheet) of where it reaches the pad [Berger 1972] (~0.14 mm in 35 µm copper at 75 µm).
+    (None, []) when no node of the pads' net is near."""
+    from ..geometry.shapes import pad_shape
+    nodes = pad_nodes(st, pads)
+    if not nodes:
+        p = pads[0]
+        n = next((n for n in (st.node(l, *p.position, p.net, snap) for l in p.layers) if n), None)
+        nodes = [n] if n else []
+    if not nodes:
+        return None, []
+    areas = np.array([getattr(pad_shape(p), "area", 0.0) or 0.0 for p in pads])      # mm²
+    w = areas if areas.sum() > 0 else np.ones(len(pads))
+    cx = float(np.dot(w, [p.position[0] for p in pads]) / w.sum())
+    cy = float(np.dot(w, [p.position[1] for p in pads]) / w.sum())
+    k = nodes[0][0]
+    g = st.grids[k]
+    lid = LidNode(k, min(max(int(round((cx - g.x0) / g.d)), 0), g.nx - 1),
+                  min(max(int(round((cy - g.y0) / g.d)), 0), g.ny - 1), st.n_lids)
+    st.n_lids += 1
+    rc = BOND_RC if bond_um is None else SOLDER_RHO * max(bond_um, BOND_MIN_UM) * 1e-6
+    r = rc / (max(float(areas.sum()), 1e-3) * 1e-6) * len(nodes)            # N bonds in parallel: the side's joint
+    return lid, [Branch(n, lid, (lambda f, r=r: complex(r)), ref, "bond") for n in nodes]
+
+
+TAB_MM = 1.0                # a switch's side with a pad this wide (its narrower side, mm) is a tab [A65]
+
+
+def switch_lids(st: StackBuild, board: Board, config: Config, plane_nets: set[str], pin_params, snap: float):
+    """Every power stage's switches (power.elements_of: FETs, catch diodes, integrated stages) whose side is a tab:
+    that side's metal as a lid soldered over its pads (part_lid, its bonds added to the model, st.side_lids), so the
+    stage's currents hand over where the copper brings them, as at a lumped part. A side is a tab by the part's pin
+    value `entry` (analysis/pins.py), else when one of its pads is at least TAB_MM wide: a silicon FET's drain tab
+    (LFPAK, PowerPAK, D2PAK), a diode's cathode. Narrower pads (a chip-scale GaN FET's bars and bumps, an IC's
+    pins) keep the even spread over each pin's copper [A51]: there the die spreads the current over them. The lid
+    floats otherwise (no part branch): the tab joins its pads' copper, and power._area_shares feeds it."""
+    from .power import ConverterError, elements_of
+    done = set(st.side_lids)
+    for spec in config.stages():
+        try:
+            elements = elements_of(board, spec)
+        except ConverterError:
+            continue
+        for el in elements:
+            entry = pin_params(el.ref).entry
+            if entry == "even":
+                continue
+            for pads in (el.a, el.b):
+                net = pads[0].net
+                if net not in plane_nets or (el.ref, net) in done:
+                    continue
+                done.add((el.ref, net))
+                if entry != "tab" and max(min(p.size) for p in pads) < TAB_MM:
+                    continue
+                lid, bonds = part_lid(st, pads, el.ref, snap, pin_params(el.ref).bond)
+                if lid is not None:
+                    st.branches += bonds
+                    st.side_lids[(el.ref, net)] = lid
 
 
 def part_impedance(model) -> Callable[[float], complex]:
@@ -2563,8 +2639,8 @@ def transfers(st: StackBuild, plane: PlaneStack, sol: Solution, route: Optional[
             joint_sum[key] = joint_sum.get(key, 0j) + complex(cur)
             frac = abs(joint_sum[key])
         x, y = st.xy(b.a)
-        if b.kind == "track":                 # a piece of track on one layer: no transfer between layers
-            continue
+        if b.kind in ("track", "bond"):       # a piece of track on one layer, a part's solder joint (part_lid): no
+            continue                          # transfer between layers or nets of its own
         if b.kind == "via" and any(math.dist((x, y), p) < 1.0 for p in return_pins):
             continue
         if b.kind == "via" and own and st.grids[b.a[0]].net_at(b.a[1:]) in own:
