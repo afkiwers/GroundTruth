@@ -51,9 +51,9 @@ def test_simulate_on_the_device_matches_the_cpu(tmp_path, torch_cpu):
     cpu = simulate(board, cfg)
     cfg.analysis.gpu = "on"
     dev = simulate(board, cfg)
-    assert cpu.solver["device"] == "CPU" and dev.solver == {"device": "cpu (PyTorch)", "gpu_fallbacks": 0,
-                                                            "gpu_error": "", "gpu_note": "",
-                                                            "build": build_version()}
+    assert "stats" in dev.solver            # the solver statistics (solver/stats.py), the device's solves included
+    assert cpu.solver["device"] == "CPU" and {k: v for k, v in dev.solver.items() if k != "stats"} == {
+        "device": "cpu (PyTorch)", "gpu_fallbacks": 0, "gpu_error": "", "gpu_note": "", "build": build_version()}
     a, b = cpu.routes[0], dev.routes[0]
     assert [s["f"] for s in a.cavity_solves] == [s["f"] for s in b.cavity_solves]
     assert b.worst["margin_db"] == pytest.approx(a.worst["margin_db"], abs=1e-3)

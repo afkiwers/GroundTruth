@@ -45,6 +45,7 @@ import copy
 import math
 import queue
 import threading
+import time
 import weakref
 from collections import OrderedDict
 from contextlib import contextmanager
@@ -61,6 +62,7 @@ from scipy.sparse.csgraph import connected_components
 from scipy.sparse.linalg import splu
 
 from . import gpu
+from . import stats as _stats
 from .kernel import (GMD_FLAT, MU0, filament_mutual, leggauss, segment_mutual, segment_vector_potential, skin_thickness,
                      strip_kernel, strip_self, strip_self_numeric)
 
@@ -1722,13 +1724,16 @@ class PlaneStack:
                 strips = np.stack([sidx[k, pos[0][sel], pos[1][sel]] for k in layers], axis=1)
                 self.blocks.append((strips, layers, orient))
 
-    def _conv(self, X: np.ndarray, orient: str) -> np.ndarray:
+    def _conv(self, X: np.ndarray, orient: str, times: Optional[_stats.SolveTimes] = None) -> np.ndarray:
         """Σ_s K[t,s] ⊛ X[s] for every layer t (double precision, see module docstring), on the whole padded FFT
-        grid: the caller picks its strips out of it."""
+        grid: the caller picks its strips out of it. `times`: a solve's time split (solver/stats.py), the FFTs and
+        the multiply-add apart."""
         P = self.Px if orient == "x" else self.Py
+        t0 = time.perf_counter() if times is not None else 0.0
         # convolution theorem: FFT each layer's currents (zero-padded to P), multiply by the kernel spectra and
         # sum over source layers per pixel, inverse FFT
         F = fft2(X, s=P, axes=(1, 2), workers=fft_workers())
+        t1 = time.perf_counter() if times is not None else 0.0
         out = np.empty_like(F)
         mac = _kernel_mac()
         if mac is not None:
@@ -1740,7 +1745,13 @@ class PlaneStack:
                 for s in range(1, self.N):
                     np.multiply(self.kernel(orient, t, s), F[s], out=tmp)
                     out[t] += tmp
-        return ifft2(out, axes=(1, 2), workers=fft_workers(), overwrite_x=True)
+        if times is None:
+            return ifft2(out, axes=(1, 2), workers=fft_workers(), overwrite_x=True)
+        t2 = time.perf_counter()
+        res = ifft2(out, axes=(1, 2), workers=fft_workers(), overwrite_x=True)
+        times.fft += (t1 - t0) + (time.perf_counter() - t2)
+        times.mac += t2 - t1
+        return res
 
     def kernel(self, orient: str, t: int, s: int) -> np.ndarray:
         """The full (P0, P1) kernel spectrum between layers t and s, unfolded from its stored quadrant (a new
@@ -1773,8 +1784,9 @@ class PlaneStack:
             cache[orient] = idx
         return idx
 
-    def Lp_matvec(self, I_s: np.ndarray) -> np.ndarray:
-        """L_p · I for the strip currents (length ns)."""
+    def Lp_matvec(self, I_s: np.ndarray, times: Optional[_stats.SolveTimes] = None) -> np.ndarray:
+        """L_p · I for the strip currents (length ns). `times`: a solve's time split (solver/stats.py)."""
+        t0 = time.perf_counter() if times is not None else 0.0
         out = np.empty(self.ns, complex)
         for orient, lo, hi, shape in (("x", 0, self.nxb, (self.N, self.nx - 1, self.ny)),
                                       ("y", self.nxb, self.ns, (self.N, self.nx, self.ny - 1))):
@@ -1784,11 +1796,13 @@ class PlaneStack:
                 into, outof = self._strip_index(orient)
                 X = np.zeros(shape[0] * shape[1] * shape[2], complex)
                 X[into] = I_s[lo:hi]
-                out[lo:hi] = self._conv(X.reshape(shape), orient).reshape(-1)[outof]
+                out[lo:hi] = self._conv(X.reshape(shape), orient, times).reshape(-1)[outof]
         if self.dL is not None:             # strips narrower than the pitch (_widths)
             out += self.dL * I_s
             if self.M_near is not None:
                 out += self.M_near @ I_s
+        if times is not None:
+            times.lp += time.perf_counter() - t0
         return out
 
     # ------------------------------------------------------------------ operators
@@ -1883,12 +1897,19 @@ class PlaneStack:
                 if build is None:
                     build = self._building[fkey] = _Build()
                     break
+            t_wait = time.perf_counter()
             build.done.wait()           # another thread is making this factorisation: use its result
+            if _stats._active[0] is not None:
+                _stats.thread_add("wait", time.perf_counter() - t_wait)
             if build.op is not None:
                 with self._lock:
                     return self._lend(f, key, build.op, m)
+        remade = m.f_lu is not None     # made before and freed since (OPERATOR_CACHE, the memory gate): made again
         try:
             op = self._factorise(m.f, m.exact)
+            c = _stats._active[0]
+            if c is not None and remade:
+                c.add(self, remade=1)
             op.made = m
             with self._lock:
                 m.f_lu, m.ref = op.f_lu, op.ref
@@ -1951,13 +1972,17 @@ class PlaneStack:
         """The operator at f with a preconditioner made for it. A stack derived from a base (with_branches) builds
         on the base's factorisation with a Woodbury update for its few extra branches; otherwise the Schur
         complement S = A^T D^-1 A is factorised by SuperLU (in a host thread)."""
+        c = _stats._active[0]
+        t0 = time.perf_counter()
         w, R_strip, z_tail = self._impedances(f)
         Dinv = self._preconditioner_admittance(w, R_strip, z_tail)
         base = self._base
         f_lu = f
         ref = None
         if base is not None and base.nb <= self.nb:
+            t_base = time.perf_counter()
             bop = base.operator(f, exact)
+            t1 = time.perf_counter()        # the base's own factorisation (when made just now) counts as the base's
             f_lu = bop.f_lu
             ref = bop.src or bop.ref     # borrowed by the base: this one is as good (or bad) as that borrow
             k0 = base.nb
@@ -1971,6 +1996,10 @@ class PlaneStack:
                 S_base^-1 U)^-1 U^T S_base^-1 v; only a k x k matrix (k = extra branches) is inverted."""
                 y = b(v)
                 return y - SiU @ (small_inv @ (Ut @ y))
+            if c is not None:
+                dt = (t_base - t0) + (time.perf_counter() - t1)
+                c.add(self, updates=1, update_s=dt)
+                _stats.thread_add("fact", dt)
         else:
             S = (self.ArT @ Dinv @ self.Ar).tocsc()
             # S is complex symmetric: symmetric mode keeps the A+Aᵀ ordering only when the diagonal pivots are
@@ -1985,7 +2014,10 @@ class PlaneStack:
             low = bool(getattr(self, "lu_fallbacks", 0) or getattr(self, "lu_low_memory", False))
             thresh = 0.0 if low else LU_PIVOT_THRESHOLD
             # admitted by the memory gate: room made, or a wait for the others being made, or the least fill
+            t_gate = time.perf_counter()
             with GATE.admit(lu_bytes(self)) as short:
+                if c is not None:
+                    c.add(self, gate_wait_s=time.perf_counter() - t_gate)
                 if short and thresh:
                     thresh = 0.0
                     self.lu_memory_fallbacks = getattr(self, "lu_memory_fallbacks", 0) + 1
@@ -2008,6 +2040,10 @@ class PlaneStack:
             # its measured fill plans the next ones (lu_bytes): the estimate from the unknowns runs low on fine grids
             self.lu_nnz = max(getattr(self, "lu_nnz", 0), lu.nnz)
             solve_S = lu.solve
+            if c is not None:               # the Schur complement's assembly, the gate's wait and SuperLU's work
+                dt = time.perf_counter() - t0
+                c.factorised(self, dt, lu.nnz)
+                _stats.thread_add("fact", dt)
         return _Operator(w, R_strip, z_tail, Dinv, solve_S, f_lu, ref=ref)
 
     def _factorise_diagonal(self, S, first: BaseException):
@@ -2069,20 +2105,43 @@ class PlaneStack:
         remove the remaining residual; a guess that does not lower the residual is ignored.
 
         Inside `gpu.use(...)` with a device, the iterations run there (solver/gpu.py); a solve the device cannot
-        finish (out of memory, a missing operation) is done again here on the CPU and counted in the run."""
+        finish (out of memory, a missing operation) is done again here on the CPU and counted in the run.
+
+        While a statistics collector is active (solver/stats.py), the solve, its iterations and its time are
+        counted for this model; what it computes does not change."""
+        c = _stats._active[0]
+        if c is None:
+            return self._solve_here(f, rhs_top, J, tol, max_cycles, guess, None)
+        mark = _stats.thread_mark()
+        t0 = time.perf_counter()
+        times = _stats.SolveTimes()
+        try:
+            out = self._solve_here(f, rhs_top, J, tol, max_cycles, guess, times)
+        except SolverError:
+            c.solved(self, None, time.perf_counter() - t0, mark, times, failed=True)
+            raise
+        c.solved(self, out[2], time.perf_counter() - t0, mark, times)
+        return out
+
+    def _solve_here(self, f, rhs_top, J, tol, max_cycles, guess, times) -> tuple:
+        """solve()'s work: the operator at f, then the iterations on the active device, or on the CPU (also when
+        the device fails). `times`: the solve's time split while statistics are collected, else None."""
         op = self.operator(f)
         run = gpu.active()
         if run is not None:
             try:
-                return self._solve(f, op, rhs_top, J, tol, max_cycles, guess, gpu.TorchMath(run, self))
+                return self._solve(f, op, rhs_top, J, tol, max_cycles, guess, gpu.TorchMath(run, self), times)
             except SolverError:
                 raise
             except Exception as e:      # noqa: BLE001 - any device failure: the CPU does this solve
                 run.failed(e)
-        return self._solve(f, op, rhs_top, J, tol, max_cycles, guess, _HostMath(self))
+                if times is not None:   # the device's attempt is not this solve's: count the CPU's afresh
+                    times.borrowed = times.refactor = 0
+        return self._solve(f, op, rhs_top, J, tol, max_cycles, guess, _HostMath(self, times), times)
 
-    def _solve(self, f, op, rhs_top, J, tol, max_cycles, guess, m) -> tuple:
-        """solve() with the matrix and vector work of `m` (_HostMath: numpy; gpu.TorchMath: a device)."""
+    def _solve(self, f, op, rhs_top, J, tol, max_cycles, guess, m, times=None) -> tuple:
+        """solve() with the matrix and vector work of `m` (_HostMath: numpy; gpu.TorchMath: a device); `times`
+        notes a borrowed preconditioner and a borrow past its budget (solver/stats.py)."""
         nb = self.nb
         # the right-hand side: the induced EMFs (KVL rows) and the injections (KCL rows, reference nodes dropped)
         rhs_h = np.concatenate([rhs_top.astype(complex), J[self.keep].astype(complex)])
@@ -2099,10 +2158,14 @@ class PlaneStack:
                 x0, r0 = m.dev(np.stack(G, axis=1) @ c), m.dev(r)
         # right preconditioning: (K·M⁻¹)·y = r0, x = x0 + M⁻¹·y  -> the Krylov residual is the true residual
         borrowed = op.f_lu != f
+        if times is not None and borrowed:
+            times.borrowed += 1
         y, its, ok = _gmres(lambda v: m.matvec(op, m.precond(op, v)), r0, tol, max_cycles=max_cycles, bnorm=bnorm,
                             max_its=op.borrow_budget() if borrowed else None, vec=m.vec,
                             extra_cycles=0 if borrowed else GMRES_EXTRA_CYCLES)
         if not ok and borrowed:
+            if times is not None:
+                times.refactor += 1
             # The borrowed preconditioner is not good enough here (near a resonance it can take 10x the
             # iterations): factorise at f and go on from the solution so far. Without the budget, refboard's
             # board-wide model at 1.2 GHz ran 996 iterations (127 s) on a 400 MHz factorisation.
@@ -2383,13 +2446,40 @@ class _HostVectors:
 _HOST_VECTORS = _HostVectors()
 
 
+class _TimedVectors(_HostVectors):
+    """_HostVectors with the basis work (Gram-Schmidt's projections, the cycle's combination) timed into a solve's
+    time split (solver/stats.py); the same arithmetic."""
+
+    def __init__(self, times: _stats.SolveTimes):
+        """Time into `times`."""
+        self.times = times
+
+    def project(self, V, j, w):
+        """_HostVectors.project, timed."""
+        t0 = time.perf_counter()
+        out = _HostVectors.project(V, j, w)
+        self.times.gs += time.perf_counter() - t0
+        return out
+
+    def combine(self, y, V, k):
+        """_HostVectors.combine, timed."""
+        t0 = time.perf_counter()
+        out = _HostVectors.combine(y, V, k)
+        self.times.gs += time.perf_counter() - t0
+        return out
+
+
 class _HostMath:
     """PlaneStack.solve's matrix work in numpy and SciPy (gpu.TorchMath is the device twin)."""
     vec = _HOST_VECTORS
 
-    def __init__(self, stack: "PlaneStack"):
-        """The math for solves on `stack`."""
+    def __init__(self, stack: "PlaneStack", times: Optional[_stats.SolveTimes] = None):
+        """The math for solves on `stack`; `times`: the solve's time split while statistics are collected
+        (solver/stats.py), the basis work then timed too."""
         self.st = stack
+        self.times = times
+        if times is not None:
+            self.vec = _TimedVectors(times)
 
     @staticmethod
     def dev(v):
@@ -2404,23 +2494,40 @@ class _HostMath:
     def matvec(self, op: _Operator, x: np.ndarray) -> np.ndarray:
         """The system matrix times x = [I; V]: [Z I - A V; A^T I], with Z I = (R + jw L_p) I for the strips (the
         FFT product) and the diagonal impedances for capacitances and branches."""
-        st = self.st
+        st, t = self.st, self.times
+        t0 = time.perf_counter() if t is not None else 0.0
         nb, ns = st.nb, st.ns
         Ib = x[:nb]
         top = np.empty(nb, complex)
-        top[:ns] = op.R_strip * Ib[:ns] + 1j * op.w * st.Lp_matvec(Ib[:ns])
+        top[:ns] = op.R_strip * Ib[:ns] + 1j * op.w * st.Lp_matvec(Ib[:ns], t)
         top[ns:] = op.z_tail * Ib[ns:]
         top -= st.Ar @ x[nb:]
-        return np.concatenate([top, st.ArT @ Ib])
+        out = np.concatenate([top, st.ArT @ Ib])
+        if t is not None:
+            t.matvec += time.perf_counter() - t0
+            t.matvecs += 1
+        return out
 
     def precond(self, op: _Operator, r: np.ndarray) -> np.ndarray:
         """The preconditioner M^-1 r: the saddle-point system with Z replaced by its approximation D, solved
         exactly by block elimination: y = S^-1 (r2 - A^T D^-1 r1) with S = A^T D^-1 A (the factorised Schur
         complement), then the branch part D^-1 (r1 + A y)."""
-        st = self.st
+        st, t = self.st, self.times
         r1, r2 = r[:st.nb], r[st.nb:]
-        y = op.solve_S(r2 - st.ArT @ (op.Dinv @ r1))
-        return np.concatenate([op.Dinv @ (r1 + st.Ar @ y), y])
+        if t is None:
+            y = op.solve_S(r2 - st.ArT @ (op.Dinv @ r1))
+            return np.concatenate([op.Dinv @ (r1 + st.Ar @ y), y])
+        # the same, timed: the whole application and its SuperLU triangular solves apart (solver/stats.py)
+        t0 = time.perf_counter()
+        rhs = r2 - st.ArT @ (op.Dinv @ r1)
+        t1 = time.perf_counter()
+        y = op.solve_S(rhs)
+        t2 = time.perf_counter()
+        out = np.concatenate([op.Dinv @ (r1 + st.Ar @ y), y])
+        t.lu += t2 - t1
+        t.precond += time.perf_counter() - t0
+        t.preconds += 1
+        return out
 
 
 # --------------------------------------------------------------------------- helpers

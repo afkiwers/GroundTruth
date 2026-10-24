@@ -1,12 +1,14 @@
 """Where Simulate (or the fix search) spends its time, on a real board (development aid).
 
     .venv/Scripts/python tools/dev/profile_sim.py BOARD SETTINGS [--only SW1,SPI_SCK] [--suggest] [--top 40]
-        [--threads N] [--out FILE.prof]
+        [--threads N] [--resolution 4] [--out FILE.prof] [--json FILE.json] [--no-profile]
 
 Runs simulate (and with --suggest the fix search from that result) under cProfile and prints: the time of each
 phase from the progress messages (model building, each solve, finishing), the slowest progress steps, and the
 functions with the most cumulative and own time. cProfile only sees the calling thread's Python code; the solver
-threads show up as waiting (run_parallel). Use --threads 1 to see the solves themselves.
+threads show up as waiting (run_parallel). Use --threads 1 to see the solves themselves. The run's solver
+statistics (solver/stats.py) are printed too (tools/dev/run_stats.py) and, with --json, written with the counts
+and the progress steps; --no-profile leaves cProfile out (its overhead on a long run).
 """
 import argparse
 import cProfile
@@ -63,7 +65,10 @@ def main() -> int:
     ap.add_argument("--suggest", action="store_true", help="also run the fix search from the simulation")
     ap.add_argument("--top", type=int, default=35)
     ap.add_argument("--threads", type=int)
+    ap.add_argument("--resolution", type=float, help="analysis.resolution for this run (the plugin's Resolution)")
     ap.add_argument("--out", help="save the profile (for snakeviz and the like)")
+    ap.add_argument("--json", help="write the solver statistics, the counts and the progress steps to this file")
+    ap.add_argument("--no-profile", action="store_true", help="run without cProfile (a long run's overhead)")
     args = ap.parse_args()
     from groundtruth.adapters.file_source import load_board
     from groundtruth.analysis.simulate import simulate
@@ -78,6 +83,8 @@ def main() -> int:
                       converters=[c for c in cfg.converters if any(k in c.name for k in keys)])
     if args.threads:
         cfg = replace(cfg, analysis=replace(cfg.analysis, threads=args.threads))
+    if args.resolution:
+        cfg = replace(cfg, analysis=replace(cfg.analysis, resolution=args.resolution))
     print(f"nets: {[n.name for n in cfg.nets]}; power stages: {[c.name for c in cfg.converters]}")
     steps: list[tuple[float, str, float]] = []
     t0 = time.perf_counter()
@@ -88,7 +95,8 @@ def main() -> int:
 
     counts = _count_solver_work()
     prof = cProfile.Profile()
-    prof.enable()
+    if not args.no_profile:
+        prof.enable()
     res = simulate(board, cfg, progress=progress)
     t_sim = time.perf_counter() - t0
     sim_counts = {k: list(v) for k, v in counts.items()}
@@ -103,6 +111,22 @@ def main() -> int:
                                                               for k, v in counts.items()}))[: 2 if args.suggest else 1]:
         print(f"  {label}: {c['factorise'][0]} factorisations ({c['factorise'][1]:.1f} s in all, summed over "
               f"threads), {c['solve'][0]} solves, {c['solve'][2]} GMRES iterations ({c['solve'][1]:.1f} s)")
+    stats = (res.solver or {}).get("stats")
+    if stats:                       # the run's own solver statistics (solver/stats.py), as run_stats.py prints them
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from run_stats import show
+        print("\nthe run's solver statistics:")
+        show(stats, 15)
+    if args.json:
+        import json
+        Path(args.json).write_text(json.dumps({
+            "board": str(args.board), "settings": str(args.settings), "only": args.only,
+            "resolution": cfg.analysis.resolution, "seconds": round(t_sim, 2), "solver": res.solver,
+            "counts": sim_counts, "steps": [{"t": round(tt, 2), "msg": m, "frac": round(fr, 4)}
+                                             for tt, m, fr in steps]}, indent=1, default=str), encoding="utf-8")
+        print(f"\nwritten: {args.json}")
+    if args.no_profile:
+        return 0
     # each progress step lasts until the next one (the steps run in parallel: these are wall-clock gaps)
     gaps = [(steps[k + 1][0] - steps[k][0], steps[k][1], steps[k][2]) for k in range(len(steps) - 1)]
     print("\nthe longest gaps between progress messages (wall clock; the bar does not move meanwhile):")
