@@ -289,6 +289,15 @@ is one solve, not four. The groups make the three converters' conducted bands re
 of a single solve, ~470 s. Estimated with the groups planned for one solve in flight: job B −300 to −400 s, job A
 −50 to −80 s (its four route rounds of one solve would be one).
 
+Fixed in ee38bcb (`kept_bytes`, `solve_groups(admitted=...)`, the conducted bands ordered together;
+`tools/dev/group_plan.py`: job B at 8x for 17.9 GB, 13 → 5 groups, conv1 and conv2's conducted bands in one).
+Job B again on the M2 with it (`runs/2026-10-25_10-55-34`): **3 700 s, still 13 groups**: the Mac had 11.9 GB
+available at the start (17.9 for the run before), so one DC solve's estimate (5.3 GB) and one component's cached
+factorisations (~2.5 GB) filled the 9.5 GB it may plan with, as before the fix. The same 12 781 iterations; 6.2 GB
+swapped in (4.1 before), each iteration 10-15 % slower (board-wide 389-428 ms against 356-383): the 188 s are the
+Mac's state. On the 24 GB M2, beside other programs, the solves that fit at once depend on what else is open
+(job B's process peaks at ~11.6 GB). To be run again with ~18 GB free.
+
 ## 6. Researched, not planned (the user's choice, 2026-10-24)
 
 - **Board-wide model capped at 4x** (a setting, default min(resolution, 4)): −25-45 % at 8x, −60 % and more at 16x; 8x
