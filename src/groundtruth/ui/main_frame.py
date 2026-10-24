@@ -550,7 +550,7 @@ class MainFrame(ConfigActions, wx.Frame):
         self.t_cancel = button("Cancel", self.on_cancel, "danger")
         bar.AddSpacer(12)
         self._config_buttons(button)            # Configuration ▾, Undo, Redo (ui/config_menu.py)
-        self.t_clear = button("Clear GT drawings", self.on_clear) if session.live else None
+        self.t_clear = button("Clear GT markers", self.on_clear) if session.live else None
         bar.AddStretchSpacer()
         button("Preferences…", lambda e: self.on_preferences(),
                tip="your settings on this computer, for every board: Simulate's resolution, the heatmaps' via "
@@ -2730,7 +2730,7 @@ class MainFrame(ConfigActions, wx.Frame):
         self.SetStatusText("comparison done")
 
     def on_clear(self, _=None):
-        """Clear GT drawings: remove everything GroundTruth drew on the board, as a job."""
+        """Clear GT markers: remove everything GroundTruth drew on the board, as a job."""
         self._start("clearing GroundTruth's drawings…", lambda progress: self.session.clear(),
                     lambda n: self.SetStatusText(f"removed {n} groundtruth item(s) from the board"),
                     what="clear GroundTruth's drawings", cancellable=False, kicad=True)

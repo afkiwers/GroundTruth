@@ -1,4 +1,4 @@
-"""KiCad IPC plugin entry point of the "Clear GT drawings" action (see plugin.json). KiCad 10 starts an action's
+"""KiCad IPC plugin entry point of the "Clear GT markers" action (see plugin.json). KiCad 10 starts an action's
 entry script without the "args" listed in plugin.json, so each action has a script of its own."""
 import time
 

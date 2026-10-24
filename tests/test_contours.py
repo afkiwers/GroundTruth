@@ -96,7 +96,7 @@ def test_isotherms_and_the_segment_budget():
 
 def test_the_map_on_the_board_is_one_group_of_segments_and_turned_labels():
     """draw_contours: every line piece as segments (index lines thicker), each label centred and turned along its
-    line, a legend; one group that Clear GT drawings removes."""
+    line, a legend; one group that Clear GT markers removes."""
     pytest.importorskip("kipy")
     from groundtruth.adapters import kipy_sink
     from kipy.util.board_layer import layer_from_canonical_name

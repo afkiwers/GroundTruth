@@ -30,7 +30,7 @@
     },
     {
       "identifier": "clear",
-      "name": "Clear GT drawings",
+      "name": "Clear GT markers",
       "description": "Remove all markers, contours and arrows GroundTruth drew on the board (one undo step)",
       "show-button": false,
       "scopes": ["pcb"],

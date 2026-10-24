@@ -93,7 +93,7 @@ def _connect(log):
 
 
 def _clear(log) -> int:
-    """The "Clear GT drawings" action. No window of ours is open while it talks to KiCad."""
+    """The "Clear GT markers" action. No window of ours is open while it talks to KiCad."""
     kb, failure = _connect(log)
     if failure:
         log.mark(failure[0])

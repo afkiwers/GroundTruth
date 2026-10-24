@@ -48,7 +48,7 @@ ENABLED: list[str] = []      # drawing layers enabled on the board by this proce
 def _drawing_layer(board: Any, name: str):
     """The layer to draw on, enabled on the board first when it is not (the user: "when not enabled, enable
     automatically"). KiCad 10 would create shapes on a disabled layer but refuse to group them: invisible, outside
-    'Clear GT drawings', removable only by Undo (seen on refboard, which enables User.1 to User.4 only).
+    'Clear GT markers', removable only by Undo (seen on refboard, which enables User.1 to User.4 only).
 
     set_enabled_layers DELETES the content of every layer left out of the new list, and cannot be undone: the call
     keeps the copper count and passes every layer enabled now plus the new one, and the result is checked (a
@@ -140,7 +140,7 @@ def _polygon(rings: list[list[tuple[float, float]]], layer, filled: bool = False
 
 
 def _commit_group(board: Any, items: list, name: str, message: str) -> int:
-    """Create the items, then group them under `name` so 'Clear GT drawings' finds them.
+    """Create the items, then group them under `name` so 'Clear GT markers' finds them.
 
     KiCad 10 only groups items that are already on the board: a group created in the same commit as its items
     is rejected as empty ("no overlapping layers"), and kipy does not report per-item failures. So the items
@@ -172,7 +172,7 @@ def _commit_group(board: Any, items: list, name: str, message: str) -> int:
     when_ready(group_them)
     if not any(g.name == name for g in board.get_groups()):
         raise RuntimeError(f"KiCad drew {len(created)} item(s) but did not group them as {name!r}, so "
-                           "'Clear GT drawings' cannot remove them; use Undo (Ctrl+Z) instead")
+                           "'Clear GT markers' cannot remove them; use Undo (Ctrl+Z) instead")
     return len(created)
 
 
@@ -373,7 +373,7 @@ def draw_suggestions(board: Any, suggestions, layer_name: str = "User.8") -> int
 @_when_ready
 def place_vias(board: Any, mods) -> int:
     """Create real through vias for via modifications (one undo step). These are design changes, not
-    annotations: they are not grouped, so 'Clear GT drawings' leaves them alone."""
+    annotations: they are not grouped, so 'Clear GT markers' leaves them alone."""
     from kipy.board_types import Via
     from kipy.proto.board import board_types_pb2 as bt
     from kipy.proto.board.board_types_pb2 import BoardLayer, PadStackShape, ViaType
