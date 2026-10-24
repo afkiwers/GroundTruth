@@ -167,7 +167,34 @@ largest piece of a solve's memory: ~2-3 GB on a route model). With 13 GB already
 once (M1 #1) fit on the 24 GB Mac only with less memory per solve (the basis first) and nothing else open; the
 estimates of section 5 are re-based on 974 s for job A.
 
-**Job B**: running (started 2026-10-24 evening); to compare with 10-19's 4 030 s.
+**Job B** (2026-10-24 19:46, `history/runs/2026-10-24_19-46-44`): **4 520 s** (10-19's run of the four converters:
+4 030 s, with older settings and code; the conv1 / conv2 board-wide solves now take 3 910 iterations each against
+3 391 then).
+
+- threads: 4 by cores, **1 by memory** for the whole run (11.94 GB available; the largest solve the **DC model's,
+  budgeted at 20.89 GB**); 13 groups; CPU 15 % of the 8 cores. The memory gate freed cached factorisations 74 times:
+  the board-wide model made 31 factorisations (348 s, ~11 s each), **16 of them repeats** (~180 s).
+- phases: models 71 s, **solves 4 422 s (98 %)**, finishing 9 s.
+- time by model kind (rounds): **board-wide 2 928 s (65 %)**, conducted-band models ~970 s (21 %), hot loops 254 s
+  (6 %), victims 224 s (5 %), **DC 46 s (1 %)**.
+- board-wide: conv1 and conv2 11 solves each, 3 910 iterations each (~355 per solve; three borrows past their budget
+  re-factorised), ~1 000 s of GMRES each; conv3 1 651 iterations 420 s; 255 ms per iteration: **SuperLU 52 %,
+  Gram-Schmidt 28 %**, L_p 10 %.
+- conducted-band, hot-loop and victims models (580-720k nodes, 1.7-2.1 M unknowns): 256-348 ms per iteration:
+  **Gram-Schmidt 36-43 %**, SuperLU 21-26 %, L_p 20-23 %; their factorisations cheap (2-3 s each).
+- the DC model (1 797 392 nodes, 5.3 M unknowns): **one factorisation, 8.2 s** (81 M fill); 16 solves of 1-2
+  iterations, 35 s. Its estimate (20.9 GB) is ~10x what it uses, and it alone makes the whole run single-threaded.
+- totals: 86 factorisations 491 s (11 %), 72 low-rank updates 14 s, 108 solves, 14 243 iterations **3 907 s (87 %)**.
+- memory: up to 10.0 GB sampled, 15.0 GB peak; 17.9 GB free at the start, 5.0 GB at the least; swap in 1.8 GB.
+
+### 4.4 What the two 8x runs say
+
+Across jobs A and B on the M2, GMRES iterations are ~88 % of the time and run on one thread. Of the iterations' time:
+**SuperLU's triangular solves ~45 %, Gram-Schmidt ~32 %**, the L_p product (FFTs and multiply-add) ~14 %, the rest
+~9 %. Factorisations are ~11 % (a third of the board-wide ones repeats where the memory gate freed them). The DC
+model costs 1 % of the time; only its estimate matters. One solve keeps the process at 13-15 GB, so more solves at
+once on the 24 GB Mac need less memory per solve too (the Krylov basis: 1.5-3 GB per solve; the solutions' dense
+grids; the cached factorisations).
 
 ## 5. Options and estimated savings
 
@@ -188,6 +215,24 @@ left, they don't add.
 Expected: M1 → A ~30-50 min, B ~22-35 min with ≥ 16 GB free (the M2 at ~4 GB free ~60-85 / ~38-50 min); M1+M2 → A
 ~25-40, B ~18-30 min; M3 a further 10-30 % of all, 30-50 % of the board-wide work (4.2). To be checked against
 4.3 and re-ranked before M1 starts.
+
+### 5.1 Re-ranked with the measurements (M0, 2026-10-24)
+
+Baseline on the M2 at 8x, measured: **job A 974 s**, **job B 4 520 s** (4.3, 4.4).
+
+| # | Change | What the measurement says | Est. saving A / B | Milestone |
+|---|---|---|---|---|
+| 1 | Memory-true accounting and per-round thread planning (as #1 above), and no cache-freeing where the memory is really there | both runs single-threaded (15-16 % CPU); job B 16 repeat factorisations (~180 s) | −30-40 % / −30-45 % with two solves at once | M1 |
+| 2 | Less memory per solve, so that #1 can run two or three at once on the 24 GB Mac: the solutions' dense grids, the cached factorisations of large models, models whose runs are done | one solve keeps 13-15 GB | (makes #1's saving possible on the M2) | M1 |
+| 3 | A faster Gram-Schmidt (nogil, parallel over the basis; memory-bound zgemv reaches ~20-25 GB/s on one core of a ~100 GB/s machine) | ~32 % of the iterations' time | −12-18 % | M1 |
+| 4 | GMRES stops on the true residual when its estimate first meets the tolerance | — | −3-8 % | M1 |
+| 7 | Faster sparse solver (PARDISO / Accelerate / PyAMG behind a backend) | SuperLU's triangular solves ~45 % of the iterations' time, factorisations ~11 % | −25-35 % of what is left | M3 |
+| 2 (old) | DC paths as a resistive network | the DC model is 1 % of job B's time; only its estimate matters (fixed by #1) | ~1 % | dropped |
+| 5, 6 | Lock-step solves; fewer factorisations beyond the repeats | 4.2: k columns save 9-26 % of a SuperLU solve; the remaining factorisations ~8 % | −2-6 % | deferred |
+
+Expected, compounded: job A 974 s → ~650 s (#1-2) → ~530 s (#3-4) → **~370-420 s with M3 (6-7 min)**; job B 4 520 s →
+~2 800 s → ~2 300 s → **~1 550-1 750 s with M3 (26-29 min)**. On a machine with more free memory (the Dell) #1
+goes further (three or four solves at once).
 
 ## 6. Researched, not planned (the user's choice, 2026-10-24)
 
