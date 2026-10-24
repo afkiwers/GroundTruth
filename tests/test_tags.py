@@ -240,3 +240,28 @@ def test_labelled_nets_joined_by_a_large_resistor_are_one_path(tmp_path):
     cfg.nets = [s]
     res = run_checks(board, cfg)
     assert ("ADC_I_RAIL_1", "U1.1") in res.routes and res.routes[("ADC_I_RAIL_1", "U1.1")].parts == ["R1"]
+
+
+def test_a_reannotated_board_s_converter_follows_its_labels(tmp_path):
+    """The board re-annotated after detection (the user's refboard, 2026-10-23: the switches swapped references): the
+    converter's parts, which no longer fit its roles, are taken from its GT labels again, with a note; a converter
+    whose parts still fit is left alone."""
+    from groundtruth.analysis.tags import follow_labels
+    from groundtruth.config.settings import validate
+    from dataclasses import replace
+    g = discrete_buck_board()
+    g.label("Q1", "conv1_hs")
+    g.label("Q2", "conv1_ls")
+    board, sc, _ = make(tmp_path, g, "before", nets=())
+    (d,) = detect_converters(board, sc.config)
+    spec = replace(d.spec, name="buck conv1")
+    assert follow_labels(board, [spec]) == ([spec], [])
+    _rename(g, "Q1", "Q9")
+    _rename(g, "Q2", "Q1")
+    _rename(g, "Q9", "Q2")
+    board, sc, _ = make(tmp_path, g, "after", nets=())
+    assert validate(replace(sc.config, converters=[spec]), board)            # the old parts no longer fit
+    (new,), notes = follow_labels(board, [spec])
+    assert (new.high_side, new.low_side) == (["Q2"], ["Q1"])
+    assert notes == ["buck conv1: Q1 → Q2, Q2 → Q1 (its GT labels)"]
+    assert validate(replace(sc.config, converters=[new]), board) == []

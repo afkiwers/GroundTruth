@@ -1342,6 +1342,10 @@ Pass through and C304 as a part across the path.</p>
 <p><b>Shortcut:</b> select one bit of copper on each net of the path in the PCB editor and press <b>Add KiCad
 selection</b> (see <a href="#nets">A whole path from KiCad</a>). GroundTruth works out the same labels and adds the
 path at once.</p>
+<p><b>Re-annotated board:</b> the labels move with the parts, so when the parts get new references (U502 becomes
+U501) a converter named after its label (<i>buck conv3</i> for <code>conv3_*</code>) whose parts no longer fit takes
+the parts its labels now name at the next Run checks or Simulate; the status line says what changed (one Undo
+step). The command line does the same for its run.</p>
 <a name="kicad11"></a>
 <table border="1" cellpadding="6" cellspacing="0" width="100%"><tr><td>
 <b>Note: writing the GT labels into the schematic automatically needs KiCad 11.</b> KiCad 10's API can't change a
