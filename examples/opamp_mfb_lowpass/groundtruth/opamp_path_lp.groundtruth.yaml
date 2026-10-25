@@ -1,0 +1,85 @@
+# GroundTruth settings file: return-path / EMI analysis of kicad-ipc:opamp_path.kicad_pcb
+# Edit by hand or from the KiCad plugin. `groundtruth init` refreshes the parts list and keeps your edits.
+# Part models: short | open | resistor (R) | cap (C, ESR, ESL) | inductor (L, R) | ferrite (R, L)
+# Net entries: driver/receivers are "REF.PAD"; freq in Hz (or "20MHz"); rise_time in s (or "2ns").
+# Converters: switching power stages (hot loop, input capacitors, conducted emission); `groundtruth detect` suggests them.
+# Bridges: motor drives (half-bridge legs on one bus, six-step), with the operating point and the motor; detected too.
+version: 1
+reference_nets: [GND]
+analysis:
+  grid_mm: auto
+  margin_mm: 10.0
+  solve_points: 4
+  limit_class: B
+  distance_m: auto
+  ground_reflection: true
+  planes: auto
+  plane_capacitance: true
+  cavity_max_nodes: 40000
+  max_solves: 10
+  max_frequency: auto
+  driver_ohms: 25.0
+  load_pf: 5.0
+  threads: auto
+  gpu: auto
+  conducted: cispr32
+  conducted_class: B
+  via_plating_um: 25.0
+rules:
+  stitch_distance_mm: 2.0
+  decap_distance_mm: 5.0
+  edge_factor: 3.0
+  min_gap_mm: 0.1
+  detour_warning: 1.25
+  detour_error: 2.0
+  emi_margin_db: 6.0
+  resonance_db: 10.0
+  overshoot_warning: 0.25
+  overshoot_error: 0.5
+  current_density_warning: 50.0
+  current_density_error: 100.0
+  via_load_warning: 100.0
+  via_load_error: 150.0
+# Nets to analyse (manual list), e.g.
+#   - {name: /SPI_SCK, driver: U1.12, receivers: [U3.5], freq: 20MHz, rise_time: 2ns, amplitude_v: 3.3}
+nets:
+  # the filter's input path: J1.2 -> R1 -> R3 -> U1 (inverting, its + input on GND) -> J2.2; a 10 kHz square wave
+  # inside the passband, edged at 1 us; the Bode sweep from 100 Hz
+  - {name: Net-(J1-Pin_2), driver: J1.2, receivers: [J2.2], freq: 10kHz, rise_time: 1us, amplitude_v: 1.0, sweep_from: 100Hz, source: manual, reviewed: true, class: Signal}
+converters: []
+# Motor bridges (`groundtruth detect --write` finds the legs; the operating point and the motor are yours), e.g.
+#   - name: bridge J1
+#     rail: VBUS
+#     ground: GND
+#     legs:
+#       - {phase: A, switch_node: PH_A, high_side: [Q1], low_side: [Q2], output: J1.A}
+#     input_connector: [J5.1, J5.2]
+#     v_bus: 48
+#     f_pwm: 20kHz
+#     i_phase: 100
+#     mode: motoring
+#     speed_rpm: 3000
+#     motor: {connection: star, r_ll: 20m, l_ll: 40uH, ke_ll: 5, pole_pairs: 7}
+bridges: []
+components:
+  C1: {value: 100n0, footprint: C_0603_1608Metric_HomePlatePaste, model: cap, C: 1e-07, ESR: 0.0159, ESL: 5e-10, C_bias: '+0.2%@5V, -7.6%@12.5V, -27%@25V, -47%@37.5V, -62%@50V', from_schematic: [C, ESR, ESL, C_bias], note: value changed from '1u0'; check model, removed: true}
+  C2: {value: 39n0, footprint: C_0603_1608Metric, model: cap, C: 3.9e-08, ESR: 2.0, ESL: 5e-10, C_bias: '+0%@5V, -0.2%@12.5V, -0.6%@25V, -1.4%@37.5V, -2.5%@50V', from_schematic: [C, ESR, ESL, C_bias], note: value changed from '100n0'; check model}
+  C3: {value: 100n0, footprint: C_0603_1608Metric_HomePlatePaste, model: cap, C: 1e-07, ESR: 0.0159, ESL: 5e-10, C_bias: '+0.2%@5V, -7.6%@12.5V, -27%@25V, -47%@37.5V, -62%@50V', from_schematic: [C, ESR, ESL, C_bias], note: value changed from '1u0'; check model, removed: true}
+  C4: {value: 100n0, footprint: C_0603_1608Metric_HomePlatePaste, model: cap, C: 1e-07, ESR: 0.0159, ESL: 5e-10, C_bias: '+0.2%@5V, -7.6%@12.5V, -27%@25V, -47%@37.5V, -62%@50V', from_schematic: [C, ESR, ESL, C_bias], note: value changed from '1u0'; check model, removed: true}
+  C5: {value: 1n0, footprint: C_0402_1005Metric_RoundPaste, model: cap, C: 1e-09, ESR: 0.0796, ESL: 4e-10, C_bias: 1e-09, from_schematic: [C, ESR, ESL, C_bias], note: value changed from '1u0'; check model}
+  J1: {value: Conn_01x02_Male, footprint: Hirose_DF57H-2P-1.2V_1x02_P1.2mm_Socket, model: open}
+  J2: {value: Conn_01x02_Male, footprint: Hirose_DF57H-2P-1.2V_1x02_P1.2mm_Socket, model: open}
+  J3: {value: Conn_01x02_Male, footprint: Hirose_DF57H-2P-1.2V_1x02_P1.2mm_Socket, model: open}
+  R1: {value: 590R0, footprint: R_0603_1608Metric, model: resistor, R: 590.0, from_schematic: [R], note: value changed from '1k0'; check model}
+  R2: {value: 1k0, footprint: R_0603_1608Metric, model: resistor, R: 1000.0, from_schematic: [R], removed: true}
+  U1: {value: OPA376AIDBVR, footprint: SOT-23-5, model: amplifier, gbw: 5500000.0, z_out: 150.0, c_in: 1.3e-11, slew: 0.002, cmrr: 90.0, aol: 134.0, from_schematic: [gbw, z_out, c_in, slew, cmrr, aol], note: an op-amp (its pin names)}
+  U2: {value: NCP718ASN330T1G, footprint: SOT-23-5, model: open}
+  C6: {value: 100n0, footprint: C_0603_1608Metric_HomePlatePaste, model: cap, C: 1e-07, ESR: 0.0159, ESL: 5e-10, C_bias: '+0.2%@5V, -7.6%@12.5V, -27%@25V, -47%@37.5V, -62%@50V', from_schematic: [C, ESR, ESL, C_bias], note: value changed from '1u0'; check model}
+  C7: {value: 1u0, footprint: C_0805_2012Metric, model: cap, C: 1e-06, ESR: 0.003, ESL: 6e-10, C_bias: 7.5e-07, from_schematic: [C, ESR, ESL, C_bias]}
+  C8: {value: 1u0, footprint: C_0805_2012Metric, model: cap, C: 1e-06, ESR: 0.003, ESL: 6e-10, C_bias: 7.5e-07, from_schematic: [C, ESR, ESL, C_bias]}
+  R3: {value: 499R0, footprint: R_0603_1608Metric, model: resistor, R: 499.0, from_schematic: [R]}
+  R4: {value: 2k94, footprint: R_0603_1608Metric, model: resistor, R: 2940.0, from_schematic: [R]}
+waivers: []
+# What-if edits for `groundtruth compare` / `--what-if` (plain check/simulate ignore them), e.g.
+#   - {type: via, at: [121.0, 122.6], net: GND, size: 0.6, drill: 0.3, enabled: true}
+modifications: []

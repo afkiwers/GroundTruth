@@ -39,6 +39,7 @@ Rules this list follows:
 
 | Key | Source | Used for |
 |---|---|---|
+| TI SBOS406 | Texas Instruments, *OPA376, OPA2376, OPA4376 Low-Noise, Low Quiescent Current, Precision Operational Amplifier*, SBOS406G, rev. Dec. 2015, §8.2 "Typical Application", Eqs. 1-2. | The multiple-feedback low-pass of examples/opamp_mfb_lowpass and its closed-form transfer function, the reference of tests/test_example_mfb.py. |
 | Hammerstad 1980 | E. Hammerstad, Ø. Jensen, "Accurate models for microstrip computer-aided design," *IEEE MTT-S Int. Microwave Symp. Digest*, 1980, pp. 407–409. | Microstrip Z0 and εeff with the strip-thickness corrections (`spectrum.microstrip`). |
 | Wheeler 1978 | H. A. Wheeler, "Transmission-line properties of a strip line between parallel planes," *IEEE Trans. Microw. Theory Tech.*, vol. 26, no. 11, pp. 866–876, 1978. | Symmetric stripline Z0 with thickness (`spectrum.stripline`). |
 | Cohn 1954 | S. B. Cohn, "Characteristic impedance of the shielded-strip transmission line," *IRE Trans. Microw. Theory Tech.*, vol. 2, no. 2, pp. 52–57, 1954. | The exact zero-thickness stripline Z0 (the cross-section solver's check). |
