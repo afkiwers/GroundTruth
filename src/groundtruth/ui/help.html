@@ -1110,6 +1110,10 @@ model on the Parts tab) when one of these holds, checked in this order:</p>
   INN), one output (OUT, VOUT, VO, or else its only pin of electrical type <i>output</i>) and supply pins (V+, V−,
   VCC, VDD, VEE, VSS). The supply pins are what tell it from a connector with + / − pins.</li>
 </ol>
+<p>Detection runs a path through a recognised op-amp without labels: from the net of its input to the net of its
+output, the end on the input side as the driver (a connector feeding the stage), the end after it as the receiver.
+When the + input is on ground (an inverting stage, a multiple-feedback filter) the signal is taken in at the −
+input. The path's description lists the feedback parts (<code>C5 1n0 ∥ U1</code>, <code>R4 2k94 → …</code>).</p>
 <p>A part marked DNP is never an op-amp. Anything else stays <code>open</code>: its pins are only ports, the circuit
 leaves it out, and the parts around it then behave as if it weren't there (a feedback network does nothing, the
 transfer function misses half the stage). The Signal paths tab warns about it (⚠ "… looks like an op-amp … but has

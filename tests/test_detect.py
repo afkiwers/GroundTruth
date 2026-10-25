@@ -126,8 +126,8 @@ def test_a_net_that_measures_a_supply_is_a_signal(tmp_path):
 def test_an_op_amp_driven_net_gets_the_fastest_signal_its_op_amp_can_make(tmp_path, fields, freq, rise):
     """A net with no class from its names, driven by an op-amp's output (U5 in opamp_path_board): its suggested edge
     and frequency come from U5's slew rate or bandwidth [A37] (a TLV6001's 0.5 V/µs: 5.28 µs at 48.2 kHz), not
-    10 MHz / 2 ns, with a reason saying so; the net before U5 (driven by U1) keeps the default, and so does every net
-    when U5 has no such data."""
+    10 MHz / 2 ns, with a reason saying so; detection's own path runs through U5 from U1 (2026-10-25) and keeps the
+    default, and so does every net when U5 has no such data."""
     from boardgen import opamp_path_board
     from conftest import make
     from groundtruth.analysis.detect import suggest_net
@@ -135,12 +135,26 @@ def test_an_op_amp_driven_net_gets_the_fastest_signal_its_op_amp_can_make(tmp_pa
     board, sc, _ = make(tmp_path, opamp_path_board(**fields), "amp", nets=())
     cfg = sc.config
     apply_fields(cfg, board)
-    after, _ = suggest_net(board, cfg, "SIG_C")
+    # the op-amp's output net alone (its input side cut off: the stage's input as the path's end), as before
+    # detection crossed op-amps: U5 drives it
+    from groundtruth.analysis import detect
+    by_net, fp_of = detect._index(board)
+    real = detect._group
+    detect._group = lambda b_, c_, n_, bn_, amps=True: real(b_, c_, n_, bn_, amps=False)
+    try:
+        after, _ = detect._suggest(board, cfg, "SIG_C", by_net, fp_of, picked=True)
+    finally:
+        detect._group = real
     assert after.spec.driver == "U5.1"
     assert after.spec.freq == pytest.approx(freq, rel=0.01) and after.spec.rise_time == pytest.approx(rise, rel=0.01)
     assert ("U5's" in after.reasons[-1]) == bool(fields)
-    before, _ = suggest_net(board, cfg, "SIG_A")
-    assert (before.spec.freq, before.spec.rise_time) == (10e6, 2e-9)
+    # detection runs the path through U5 (one path U1.1 -> U2.1 from either net): U5 is a later stage there, its
+    # slew and pole applied by the path model, so the driver's signal keeps the default
+    # (without fields U5 is no amplifier: no Gain field, no supply pins; the path ends at its input as before)
+    for net in ("SIG_A", "SIG_C") if fields else ("SIG_A",):
+        whole, _ = suggest_net(board, cfg, net)
+        assert (whole.spec.driver, whole.spec.receivers) == ("U1.1", ["U2.1" if fields else "U5.3"]), net
+        assert (whole.spec.freq, whole.spec.rise_time) == (10e6, 2e-9)
 
 
 @pytest.mark.parametrize("kelvin", ["RTN", "GR", "KS"])

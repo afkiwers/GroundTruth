@@ -398,7 +398,8 @@ def _part_text(board: Board, config: Config, ref: str) -> str:
     m = config.model_for(ref)
     if m is not None and m.kind == "amplifier":
         g = m.params.get("gain")
-        return f"{ref} ×{1.0 if g is None else g:g}"
+        # a Gain field: a fixed gain block; without one the circuit around it sets its gain (analog_net)
+        return f"{ref} (op-amp)" if g is None else f"{ref} ×{g:g}"
     entry = config.components.get(ref)
     fp = board.footprint(ref)
     value = entry.value if entry is not None else (fp.value if fp is not None else "")
@@ -463,8 +464,11 @@ def path_branches(board: Board, config: Config, route: Route) -> list:
     """What hangs off a path, for the Signal paths tab (the user: "add branches to let's say GND or other nets to also
     show capacitors, pullups/downs. mark the ones ... that are DNP"): per net of the path, in path order, every 2-pin
     part with one pin on it and the other on another net, not one of the path's series parts, DNP ones included and
-    marked; a part across a series part's two nets is listed as parallel to it ("C2 100n ∥ R2"). Display only: the solver's shunts (shunt_parts) leave DNP parts out and take reference nets only."""
-    order = list(dict.fromkeys(n for n in [route.driver.net, *route.nets, route.receiver.net] if n))
+    marked; a part across a series part's two nets is listed as parallel to it ("C2 100n ∥ R2"), across an op-amp
+    stage's input and output as its feedback ("R4 2k94 ∥ U1"). Display only: the solver's shunts (shunt_parts) leave DNP parts out and take reference nets only."""
+    # the path's nets in route order (its steps' nets as they come; route.nets is a set), any the steps miss after
+    order = list(dict.fromkeys(n for n in [route.driver.net, *(getattr(s, "net", "") for s in route.steps),
+                                           *sorted(route.nets), route.receiver.net] if n))
     series = set(route.parts)
     # the net pair each series part spans: a part across the same two nets is in parallel with it (a feedback
     # capacitor across its resistor, a speed-up capacitor across a series resistor)
@@ -472,6 +476,9 @@ def path_branches(board: Board, config: Config, route: Route) -> list:
     for ref in route.parts:
         sfp = board.footprint(ref)
         snets = {p.net for p in sfp.pads if p.net} if sfp is not None else set()
+        amp = _amp_pads(config, sfp) if sfp is not None else None
+        if amp is not None:                 # an op-amp stage spans its input's and output's nets: its feedback
+            snets = {amp[0].net, amp[1].net}
         if len(snets) == 2:
             spans.setdefault(frozenset(snets), []).append(ref)
     found: dict[str, list[str]] = {n: [] for n in order}
@@ -484,10 +491,12 @@ def path_branches(board: Board, config: Config, route: Route) -> list:
         on = [n for n in nets if n in found]
         if len(on) == 2:                    # both pins on the path: across a series part, or another branch's part
             across = spans.get(frozenset(nets))
-            if across:
-                first = min(on, key=order.index)
-                text = f"{_part_text(board, config, fp.reference)} ∥ {', '.join(across)}"
-                found[first].append(f"{DNP_MARK} {text} (DNP)" if fp.dnp else text)
+            first, last = sorted(on, key=order.index)
+            # parallel to a series part or an op-amp stage; else a bridge between two of the path's nets (a
+            # multiple-feedback filter's R from the input node to the output), named by the net it reaches
+            text = (f"{_part_text(board, config, fp.reference)} ∥ {', '.join(across)}" if across
+                    else f"{_part_text(board, config, fp.reference)} → {last}")
+            found[first].append(f"{DNP_MARK} {text} (DNP)" if fp.dnp else text)
             continue
         if len(on) != 1:
             continue

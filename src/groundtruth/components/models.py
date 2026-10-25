@@ -36,6 +36,7 @@ AMP_Z_OUT = 1.0         # Ω, an amplifier's output impedance when its z_out is 
 AMP_C_IN = 2e-12        # F, its input capacitance when its c_in is not given
 AMP_IN = re.compile(r"^(\+IN|IN\+|INP|IN_P|\+|NONINV|VIN\+|\+VIN|IN)$", re.I)     # the input pin's name
 AMP_OUT = re.compile(r"^(OUT|VOUT|OUTPUT|VO|O)$", re.I)                              # the output pin's name
+GROUND_NAME = re.compile(r"^(A|D|P|S)?GNDA?\w*$|^VSS\w*$|^0$", re.I)       # a net named as ground (its last part)
 
 SHORT_OHMS = 1e-3       # numerical stand-in for a dead short
 SERIES_PATH_MAX_OHMS = 1e3  # resistors above this are pull-ups/downs, not part of a signal path
@@ -264,10 +265,22 @@ def amplifier_pins(fp, model: Optional[ComponentModel]):
                 next((p for p in fp.pads if (p.pin_function or "").upper() == want), None)
         a, b = pad(names[0]), pad(names[1])
         return (a, b) if a is not None and b is not None and a.net and b.net else None
-    # no names given: by the schematic pin names, but only when they are unambiguous (one input, one output)
+    # no names given: by the schematic pin names, but only when they are unambiguous (one input, one output); else
+    # the op-amp by its pin roles (analysis/analog_net.opamp_pin_roles: an unnamed output by its pin type)
+    from ..analysis.analog_net import opamp_pin_roles
+    roles = opamp_pin_roles(fp)
     ins = [p for p in fp.pads if AMP_IN.match((p.pin_function or "").strip()) and p.net]
     outs = [p for p in fp.pads if AMP_OUT.match((p.pin_function or "").strip()) and p.net]
-    return (ins[0], outs[0]) if len(ins) == 1 and len(outs) == 1 else None
+    if len(ins) == 1 and len(outs) == 1:
+        pair = (ins[0], outs[0])
+    elif roles is not None and roles["inp"].net and roles["out"].net:
+        pair = (roles["inp"], roles["out"])
+    else:
+        return None
+    # an inverting stage: its + input on ground, the signal comes in at its − input (through the input resistor)
+    if roles is not None and GROUND_NAME.match(pair[0].net.split("/")[-1]) and roles["inn"].net:
+        pair = (roles["inn"], pair[1])
+    return pair
 
 
 def model_nets(fp, model: Optional[ComponentModel]) -> set[str]:
