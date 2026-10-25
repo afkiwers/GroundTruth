@@ -571,3 +571,24 @@ def test_a_path_notes_an_opamp_on_it_without_a_model(tmp_path):
     sc.config.components["U7"].model = ComponentModel("open")
     c = path_chain(board, sc.config, spec)
     assert any(n.startswith("U7 looks like an op-amp") for n in c.notes), c.notes
+
+
+def test_detection_runs_a_path_through_an_inverting_opamp_stage(tmp_path):
+    """A multiple-feedback low-pass (R1 into node A, C2 to GND, R3 to the − input, R4 from A and C5 from the − input
+    to the output; the + input on GND), op-amp recognised by its pin names: detection gives one path from the input
+    side's end (U1.1) to the output side's (U2.1) from either net, through the − input (models.amplifier_pins: the
+    + input is on ground). (Unrouted: the chain itself is checked on routed boards.)"""
+    from conftest import make
+    from boardgen import opamp_circuit_board
+    from groundtruth.analysis.detect import suggest_net
+    parts = [("R1", "590", "R", "SIG_IN", "A"), ("C2", "39n", "C", "A", "GND"), ("R3", "499", "R", "A", "N"),
+             ("R4", "2k94", "R", "A", "OUT"), ("C5", "1n", "C", "N", "OUT")]
+    amp = ("U3", {1: ("OUT", "OUT"), 2: ("V-", "GND"), 3: ("+", "GND"), 4: ("-", "N"), 5: ("V+", "+3V3")})
+    board, sc, _ = make(tmp_path, opamp_circuit_board(parts, [amp]), "mfb", nets=())
+    assert sc.config.model_for("U3").kind == "amplifier"
+    for net in ("SIG_IN", "OUT"):
+        d, why = suggest_net(board, sc.config, net)
+        assert d is not None, why
+        assert (d.spec.driver, d.spec.receivers) == ("U1.1", ["U2.1"]), (net, d.spec)
+    from groundtruth.components.models import amplifier_pins
+    assert [p.number for p in amplifier_pins(board.footprint("U3"), sc.config.model_for("U3"))] == ["4", "1"]

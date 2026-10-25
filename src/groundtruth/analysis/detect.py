@@ -124,19 +124,40 @@ def _model(config: Config, fp):
     return config.model_for(fp.reference) or suggest_model(fp)
 
 
-def _group(board: Board, config: Config, net: str, by_net: dict) -> set[str]:
-    """The net plus nets reached through series parts (0R, termination R, beads), never power nets."""
+def _group(board: Board, config: Config, net: str, by_net: dict, amps: bool = True) -> set[str]:
+    """The net plus nets reached through series parts (0R, termination R, beads) and, with `amps`, through op-amp
+    stages (a part modelled as an amplifier, components.models.amplifier_pins: its input's net and its output's are
+    one path, either way), never power nets."""
     group, frontier = {net}, [net]
     while frontier:
         n = frontier.pop()
         for fp in by_net.get(n, []):
-            if not _model(config, fp).passes_signal() or len(fp.nets()) != 2:
+            m = _model(config, fp)
+            pins = amplifier_pins(fp, m) if amps and m.kind == "amplifier" else None
+            if pins is not None:
+                nets = [p.net for p in pins] if n in (pins[0].net, pins[1].net) else []
+            elif m.passes_signal() and len(fp.nets()) == 2:
+                nets = list(fp.nets())
+            else:
                 continue
-            for other in fp.nets():
+            for other in nets:
                 if other and other not in group and not is_power_net(board, other, config):
                     group.add(other)
                     frontier.append(other)
     return group
+
+
+def _amp_outputs(board: Board, config: Config, group: set[str], by_net: dict) -> set[str]:
+    """The nets of a group on an op-amp's output side: each amplifier's output net and what series parts reach from
+    it without crossing an op-amp again. A path's driver is not there (the signal comes into the stage)."""
+    out: set[str] = set()
+    for n in group:
+        for fp in by_net.get(n, []):
+            m = _model(config, fp)
+            pins = amplifier_pins(fp, m) if m.kind == "amplifier" else None
+            if pins is not None and pins[1].net == n:
+                out |= _group(board, config, n, by_net, amps=False)
+    return out
 
 
 GENERIC = SignalClass("Signal", "", 10e6, 2e-9, 0, "no class from the net or pin names: set the frequency "
@@ -193,11 +214,14 @@ def _suggest(board: Board, config: Config, net: str, by_net: dict, fp_of: dict, 
         if not picked:
             return None, group   # a poured net matched only by a pin name is a supply, not a signal
         doubts.append("a poured net, named like a signal only by a pin: is it a supply?")
-    ranked = sorted(ends, key=lambda p: (DRIVER_RANK.get(p.pin_type, 1), len(fp_of[p.footprint].pads)),
-                    reverse=True)
+    # an end on an op-amp's output side (J2 after the stage) receives; the input side's end (J1) drives
+    downstream = _amp_outputs(board, config, group, by_net)
+    ranked = sorted(ends, key=lambda p: (p.net not in downstream, DRIVER_RANK.get(p.pin_type, 1),
+                                         len(fp_of[p.footprint].pads)), reverse=True)
     driver = ranked[0]
     top = DRIVER_RANK.get(driver.pin_type, 1)
-    ties = [p for p in ranked if DRIVER_RANK.get(p.pin_type, 1) == top]
+    ties = [p for p in ranked if DRIVER_RANK.get(p.pin_type, 1) == top
+            and (p.net in downstream) == (driver.net in downstream)]
     reasons = [f"class '{cls.name}' from {why}"] if why else []
     if len(ties) == 1 and top > 0.5:
         confidence = "high" if top >= 2 else "medium"
