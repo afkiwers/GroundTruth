@@ -340,6 +340,23 @@ iterations +7 % (theirs ~21 %, ~1.3x slower); half the factorisation memory, so 
 **Intel MKL does not run on Apple Silicon**: the M2 needs Apple Accelerate's sparse solvers instead, measured on
 the Mac itself (next).
 
+### 5.4 M3 spike: Apple Accelerate on the M2 (2026-10-25)
+
+`tools/dev/accelerate_pack.py` + `accelerate_bench.c` on the same three 4x matrices, on the M2 (macOS 26.6.2),
+complex symmetric LDLᵀ (`SparseSymmetric`, upper triangle). SBK pivoting, 1 thread (4 threads):
+
+| Matrix (4x) | Factorise | Refactorise | 1-column solve | 8 columns | Residual | Peak |
+|---|---|---|---|---|---|---|
+| board-wide, 130 075 | 0.53 s (0.28) | 0.45 s (0.21) | **35 ms** | 90 ms | 1e-8 | 427 MB |
+| conducted, 313 356 | 0.25 s (0.16) | 0.16 s (0.07) | **30 ms** | 121 ms | 5e-8 | 317 MB |
+| DC, 903 653 | 0.86 s (0.55) | 0.51 s (0.20) | **91 ms** | 367 ms | 8e-7 | 928 MB |
+
+Every run gave the same bits, with 4 threads too; the four LDLᵀ variants within ~10 % of each other. The Mac's
+python3 had no scipy, so SuperLU was not timed there; against this laptop's SuperLU (93 / 53 / 189 ms solves,
+38 / 4 / 17 s factorisations) and the M2's SuperLU in 4.3 (a board-wide factorisation ~10 s at 8x), Accelerate's
+solves are ~2-3x faster than the laptop's PARDISO and SuperLU and its factorisations 10-70x faster. A go on the
+M2 as on Windows.
+
 ## 6. Researched, not planned (the user's choice, 2026-10-24)
 
 - **Board-wide model capped at 4x** (a setting, default min(resolution, 4)): −25-45 % at 8x, −60 % and more at 16x; 8x
