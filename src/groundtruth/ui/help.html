@@ -1179,7 +1179,9 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   the resolution to check it at. <b>Sharper map</b> solves one view with 4× the nodes of what was simulated.
   Applies from the next Simulate. The command line has <code>--resolution N</code>.</td></tr>
 <tr><td valign="top"><b>Solver threads</b>, <b>GPU</b></td><td>how many models are solved at once (auto: the
-  physical cores, at most 4, and no more than fit in the free memory: fewer at high resolutions) and whether a graphics card does the iterations (auto: one if this computer has one;
+  physical cores, at most 4, and in each round only as many as fit in the free memory, the largest first, each
+  planned from its model's measured factorisation and iterations: a large model and small ones side by side, large
+  ones one at a time) and whether a graphics card does the iterations (auto: one if this computer has one;
   on: refuses to run without one; off: never), on this computer (a laptop with other programs open wants fewer
   threads, a server more). <i>From the settings file</i> keeps the
   board's own <code>analysis.threads</code> and <code>analysis.gpu</code>.</td></tr>
@@ -1763,7 +1765,11 @@ smaller but dense, which a regular grid lets it apply with FFTs.</p>
 <li><b>The linear solve: GMRES</b> (right-preconditioned, restarted):
   <ul>
   <li>Gram–Schmidt orthogonalisation, repeated only where cancellation happens;</li>
+  <li>the basis vectors are stored in single precision and every product with them is done in double precision
+    (mixed-precision GMRES): half the memory and half the memory traffic, the same iterations at the solver's
+    tolerance; the answer is checked on the true residual in double precision;</li>
   <li>Givens rotations keep the small least-squares problem triangular;</li>
+  <li>it stops as soon as the true residual meets the tolerance (checked when the running estimate first says so);</li>
   <li>the restart length follows a memory budget;</li>
   <li>a solve that stops converging is marked unsolved, and its band is named in the results, never silently
     filled in.</li>

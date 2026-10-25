@@ -234,6 +234,81 @@ Expected, compounded: job A 974 s → ~650 s (#1-2) → ~530 s (#3-4) → **~370
 ~2 800 s → ~2 300 s → **~1 550-1 750 s with M3 (26-29 min)**. On a machine with more free memory (the Dell) #1
 goes further (three or four solves at once).
 
+### 5.2 M1 as built (branch `speed-m1`, 2026-10-25)
+
+- **#1 Memory-true accounting.** `peec.lu_commit()`: SuperLU's factor is Windows' commit (6.5x the fill, [A38])
+  only on Windows; macOS and Linux count resident pages, at most ~2x the fill while an array grows (`LU_RESIDENT`,
+  [A67]). `simulate.basis_rows`: a solve plans the basis rows its model's most iterations so far need (x1.5, in the
+  basis's doubling steps; `PlaneStack.its_max`), 16 rows for a DC solve before its model was measured, the full
+  restart length otherwise. Each round's solves are admitted by memory (`simulate.Admission` in `run_parallel`):
+  each plans `solve_bytes` at its frequency against 80 % of the memory available when the round starts, the
+  largest first, on the cores' threads; a solve that does not fit waits, one larger than everything runs alone.
+  Before, every round ran on `memory_threads` of the largest model of the whole run (both 8x jobs: one at a time).
+  The statistics keep per round how many ran at once (`at_once`; `run_stats.py` prints it).
+- **#2 / #3 Less memory per solve, faster Gram-Schmidt: the Krylov basis in single precision.** Two float32
+  planes; every product with them in float64 (`solver/_mac.gs_project`, `gs_combine`: numba, nogil, in column
+  blocks; mixed-precision GMRES [Lindquist 2020] [Aliaga 2023], [A66]). Half the basis memory (a 2 M-unknown route
+  model's 101 rows: 3.2 → 1.6 GB per solve) and half the bytes per pass. On this laptop a 64-row pass over 1 M
+  unknowns: 87-97 ms single-threaded against `zgemv` on the complex128 basis 103 ms on one core, 90 ms on four;
+  the laptop's memory bus (~20 GB/s) is already full with one core, the M2's (~100 GB/s; `zgemv` reached ~32 GB/s
+  there) is not. Iterations as with complex128 down to 1e-7 (tests/test_speed.py), 3x more at 1e-8: used for
+  tolerances ≥ 1e-6 (`BASIS32_MIN_TOL`; the solver's default 1e-5), complex128 below. Splitting `zgemv` over Python
+  threads was 4x slower (strided copies); interleaved complex64 in numba 3x slower than BLAS (no vectorisation).
+- **#4 The true-residual stop.** `_gmres` checks the true residual when the recurrence's first meets the tolerance
+  and stops there (it went on to half the tolerance first): 3-4 fewer iterations per solve on refboard.
+
+Measured on this laptop (refboard, 1x, `main` 9716e21 against the branch, one after the other; `out/speed/m1/`):
+
+| Job | main | speed-m1 | Results |
+|---|---|---|---|
+| A, the six nets | 246 s | 215 s (−13 %) | largest difference 0.022 dB (SW_CLK's emissions; its route solve 32 → 29 iterations); the same 40 issues |
+| B, the four converters | 1 074 s | 905 s (−16 %) | conducted within 0.005 dB, the issues' margins within 0.0003 dB |
+
+The laptop (a few GB available beside its other programs) runs its large solves one at a time either way: these are
+mostly #3 and #4. The 0.022 dB
+is the size of a solve stopping at the tolerance instead of half of it (the same as `main` showed for an equally
+valid factorisation choice, ARCHITECTURE "Memory use"). Job B's issue list differs only in the voltage clearance
+check, which does not use the solver: the same pairs named the other way round, one of +VDC's three pairs folded
+into another (an iteration order between processes; noted in HANDOFF). `result_diff.py` reads `f_3db` as a dB value
+and matches issues by position: its "680 dB" lines are 1e-6 relative and a reordering.
+
+**On the M2** (2026-10-25, build 0.1.42747 from 113ae1c, the same board and settings as 4.3):
+
+| Job | M0 (4.3) | M1 | What changed |
+|---|---|---|---|
+| A, the six nets (`runs/2026-10-25_07-46-51`) | 974 s | **652 s (−33 %)** | the 18 board-wide solves 3 at once (721 → 438 s; 226 → 314 ms per iteration side by side); the largest solve planned at 3.3 GB (8.0); peak 13.3 → 9.8 GB; no cached factorisation freed (4); 3 730 → 3 487 iterations; CPU 16 → 26 % |
+| B, the four converters (`runs/2026-10-25_08-48-10`) | 4 520 s | **3 512 s (−22 %)** | up to 3 solves at once; no cached factorisation freed (74, 16 of them made again); 14 243 → 12 781 iterations; board-wide rounds 2 194 s (63 %): SuperLU 47 %, Gram-Schmidt 31 % of an iteration |
+
+Job A ran with 10.1 GB available at its start (15.8 in 4.3), job B with 17.9 GB; job B swapped in 4.1 GB (the
+Mac's free memory fell to 4.4 GB; the process peaked at 11.6 GB).
+
+What job B still loses: **13 groups** (`solve_groups`) solved one after the other, as before. They are planned once,
+before any model is factorised, with 4 threads x the largest run's estimate in flight (the DC model's, 8.7 GB from
+`FILL_PER_UNKNOWN` against the ~2.6 GB it takes once measured). With admission in each round that in-flight term
+is one solve, not four. The groups make the three converters' conducted bands refine one stage at a time: 18 rounds
+of a single solve, ~470 s. Estimated with the groups planned for one solve in flight: job B −300 to −400 s, job A
+−50 to −80 s (its four route rounds of one solve would be one).
+
+Fixed in ee38bcb (`kept_bytes`, `solve_groups(admitted=...)`, the conducted bands ordered together;
+`tools/dev/group_plan.py`: job B at 8x for 17.9 GB, 13 → 5 groups, conv1 and conv2's conducted bands in one).
+Job B again on the M2 with it (`runs/2026-10-25_10-55-34`): **3 700 s, still 13 groups**: the Mac had 11.9 GB
+available at the start (17.9 for the run before), so one DC solve's estimate (5.3 GB) and one component's cached
+factorisations (~2.5 GB) filled the 9.5 GB it may plan with, as before the fix. The same 12 781 iterations; 6.2 GB
+swapped in (4.1 before), each iteration 10-15 % slower (board-wide 389-428 ms against 356-383): the 188 s are the
+Mac's state. On the 24 GB M2, beside other programs, the solves that fit at once depend on what else is open
+(job B's process peaks at ~11.6 GB). To be run again with ~18 GB free.
+
+Again on a quiet M2 (`runs/2026-10-25_12-15-06`, other programs closed): **3 575 s**, 432 MB swapped in, the same
+12 781 iterations, **13 groups again**. The process started with 16.9 GB available, but the groups are planned when
+the solves start, after the models are built (~6 GB at 8x): **10.8 GB** then (10.4 GB in the 3 512 s run). The
+group_plan check above used 17.9 GB, that run's figure at the process's start: a mistake; at the solves' start the
+room is 0.8 x 10.8 − 5.3 (the DC model's estimate in flight) ≈ 3.3 GB, one component's cached factorisations
+(~2.5 GB) per group, as before. So on the M2 at 8x the fix cannot take effect: job B is memory-bound there. More at
+once needs smaller factorisations (M3) and a DC estimate nearer its real fill before its first factorisation
+(`FILL_PER_UNKNOWN` "diag" 35 per unknown: 5.3 GB planned, ~2.6 GB measured).
+
+M1 on the M2, then: job A 974 → 652 s (−33 %), job B 4 520 → 3 512-3 575 s (−21-22 %).
+
 ## 6. Researched, not planned (the user's choice, 2026-10-24)
 
 - **Board-wide model capped at 4x** (a setting, default min(resolution, 4)): −25-45 % at 8x, −60 % and more at 16x; 8x

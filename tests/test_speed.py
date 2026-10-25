@@ -141,7 +141,7 @@ def test_a_simulate_does_not_depend_on_the_order_its_solves_finish(tmp_path, mon
                         capacitance=True, solve_points=3, max_solves=5, cavity_max_nodes=12000)
 
     def in_order(reverse):
-        def run_parallel(tasks, work, threads, relief=None):
+        def run_parallel(tasks, work, threads, relief=None, **admission):     # memory admission: not here
             out = [None] * len(tasks)
             for k in (reversed(range(len(tasks))) if reverse else range(len(tasks))):
                 out[k] = work(tasks[k])
@@ -229,3 +229,101 @@ def test_fix_search_reports_steps_and_ends_at_one(tmp_path):
     assert all(b >= a for a, b in zip(fracs, fracs[1:])) and fracs[-1] == 1.0
     assert any(m.startswith("evaluating candidates:") and " of " in m for m, _ in seen)
     assert any(m.startswith("verifying the selected fixes together:") for m, _ in seen)
+
+
+def test_the_single_precision_basis_projects_in_double_precision():
+    """peec._Basis32Vectors (M1, docs/SPEED.md): the basis is stored rounded to single precision, every product with
+    it is double precision on what is stored: the Gram-Schmidt pass and the combination agree with complex128
+    arithmetic on the rounded basis to ~1e-15, and the basis takes half the memory."""
+    if peec._gs_kernels() is None:
+        pytest.skip("numba not installed: the basis stays complex128")
+    rng = np.random.default_rng(3)
+    n, rows = 20_001, 9                         # not a multiple of the kernels' block
+    vec = peec.host_vectors()
+    V = vec.basis(rows, n)
+    for i in range(rows):
+        vec.put(V, i, rng.standard_normal(n) + 1j * rng.standard_normal(n))
+    stored = np.array([vec.row(V, i) for i in range(rows)])
+    assert np.array_equal(stored.real, stored.real.astype(np.float32))     # what is stored is single precision
+    w = rng.standard_normal(n) + 1j * rng.standard_normal(n)
+    h, w2 = vec.project(V, rows - 1, w.copy())
+    h_ref = stored.conj() @ w
+    assert np.abs(h - h_ref).max() < 1e-13 * np.abs(h_ref).max()
+    assert np.abs(w2 - (w - stored.T @ h_ref)).max() < 1e-13 * np.abs(stored.T @ h_ref).max()
+    y = rng.standard_normal(5) + 1j * rng.standard_normal(5)
+    assert np.abs(vec.combine(y, V, 5) - y @ stored[:5]).max() < 1e-13 * np.abs(y @ stored[:5]).max()
+    grown = vec.grow(V, 2 * rows, rows)
+    assert len(grown) == 2 * rows and np.array_equal(vec.row(grown, 3), stored[3])
+    assert V.re.nbytes + V.im.nbytes == rows * n * 8                           # half of complex128
+
+
+def test_gmres_stops_once_the_true_residual_meets_the_tolerance(monkeypatch):
+    """_gmres checks the true residual as soon as the recurrence's meets the tolerance and stops there (before
+    2026-10-25 it went on to half the tolerance first): the answer meets it, in fewer iterations. The single-precision
+    basis takes the same iterations as complex128 (no numba, or a tolerance below BASIS32_MIN_TOL) at the solver's
+    tolerances, and the same answer to well within them."""
+    rng = np.random.default_rng(0)
+    D = np.linspace(1.0, 30.0, 3000) * np.exp(1j * rng.uniform(0, 0.3, 3000))
+    b = np.ones(3000, complex)
+    for tol in (1e-5, 1e-6):
+        x, its, ok = _gmres(lambda v: D * v, b, tol)
+        assert ok and np.linalg.norm(D * x - b) <= tol * np.linalg.norm(b)
+        _, its_half, ok_half = _gmres(lambda v: D * v, b, 0.5 * tol)
+        assert ok_half and its < its_half
+        with monkeypatch.context() as m:
+            m.setattr(peec, "USE_BASIS32", False)
+            m.setattr(peec, "_GS", [])
+            assert type(peec.host_vectors()) is peec._HostVectors
+            x64, its64, ok64 = _gmres(lambda v: D * v, b, tol)
+        assert ok64 and its64 == its and np.linalg.norm(x64 - x) < 0.1 * tol * np.linalg.norm(x)   # ~6e-8: rounding
+    if peec._gs_kernels() is not None:          # below BASIS32_MIN_TOL the basis is complex128 again
+        assert type(peec.host_vectors().for_tol(1e-8)) is peec._HostVectors
+        assert peec.host_vectors().for_tol(1e-5) is not None
+
+
+def test_a_solve_plans_the_basis_its_model_needs_and_the_platforms_memory(monkeypatch):
+    """simulate.basis_rows: the full restart length before a model was solved, the first rows for a DC solve, then
+    the doubling steps that hold BASIS_MARGIN x its most iterations; peec.lu_commit: Windows commits 6.5x a
+    factorisation's fill, macOS and Linux keep ~2x it resident [A38] [A67]."""
+    from types import SimpleNamespace as NS
+    from groundtruth.analysis import simulate as sim
+    st = NS(nb=900_000, n_nodes=300_000, precond_mode="sheet", lu_nnz=10**7)
+    full = peec.gmres_restart(1_200_000) + 1
+    assert sim.basis_rows(st) == full and sim.basis_rows(st, 1e8) == full
+    assert sim.basis_rows(st, 10.0) == peec.GMRES_FIRST_ROWS
+    assert sim.solve_bytes(st, 10.0) < sim.solve_bytes(st, 1e8)
+    st.its_max = 2
+    assert sim.basis_rows(st, 1e8) == peec.GMRES_FIRST_ROWS
+    st.its_max = 30                             # 46 rows wanted: the 64-row step
+    assert sim.basis_rows(st) == 64
+    st.its_max = 300
+    assert sim.basis_rows(st) == full
+    monkeypatch.setattr(peec.sys, "platform", "win32")
+    win = peec.lu_bytes(st)
+    monkeypatch.setattr(peec.sys, "platform", "darwin")
+    assert peec.lu_bytes(st) == pytest.approx(win * peec.LU_RESIDENT / peec.LU_COMMIT)
+
+
+def test_solves_are_admitted_by_the_memory_they_plan():
+    """simulate.run_parallel with need/budget (Admission): small solves run side by side up to the budget, a solve
+    larger than the budget runs alone (never waits for memory nothing will free), every task runs once."""
+    import threading
+    import time as _time
+    from groundtruth.analysis.simulate import Admission, run_parallel
+    lock = threading.Lock()
+    now, seen = [0, 0], []
+
+    def work(t):
+        with lock:
+            now[0] += t
+            now[1] = max(now[1], now[0])
+        _time.sleep(0.05)
+        with lock:
+            now[0] -= t
+            seen.append(t)
+        return t
+    tasks = [3, 3, 3, 3, 10, 2, 2]
+    gate = Admission(8)
+    assert run_parallel(tasks, work, 4, need=lambda t: t, admission=gate) == tasks
+    assert sorted(seen) == sorted(tasks)
+    assert now[1] <= 10 and 2 <= gate.peak <= 3          # 3 + 3 (+ 2) fit in 8; the 10 ran alone

@@ -52,7 +52,8 @@ def test_the_current_hands_over_like_a_transmission_line_contact():
         i = int(round(x / D - 0.5))
         expect = math.sinh((L - u) / lam) / math.sinh(L / lam)
         assert current[i] == pytest.approx(expect, abs=0.003), u      # measured within 0.001
-    assert current[int(5 / D)] == pytest.approx(1.0, abs=1e-9)            # all of it before the pad
+    # all of it before the pad: to the solve's rounding (GMRES to 1e-5 with a single-precision basis, [A66])
+    assert current[int(5 / D)] == pytest.approx(1.0, abs=1e-7)
     v_feed = float(np.mean(sol.V[0, 0, :21].real))
     r = v_feed - float(sol.V_lid[0].real)
     expect = rs * (10.0 / w) + rs * lam / w / math.tanh(L / lam)

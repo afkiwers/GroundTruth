@@ -33,7 +33,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -52,9 +52,9 @@ from ..emi.spectrum import analysis_band, microstrip, offset_stripline, trapezoi
 from ..geometry.copper import CopperMap, reference_layers
 from ..geometry.shapes import arc_points
 from ..rules.checks import CheckResult, run_checks
-from ..solver.peec import (EPS0, gmres_restart, Branch, Grid, LidNode, PlaneLayer, PlanePair, PlaneStack,
-                           RouteExcitation, Solution, SolverError, TraceSegment, build_grid, thread_budget,
-                           track_impedance, via_impedance)
+from ..solver.peec import (EPS0, GMRES_FIRST_ROWS, gmres_restart, Branch, Grid, LidNode, PlaneLayer, PlanePair,
+                           PlaneStack, RouteExcitation, Solution, SolverError, TraceSegment, build_grid,
+                           thread_budget, track_impedance, via_impedance)
 from ..solver import gpu, peec, stats
 from .progress import Phases
 from .pins import SOLDER_RHO, column_conductance, feed_layer, params_cache, segment_impedance, solder_span
@@ -2771,8 +2771,11 @@ def refine_width(config: Config, threads: int, runs: int) -> int:
 
 
 FILL_PER_UNKNOWN = peec.FILL_PER_UNKNOWN       # SuperLU fill per branch unknown until measured [A38]
-LU_COMMIT = peec.LU_COMMIT                      # SuperLU commits ~6.5x its fill (ARCHITECTURE "Memory use") [A38]
 MEMORY_SHARE = 0.8                              # of the available memory the parallel solves may plan with
+DC_LIKE_HZ = 1e3                                # a model solved at or below this before any solve of it was
+                                                # measured plans GMRES_FIRST_ROWS basis rows (a DC path: 1-2
+                                                # iterations on refboard at 8x, docs/SPEED.md 4.3)
+BASIS_MARGIN = 1.5                              # the basis planned for this many times a model's most iterations
 
 
 def factor_bytes(stack: PlaneStack) -> int:
@@ -2781,12 +2784,41 @@ def factor_bytes(stack: PlaneStack) -> int:
     return peec.lu_bytes(stack)
 
 
-def solve_bytes(stack: PlaneStack) -> int:
-    """About the memory one solve of this model needs on top of the model itself: a factorisation being made
-    (its fill, as SuperLU commits it) and the GMRES basis."""
+def basis_rows(stack: PlaneStack, f: Optional[float] = None) -> int:
+    """The GMRES basis rows a solve of this model plans for: the basis grows from GMRES_FIRST_ROWS by doubling up to
+    the restart length (peec._gmres), so the rows its most iterations so far needed (`its_max`, times BASIS_MARGIN:
+    another frequency may take more); before any solve of it, GMRES_FIRST_ROWS for a solve at or below DC_LIKE_HZ
+    (a resistive DC path converges in a few iterations) and the full restart length otherwise. It was always the
+    full length before 2026-10-25: a DC model of 5.3 M unknowns planned 8.6 GB of basis for solves of 1-2
+    iterations (docs/SPEED.md 4.3)."""
     n = stack.nb + stack.n_nodes
-    basis = (gmres_restart(n) + 1) * n * 16      # its longest (peec.gmres_restart: at least GMRES_RESTART_MIN rows)
-    return int(factor_bytes(stack) + basis + 12 * n * 16)
+    full = gmres_restart(n) + 1
+    its = getattr(stack, "its_max", 0)
+    if its:
+        want = BASIS_MARGIN * its + 1
+    elif f is not None and f <= DC_LIKE_HZ:
+        want = GMRES_FIRST_ROWS
+    else:
+        return full
+    rows = GMRES_FIRST_ROWS
+    while rows < want and rows < full:
+        rows *= 2
+    return min(rows, full)
+
+
+def solve_bytes(stack: PlaneStack, f: Optional[float] = None) -> int:
+    """About the memory one solve of this model (at f, when known) needs on top of the model itself: a
+    factorisation being made (its fill, as the platform counts it: peec.lu_bytes) and the GMRES basis (basis_rows;
+    single precision when the compiled Gram-Schmidt is there, peec._Basis32Vectors), and a dozen work vectors."""
+    n = stack.nb + stack.n_nodes
+    per_row = 8 if peec._gs_kernels() is not None else 16
+    return int(factor_bytes(stack) + basis_rows(stack, f) * n * per_row + 12 * n * 16)
+
+
+def run_bytes(run) -> int:
+    """solve_bytes for a run's solves (its highest planned frequency: a DC run's are all DC)."""
+    planned = getattr(run, "planned", None)
+    return solve_bytes(run.exc.stack, max(planned) if planned else None)
 
 
 def _stacks_of(run) -> list:
@@ -2795,7 +2827,25 @@ def _stacks_of(run) -> list:
     return [st] if st._base is None else [st, st._base]
 
 
-def solve_groups(runs: list, threads: int, available: Optional[int]) -> list[list]:
+def kept_bytes(runs: list) -> int:
+    """The factorisation memory runs [(setup, run)] keep while they are solved: per base model OPERATOR_CACHE
+    factorisations, or as many as the distinct frequencies its runs plan when none of them refines (a DC model:
+    one); none for a derived model (its solves update its base's factorisations, PlaneStack.with_branches)."""
+    freqs: dict[int, set] = {}
+    refines: set[int] = set()
+    bases: dict[int, PlaneStack] = {}
+    for s, r in runs:
+        st = r.exc.stack if r.exc.stack._base is None else r.exc.stack._base
+        bases[id(st)] = st
+        freqs.setdefault(id(st), set()).update(getattr(r, "planned", None) or ())
+        if r is getattr(s, "spectrum_run", None) or r is getattr(s, "cond", None):
+            refines.add(id(st))
+    return sum(factor_bytes(st) * (peec.OPERATOR_CACHE if k in refines or not freqs[k]
+                                   else min(peec.OPERATOR_CACHE, len(freqs[k])))
+               for k, st in bases.items())
+
+
+def solve_groups(runs: list, threads: int, available: Optional[int], admitted: bool = False) -> list[list]:
     """The runs [(setup, run)] in groups solved one after the other, so that the factorisations alive at once fit
     in MEMORY_SHARE of the available memory: one group (everything together, as before) when they fit or the
     available memory is unknown.
@@ -2804,8 +2854,12 @@ def solve_groups(runs: list, threads: int, available: Optional[int]) -> list[lis
     split, so every model sees the same rounds as when everything is solved together and every number stays the
     same (a run's refinement depends only on its own model's solutions and its setup's planned ones). The
     components with a board-wide model (shared by every route and stage) come last: their refinement weighs the
-    route and stage models' planned solves (band_moments, the ringing). Peak per group: OPERATOR_CACHE
-    factorisations kept per model, plus `threads` being made."""
+    route and stage models' planned solves (band_moments, the ringing). Peak per group: the factorisations its
+    models keep (held: OPERATOR_CACHE per model, one for a model solved at one frequency only, none of its own for a
+    derived model, whose solves are low-rank updates of its base's), plus the solves in flight: `threads` of the
+    largest, or one when each round's solves are admitted by memory (`admitted`: solve_setups' Admission keeps the
+    rest within the memory then available). Until 2026-10-25 every model counted OPERATOR_CACHE and four in flight:
+    refboard's job B at 8x ran as 13 groups one after the other on the M2 (docs/SPEED.md 5.2)."""
     if available is None or len(runs) < 2:
         return [runs]
     parent: dict[int, int] = {}
@@ -2823,14 +2877,17 @@ def solve_groups(runs: list, threads: int, available: Optional[int]) -> list[lis
     comps: dict[int, list] = {}
     for s, r in runs:
         comps.setdefault(root(id(r.exc.stack)), []).append((s, r))
-    boardwide = lambda c: any(r is s.cavity for s, r in c)
-    order = [c for c in comps.values() if not boardwide(c)] + [c for c in comps.values() if boardwide(c)]
+    boardwide = lambda c: any(r is s.cavity for s, r in c)                                   # noqa: E731
+    own = lambda c: any(r is getattr(s, "fine", None) for s, r in c)                         # noqa: E731
+    refining = lambda c: any(r is getattr(s, "cond", None) for s, r in c)                   # noqa: E731
+    # the setups' own models first (a stage's conducted refinement weighs the ringing its hot loop's planned solves
+    # give: planned_solved), then the refining conducted bands together (in one group they refine side by side, not
+    # one stage after the other: refboard's job B, docs/SPEED.md 5.2), then the rest; the board-wide model last
+    rank = lambda c: 3 if boardwide(c) else 0 if own(c) else 1 if refining(c) else 2        # noqa: E731
+    order = sorted(comps.values(), key=rank)            # stable: the runs' own order within a rank
 
-    def held(c) -> int:
-        """The factorisation memory a component keeps (OPERATOR_CACHE per stack)."""
-        stacks = {id(x): x for _, r in c for x in _stacks_of(r)}.values()
-        return sum(peec.OPERATOR_CACHE * factor_bytes(x) for x in stacks)
-    in_flight = threads * max(solve_bytes(r.exc.stack) for _, r in runs)
+    held = kept_bytes
+    in_flight = (1 if admitted else threads) * max(run_bytes(r) for _, r in runs)
     room = MEMORY_SHARE * available - in_flight
     if sum(held(c) for c in order) <= room or len(order) < 2:
         return [runs]
@@ -2926,32 +2983,77 @@ def memory_notes(relief: MemoryRelief, stacks, gate0: tuple = (0, 0)) -> list[st
     return out
 
 
-def run_parallel(tasks: list, work: Callable, threads: int, relief: Optional[MemoryRelief] = None) -> list:
+class Admission:
+    """Lets tasks run side by side while the memory they plan to use (`need` bytes each) fits in `budget`; a task
+    that does not fit waits for running ones to finish, and runs alone when nothing else is running (never waits
+    for memory nothing will free). `peak`: the most that ran at once."""
+
+    def __init__(self, budget: float):
+        """Nothing running."""
+        self.budget = budget
+        self.used = 0.0
+        self.running = 0
+        self.peak = 0
+        self.cond = threading.Condition()
+
+    @contextmanager
+    def hold(self, need: float):
+        """Wait until `need` fits (or nothing runs), then hold it while the task runs."""
+        with self.cond:
+            while self.running and self.used + need > self.budget:
+                self.cond.wait()
+            self.used += need
+            self.running += 1
+            self.peak = max(self.peak, self.running)
+        try:
+            yield
+        finally:
+            with self.cond:
+                self.used -= need
+                self.running -= 1
+                self.cond.notify_all()
+
+
+def run_parallel(tasks: list, work: Callable, threads: int, relief: Optional[MemoryRelief] = None,
+                 need: Optional[Callable] = None, budget: Optional[float] = None,
+                 admission: Optional[Admission] = None) -> list:
     """work(task) for every task, in a thread pool when threads > 1. The FFTs inside share the cores (each
     worker gets cpu_count / threads of them). An exception in any task (e.g. Cancelled from a progress
     callback) cancels the tasks not started yet and is raised once the running ones have finished. A task out of
     memory goes through `relief`'s ladder once the others are done (MemoryRelief; a default one without
-    on_short)."""
+    on_short).
+
+    need(task) -> bytes and `budget` (bytes): the tasks are admitted by memory (Admission, or the `admission`
+    given), the largest first, so a big solve and small ones run side by side where they fit, and big ones one at
+    a time where they don't. Results don't depend on it (which factorisation a solve uses is fixed per round:
+    PlaneStack.next_round)."""
     relief = relief if relief is not None else MemoryRelief()
     if threads <= 1 or len(tasks) <= 1:
         return [_alone(work, t, relief) for t in tasks]
     n = min(threads, len(tasks))
     share = max(1, (os.cpu_count() or 2) // n)
     short = object()
+    gate = admission if admission is not None else Admission(budget) if need is not None and budget is not None \
+        else None
+    if gate is not None and need is not None:
+        order = sorted(range(len(tasks)), key=lambda k: -need(tasks[k]))      # the largest first, fewest waits
+    else:
+        order = list(range(len(tasks)))
 
     def one(t):
-        """Run one task in a pool thread with its share of the FFT threads; out of memory marks it for a retry."""
-        with thread_budget(share):
+        """Run one task in a pool thread with its share of the FFT threads (admitted by memory with a gate); out
+        of memory marks it for a retry."""
+        with thread_budget(share), (gate.hold(need(t)) if gate is not None and need is not None else nullcontext()):
             try:
                 return work(t)
             except MemoryError:
                 return short                 # retried alone below, once the others have freed their memory
     with ThreadPoolExecutor(n, thread_name_prefix="groundtruth-solve") as pool:
-        futures = [pool.submit(one, t) for t in tasks]
+        futures = {k: pool.submit(one, tasks[k]) for k in order}
         try:
-            out = [f.result() for f in futures]
+            out = [futures[k].result() for k in range(len(tasks))]
         except BaseException:
-            for f in futures:
+            for f in futures.values():
                 f.cancel()
             raise
     # Out of memory in parallel (refboard's four power stages and four nets: ~2 GB per model at once,
@@ -3033,8 +3135,11 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
 
     Out of memory: `relief` (MemoryRelief; one is made without it) takes a solve that ran out through its ladder,
     and its last rung leaves that frequency unsolved with a note: the run always finishes. After a round in which
-    solves ran out beside others, the rounds after it run on half the threads; with threads "auto" each round's
-    threads are also planned again from the models' measured fill (memory_threads, peec.lu_bytes).
+    solves ran out beside others, the rounds after it run on half the threads. With threads "auto" each round's
+    solves are admitted by memory (run_parallel's Admission): each plans solve_bytes at its frequency (the model's
+    measured fill and iterations so far) against MEMORY_SHARE of the memory available when the round starts, the
+    largest first; the threads are the cores' (solver_threads). Until 2026-10-25 every round ran on
+    memory_threads of the largest model of the whole run: refboard's 8x jobs one solve at a time (docs/SPEED.md 4.3).
 
     Returns the number of groups."""
     from ..core.sysmem import available_bytes
@@ -3046,8 +3151,6 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
     auto = not (isinstance(t, (int, float)) and t >= 1)    # "auto" (a number is the user's choice)
     avail0 = available_bytes()          # before this run's own factorisations take any of it
     threads_cpu = threads
-    if auto:
-        threads = memory_threads(threads, [r.exc.stack for _, r in runs], avail0)
     c = stats.active()
     if c is not None:
         # the run's solver statistics: every model named by what it is and who uses it, and how the threads were
@@ -3058,7 +3161,9 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
                 if st is not None:
                     c.label(st, kind, name)
         lim = _memory_limit([r.exc.stack for _, r in runs])
-        c.info.update({"threads_setting": str(t), "threads_cpu": threads_cpu, "threads_memory": threads,
+        c.info.update({"threads_setting": str(t), "threads_cpu": threads_cpu,
+                       "threads_memory": memory_threads(threads, [r.exc.stack for _, r in runs], avail0) if auto
+                       else threads, "admission": auto,
                        "available_gb": None if avail0 is None else round(avail0 / 2 ** 30, 2),
                        "memory_limit": None if lim is None else {"model": c.entry(lim[0])["label"],
                                                                  "gb": round(lim[1] / 2 ** 30, 2)}})
@@ -3079,15 +3184,11 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
     seen = [relief.shorts]
 
     def plan(threads: int) -> int:
-        """The threads for the next round: halved after solves ran out beside others, and (auto) planned again with
-        the models' measured fill against the memory free when the solves began (not the memory free now, which
-        this run's own cached factorisations lower): fewer only when the first estimate was too low. Never more
-        than before: results don't depend on it."""
+        """The threads for the next round: halved after solves ran out beside others (the memory the solves plan
+        is admitted per round: parallel). Never more than before: results don't depend on it."""
         if relief.shorts > seen[0]:
             seen[0] = relief.shorts
             threads = max(1, threads // 2)
-        if auto and threads > 1:
-            threads = memory_threads(threads, [r.exc.stack for _, r in runs], avail0)
         return threads
     # "Use all cores": several frequencies per refining run and round, the budget raised as much (refine_width)
     width = refine_width(config, threads, sum(1 for s, r in runs if r is s.spectrum_run or
@@ -3133,15 +3234,25 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
         t0 = time.perf_counter()
         with lock:
             busy[0] = 0.0
-        run_parallel(sorted(tasks, key=lambda t: t[2]), run, threads, relief)
+        gate = None
+        if auto:
+            # this round's solves admitted by the memory each plans (its model's fill and iterations so far, at its
+            # frequency) against the memory available now, between rounds: what this run's cached
+            # factorisations hold is already taken from it
+            avail = available_bytes()
+            if avail is not None:
+                gate = Admission(MEMORY_SHARE * avail)
+        run_parallel(sorted(tasks, key=lambda t: t[2]), run, threads, relief,
+                     need=lambda t: solve_bytes(t[1].exc.stack, t[2]), admission=gate)
         if c is not None:
             kinds: dict[str, int] = {}
             for s, r, _ in tasks:
                 k = run_kind(s, r)
                 kinds[k] = kinds.get(k, 0) + 1
+            # a round of one solve (or one thread) runs without the gate (run_parallel): at_once from the threads
             c.round(round=rounds[0], group=group, step=step, tasks=len(tasks), by_kind=kinds,
-                    threads=min(threads, len(tasks)), wall_s=round(time.perf_counter() - t0, 2),
-                    busy_s=round(busy[0], 2))
+                    threads=min(threads, len(tasks)), at_once=gate.peak if gate is not None and gate.peak else
+                    min(threads, len(tasks)), wall_s=round(time.perf_counter() - t0, 2), busy_s=round(busy[0], 2))
         rounds[0] += 1
 
     stacks = list({id(r.exc.stack): r.exc.stack for _, r in runs}.values())
@@ -3166,7 +3277,7 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
     # in groups only when freeing between them lowers the peak and the factorisations kept would not fit otherwise
     groups = [runs]
     if free_done:
-        groups = solve_groups(runs, threads, available_bytes())
+        groups = solve_groups(runs, threads, available_bytes(), admitted=auto)
     hooked: set[int] = set()
     for gi, group in enumerate(groups):
         next_round()

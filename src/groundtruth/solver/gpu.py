@@ -358,6 +358,22 @@ class TorchVectors:
         """A copy of v (on the device)."""
         return v.clone()
 
+    @staticmethod
+    def put(V, j, v):
+        """Store v as basis vector j."""
+        V[j] = v
+
+    @staticmethod
+    def row(V, j):
+        """Basis vector j."""
+        return V[j]
+
+    def grow(self, V, rows, used):
+        """A basis of `rows` rows holding the first `used` of V (on the device)."""
+        out = self.basis(rows, V.shape[1])
+        out[:used] = V[:used]
+        return out
+
     def norm(self, v) -> float:
         """The Euclidean norm of v, as a Python float (one value crosses to the CPU)."""
         return float(self.t.linalg.vector_norm(v))
