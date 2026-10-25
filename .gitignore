@@ -19,3 +19,6 @@ release_ed25519*
 
 # Claude Code project notes: local only (personal paths and boards)
 CLAUDE.md
+# session notes: local only (personal paths, machines, boards)
+docs/HANDOFF.md
+docs/NEXT_STEPS.md
