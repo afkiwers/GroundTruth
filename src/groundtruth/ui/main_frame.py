@@ -1578,7 +1578,7 @@ class MainFrame(ConfigActions, wx.Frame):
         from .help import HelpWindow, topic_of
         k = self.notebook.GetSelection()
         topic = topic_of(self.notebook.GetPageText(k) if k >= 0 else "")
-        if self._help:
+        if self._help and self._help.IsShown():         # closed: hidden until wx deletes it (HelpWindow._on_close)
             self._help.show(topic)
         else:
             self._help = HelpWindow(self, topic)
@@ -1589,7 +1589,7 @@ class MainFrame(ConfigActions, wx.Frame):
         windows that existed when it opened, and a disabled help could neither scroll nor be read."""
         from .help import HelpWindow, ref_anchor
         anchor = ref_anchor(key)
-        if self._help:
+        if self._help and self._help.IsShown():
             self._help.show("references", anchor)
         else:
             self._help = HelpWindow(self, "references", anchor)

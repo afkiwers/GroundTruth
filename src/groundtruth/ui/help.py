@@ -423,6 +423,7 @@ class HelpWindow(wx.Frame):
         self._text = ""
         self._watch = None                          # the engine's start watched (LOAD_WAIT_MS), stopped on destroy
         self.Bind(wx.EVT_WINDOW_DESTROY, self._on_destroy)
+        self.Bind(wx.EVT_CLOSE, self._on_close)
         backend = _webview_backend()
         if backend is not None:
             self._web(backend)
@@ -440,6 +441,13 @@ class HelpWindow(wx.Frame):
         self.html.Bind(wx.html.EVT_HTML_LINK_CLICKED, self._on_link)
         self.html.SetPage(page())
         self.SendSizeEvent()
+
+    def _on_close(self, _evt):
+        """The window's X: hidden at once, then destroyed. Opened from a modal dialog (a Run check's basis link in
+        Preferences), wx only queues a frame's destruction until that dialog's loop ends and leaves it on screen
+        meanwhile: the X seemed to do nothing (the user)."""
+        self.Hide()
+        self.Destroy()
 
     def _on_destroy(self, evt):
         """The window goes: the watch on the engine's start stops (a timer must not outlive its window; the event
