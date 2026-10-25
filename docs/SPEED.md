@@ -298,6 +298,17 @@ swapped in (4.1 before), each iteration 10-15 % slower (board-wide 389-428 ms ag
 Mac's state. On the 24 GB M2, beside other programs, the solves that fit at once depend on what else is open
 (job B's process peaks at ~11.6 GB). To be run again with ~18 GB free.
 
+Again on a quiet M2 (`runs/2026-10-25_12-15-06`, other programs closed): **3 575 s**, 432 MB swapped in, the same
+12 781 iterations, **13 groups again**. The process started with 16.9 GB available, but the groups are planned when
+the solves start, after the models are built (~6 GB at 8x): **10.8 GB** then (10.4 GB in the 3 512 s run). The
+group_plan check above used 17.9 GB, that run's figure at the process's start: a mistake; at the solves' start the
+room is 0.8 x 10.8 − 5.3 (the DC model's estimate in flight) ≈ 3.3 GB, one component's cached factorisations
+(~2.5 GB) per group, as before. So on the M2 at 8x the fix cannot take effect: job B is memory-bound there. More at
+once needs smaller factorisations (M3) and a DC estimate nearer its real fill before its first factorisation
+(`FILL_PER_UNKNOWN` "diag" 35 per unknown: 5.3 GB planned, ~2.6 GB measured).
+
+M1 on the M2, then: job A 974 → 652 s (−33 %), job B 4 520 → 3 512-3 575 s (−21-22 %).
+
 ## 6. Researched, not planned (the user's choice, 2026-10-24)
 
 - **Board-wide model capped at 4x** (a setting, default min(resolution, 4)): −25-45 % at 8x, −60 % and more at 16x; 8x
