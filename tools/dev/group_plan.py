@@ -24,6 +24,7 @@ def main() -> int:
                     "(default: this machine's)")
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--src", help="the src folder of another tree (default: this one's)")
+    ap.add_argument("--sparse", help="plan as with this factorisation backend active (solver/sparse.py)")
     ap.add_argument("--platform", help="plan as on this platform (sys.platform: win32, darwin, linux; peec.lu_commit)")
     args = ap.parse_args()
     sys.path.insert(0, args.src or str(Path(__file__).resolve().parents[2] / "src"))
@@ -36,6 +37,8 @@ def main() -> int:
 
     if args.platform:                   # SuperLU's memory as that platform counts it (peec.lu_commit)
         sim.peec.sys = type("PlatformSys", (), {"platform": args.platform})()
+    if args.sparse:                     # that backend's fill and memory (peec.lu_bytes), loaded here or not
+        sim.peec._sparse.active = lambda: args.sparse
     board = load_board(args.board)
     cfg = SettingsFile.load(args.settings).config
     cfg = replace(cfg, analysis=replace(cfg.analysis, resolution=args.resolution))
