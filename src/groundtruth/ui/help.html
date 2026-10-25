@@ -1501,6 +1501,29 @@ on, off). In the plugin, <a href="#prefs">Preferences</a> sets the resolution an
   what it misses), and the rest of the run finishes. The run's notes say what it had to do. To avoid it: close
   other programs, choose fewer <b>Solver threads</b> or a lower <b>Resolution</b> (above 1×) in Preferences, or lower
   <code>analysis.max_nodes</code>.</li>
+<li><b>Two optional speed-ups</b>, each installed once per computer with an installer in the plugin's
+  <code>tools</code> folder (Plugin and Content Manager's install folder:
+  <code>Documents\KiCad\10.0\3rdparty\plugins\io_github_iwers_groundtruth\tools</code> on Windows). Close
+  KiCad first, and start GroundTruth in KiCad once before (KiCad builds the plugin's Python environment then).
+  Without them everything runs as before.
+  <table border="1" cellpadding="3" cellspacing="0">
+  <tr><th></th><th>Faster sparse solver (Windows)</th><th>GPU (NVIDIA, or AMD Radeon)</th></tr>
+  <tr><td>What it does</td><td>Intel MKL PARDISO factorises the preconditioner 10-50x faster than SuperLU in less
+    memory, so more solves fit side by side (<b>Sparse solver</b> in Preferences)</td><td>the solver's iterations
+    on the graphics card when it is faster than the CPU there (<b>GPU</b> in Preferences)</td></tr>
+  <tr><td>Install</td><td>double-click <code>install_sparse.cmd</code> (or run
+    <code>"C:\Program Files\KiCad\10.0\bin\python.exe" install_sparse.py</code>); about 250 MB</td><td>run
+    <code>"C:\Program Files\KiCad\10.0\bin\python.exe" install_gpu.py</code> (an AMD Radeon: double-click
+    <code>install_gpu_amd.cmd</code>); about 2.5 GB</td></tr>
+  <tr><td>Check</td><td>the installer ends with "PARDISO works here"; after a Simulate the run's solver
+    statistics say "sparse solver: pardiso"</td><td><code>check_gpu.py</code> says whether the GPU is faster;
+    after a Simulate the status line ends "solved on GPU &lt;name&gt;"</td></tr>
+  <tr><td>Remove</td><td><code>install_sparse.cmd --uninstall</code></td><td>Preferences: GPU <i>off</i></td></tr>
+  <tr><td>Not for</td><td>a Mac (Apple Accelerate is built in; a Mac compute server's installer sets it up) or
+    an ARM PC</td><td>a Mac (no double precision on Apple GPUs) or Intel graphics</td></tr>
+  </table>
+  Both change only the speed: the results are the same to the solver's tolerance. A compute server gets them from
+  its own installer (<code>install_server.cmd</code> / <code>install_server.command</code>).</li>
 <li>With PyTorch installed in the plugin's environment on a machine with an NVIDIA GPU (CUDA) or an AMD Radeon
   (ROCm, e.g. a Radeon 860M), the solver's iterations run on the GPU (<b>GPU</b> in Preferences, or
   <code>analysis.gpu</code>: auto). The status line ends with "solved on GPU &lt;name&gt;". The installer is

@@ -63,6 +63,12 @@ pip install "groundtruth-pcb @ https://github.com/afkiwers/GroundTruth/releases/
 
 More, including the development setup, GPU acceleration and where everything is on disk: [Installing](docs/guide/install.md).
 
+**Optional speed-ups** (once per computer, KiCad closed; the installers are in the installed plugin's `tools`
+folder): the **faster sparse solver** on Windows, `install_sparse.cmd` (Intel MKL PARDISO, ~250 MB; a Mac has Apple
+Accelerate built in), and **GPU** support for an NVIDIA or AMD card, `install_gpu.py` / `install_gpu_amd.cmd`
+(PyTorch, ~2.5 GB). Both only change the speed. Steps: [Installing, Optional speed-ups](docs/guide/install.md#optional-speed-ups).
+
+
 ## Quick start
 
 In KiCad: open the board in the PCB editor and click **Analyse return paths**.

@@ -60,6 +60,24 @@ To open the same window on a file without KiCad (drawing on the board is disable
 
 Each is described in these guides and in the plugin's own help (F1).
 
+## Optional speed-ups
+
+Two installers in the plugin's `tools` folder make Simulate faster; each runs once per computer, with KiCad closed
+and after GroundTruth has been started in KiCad once (KiCad builds the plugin's Python environment then). Without
+them everything runs as before, and with them the results are the same to the solver's tolerance.
+
+| | Faster sparse solver (Windows, x86) | GPU (NVIDIA, or AMD Radeon) |
+|---|---|---|
+| What it does | Intel MKL PARDISO factorises the preconditioner 10-50x faster than SuperLU in less memory (Preferences: **Sparse solver**) | the solver's iterations on the graphics card when it is faster than the CPU there (Preferences: **GPU**) |
+| Install | double-click `install_sparse.cmd`, or `"C:\Program Files\KiCad\10.0\bin\python.exe" tools\install_sparse.py` (~250 MB) | `"C:\Program Files\KiCad\10.0\bin\python.exe" tools\install_gpu.py` (AMD: `install_gpu_amd.cmd`; ~2.5 GB), see below |
+| Check | the installer ends "PARDISO works here"; a run's solver statistics say "sparse solver: pardiso" | `tools\check_gpu.py`; the status line ends "solved on GPU <name>" |
+| Remove | `install_sparse.cmd --uninstall` | Preferences: GPU off |
+| Not for | a Mac (Apple Accelerate is built in) or an ARM PC | a Mac or Intel graphics |
+
+The CLI's environment: `python tools/install_sparse.py --python PATH` (or `pip install "groundtruth-pcb[sparse]"`).
+A compute server gets both from its own installer: on a Mac, `install_server.command` builds the Apple Accelerate
+helper with Xcode's command line tools (`xcode-select --install` if it says they are missing).
+
 ## GPU acceleration (optional)
 
 Simulate and Suggest fixes can run the field solver's iterations on a graphics card: the FFT convolutions, the
