@@ -43,6 +43,17 @@ case " ${ARGS[*]} " in
     *" --python "*) ;;
     *) ARGS+=(--python "$PY") ;;
 esac
+# the Apple Accelerate shim (solver/sparse.py), built now as you: the service runs as root and cannot compile it
+# itself (Xcode's licence); server_setup.py installs it. Without Xcode's command line tools: SuperLU, as before.
+SHIM=$(find . -name accelerate_shim.c -path "*solver*" | head -1)
+rm -f gt_accelerate.dylib
+if [ -n "$SHIM" ] && xcrun --find clang >/dev/null 2>&1; then
+    if xcrun clang -O2 -dynamiclib -o gt_accelerate.dylib "$SHIM" -framework Accelerate; then
+        echo "Apple Accelerate shim built."
+    else
+        echo "Apple Accelerate shim could not be built: the solver uses SuperLU."
+    fi
+fi
 echo "GroundTruth compute server: $PY"
 echo "Administrator rights are needed: enter your Mac's password (it is not shown while you type)."
 sudo "$PY" server_setup.py "${ARGS[@]}"
