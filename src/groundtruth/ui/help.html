@@ -1141,6 +1141,44 @@ are exact (the circuit's eigenvalues, each track as its lumped π section; a not
 exact); a pole and a zero within 0.1 % of each other cancel. Each op-amp's <b>loop gain</b> is computed by breaking
 its loop at its output: its crossover frequency and <b>phase margin</b> (amber below 45°: the circuit rings; red
 below 20°: close to oscillating). Simulate's emission estimate takes the path's currents from the same circuit.</p>
+<p><a name="tf_how"></a><b>How the transfer function is calculated.</b> No circuit simulator (SPICE or similar)
+is used: GroundTruth builds the circuit's equations itself and solves them with two libraries, SymPy for the
+algebra and NumPy / SciPy for the numbers.</p>
+<ol>
+<li><b>The circuit from the board.</b> From the path's nets outwards, every part with a model, every op-amp
+  channel and every track and via becomes an element between named nodes (the nets; ground and the supply rails are
+  AC ground). This is the same circuit for both forms below; the ideal form simply leaves out what a designer's
+  equation leaves out.</li>
+<li><b>The equations: modified nodal analysis.</b> Kirchhoff's current law at every node, written as one matrix
+  equation (G + s·C)·x = b·u: x the node voltages plus a current for each voltage source, op-amp and inductor; G
+  the conductances and the connections, C the capacitances (and the inductors), u the input. This is the standard
+  method of circuit simulators (Ho, Ruehli and Brennan, 1975).</li>
+<li><b>The ideal H(s), in part names (SymPy).</b> Each resistor is the symbol R1, each capacitor 1/(s·C2), each
+  inductor s·L1, at their design values without parasitics; the input an ideal voltage source, no load. Each op-amp
+  is ideal: a <i>nullor</i> (Franco, 2015). Its two inputs are forced to the same voltage and its output supplies
+  whatever current that takes, so its gain, bandwidth and output impedance drop out and only the feedback network
+  is left. SymPy solves the matrix equation symbolically (its exact LU solve on the symbol matrix; the determinant
+  with the division-free Berkowitz method decides whether the circuit has a unique answer). The result
+  v(out)/v(in) is cancelled to one fraction N(s)/D(s) and written with D's constant term 1, so N's constant term is
+  the DC gain: e.g. −R4/R1 / (C2·C5·R3·R4·s² + C5·(R1·R3 + R1·R4 + R3·R4)/R1·s + 1). Up to 15 parts: beyond that a
+  symbolic solve grows too large to read.</li>
+<li><b>The full circuit, in numbers (NumPy / SciPy).</b> The same equations with every value filled in: each
+  capacitor with its ESR, ESL and capacitance at its DC voltage, each track as a transmission line (or a lumped π
+  section for the poles), the source's and the load's impedance, and each op-amp as its datasheet macromodel (Aol
+  with its pole at GBW/Aol, a second pole, Zout, the input capacitances: above). The Bode plot solves the matrix
+  equation at each frequency. The <b>poles</b> are the generalised eigenvalues of the matrix pencil (G, −C) (SciPy's
+  <code>linalg.eig</code>, the QZ algorithm: Golub and Van Loan); the <b>zeros</b> the eigenvalues of the system
+  matrix bordered with the input and the output (Rosenbrock, 1970). The matrices are scaled first, so parts from pF to
+  MΩ stay well conditioned. From the poles and zeros comes the normal form K · Π(1 + s/ω) · Π(1 + s/(Q·ω) + s²/ω²) /
+  […]; from the same equations the loop gain and the step response.</li>
+</ol>
+<p>The ideal form is what you design with; the numeric one is what the board does, so they differ where the
+board's details matter: a real op-amp's limited bandwidth, a source impedance (25 Ω by default) in series with
+the input resistor, a capacitor's DC-bias capacitance. Both are checked against independent results: textbook closed
+forms of inverting, non-inverting, Sallen-Key, multiple-feedback and integrator circuits; an independent solve of the
+same circuits with Lcapy (validation audit round 7); and TI's OPA376 multiple-feedback low-pass, drawn in KiCad
+in <code>examples/opamp_mfb_lowpass</code>. For that board the ideal H(s) read from the copper is exactly TI's
+Eq. 1: DC gain −R4/R1 = −4.98, f₀ = 1/(2π·√(R3·R4·C2·C5)) = 21.0 kHz, 3 dB of Chebyshev peaking.</p>
 <p>The <b>step response</b>: the path's (and each op-amp output's) response to a 1 V step at the driver, from rest,
 on the plot under the Bode plot: the final value (the DC gain) dashed with its ±2 % band, the settling time dotted;
 a filter's milliseconds and an op-amp's nanoseconds each on a panel of their own. The <b>step</b> tile gives the
