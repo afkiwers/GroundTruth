@@ -248,6 +248,7 @@ def cap_voltages(board: Board, config, vm: Optional[Volts] = None) -> dict:
     span = [v for s in dc.src.values() for v in s[:2]] or [0.0]
     v_max = max(span) - min(span)
     out = {}
+    bound = None                    # the IC-driven nets' supply ranges, for a side the operating point can't place
     for fp in board.footprints:
         m = config.model_for(fp.reference)
         nets = tuple(sorted({p.net for p in fp.pads if p.net}))
@@ -259,7 +260,20 @@ def cap_voltages(board: Board, config, vm: Optional[Volts] = None) -> dict:
             continue
         ra, rb = dc.row(nets[0]), dc.row(nets[1])
         if ra is None or rb is None:
-            out[fp.reference] = (None, "voltage unknown", nets)
+            # a side with no DC path to a source: bounded by an IC that drives it, within its supply (rail to rail
+            # [A58]) when there is one: an op-amp whose input the operating point cannot place (its + input on a net
+            # with no DC path) still drives its output within its supply; since op-amps known by their pin names
+            # became amplifiers (channels, not sources, in the operating point) that bound was lost (test_bias)
+            if bound is None:
+                bound = _sources(board, config, vm, set())
+            ends = [dc.interval(r) if r is not None else bound.get(n) for n, r in ((nets[0], ra), (nets[1], rb))]
+            if any(e is None for e in ends):
+                out[fp.reference] = (None, "voltage unknown", nets)
+                continue
+            (alo, ahi), (blo, bhi) = ends[0][:2], ends[1][:2]
+            dv = min(max(abs(ahi - blo), abs(alo - bhi)), v_max)
+            why = "; ".join(bound[n][2] for n, r in ((nets[0], ra), (nets[1], rb)) if r is None)
+            out[fp.reference] = (dv, why, nets)
             continue
         diff = {s: ra.get(s, 0.0) - rb.get(s, 0.0) for s in set(ra) | set(rb)}
         lo, hi = dc.interval(diff)
