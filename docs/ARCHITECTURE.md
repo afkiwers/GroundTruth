@@ -839,6 +839,29 @@ and working set = Task Manager's "Memory", sampled every 50 ms; a census of the 
   Building the models one route at a time instead of all first would lower the peak further, at the price of the
   shared factorisations between routes on the same board-wide model.
 
+### Sparse solver backends (`solver/sparse.py`, 2026-10-25, branch `speed-m3`)
+M3 of the speed work (docs/SPEED.md 5.3-5.5). `PlaneStack._factorise` hands the Schur complement S = Arᵀ·D⁻¹·Ar
+(complex symmetric, not Hermitian) to `sparse.factorise`, which returns a `Factor` from the active backend or None
+(SuperLU in peec, as before):
+- **PARDISO** (Intel MKL, the optional `mkl` package: `pip install groundtruth[sparse]`, x86 only): ctypes on
+  mkl_rt, mtype 6, Bunch-Kaufman pivoting (`iparm[20]`; with 1x1 pivots the inductive models' solves were 3x
+  slower), METIS ordering, no iterative refinement, one thread [MKL PARDISO].
+- **Accelerate** (macOS 15.5+): LDLᵀ with SBK pivoting through `accelerate_shim.c` (Python cannot call its
+  overloaded C API) [Apple Accelerate]. Looked for prebuilt at `/Library/Application Support/GroundTruth/
+  gt_accelerate.dylib` (the Mac server's installer builds it as the installing user: the service runs as root and
+  could not compile it, Xcode's licence), beside the module, else compiled on first use into ~/Library/Caches.
+- Every backend single-threaded inside a solve (the same bits every run; Apple documents determinism only so), a
+  lock per factorisation (their handles are not safe for concurrent solves); any failure: SuperLU for that
+  factorisation, counted (`sparse.report()` in the run's statistics with the reason a backend did not load).
+- Chosen by `analysis.sparse` (settings file; Preferences' **Sparse solver** per computer; `--sparse`), else
+  `GROUNDTRUTH_SPARSE`, else auto (Accelerate on macOS, PARDISO where mkl loads, else SuperLU).
+- Memory planning (`peec.lu_bytes`) with a backend: 0.45x SuperLU's fill estimate before a model's first
+  factorisation, 1.5x the fill as memory (no SuperLU commit growth) [A69]; the measured fill after it.
+
+Measured (SPEED.md): refboard at 1x on the laptop with PARDISO, job A 184 -> 153 s, job B 826 -> 718 s, results
+within 1.4e-5 dB; at 8x on the M2 with Accelerate, job B's factorisations 490 -> 97 s, fill 0.27-0.43 of SuperLU's,
+13 -> 3 groups, 3 512 -> 2 669 s, the same 12 781 GMRES iterations.
+
 ### Solver statistics (`solver/stats.py`, 2026-10-24, branch `speed-stats`)
 The user asked for research on cutting computation time ([SPEED.md](SPEED.md): the same refboard job 66 s at 1x and
 5 538 s at 8x on the M2 server). `simulate()` runs under `stats.collect()`: a `Collector` the solver's hooks add to

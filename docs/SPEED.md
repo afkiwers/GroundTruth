@@ -357,6 +357,19 @@ python3 had no scipy, so SuperLU was not timed there; against this laptop's Supe
 solves are ~2-3x faster than the laptop's PARDISO and SuperLU and its factorisations 10-70x faster. A go on the
 M2 as on Windows.
 
+### 5.5 M3 as built (branch `speed-m3`)
+
+`solver/sparse.py` (ARCHITECTURE "Sparse solver backends"). Job B at 8x on the M2:
+
+| Run | Backend, planning | Groups | Factorisations | Time |
+|---|---|---|---|---|
+| `runs/2026-10-25_16-20-05` | SuperLU (the shim did not compile under root) | 13 | 471 s | 3 077 s |
+| `runs/2026-10-25_18-44-48` | Accelerate, planned as SuperLU | 13 | 74 s | 3 203 s (3.5 GB swapped) |
+| `runs/2026-10-25_19-59-18` | Accelerate, planned by its fill [A69] | **3** | 97 s | **2 669 s** (2.7 GB swapped) |
+
+The same 12 781 GMRES iterations in all; up to 4 solves at once, CPU 32 % (20). From M0: job B 4 520 → 2 669 s
+(−41 %). What is left is board-wide GMRES, three solves at once sharing the memory bus.
+
 ## 6. Researched, not planned (the user's choice, 2026-10-24)
 
 - **Board-wide model capped at 4x** (a setting, default min(resolution, 4)): −25-45 % at 8x, −60 % and more at 16x; 8x

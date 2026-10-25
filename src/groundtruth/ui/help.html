@@ -1189,6 +1189,16 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   on: refuses to run without one; off: never), on this computer (a laptop with other programs open wants fewer
   threads, a server more). <i>From the settings file</i> keeps the
   board's own <code>analysis.threads</code> and <code>analysis.gpu</code>.</td></tr>
+<tr><td valign="top"><b>Sparse solver</b></td><td>the factorisation behind every solve. <i>auto</i> takes Apple
+  Accelerate on a Mac (macOS 15.5 or later) and Intel MKL PARDISO on Windows when the <code>mkl</code> package is
+  installed in the plugin's Python (<code>python -m pip install mkl</code> with that Python), else SuperLU, which is
+  always there. The faster ones factorise 10-50x quicker in a third to a half of the memory, so more solves fit
+  side by side: refboard's four converters at 8x on an M2 Mac took 2 669 s against 3 512 s with SuperLU. The results
+  are the same to the solver's tolerance. A backend that cannot load or fails on a model falls back to SuperLU for
+  it; the run's solver statistics name the backend used. A compute server on a Mac gets Accelerate from its
+  installer (<code>install_server.command</code> builds a small helper with Xcode's command line tools; without
+  them: SuperLU). <i>From the settings file</i>: its <code>analysis.sparse</code> (auto when not set); the
+  command line has <code>--sparse</code>.</td></tr>
 <tr><td valign="top"><b>All cores</b> (opt-in)</td><td>"Use every core": Solver threads <i>auto</i> uses every
   physical core (not at most 4), and after the first frequencies the refinement solves up to 4 frequencies per net or
   power stage at once while cores would otherwise wait, with its solve budget raised as much. It helps big machines
@@ -1783,7 +1793,9 @@ smaller but dense, which a regular grid lets it apply with FFTs.</p>
   <li>a solve that stops converging is marked unsolved, and its band is named in the results, never silently
     filled in.</li>
   </ul></li>
-<li><b>The preconditioner</b> is an exact sparse factorisation (SuperLU) of the system's Schur complement Aᵀ·D⁻¹·A.
+<li><b>The preconditioner</b> is an exact sparse factorisation (SuperLU, or Apple Accelerate's or Intel MKL
+  PARDISO's complex symmetric LDLᵀ where available: <b>Sparse solver</b> in Preferences) of the system's Schur
+  complement Aᵀ·D⁻¹·A.
   D has two forms:
   <ul>
   <li>each strip's own impedance, for the route models, which are inductive;</li>
@@ -1998,6 +2010,14 @@ the ones the plugin's <code>requirements.txt</code> names.</p>
 <tr><td>Jinja2, MarkupSafe</td><td>PyTorch</td><td>BSD-3-Clause</td></tr>
 <tr><td>filelock, setuptools</td><td>PyTorch</td><td>MIT</td></tr>
 </table>
+
+<p><b>Only when installed by hand</b> (the faster sparse solver on Windows, <b>Sparse solver</b> in Preferences):</p>
+<table border="1" cellpadding="3" cellspacing="0">
+<tr><th>Package</th><th>Used for</th><th>Licence</th><th>Home</th></tr>
+<tr><td>Intel oneMKL (<code>mkl</code>, with <code>intel-openmp</code>, <code>tbb</code>)</td><td>PARDISO, the
+  preconditioner's factorisation</td><td>Intel Simplified Software License</td><td>intel.com/oneMKL</td></tr>
+</table>
+<p>On a Mac, Apple Accelerate is part of macOS (no package).</p>
 
 <p><b>Only for the compute server</b> (its signed update packages):</p>
 <table border="1" cellpadding="3" cellspacing="0">
