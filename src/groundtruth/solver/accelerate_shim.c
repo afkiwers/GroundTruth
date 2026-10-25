@@ -28,7 +28,6 @@ void *gt_factor(long n, const long *columnStarts, const int *rowIndices, const d
     info[0] = (long)h->F.status;
     info[1] = (long)(h->F.symbolicFactorization.factorSize_Double / 16);
     if (h->F.status != SparseStatusOK) {
-        if (h->F.status == SparseStatusFailed && info[1] == 0) info[0] = -2;
         SparseCleanup(h->F);
         free(h);
         return NULL;
