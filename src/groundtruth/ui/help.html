@@ -1100,6 +1100,34 @@ OUT, VOUT, and per channel of a dual or quad: +INA, −INB, OUTA, IN1+ …; a si
 pin of type output), else by the GT labels
 <code>amp_in</code>, <code>amp_inv</code> (the inverting input) and <code>amp_out</code>. Small signal only: no
 output swing, saturation or slew in the sweep.</p>
+<p><a name="opamp_detect"></a><b>How an op-amp is recognised.</b> A part is an op-amp (the <code>amplifier</code>
+model on the Parts tab) when one of these holds, checked in this order:</p>
+<ol>
+<li>its symbol has a <b>Gain</b> field (it is then a fixed gain block);</li>
+<li>it has the GT labels <code>amp_in</code> / <code>amp_out</code> (and <code>amp_inv</code> where the inverting
+  input's pin name doesn't say it);</li>
+<li>its pin names say it: exactly one non-inverting input (+, +IN, IN+, INP), one inverting input (−, −IN, IN−,
+  INN), one output (OUT, VOUT, VO, or else its only pin of electrical type <i>output</i>) and supply pins (V+, V−,
+  VCC, VDD, VEE, VSS). The supply pins are what tell it from a connector with + / − pins.</li>
+</ol>
+<p>A part marked DNP is never an op-amp. Anything else stays <code>open</code>: its pins are only ports, the circuit
+leaves it out, and the parts around it then behave as if it weren't there (a feedback network does nothing, the
+transfer function misses half the stage). The Signal paths tab warns about it (⚠ "… looks like an op-amp … but has
+no model") when the pin names point to an op-amp that is still <code>open</code>.</p>
+<p><b>If an op-amp is not recognised</b> (pins named differently, such as IN_A / FB / VOUT_SENSE, a dual or quad
+whose channels can't be told, an output pin of type passive), do one of these:</p>
+<ul>
+<li>on the <b>Parts</b> tab, or in the settings file, set its model to <code>amplifier</code>; for a dual or quad
+  also its stage's <code>pins</code> (input, then output);</li>
+<li>or give its symbol the GT labels, e.g. <code>GT = amp_in:3, amp_out:1</code> (add <code>amp_inv:4</code> when
+  the inverting input isn't named − / IN−; the second unit of a dual: <code>amp_in:5, amp_out:7</code>), then
+  <b>Reload board</b>: see <a href="#labels">GT labels</a>;</li>
+<li>or, for an amplifier IC whose inside doesn't matter (an instrumentation amplifier), a <b>Gain</b> field.</li>
+</ul>
+<p>Add <b>GBW</b>, <b>Aol</b>, <b>Zout</b> (and <b>Cin</b>, <b>PM</b>) fields to the symbol for its real model;
+without them the defaults above apply, with a note. A settings file made before the part was recognised keeps
+<code>open</code> until the parts are refreshed (Reload board, or <code>groundtruth init</code>), which then makes it
+an amplifier.</p>
 <p>The <b>transfer function</b> is shown two ways: in the part names, for the ideal circuit (ideal op-amps, the
 parts at their design values without parasitics, an ideal source, no load), e.g. a Sallen-Key's
 H(s) = 1 / (C1·C2·R1·R2·s² + C2·(R1 + R2)·s + 1), over the Bode plot and in the report (up to 15 parts); and
