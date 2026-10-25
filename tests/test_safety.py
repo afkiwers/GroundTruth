@@ -275,3 +275,35 @@ def test_esd_search_distance_from_preferences(tmp_path):
     assert not sig_flagged({}) and not sig_flagged({"esd_mm": 10.0})
     assert sig_flagged({"esd_mm": 1.0})
     assert with_checks(sc.config, {"esd_mm": 1.0}).safety.esd_mm == 1.0
+
+
+def test_clearances_do_not_depend_on_the_order_of_the_nets(monkeypatch):
+    """check_clearances: a net's copper is the same against every other net (a part's own pads left out for one
+    neighbour sharing that part stayed out for the next ones, so a pair could be missed), and the pairs and which net
+    leads each are the same whatever order the copper map lists the nets in (a set: it differs between processes)."""
+    import itertools
+    from types import SimpleNamespace
+    from shapely.geometry import box
+    from groundtruth.analysis import safety
+    main, pad = box(0, 0, 5, 1), box(6, 0, 7, 1)
+    geoms = {"A": main.union(pad), "B": box(7.2, 0, 8, 1), "C": box(6, 1.2, 7, 2)}
+
+    def own_pads(board, layer, a, b, ga, gb, d):
+        """B shares a part with A whose pad is `pad` (left out for B only, as _without_own_pads does)."""
+        if {a, b} == {"A", "B"}:
+            ga = main if a == "A" else ga
+            gb = main if b == "A" else gb
+            return ga, gb, ga.distance(gb)
+        return ga, gb, d
+    monkeypatch.setattr(safety, "_without_own_pads", own_pads)
+    peak = {"A": (48.0, "rail"), "B": (0.0, "ground"), "C": (0.0, "ground")}
+    model = SimpleNamespace(peak=peak, dv=lambda a, b: abs(peak[a][0] - peak[b][0]), text=lambda n: f"{peak[n][0]} V")
+    board = SimpleNamespace(copper_layers=["F.Cu"])
+    seen = set()
+    for order in itertools.permutations(geoms):
+        copper = SimpleNamespace(nets_on=lambda layer, o=order: list(o), get=lambda layer, n: geoms[n])
+        found = []
+        safety.check_clearances(board, copper, model, None, lambda check, net, msg, at, **kw: found.append(
+            (net, kw["details"]["other"])))
+        seen.add(tuple(found))
+    assert seen == {(("A", "C"),)}          # C beside A's pad found, B (the part's own pads) not, always as A-C
