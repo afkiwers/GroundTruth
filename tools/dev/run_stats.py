@@ -50,6 +50,10 @@ def show(st: dict, n_models: int):
           f"{lim.get('model')} ~{lim.get('gb')} GB); groups {info.get('groups')}; memory gate: "
           f"{info.get('gate_freed', 0)} cached factorisations freed, {info.get('gate_waits', 0)} waits; "
           f"retried alone {info.get('retried_alone', 0)}, unsolved for memory {info.get('unsolved_for_memory', 0)}")
+    sp_ = info.get("sparse")
+    if sp_:             # the factorisation backend (solver/sparse.py, since 2026-10-25)
+        print(f"  sparse solver: {sp_.get('active')} (chosen {sp_.get('chosen')}, {sp_.get('fallbacks', 0)} fell back to "
+              f"SuperLU)" + "".join(f"; {k} not loaded: {v}" for k, v in (sp_.get("not_loaded") or {}).items()))
     print("  phases: " + ", ".join(f"{p['phase']} {p['s']:.0f} s ({pct(p['s'], wall).strip()})"
                                    for p in st.get("phases", [])))
     rounds = st.get("rounds", [])

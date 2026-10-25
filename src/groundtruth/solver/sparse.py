@@ -105,20 +105,31 @@ def _shim_cache() -> Path:
     return base / "GroundTruth"
 
 
+PREBUILT = [Path("/Library/Application Support/GroundTruth/gt_accelerate.dylib")]   # the server's (built once by
+                                        # the user: a root service cannot answer Xcode's licence prompt, 2026-10-25)
+
+
 def _load_accelerate():
-    """The Accelerate shim, compiled from accelerate_shim.c with the Mac's clang on first use (cached, rebuilt
-    when the source changes)."""
+    """The Accelerate shim: GROUNDTRUTH_ACCELERATE_SHIM, else a prebuilt one (PREBUILT, beside this file), else
+    compiled from accelerate_shim.c with the Mac's clang on first use (cached, rebuilt when the source changes;
+    the compiler's message in the error when it fails)."""
     if sys.platform != "darwin":
         raise OSError("Apple Accelerate is macOS only")
     src = Path(__file__).with_name("accelerate_shim.c")
-    code = src.read_bytes()
-    import hashlib
-    lib_path = _shim_cache() / f"gt_accelerate_{hashlib.sha256(code).hexdigest()[:12]}.dylib"
+    given = os.environ.get("GROUNDTRUTH_ACCELERATE_SHIM")
+    found = [Path(given)] if given else []
+    found += PREBUILT + [Path(__file__).with_name("gt_accelerate.dylib")]
+    lib_path = next((p for p in found if p.exists()), None)
+    if lib_path is None:
+        import hashlib
+        lib_path = _shim_cache() / f"gt_accelerate_{hashlib.sha256(src.read_bytes()).hexdigest()[:12]}.dylib"
     if not lib_path.exists():
         lib_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = lib_path.with_suffix(".tmp")
-        subprocess.run(["xcrun", "clang", "-O2", "-dynamiclib", "-o", str(tmp), str(src), "-framework", "Accelerate"],
-                       check=True, capture_output=True, timeout=300)
+        done = subprocess.run(["xcrun", "clang", "-O2", "-dynamiclib", "-o", str(tmp), str(src), "-framework",
+                               "Accelerate"], capture_output=True, text=True, timeout=300)
+        if done.returncode != 0:
+            raise OSError(f"compiling the Accelerate shim failed: {(done.stderr or done.stdout).strip()[:300]}")
         os.replace(tmp, lib_path)
     os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")       # deterministic (Apple: only single-threaded)
     lib = ctypes.CDLL(str(lib_path))
@@ -157,6 +168,16 @@ class Factor:
                 free()
             except Exception:       # noqa: BLE001 - interpreter shutdown: nothing to give back
                 pass
+
+
+def report() -> dict:
+    """What the factorisations here use, for a run's statistics: the backend chosen and active, why the chosen one
+    (or auto's) did not load, and how many factorisations fell back to SuperLU."""
+    out = {"chosen": chosen(), "active": active(), "fallbacks": fallbacks[0]}
+    why = {k: str(v)[:300] for k, v in _LOADED.items() if isinstance(v, Exception)}
+    if why:
+        out["not_loaded"] = why
+    return out
 
 
 def factorise(S) -> Optional[Factor]:

@@ -3207,7 +3207,7 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
         lim = _memory_limit([r.exc.stack for _, r in runs])
         c.info.update({"threads_setting": str(t), "threads_cpu": threads_cpu,
                        "threads_memory": memory_threads(threads, [r.exc.stack for _, r in runs], avail0) if auto
-                       else threads, "admission": auto,
+                       else threads, "admission": auto, "sparse": peec._sparse.report(),
                        "available_gb": None if avail0 is None else round(avail0 / 2 ** 30, 2),
                        "memory_limit": None if lim is None else {"model": c.entry(lim[0])["label"],
                                                                  "gb": round(lim[1] / 2 ** 30, 2)}})
