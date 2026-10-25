@@ -76,7 +76,7 @@ li::marker { color: var(--accent); }
 b, strong { font-weight: 620; }
 code {
   font: 13px var(--mono); background: var(--code); border: 1px solid var(--border); border-radius: 5px;
-  padding: 1px 5px; white-space: nowrap;
+  padding: 1px 5px; white-space: normal; overflow-wrap: anywhere;   /* a long command or path wraps, not the page */
 }
 pre { font: 13px/1.5 var(--mono); background: var(--code); border: 1px solid var(--border); border-radius: 8px;
   padding: 12px 14px; overflow-x: auto; }
