@@ -540,6 +540,16 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   refboard at 2x, the stages' DC currents together (`tools/dev/pad_density.py --part Q601`, `out/speed/q601_*_2x.json`):
   Q601's drain pad densest 67.7 → 22.5 A/mm² (a sampled corner → the edge the current arrives at, falling to ~0
   across the pad), its drain fingers 59.6 → ≤ 10, the view's peak 66.4 → 57.6 A/mm² (now elsewhere).
+  **A vertical FET's die is spread over its tab** (2026-10-25, branch `tab-spread`, `simulate.die_side`,
+  `die_branches`, [A68]; the user, of that view: "the top layer under the fet is black and the vias glow which does
+  not make sense"). With one lid per side the drain tab was one node at one voltage, so the copper under Q601 handed
+  its current over within ~0.14 mm of each via and of the pad's edge and read near zero between them. A transistor
+  modelled as a resistor with a tab (one side's pad ≥ `TAB_MM` and wider than the other's) now has no drain lid: one
+  `part` branch from each grid node under the tab to the source side's lid, N·Z plus that node's share of the solder
+  each, so the die's on-resistance is spread evenly over the tab (R·A ≫ r_c). The copper hands over along
+  √(R·A / R_sheet) (~17 mm for 6.5 mΩ over 21 mm²; test_pad_bond.py checks Berger's profile with r_c = R·A). The
+  parts' sums add the branches by name (as `part_pairs`'); a tab side without a lid gets the even spread where a
+  stage's current is fed in there (power._area_shares). The pin value `entry: tab` keeps the old lid.
   A part's own joint: the pin value `bond` (µm of solder; 0 a perfect bond, taken as 0.1 µm; analysis/pins.py, its
   GT field, the Parts tab's Pins cell or Pin defaults…). `part_pairs` is left for the PDN's ideal source.
   The bonds' I²R is the joints', not the copper's: `power.dc_summary` gives each DC path `r_joints_mohm` and

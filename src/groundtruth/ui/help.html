@@ -1316,7 +1316,8 @@ an example in <a href="#siglabels">Labelling a signal path</a>.</p>
 <tr><td><code>bond:50</code></td><td>the solder between the part's pads and its metal, µm (75 when not given,
   <code>bond:0</code> a perfect bond): each side of the part is soldered over the whole of its pads, so the current
   hands over to the part where the copper brings it to the pad, within a few tenths of a millimetre of the edge it
-  arrives at; a thicker joint spreads that handover further across the pad</td></tr>
+  arrives at; a thicker joint spreads that handover further across the pad. A transistor modelled as a resistor
+  with a drain tab spreads its on-resistance over the tab (<code>entry:tab</code>: one soldered metal instead)</td></tr>
 <tr><td colspan="2"><b>A power stage's switch</b> (a FET, a catch diode, an integrated stage):</td></tr>
 <tr><td><code>entry:tab</code></td><td>how the stage's current enters the copper at its pads: <code>tab</code>, each
   side's metal soldered over its pads (a silicon FET's drain tab: the current hands over at the edge it arrives at);
@@ -1752,7 +1753,10 @@ smaller but dense, which a regular grid lets it apply with FFTs.</p>
   <li>a part is its model's Z(f) plus 0.3 nH mounting inductance between its two sides' metal (a terminal, a FET's
     drain or source), each soldered over the whole of its pads (75 µm of solder, a few tenths of a mΩ on a large
     pad): the current hands over to the part where the copper brings it to the pad, mostly at the edge it arrives
-    at, falling off across the pad, not at a few points of it. A power stage's switch with a tab (a pad at least
+    at, falling off across the pad, not at a few points of it. A transistor modelled as a resistor (a surge stopper,
+    a reverse-polarity FET) with a drain tab has its on-resistance spread evenly over the tab instead, as its die's
+    cells are: the current leaves the copper all across the tab, not only at its edge and its vias (the pin value
+    <code>entry:tab</code> keeps one soldered metal). A power stage's switch with a tab (a pad at least
     1 mm wide on a side: a silicon FET's drain, a diode's cathode) is soldered over its pads the same way, so the
     stage's currents enter the copper where it brings them; a chip-scale GaN FET's narrow bars keep their current
     spread evenly over each pin's copper, which its die does (the pin value <code>entry</code> overrides).</li>

@@ -500,8 +500,21 @@ class BoardModel:
             # Until 2026-10-24 the part joined up to 8 sampled nodes per side (the pads' corners first): each a point
             # sink, refboard's Q601 drain read 54 A/mm² at a corner its current only reaches by crowding (the user)
             bond = pin_params(fp.reference).bond         # the part's own solder thickness (pins.py), else built in
-            lid_a, bonds_a = part_lid(st, [p for p in fpads if p.net == pa.net], fp.reference, snap, bond)
-            lid_b, bonds_b = part_lid(st, [p for p in fpads if p.net == pb.net], fp.reference, snap, bond)
+            sides = [[p for p in fpads if p.net == pa.net], [p for p in fpads if p.net == pb.net]]
+            die = die_side(fp, model, sides, pin_params(fp.reference).entry)
+            if die is not None:
+                # a vertical FET: its on-resistance spread over its tab (die_branches [A68]); the other side's
+                # metal (the source clip and leads) one lid as at any part
+                other = sides[1 - die]
+                lid, bonds = part_lid(st, other, fp.reference, snap, bond)
+                spread = die_branches(st, sides[die], lid, fp.reference, model, bond) if lid is not None else []
+                if not spread:
+                    continue
+                st.branches += spread + bonds
+                st.side_lids[(fp.reference, other[0].net)] = lid
+                continue
+            lid_a, bonds_a = part_lid(st, sides[0], fp.reference, snap, bond)
+            lid_b, bonds_b = part_lid(st, sides[1], fp.reference, snap, bond)
             if lid_a is None or lid_b is None:
                 continue
             st.branches.append(Branch(lid_a, lid_b, part_impedance(model), fp.reference, "part"))
@@ -661,6 +674,37 @@ def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optiona
     rc = BOND_RC if bond_um is None else SOLDER_RHO * max(bond_um, BOND_MIN_UM) * 1e-6
     r = rc / (max(float(areas.sum()), 1e-3) * 1e-6) * len(nodes)            # N bonds in parallel: the side's joint
     return lid, [Branch(n, lid, (lambda f, r=r: complex(r)), ref, "bond") for n in nodes]
+
+
+def die_side(fp, model, sides: list, entry: Optional[str]) -> Optional[int]:
+    """Which side (0 / 1) of a lumped part is a vertical FET's drain tab with the die's resistance on it, or None
+    [A68]: a transistor (reference Q...) modelled as a resistor with R > 0, its widest pad at least TAB_MM wide on
+    exactly that side; the pin value `entry: tab` keeps the old single soldered metal (part_lid on both sides)."""
+    if entry == "tab" or model.kind != "resistor" or not (model.params.get("R") or 0) > 0:
+        return None
+    if not fp.reference.upper().startswith("Q"):
+        return None
+    width = [max((min(p.size) for p in pads), default=0.0) for pads in sides]
+    k = int(width[1] > width[0])
+    return k if width[k] >= TAB_MM and width[k] > width[1 - k] else None
+
+
+def die_branches(st: StackBuild, pads: list, lid, ref: str, model, bond_um: Optional[float] = None) -> list[Branch]:
+    """A vertical FET's die over its drain tab [A68]: one `part` branch from every grid node under the tab's pads
+    (pad_nodes) to the source side's lid, each N × the part's impedance plus that node's share of the solder joint
+    (part_lid's r), so the N in parallel are the part (its currents add by name, as part_pairs' do). The on-resistance
+    is the die's vertical cells' in parallel, evenly over its area, and r_ds·A ≫ the solder's r_c and the copper's
+    spreading: the current leaves the copper evenly over the tab, not where it first reaches it."""
+    from ..geometry.shapes import pad_shape
+    nodes = pad_nodes(st, pads)
+    if not nodes:
+        return []
+    area = max(float(sum(getattr(pad_shape(p), "area", 0.0) or 0.0 for p in pads)), 1e-3)     # mm²
+    rc = BOND_RC if bond_um is None else SOLDER_RHO * max(bond_um, BOND_MIN_UM) * 1e-6
+    n = len(nodes)
+    r_joint = rc / (area * 1e-6) * n                    # one node's share of the tab's joint, as part_lid's bonds
+    z = part_impedance(model)
+    return [Branch(nd, lid, (lambda f, z=z, n=n, r=r_joint: n * z(f) + r), ref, "part") for nd in nodes]
 
 
 TAB_MM = 1.0                # a switch's side with a pad this wide (its narrower side, mm) is a tab [A65]

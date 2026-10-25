@@ -181,3 +181,45 @@ def test_a_tab_takes_its_current_at_the_edge_the_copper_brings_it_to(tmp_path):
     assert edge_t == pytest.approx(edge_e, rel=0.2)          # the same current reaches the pad
     assert mid_t < 0.1 * edge_t
     assert 0.3 * edge_e < mid_e < 0.8 * edge_e
+
+
+def test_a_fets_die_spread_over_its_tab_hands_over_evenly():
+    """A vertical FET's on-resistance spread over its drain tab [A68] (simulate.die_branches: each node N·R to the
+    source side): a transmission-line contact [Berger 1972] with r_c = R·A, so with a 6.5 mΩ FET over a 10 × 2.1 mm
+    tab the transfer length is ~17 mm, not the solder's ~0.14 mm: the current leaves the copper all along the tab,
+    I(u) = I₀·sinh((L−u)/λ)/sinh(L/λ), nearly linear: about half still in the copper halfway (the solder alone: none)."""
+    g = build_grid({"A": box(-D / 2, -D / 2, 20 + D / 2, 2 + D / 2), "B": box(25 - D / 2, -D / 2, 26 + D / 2, 1 + D / 2)},
+                   (0.0, 0.0, 26.0, 2.0), D)
+    rs = 1 / (SIGMA_CU * skin_thickness(T, 10.0, SIGMA_CU))
+    r_fet, L, w = 6.5e-3, 10.0, 21 * D
+    i0, i1 = int(round(10 / D)), int(round(20 / D))
+    island = (0, int(round(25.5 / D)), 5)
+    cells = [(i, j, 0.5 if i in (i0, i1) else 1.0) for i in range(i0, i1 + 1) for j in range(21)]
+    total = sum(s for _, _, s in cells)                        # each node's share of the tab: its conductance's
+    branches = [Branch((0, i, j), island, (lambda f, r=r_fet * total / s: complex(r)), "Q1", "part")
+                for i, j, s in cells]
+    st = PlaneStack([PlaneLayer("F.Cu", 0.0, g, T)], branches)
+    sol = RouteExcitation(st, [], injections=[((0, 0, j), 1 / 21) for j in range(21)] + [(island, -1.0)]).solve(10.0)
+    lam = math.sqrt(r_fet * (L * w * 1e-6) / rs) * 1e3            # mm
+    assert 15.0 < lam < 18.0
+    current = sol.I_x[0].real.sum(axis=1)
+    for u in (0.55, 3.05, 6.05, 9.05):
+        i = int(round((10.0 + u) / D - 0.5))
+        assert current[i] == pytest.approx(math.sinh((L - u) / lam) / math.sinh(L / lam), abs=0.01), u
+
+
+def test_a_transistor_modelled_as_a_resistor_spreads_its_die_over_its_wider_side():
+    """simulate.die_side: a Q part modelled as a resistor (R > 0) with one side's pad ≥ TAB_MM wider than the other's
+    is a vertical FET with its die on that side; `entry: tab`, a capacitor, a 0R (short) or a U part keep the lid on
+    both sides."""
+    from types import SimpleNamespace as N
+    from groundtruth.analysis.simulate import die_side
+    pad = lambda w, h: N(size=(w, h))                                  # noqa: E731
+    sides = [[pad(0.6, 0.8)] * 3, [pad(5.2, 6.9)]]
+    fet = N(kind="resistor", params={"R": 6.5e-3})
+    assert die_side(N(reference="Q601"), fet, sides, None) == 1
+    assert die_side(N(reference="Q601"), fet, sides[::-1], None) == 0
+    assert die_side(N(reference="Q601"), fet, sides, "tab") is None
+    assert die_side(N(reference="U1"), fet, sides, None) is None
+    assert die_side(N(reference="Q1"), N(kind="short", params={}), sides, None) is None
+    assert die_side(N(reference="Q1"), fet, [[pad(0.6, 0.8)], [pad(0.6, 0.8)]], None) is None
