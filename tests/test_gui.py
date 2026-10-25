@@ -3399,3 +3399,30 @@ def test_the_window_opens_big_enough_and_as_it_was_closed(app, tmp_path, monkeyp
     close_window(f)
     assert theme.prefs()["window"] == {"width": 1100, "height": 700, "maximized": False}
     assert main_frame.window_size() == (1100, 700)
+
+
+def test_save_configuration_as_picks_its_folder(app, frame, tmp_path, monkeypatch):
+    """Save configuration as… has a Folder picker (the user: "provide a simple picker dialog so the user can decide
+    where to save it"): it starts at the board's configs folder, the file goes into the folder chosen (made when
+    missing) and is the configuration in use; the next Save as starts in that folder."""
+    from groundtruth.config import scenario
+    from groundtruth.ui import config_menu
+    f = frame
+    run_steps(app, f, [lambda: None])
+    chosen = tmp_path / "my configs"
+    started = []
+
+    def answer(dlg):
+        """Stands in for the user: notes the folder offered, fills the fields, OK."""
+        started.append(dlg.folder.GetPath())
+        dlg.name.SetValue("elsewhere")
+        dlg.folder.SetPath(str(chosen))
+        return wx.ID_OK
+    monkeypatch.setattr(config_menu.NameDialog, "ShowModal", answer)
+    f.save_config_as()
+    run_steps(app, f, [lambda: None])
+    wait_for(app, lambda: (chosen / scenario.file_name("elsewhere")).exists(), timeout=10)
+    assert started == [str(scenario.folder_for(f.settings.path))]
+    assert f._active["file"] == str(chosen / scenario.file_name("elsewhere"))
+    f.save_config_as()
+    assert started[-1] == str(chosen)
