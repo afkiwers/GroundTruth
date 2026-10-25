@@ -2589,6 +2589,31 @@ def test_each_check_shows_its_basis_as_links_into_the_references(app, frame):
     assert re.search(r"<b>Voltage spacing</b>: <a href=\"#ref-IPC-2221B\">IPC-2221B</a>", text)
 
 
+def test_the_help_closes_by_its_x_while_a_modal_dialog_is_open(app, frame):
+    """The help opened from Preferences (a modal dialog) and its X clicked (the system menu's close, as Windows sends
+    it): the window goes at once, though wx only deletes a frame once the dialog's loop ends (the user: "pressing X
+    does not close the help"); the next Help opens a new window."""
+    import ctypes
+    f = frame
+    run_steps(app, f, [lambda: None])
+    seen = {}
+    dlg = wx.Dialog(f, title="modal")
+
+    def close_it():
+        """Opens the help from inside the modal loop, sends it the X, then ends the dialog."""
+        f.show_reference("IPC-2221B")
+        h = f._help
+        ctypes.windll.user32.PostMessageW(h.GetHandle(), 0x0112, 0xF060, 0)      # WM_SYSCOMMAND, SC_CLOSE
+        wx.CallLater(800, lambda: (seen.update(shown=bool(h) and h.IsShown()), dlg.EndModal(0)))
+    wx.CallLater(300, close_it)
+    dlg.ShowModal()
+    dlg.Destroy()
+    assert seen == {"shown": False}
+    f.on_help()
+    assert f._help.IsShown()
+    close_window(f._help)
+
+
 def test_find_servers_lists_the_cluster_and_fills_the_address(app, frame, monkeypatch):
     """Preferences › Find servers: without a key it only says to enter one; the servers found are listed (the lead
     first, with its role) and the one picked goes into the address (its port only when not the default)."""
