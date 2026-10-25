@@ -327,7 +327,9 @@ def check_clearances(board: Board, copper, model: Volts, safety, add: Add) -> in
     found = 0
     for layer in board.copper_layers:
         external = layer in EXTERNAL
-        nets = [n for n in copper.nets_on(layer) if n]
+        # sorted: nets_on is a set, whose order differs between processes; the pairs (and which net of a pair
+        # leads the issue) must not (one board named +VDC and SW2's pair either way round between two runs)
+        nets = sorted(n for n in copper.nets_on(layer) if n)
         hot = [n for n in nets if n in volts and volts[n][0] > CHECK_FROM_V]
         if not hot:
             continue
@@ -355,11 +357,13 @@ def check_clearances(board: Board, copper, model: Volts, safety, add: Add) -> in
                 if d >= need - 1e-6:
                     continue
                 # a part's own pins are spaced and rated by its maker (an EPC2306's interleaved drain and source,
-                # a controller's 0.5 mm pitch): its pads against each other don't count, a track against them does
-                ga, gb, d = _without_own_pads(board, layer, a, b, ga, gb, d)
+                # a controller's 0.5 mm pitch): its pads against each other don't count, a track against them does.
+                # Into names of their own: `ga` is a's whole copper for every other net b (overwriting it here took
+                # one part's pads out of a for the nets after it, so a pair could be missed depending on the order)
+                ca, cb, d = _without_own_pads(board, layer, a, b, ga, gb, d)
                 if d >= need - 1e-6:
                     continue
-                pa, pb = nearest_points(ga, gb)
+                pa, pb = nearest_points(ca, cb)
                 at = ((pa.x + pb.x) / 2, (pa.y + pb.y) / 2)
                 found += 1
                 known = b in volts
