@@ -16,3 +16,6 @@ fp-info-cache
 # a release key (private half) must never be committed: the release workflow takes it from an Actions secret
 *.pem
 release_ed25519*
+
+# Claude Code project notes: local only (personal paths and boards)
+CLAUDE.md
