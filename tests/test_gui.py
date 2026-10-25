@@ -3008,7 +3008,7 @@ def test_preferences_list_the_servers_and_update_the_old_ones(app, frame, monkey
     server package (a development copy) the buttons stay off."""
     from groundtruth.ui import prefs_dialog, server_updates
     from groundtruth.ui.prefs_dialog import PreferencesDialog, defaults
-    rows = [{"name": "build_pc", "address": "build_pc", "version": "0.1.5 (x)", "state": "older", "text": "out of date",
+    rows = [{"name": "build-pc", "address": "build-pc", "version": "0.1.5 (x)", "state": "older", "text": "out of date",
              "can_update": True, "update": None},
             {"name": "mac", "address": "10.0.0.3:8765", "version": "0.1.9 (y)", "state": "same", "text": "up to date",
              "can_update": False, "update": None}]
@@ -3022,18 +3022,18 @@ def test_preferences_list_the_servers_and_update_the_old_ones(app, frame, monkey
                         lambda parent, t, v: confirmed.append([r["name"] for r in t]) or True)
     import groundtruth.remote.release as release
     monkeypatch.setattr(release, "bundled", lambda folder=None: {"zip": None, "sig": "ab", "version": "0.1.9 (y)"})
-    prefs = dict(defaults({}), compute="server", server="build_pc", server_key="k" * 20)
+    prefs = dict(defaults({}), compute="server", server="build-pc", server_key="k" * 20)
     with PreferencesDialog(frame, prefs) as dlg:
         p = dlg.servers
         assert isinstance(p, prefs_dialog.ServersPanel)
         wait_for(app, lambda: p.list.GetItemCount() == 2)            # asked by itself once the dialog shows
-        assert asked == [("build_pc", "k" * 20)] and "1 server(s) out of date" in p.note.GetLabel()
+        assert asked == [("build-pc", "k" * 20)] and "1 server(s) out of date" in p.note.GetLabel()
         assert p.all_b.IsEnabled() and not p.update_b.IsEnabled()
         p.list.Select(0)
         wait_for(app, lambda: p.update_b.IsEnabled())
         p.on_update(all_=True)
         wait_for(app, lambda: len(asked) == 2)                        # asked again after the update
-        assert updated == ["build_pc"] and not p.busy and confirmed == [["build_pc"]]
+        assert updated == ["build-pc"] and not p.busy and confirmed == [["build-pc"]]
         p.bundle = None
         p._enable()
         assert not p.all_b.IsEnabled() and not p.update_b.IsEnabled()

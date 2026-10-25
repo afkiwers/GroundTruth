@@ -19,7 +19,7 @@ def _status(**kw):
           "cluster": {"role": "lead", "size": 2, "together_since": NOW - 6300, "now": NOW, "forced_lead": True,
                       "lead": {"me": True}, "events": [{"event": "lost", "host": "laptop", "at": NOW - 600,
                                                          "text": "no beacon"}],
-                      "members": [{"host": "build_pc", "address": "192.0.2.127:8765", "cores": 16, "memory_gb": 31.7,
+                      "members": [{"host": "build-pc", "address": "192.0.2.127:8765", "cores": 16, "memory_gb": 31.7,
                                    "gpus": ["RTX 3050"], "joined_at": NOW - 6300, "lead": False}]}}
     st.update(kw)
     return st
@@ -38,11 +38,11 @@ def test_the_answer_is_rows_and_a_cluster_table():
     assert rows["Running for"] == "1 h 45 min" and rows["Remote updates"].startswith("on")
     assert s["cluster_title"] == "Cluster of 2 servers, together for 1 h 45 min"
     assert [(r["role"], r["host"]) for r in s["cluster"]] == [("lead", "mac-server.local (this one)"),
-                                                             ("member", "build_pc")]
+                                                             ("member", "build-pc")]
     assert s["cluster"][1]["gpu"] == "RTX 3050" and s["cluster"][1]["since"] == "1 h 45 min"
     assert any("--lead" in n for n in s["cluster_notes"]) and any("laptop was lost" in n for n in s["cluster_notes"])
     text = summary_text(s)
-    assert "Memory: 24.0 GB, 11.5 GB free" in text and "member  build_pc" in text
+    assert "Memory: 24.0 GB, 11.5 GB free" in text and "member  build-pc" in text
 
 
 def test_another_version_and_a_standalone_server():
@@ -53,7 +53,7 @@ def test_another_version_and_a_standalone_server():
     assert any("another GroundTruth" in w for w in s["warnings"])
     assert s["cluster"] == [] and s["cluster_title"].startswith("Standalone")
     # just restarted (an update): the others' beacons not heard yet, said so (the user: "it says no other server
-    # with this key is heard. However, build_pc has the same key", at "Running for 1 s")
+    # with this key is heard. However, build-pc has the same key", at "Running for 1 s")
     fresh = server_summary(_status(cluster={"role": "standalone"}, uptime_s=1), "ed1ff59c30b9", "GT x")
     assert fresh["cluster_title"].startswith("No other server heard yet: this one started 1 s ago")
 
@@ -70,7 +70,7 @@ def test_the_dialog_builds(monkeypatch):
         labels = [c.GetLabel() for c in dlg.GetChildren() if isinstance(c, wx.StaticText)]
         assert "24.0 GB, 11.5 GB free" in labels and any(lbl.endswith("Connected to mac-server.local")
                                                          for lbl in labels)
-        assert dlg.cluster.GetItemCount() == 2 and dlg.cluster.GetItemText(1, 1) == "build_pc"
+        assert dlg.cluster.GetItemCount() == 2 and dlg.cluster.GetItemText(1, 1) == "build-pc"
         dlg.Destroy()
     finally:
         app.Destroy()
@@ -84,10 +84,10 @@ def test_the_update_confirmation_lists_the_servers_now_and_after(monkeypatch):
     from groundtruth.ui import theme
     from groundtruth.ui.server_info import UpdateConfirmDialog, update_summary
     rows = [{"name": "mac-server.local", "version": "0.1.41524 (29fb7ad)"},
-            {"name": "build_pc", "version": "0.1.41524 (29fb7ad)"}]
+            {"name": "build-pc", "version": "0.1.41524 (29fb7ad)"}]
     s = update_summary(rows, "GroundTruth 0.1.41525 (64c896a, built 2026-10-16 19:57)")
     assert s["title"] == "Update 2 compute servers to 0.1.41525 (64c896a)?"
-    assert s["rows"][1] == {"name": "build_pc", "now": "0.1.41524 (29fb7ad)", "after": "0.1.41525 (64c896a)"}
+    assert s["rows"][1] == {"name": "build-pc", "now": "0.1.41524 (29fb7ad)", "after": "0.1.41525 (64c896a)"}
     assert s["built"] == "this plugin's version, built 2026-10-16 19:57" and len(s["notes"]) == 3
     assert update_summary(rows[:1], "GroundTruth 0.1.41525 (64c896a)")["title"] == \
         "Update mac-server.local to 0.1.41525 (64c896a)?"

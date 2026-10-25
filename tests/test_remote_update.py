@@ -314,12 +314,12 @@ def test_the_preferences_list_and_an_update_followed(tmp_path):
     from groundtruth.remote.protocol import code_id
     from groundtruth.ui import server_updates as su
     mine = code_id()
-    st = {"host": "build_pc", "code": "old", "version": "GroundTruth 0.1.5 (x, built y)", "remote_update": True,
+    st = {"host": "build-pc", "code": "old", "version": "GroundTruth 0.1.5 (x, built y)", "remote_update": True,
           "cluster": {"members": [{"host": "mac", "address": "10.0.0.3:8765"}],
                       "other_versions": [{"host": "laptop", "address": "10.0.0.2:8765"}]}}
-    assert su.server_addresses(st, "build_pc") == [("build_pc", ["build_pc"]), ("mac", ["10.0.0.3:8765"]),
+    assert su.server_addresses(st, "build-pc") == [("build-pc", ["build-pc"]), ("mac", ["10.0.0.3:8765"]),
                                                 ("laptop", ["10.0.0.2:8765"])]
-    row = su.row_of("build_pc", "build_pc", st, "", NEW, mine)
+    row = su.row_of("build-pc", "build-pc", st, "", NEW, mine)
     assert row["state"] == "older" and row["can_update"] and row["version"] == "0.1.5 (x)"
     off = su.row_of("x", "x", {**st, "remote_update": False}, "", NEW, mine)
     assert not off["can_update"] and "remote updates off" in off["text"]
@@ -346,12 +346,12 @@ def test_the_preferences_list_and_an_update_followed(tmp_path):
     Fake.answers = [{"update": None}, {"update": {"state": "waiting"}, "running": [1]}, OSError("restarting"),
                     {"code": mine, "version": NEW}]
     steps = []
-    done, text = su.update("build_pc", KEY, bundle, steps.append, remote=Fake, sleep=lambda s: None)
+    done, text = su.update("build-pc", KEY, bundle, steps.append, remote=Fake, sleep=lambda s: None)
     assert done and "updated to 0.1.99999 (abc1234)" in text and Fake.sent == [(b"zip", "ab")]
     assert "stopping 1 running job(s)" in steps and any("restarts" in s for s in steps)
     Fake.answers = [{"update": {"state": "failed", "at": 1.0}}, {"update": {"state": "failed", "at": 1.0}},
                     {"update": {"state": "rolled back", "at": 2.0, "error": "it ended after 3 s"}}]
-    done, text = su.update("build_pc", KEY, bundle, steps.append, remote=Fake, sleep=lambda s: None)
+    done, text = su.update("build-pc", KEY, bundle, steps.append, remote=Fake, sleep=lambda s: None)
     assert not done and "rolled back" in text and "3 s" in text        # the older failure (at 1.0) was not this one
 
 
@@ -442,7 +442,7 @@ def test_end_to_end_the_service_updates_itself(tmp_path, monkeypatch):
 
 
 def test_a_server_with_two_networks_is_found_at_the_address_that_answers(monkeypatch, tmp_path, capsys):
-    """The user: build_pc (198.51.100.6) in the cluster of server-pc (203.0.113.128) was not listed in Preferences,
+    """The user: build-pc (198.51.100.6) in the cluster of server-pc (203.0.113.128) was not listed in Preferences,
     and "can we start a server with a known address ... and then get presented the available options?". A server
     can announce one chosen address (server.json "address", install --address: picked from this PC's network cards
     or checked against them); the beacons also go to each own subnet's broadcast (Windows sends 255.255.255.255 out
@@ -462,8 +462,8 @@ def test_a_server_with_two_networks_is_found_at_the_address_that_answers(monkeyp
     assert srv.addresses(announced=True) == ["198.51.100.6"] and srv.addresses()[0] == "198.51.100.6"
     st = srv.status()
     assert st["address"] == "198.51.100.6" and st["addresses"][0] == "198.51.100.6"
-    block = server_setup.status_block({**st, "host": "build_pc"}, 8765)
-    assert "build_pc (198.51.100.6" in block and "announces 198.51.100.6" in block
+    block = server_setup.status_block({**st, "host": "build-pc"}, 8765)
+    assert "build-pc (198.51.100.6" in block and "announces 198.51.100.6" in block
     # install --address: listed and picked, given and checked, or automatic again
     paths = server_setup.layout(tmp_path / "inst")
     monkeypatch.setitem(server_setup.DRY, "on", False)
@@ -484,10 +484,10 @@ def test_a_server_with_two_networks_is_found_at_the_address_that_answers(monkeyp
     assert Args.address == ""
     # Preferences: a member reached at the second address it announces; a server only the query heard is added
     lead = {"host": "server-pc", "code": "c", "version": NEW, "remote_update": True,
-            "cluster": {"members": [{"host": "build_pc", "address": "203.0.113.7:8765",
+            "cluster": {"members": [{"host": "build-pc", "address": "203.0.113.7:8765",
                                      "addresses": ["203.0.113.7", "198.51.100.6"]}]}}
     heard = [{"host": "mac", "address": "10.0.0.3", "port": 8765, "info": {"addresses": ["10.0.0.3"]}},
-             {"host": "build_pc", "address": "198.51.100.6", "port": 8765}]
+             {"host": "build-pc", "address": "198.51.100.6", "port": 8765}]
 
     class Fake:
         """A client answering the status of whatever address it was made for."""
