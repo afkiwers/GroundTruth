@@ -47,3 +47,20 @@ def test_a_backend_solves_like_a_direct_solve(name):
         assert np.allclose(X[:, 0], x) and np.allclose(X[:, 1], 1j * x)
     finally:
         sparse.configure(old)
+
+
+def test_the_backend_is_a_setting_a_preference_and_a_cli_flag(tmp_path):
+    """analysis.sparse in the settings file (unknown names reported), Preferences' "Sparse solver" (per computer,
+    "From the settings file" leaves it), and --sparse setting it for one run."""
+    from types import SimpleNamespace
+    from groundtruth.cli import _solver_options
+    from groundtruth.config.settings import _sparse
+    from groundtruth.ui.prefs_dialog import FROM_FILE, overrides
+    errors = []
+    assert _sparse(None, errors) is None and _sparse("PARDISO", errors) == "pardiso" and not errors
+    assert _sparse("umfpack", errors) is None and errors
+    assert overrides({"sparse": "accelerate"})["sparse"] == "accelerate"
+    assert "sparse" not in overrides({"sparse": FROM_FILE}) and "sparse" not in overrides({})
+    cfg = SimpleNamespace(analysis=SimpleNamespace(gpu="auto", sparse=None, resolution=1.0))
+    _solver_options(cfg, SimpleNamespace(gpu=None, sparse="superlu", resolution=None))
+    assert cfg.analysis.sparse == "superlu"

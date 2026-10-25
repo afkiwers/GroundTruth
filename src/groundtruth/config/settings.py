@@ -389,6 +389,8 @@ class AnalysisSettings:
     load_pf: float = 5.0                  # default receiver input capacitance
     threads: Union[str, int] = "auto"     # parallel solves: "auto" (physical cores, at most 4) or a number
     gpu: str = "auto"                     # solver iterations on a GPU (PyTorch): auto (if one is there) | on | off
+    sparse: Optional[str] = None          # the preconditioner's factorisation (solver/sparse.py): auto | superlu |
+                                          # pardiso | accelerate; None: GROUNDTRUTH_SPARSE, else auto
     all_cores: bool = False               # "Use all cores" (per machine, Preferences / CLI --all-cores; not in the
                                           # file): auto threads = every physical core, several frequencies per
                                           # refinement round while threads would idle (simulate.solve_setups)
@@ -675,6 +677,18 @@ def _threads(v: Any, errors: list[str]) -> Union[str, int]:
         return int(v)
     errors.append(f"analysis.threads must be auto or a whole number >= 1, not {v!r}")
     return "auto"
+
+
+def _sparse(v: Any, errors: list[str]) -> Optional[str]:
+    """analysis.sparse: auto | superlu | pardiso | accelerate, or None when not given (anything else reported in
+    `errors`, taken as not given)."""
+    if v is None:
+        return None
+    s = str(v).strip().lower()
+    if s not in ("auto", "superlu", "pardiso", "accelerate"):
+        errors.append(f"analysis.sparse must be auto, superlu, pardiso or accelerate, not {v!r}")
+        return None
+    return s
 
 
 def _gpu(v: Any, errors: list[str]) -> str:
@@ -1188,6 +1202,7 @@ def config_from_data(data: Any) -> Config:
             load_pf=_num(a.get("load_pf", 5.0), "analysis.load_pf", "pF"),
             threads=_threads(a.get("threads", "auto"), errors),
             gpu=_gpu(a.get("gpu", "auto"), errors),
+            sparse=_sparse(a.get("sparse"), errors),
             conducted=str(a.get("conducted", "cispr32")).lower().replace(" ", "").replace("-", ""),
             conducted_class=str(a.get("conducted_class", "B")),
             # "G", "H", "461H" or "MIL-STD-461H" all name the revision

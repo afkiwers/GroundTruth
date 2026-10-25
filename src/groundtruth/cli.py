@@ -558,8 +558,7 @@ def _solver_options(cfg, args):
     if getattr(args, "gpu", None):
         cfg.analysis.gpu = args.gpu
     if getattr(args, "sparse", None):
-        from .solver import sparse
-        sparse.configure(args.sparse)
+        cfg.analysis.sparse = args.sparse
     if getattr(args, "resolution", None):
         cfg.analysis.resolution = float(args.resolution)
     if getattr(args, "all_cores", False):

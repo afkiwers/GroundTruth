@@ -56,6 +56,7 @@ from ..solver.peec import (EPS0, GMRES_FIRST_ROWS, gmres_restart, Branch, Grid, 
                            PlaneStack, RouteExcitation, Solution, SolverError, TraceSegment, build_grid,
                            thread_budget, track_impedance, via_impedance)
 from ..solver import gpu, peec, stats
+from ..solver import sparse as sparse_solver
 from .progress import Phases
 from .pins import SOLDER_RHO, column_conductance, feed_layer, params_cache, segment_impedance, solder_span
 from .route import SHUNT_KINDS, Route, RouteSegment, RouteVia, return_pad, shunt_parts, signal_nets  # noqa: F401
@@ -3496,6 +3497,8 @@ def simulate(board: Board, config: Config, nets: Optional[list[str]] = None,
     with stats.collect() as st:
         config, cap_bias, bias_notes = at_dc(board, config.active(nets))
         stats.mark("capacitor bias")
+        # the factorisation backend (solver/sparse.py): the settings' or Preferences' choice, else the process's
+        sparse_solver.configure(getattr(config.analysis, "sparse", None))
         with gpu.use(getattr(config.analysis, "gpu", "auto")) as run:
             result = _simulate(board, config, nets, progress, copper, model, keep_factorisations, part,
                                full if part is not None else None)

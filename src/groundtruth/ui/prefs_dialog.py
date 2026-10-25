@@ -18,6 +18,7 @@ VIAS_SHOWN = ("All", "5", "10", "20", "50")      # the via markers per map at mo
 FROM_FILE = "From the settings file"
 THREADS = (FROM_FILE, "auto", "1", "2", "4", "8", "16", "32")
 GPU = (FROM_FILE, "auto", "on", "off")
+SPARSE = (FROM_FILE, "auto", "superlu", "pardiso", "accelerate")     # solver/sparse.py's backends
 QUALITY = (FROM_FILE, "draft", "normal", "fine")
 # the electro-thermal coupling (analysis/electrothermal.py): on or off, its most rounds and its tolerance, each from the
 # settings file (thermal.electrothermal, _rounds, _tolerance) unless set here for this computer
@@ -97,6 +98,8 @@ def overrides(prefs: dict) -> dict:
         out["threads"] = "auto" if p["threads"] == "auto" else int(p["threads"])
     if p["gpu"] != FROM_FILE:
         out["gpu"] = p["gpu"]
+    if p["sparse"] != FROM_FILE:
+        out["sparse"] = p["sparse"]
     if p["all_cores"]:
         out["all_cores"] = True
     return out
@@ -176,6 +179,7 @@ def defaults(prefs: dict) -> dict:
     return {"resolution": prefs.get("resolution", 1) if prefs.get("resolution", 1) in RESOLUTIONS else 1,
             "threads": str(prefs.get("threads")) if str(prefs.get("threads")) in THREADS else FROM_FILE,
             "gpu": prefs.get("gpu") if prefs.get("gpu") in GPU else FROM_FILE,
+            "sparse": prefs.get("sparse") if prefs.get("sparse") in SPARSE else FROM_FILE,
             "all_cores": bool(prefs.get("all_cores", False)),
             "thermal_quality": prefs.get("thermal_quality") if prefs.get("thermal_quality") in QUALITY else FROM_FILE,
             "electrothermal": prefs.get("electrothermal") if prefs.get("electrothermal") in ELECTROTHERMAL
@@ -472,6 +476,13 @@ class PreferencesDialog(wx.Dialog):
             "the solver's iterations on a graphics card (PyTorch with CUDA or AMD ROCm, see Help): auto uses one if this "
             "computer has one, on refuses to run without it, off never uses it. From the settings file: its "
             "analysis.gpu.")
+        self.sparse = wx.Choice(self, choices=list(SPARSE))
+        self.sparse.SetStringSelection(p["sparse"])
+        row(sim, "Sparse solver", self.sparse,
+            "the factorisation behind every solve: auto takes Apple Accelerate on a Mac and Intel MKL PARDISO on "
+            "Windows when it is installed, else SuperLU (always there). The faster ones factorise 10-50x quicker in "
+            "less memory; the results are the same to the solver's tolerance. From the settings file: its "
+            "analysis.sparse (auto when not set).")
         # "Use all cores": opt-in, with an info button on what it costs (the user: "make it an opt-in 'use all
         # cores' setting. and add an info icon to explain its potential issues")
         holder = wx.Panel(self)
@@ -720,6 +731,7 @@ class PreferencesDialog(wx.Dialog):
         return {"resolution": RESOLUTIONS[self.resolution.GetSelection()],
                 "threads": self.threads.GetStringSelection(),
                 "gpu": self.gpu.GetStringSelection(),
+                "sparse": self.sparse.GetStringSelection(),
                 "all_cores": self.all_cores.GetValue(),
                 "thermal_quality": self.thermal_quality.GetStringSelection(),
                 "electrothermal": self.electrothermal.GetStringSelection(),
