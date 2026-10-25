@@ -1328,9 +1328,9 @@ LU_COMMIT = 6.5                                 # SuperLU commits ~6.5x its fill
 LU_RESIDENT = 2.0                               # ... and keeps at most ~2x it resident elsewhere [A67]
 BACKEND_FILL = 0.45                             # a faster backend's fill per unknown against SuperLU's estimate,
                                                 # before its first factorisation (Accelerate on the M2 at 8x: 0.27
-                                                # board-wide, ~0.41 the others; PARDISO at 4x 0.5-0.6) [A68]
+                                                # board-wide, ~0.41 the others; PARDISO at 4x 0.5-0.6) [A69]
 BACKEND_MEMORY = 1.5                            # its memory per byte of fill: no SuperLU commit growth (PARDISO's
-                                                # own peak, Accelerate's measured: <= ~1.5x) [A68]
+                                                # own peak, Accelerate's measured: <= ~1.5x) [A69]
 GATE_SHARE = 0.8                                # of the available memory a factorisation may plan to commit
 GATE_WAIT_S = 1.0                               # a waiting factorisation looks at the memory again this often
 _STACKS: "weakref.WeakSet[PlaneStack]" = weakref.WeakSet()     # every stack alive: their caches can be freed
@@ -1341,7 +1341,7 @@ def lu_bytes(stack: "PlaneStack") -> int:
     so far (`lu_nnz`), else as estimated from its unknowns (FILL_PER_UNKNOWN; fill grows faster than the unknowns
     on finer grids, so the estimate is low at high resolutions until the first one is measured), x 16 bytes x
     lu_commit() [A38] [A67]; with a faster backend (solver/sparse.py) its own fill and memory: BACKEND_FILL,
-    BACKEND_MEMORY [A68]."""
+    BACKEND_MEMORY [A69]."""
     backend = _sparse.active() != "superlu"
     nnz = getattr(stack, "lu_nnz", 0) or (FILL_PER_UNKNOWN.get(stack.precond_mode, 70) * stack.nb
                                           * (BACKEND_FILL if backend else 1.0))
