@@ -47,18 +47,24 @@ def initial_state(settings) -> tuple:
 
 
 class NameDialog(wx.Dialog):
-    """Save configuration as…: its name (also the file's) and an optional note."""
+    """Save configuration as…: its name (also the file's), an optional note and the folder it goes into (the
+    board's configs folder by default; the user: "provide a simple picker dialog so the user can decide where to
+    save it")."""
 
-    def __init__(self, parent, name: str = "", note: str = ""):
-        """The two fields, OK and Cancel."""
+    def __init__(self, parent, name: str = "", note: str = "", folder: str = ""):
+        """The three fields (the folder with a Browse… picker), OK and Cancel."""
         super().__init__(parent, title="Save configuration as")
-        grid = wx.FlexGridSizer(2, 2, 8, 8)
+        grid = wx.FlexGridSizer(3, 2, 8, 8)
         grid.AddGrowableCol(1)
         self.name = wx.TextCtrl(self, value=name, size=(320, -1))
         self.name.SetHint("e.g. ADC paths at 1 kHz")
         self.note = wx.TextCtrl(self, value=note)
         self.note.SetHint("optional: what this configuration is for")
-        for label, ctrl in (("Name", self.name), ("Note", self.note)):
+        self.folder = wx.DirPickerCtrl(self, path=folder, message="Folder for the configuration",
+                                       style=wx.DIRP_USE_TEXTCTRL | wx.DIRP_SMALL)
+        self.folder.SetToolTip("where the configuration file is saved (made when missing); Load configuration… "
+                               "opens the board's configs folder first")
+        for label, ctrl in (("Name", self.name), ("Note", self.note), ("Folder", self.folder)):
             grid.Add(wx.StaticText(self, label=label), 0, wx.ALIGN_CENTER_VERTICAL)
             grid.Add(ctrl, 1, wx.EXPAND)
         hint = wx.StaticText(self, label="Saved: what is simulated and how (the tabs' rows with their ticks, what-if "
@@ -72,9 +78,9 @@ class NameDialog(wx.Dialog):
         self.SetSizerAndFit(box)
         theme.style_tree(self)
 
-    def values(self) -> tuple[str, str]:
-        """(name, note), stripped."""
-        return self.name.GetValue().strip(), self.note.GetValue().strip()
+    def values(self) -> tuple[str, str, str]:
+        """(name, note, folder), stripped."""
+        return self.name.GetValue().strip(), self.note.GetValue().strip(), self.folder.GetPath().strip()
 
 
 class ConfigActions:
@@ -269,16 +275,19 @@ class ConfigActions:
         menu.Destroy()
 
     def save_config_as(self):
-        """Save configuration as…: name and note, then configs/<name>.gtconfig.yaml (asked before overwriting); it
-        becomes the configuration in use."""
+        """Save configuration as…: name, note and folder (the configuration in use's folder, else the board's
+        configs folder), then <folder>/<name>.gtconfig.yaml (asked before overwriting); it becomes the configuration
+        in use."""
         from ..config import scenario
-        with NameDialog(self, self._active.get("name", "")) as dlg:
+        active = self._active.get("file")
+        start = Path(active).parent if active else scenario.folder_for(self.settings.path)
+        with NameDialog(self, self._active.get("name", ""), folder=str(start)) as dlg:
             if dlg.ShowModal() != wx.ID_OK:
                 return
-            name, note = dlg.values()
+            name, note, folder = dlg.values()
         if not name:
             return
-        path = scenario.folder_for(self.settings.path) / scenario.file_name(name)
+        path = Path(folder or start) / scenario.file_name(name)
         if path.exists() and path != Path(self._active.get("file", "")) and message_box(
                 f"A configuration {path.name} exists already. Replace it?", "GroundTruth",
                 wx.YES_NO | wx.NO_DEFAULT) != wx.YES:
