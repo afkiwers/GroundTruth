@@ -7,7 +7,7 @@ buttons "with more volume"; option A with the adapter; numba included (it instal
 defaults 25 °C ambient, natural convection, limits 85 / 105 °C, normal quality. **M3 below is what is
 outstanding.** The original plan follows; the decisions marked **Decide** were answered as above.
 
-**Source:** `the author's PCB Thermal app` (package `pcbsim`, "PCB Thermal",
+**Source:** the author's PCB Thermal app (package `pcbsim`, "PCB Thermal",
 about 7 200 lines: a coupled electro-thermal solver with analytic validation tests, and a PySide6/Qt UI).
 The folder has no licence file; this plan assumes the code is yours to reuse.
 

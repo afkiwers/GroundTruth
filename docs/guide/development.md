@@ -23,6 +23,6 @@ src/groundtruth/
   ci/            zone refill with kicad-cli
 plugin/          plugin.json, requirements.txt, entry scripts, icons, demo board
 tools/           install_plugin.py, make_pcm_package.py, make_server_package.py, install_gpu.py, check_gpu.py,
-                 make_demo.py, make_icons.py; dev/: developer scripts (see CLAUDE.md)
+                 make_demo.py, make_icons.py; dev/: developer scripts (each one's docstring says how to run it)
 tests/           synthetic board generator + test-suite
 ```

@@ -9,7 +9,7 @@ rem The zip lands in out\dist; install it in KiCad with Tools > Plugin and Conte
 setlocal
 cd /d "%~dp0"
 if not exist ".venv\Scripts\python.exe" (
-    echo No Python environment in .venv: create it first, see CLAUDE.md ^("Environment"^).
+    echo No Python environment in .venv: create it first, see docs\guide\development.md.
     goto :end
 )
 set "MODE=--working-tree"
