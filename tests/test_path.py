@@ -551,3 +551,23 @@ def test_the_return_plane_s_resistance_is_johnsons_spread_in_closed_form(w_over_
         assert plane_resistance(w, h) == pytest.approx(1 / (2 * math.pi * h), rel=0.01)
     if w_over_h >= 200:                       # the approach is slow, a (h/a)·ln(a/h) term: 96 % at w = 200 h
         assert plane_resistance(w, h) == pytest.approx(1 / w, rel=0.05)
+
+
+def test_a_path_notes_an_opamp_on_it_without_a_model(tmp_path):
+    """An op-amp by its pin names whose model is 'open' on a path's nets: the chain says it is left out."""
+    from conftest import make
+    from boardgen import opamp_path_board
+    from groundtruth.analysis.route import path_chain
+    from groundtruth.config.settings import NetSpec
+    from groundtruth.components.models import ComponentModel
+    spec = NetSpec("SIG_A", "U1.1", ["U2.1"], 20e6, 1e-9, through=["R2"])
+    g = opamp_path_board(r_after="4k7", Gain="2")
+    g.footprint("U7", "OPA376", "Package_TO_SOT_SMD:SOT-23-5", (25.0, 16.0), [
+        {"number": 3, "at": (-1.5, 0.0), "net": "SIG_C", "pintype": "input", "pinfunction": "+"},
+        {"number": 4, "at": (-0.5, 0.0), "net": "SIG_X", "pintype": "input", "pinfunction": "-"},
+        {"number": 1, "at": (1.5, 0.0), "net": "SIG_X", "pintype": "output", "pinfunction": ""},
+        {"number": 5, "at": (0.5, 0.0), "net": "GND", "pintype": "power_in", "pinfunction": "V+"}])
+    board, sc, _ = make(tmp_path, g, "amp", nets=(spec,))
+    sc.config.components["U7"].model = ComponentModel("open")
+    c = path_chain(board, sc.config, spec)
+    assert any(n.startswith("U7 looks like an op-amp") for n in c.notes), c.notes

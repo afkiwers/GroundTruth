@@ -80,6 +80,32 @@ class OpAmpChannel:
     params: dict
 
 
+def opamp_pin_roles(fp: Footprint) -> Optional[dict]:
+    """{"inp", "inn", "out": pad} when a part's pins say it is one op-amp without any model or label: one pin named as
+    the non-inverting input and one as the inverting input (+ / − / +IN / IN− ...), its output by name or else its one
+    pin of electrical type output (a symbol whose output pin is unnamed: the OPA376's "~"), and supply pins by name
+    (V+ / V− / VCC ...: a comparator or op-amp, not a connector with + / − pins). None otherwise (a dual or quad by
+    its channel names is left to the user, as is anything without supply pins)."""
+    roles: dict[str, list] = {}
+    for p in fp.pads:
+        r = pin_role(p.pin_function or "")
+        if r:
+            roles.setdefault(r[0], []).append(p)
+    if not roles.get("supply") or len(roles.get("inp", ())) != 1 or len(roles.get("inn", ())) != 1:
+        return None
+    outs = roles.get("out") or [p for p in fp.pads if p.pin_type == "output" and p not in roles["inp"] + roles["inn"]]
+    if len(outs) != 1:
+        return None
+    return {"inp": roles["inp"][0], "inn": roles["inn"][0], "out": outs[0]}
+
+
+def unmodelled_note(refs: list[str]) -> str:
+    """The note for op-amps (by their pins) whose model is 'open': the circuit leaves them out."""
+    it = ", ".join(refs)
+    return (f"{it} looks like an op-amp (its pin names) but has no model ('open'): it is left out, so its feedback "
+            f"parts don't reach the output; set its model to amplifier (or give it a Gain field or GT amp labels)")
+
+
 def opamp_channels(fp: Footprint, model) -> list[OpAmpChannel]:
     """The op-amp channels of an `amplifier` part [A52]: by the GT labels amp_in / amp_inv / amp_out (one channel),
     else by the pins' schematic names grouped by channel; a channel without IN− is kept with inn None (the gain
@@ -117,6 +143,10 @@ def opamp_channels(fp: Footprint, model) -> list[OpAmpChannel]:
         if "inp" in roles and "out" in roles:
             name = fp.reference + (ch if len(chans) > 1 and ch else "")
             out.append(OpAmpChannel(name, fp.reference, roles["inp"], roles.get("inn"), roles["out"], params))
+    if not out:                         # an unnamed output pin: the single op-amp by its inputs and output type
+        pins = opamp_pin_roles(fp)
+        if pins is not None and all(p.net for p in pins.values()):
+            out.append(OpAmpChannel(fp.reference, fp.reference, pins["inp"], pins["inn"], pins["out"], params))
     return out
 
 
@@ -183,6 +213,7 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
     fps = {fp.reference: fp for fp in board.footprints}
     parts: dict[str, tuple] = {}            # ref -> (model, pad a, pad b)
     amps: dict[str, OpAmpChannel] = {}
+    unmodelled: list[str] = []          # op-amps by their pins whose model is 'open': left out, said in a note
     while todo:
         net = todo.pop(0)
         if net in nets or net in ground:
@@ -197,6 +228,9 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
                 continue
             m = config.model_for(fp.reference)
             if m is None or m.kind == "open":
+                if (m is not None and not fp.dnp and fp.reference not in unmodelled
+                        and opamp_pin_roles(fp) is not None):
+                    unmodelled.append(fp.reference)
                 continue
             if m.kind == "amplifier":
                 for ch in opamp_channels(fp, m):
@@ -213,6 +247,8 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
                     parts[fp.reference] = (m, pa, pb)
                     if pb.net not in ground:
                         todo.append(pb.net)
+    if unmodelled:
+        notes.append(unmodelled_note(unmodelled))
     # ---- the copper of those nets: nodes joined by pads, vias' layer joins and pours; tracks as lines; vias R + L
     g = copper_graph(board, set(nets))
     parent = list(range(len(g.pos)))

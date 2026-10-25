@@ -417,6 +417,7 @@ class PathChain:
     # every 2-pin part hanging off the path, by the path's net it sits on (path order): [(net, ["R307 10k → GND",
     # "✗ C309 100n → GND (DNP)"])]: capacitors, pull-ups / -downs, to any other net; DNP ones marked (path_branches)
     branches: list = field(default_factory=list)
+    notes: list = field(default_factory=list)       # what the path's circuit leaves out (an op-amp without a model)
     error: str = ""
 
     def text(self) -> str:
@@ -441,6 +442,17 @@ def path_chain(board: Board, config: Config, spec) -> PathChain:
     chain.shunts = [f"{_part_text(board, config, fp.reference)} to {ret.net}"
                     for fp, _, _, ret in shunt_parts(board, config, route, set(config.reference_nets))]
     chain.branches = path_branches(board, config, route)
+    # an op-amp by its pins on the path's nets whose model is 'open' (not one the route passes): the circuit leaves
+    # it out, and with it what its feedback parts do
+    from .analog_net import opamp_pin_roles, unmodelled_note
+    nets = {route.driver.net, *route.nets, route.receiver.net}
+    passed = set(route.parts)
+    loose = [fp.reference for fp in board.footprints
+             if fp.reference not in passed and not fp.dnp and any(p.net in nets for p in fp.pads if p.net)
+             and (m := config.model_for(fp.reference)) is not None and m.kind == "open"
+             and opamp_pin_roles(fp) is not None]
+    if loose:
+        chain.notes.append(unmodelled_note(sorted(loose)))
     return chain
 
 

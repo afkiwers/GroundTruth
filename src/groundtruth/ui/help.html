@@ -597,7 +597,9 @@ symbol's fields where it has them (<a href="#fields">Part parameters from the sc
 matters:</p>
 <ul>
 <li>an op-amp in a signal path: give it the <code>amplifier</code> model (a <b>Gain</b> field on its symbol does it
-  by itself) and, for a dual or quad op-amp, its stage's input and output pins (<code>pins</code>, or the GT labels
+  by itself; so does a single op-amp whose pins say so: + and − inputs, an output by name or its one output-type
+  pin, and V+ / V− supply pins. The Signal paths tab warns about an op-amp on a path that is still
+  <code>open</code>: it is left out, and its feedback parts do nothing) and, for a dual or quad op-amp, its stage's input and output pins (<code>pins</code>, or the GT labels
   <code>amp_in:3, amp_out:1</code>). The path runs through it: see <a href="#nets">Signal paths tab</a>.</li>
 <li>a signal route runs through a part whose model passes it (0R, a termination resistor up to 1 kΩ, a
   ferrite);</li>
@@ -1094,7 +1096,8 @@ gives a follower exactly that margin. Its gain, bandwidth and output impedance i
 follow from the resistors and capacitors around it; a part with a <b>Gain</b> field stays a fixed gain block (for
 an amplifier GroundTruth can't see inside, such as an instrumentation-amplifier IC), as does an op-amp whose
 inverting input can't be told. The pins are found by their schematic names (+IN, IN+, INP, +, −IN, IN−, INN, −,
-OUT, VOUT, and per channel of a dual or quad: +INA, −INB, OUTA, IN1+ …), else by the GT labels
+OUT, VOUT, and per channel of a dual or quad: +INA, −INB, OUTA, IN1+ …; a single op-amp's unnamed output: its one
+pin of type output), else by the GT labels
 <code>amp_in</code>, <code>amp_inv</code> (the inverting input) and <code>amp_out</code>. Small signal only: no
 output swing, saturation or slew in the sweep.</p>
 <p>The <b>transfer function</b> is shown two ways: in the part names, for the ideal circuit (ideal op-amps, the

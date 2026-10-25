@@ -239,3 +239,30 @@ def test_a_pm_field_gives_that_phase_margin(tmp_path):
                                      aol=200.0)
         net = analog_network(board, cfg, spec, "U2.1")
         assert phase_margin(f, net.circuit.loop_gain("U3", f))["pm"] == pytest.approx(pm, abs=0.5), pm
+
+
+def _opamp_fp(pins, ref="U1"):
+    """A footprint with pads (number, pin name, pin type, net)."""
+    from groundtruth.core.board import Footprint, Pad
+    pads = [Pad(ref, num, (0.0, 0.0), 0.0, (0.5, 0.5), "rect", ["F.Cu"], net, pin_type=ptype, pin_function=name)
+            for num, name, ptype, net in pins]
+    return Footprint(ref, "OPA376", "Package_TO_SOT_SMD:SOT-23-5", (0.0, 0.0), 0.0, "F.Cu", pads)
+
+
+OPA376 = [("1", "", "output", "OUT"), ("2", "V-", "power_in", "GND"), ("3", "+", "input", "GND"),
+          ("4", "-", "input", "N"), ("5", "V+", "power_in", "+3V3")]
+
+
+def test_an_opamp_is_known_by_its_pin_names_even_with_an_unnamed_output():
+    """The OPA376 symbol (pins +, -, V+, V- and an unnamed output pin): its inputs by name, its output as its one
+    output-typed pin; the parts suggestion makes it an amplifier. Without supply pins (a connector's + / −) or with
+    two outputs it is not taken for an op-amp."""
+    from groundtruth.analysis.analog_net import opamp_pin_roles
+    from groundtruth.components.defaults import suggest_model
+    roles = opamp_pin_roles(_opamp_fp(OPA376))
+    assert {k: p.number for k, p in roles.items()} == {"inp": "3", "inn": "4", "out": "1"}
+    assert suggest_model(_opamp_fp(OPA376), fields=False).kind == "amplifier"
+    assert opamp_pin_roles(_opamp_fp([p for p in OPA376 if not p[1].startswith("V")])) is None
+    assert opamp_pin_roles(_opamp_fp(OPA376 + [("6", "", "output", "X")])) is None
+    assert suggest_model(_opamp_fp([("1", "+", "passive", "A"), ("2", "-", "passive", "B")], "J1"),
+                         fields=False).kind == "open"

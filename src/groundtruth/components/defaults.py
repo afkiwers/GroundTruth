@@ -61,8 +61,8 @@ def suggest_model(fp: Footprint, fields: bool = True) -> ComponentModel:
 
 
 def _suggest(fp: Footprint) -> ComponentModel:
-    """The guess itself, in order: an op-amp (its Gain field or GT amp labels), DNP (open), a net tie (short),
-    then by reference prefix: resistors, capacitors (ESR/ESL by kind and package), ferrites, inductors, fuses.
+    """The guess itself, in order: an op-amp (its Gain field, GT amp labels or op-amp pin names), DNP (open), a net
+    tie (short), then by reference prefix: resistors, capacitors (ESR/ESL by kind and package), ferrites, inductors, fuses.
     Anything else (ICs, connectors, transistors ...) is "open": its pins are only ports of the analysis."""
     prefix = ref_prefix(fp.reference)
     if not fp.dnp and any(k.strip().lower() == "gain" and (v or "").strip() for k, v in fp.fields.items()):
@@ -71,6 +71,9 @@ def _suggest(fp: Footprint) -> ComponentModel:
         from ..analysis.tags import amp_label_pins
         if amp_label_pins(fp):
             return ComponentModel("amplifier", note="an op-amp stage (its GT amp_in / amp_out labels)")
+        from ..analysis.analog_net import opamp_pin_roles
+        if opamp_pin_roles(fp) is not None:     # +/− inputs, an output and supply pins: an op-amp, ideal by default
+            return ComponentModel("amplifier", note="an op-amp (its pin names)")
     value = fp.value or ""
     name = fp.footprint_name
     lib = fp.lib_id

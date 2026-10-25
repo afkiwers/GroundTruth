@@ -158,7 +158,7 @@ def symbolic_transfer(schematic: dict) -> Optional[SymbolicTF]:
     notes = []
     dnp = [ref for ref in schematic.get("dnp", ()) if any(p[0] == ref for p in parts)]
     if dnp:                                       # in H(s) as drawn; the note lets a reader drop them elsewhere
-        notes.append(f"{', '.join(dnp)} not populated (DNP), included in H(s)")
+        notes.append(f"{', '.join(dnp)} not populated (DNP), kept in the circuit")
     return SymbolicTF(text, latex, mathml, expr, {k_: v for k_, v in values.items() if v is not None}, notes)
 
 

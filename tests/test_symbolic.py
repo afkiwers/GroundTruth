@@ -79,5 +79,5 @@ def test_a_dnp_part_stays_in_h_and_is_named_in_a_note():
     sk = dict(SK, dnp=["C2"])
     tf = symbolic_transfer(sk)
     assert "C_{2}" in tf.latex or "C2" in tf.text
-    assert tf.notes == ["C2 not populated (DNP), included in H(s)"]
+    assert tf.notes == ["C2 not populated (DNP), kept in the circuit"]
     assert symbolic_transfer(SK).notes == []
