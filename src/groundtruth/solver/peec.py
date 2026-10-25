@@ -63,6 +63,7 @@ from scipy.sparse.csgraph import connected_components
 from scipy.sparse.linalg import splu
 
 from . import gpu
+from . import sparse as _sparse
 from . import stats as _stats
 from .kernel import (GMD_FLAT, MU0, filament_mutual, leggauss, segment_mutual, segment_vector_potential, skin_thickness,
                      strip_kernel, strip_self, strip_self_numeric)
@@ -2099,9 +2100,13 @@ class PlaneStack:
                 if short and thresh:
                     thresh = 0.0
                     self.lu_memory_fallbacks = getattr(self, "lu_memory_fallbacks", 0) + 1
+                # a faster backend when one is configured and loads (solver/sparse.py: PARDISO, Accelerate),
+                # else None and SuperLU as before; the least-fill retries below stay SuperLU's
+                lu = _sparse.factorise(S) if not low else None
                 try:                    # made (and freed) in a host thread: see _LuHost
-                    lu = hosted_splu(S, permc_spec="MMD_AT_PLUS_A", diag_pivot_thresh=thresh,
-                                     options={"SymmetricMode": True})
+                    if lu is None:
+                        lu = hosted_splu(S, permc_spec="MMD_AT_PLUS_A", diag_pivot_thresh=thresh,
+                                         options={"SymmetricMode": True})
                 except RuntimeError as e:
                     # SuperLU reports a failed allocation as a RuntimeError: as a MemoryError the scheduler retries
                     # the solve with more room (simulate.MemoryRelief)

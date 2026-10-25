@@ -553,9 +553,13 @@ def _apply_what_if(board, cfg, quiet: bool):
 
 
 def _solver_options(cfg, args):
-    """--gpu overrides analysis.gpu for this run; --resolution sets the models' node factor."""
+    """--gpu overrides analysis.gpu for this run; --sparse chooses the factorisation backend (solver/sparse.py);
+    --resolution sets the models' node factor."""
     if getattr(args, "gpu", None):
         cfg.analysis.gpu = args.gpu
+    if getattr(args, "sparse", None):
+        from .solver import sparse
+        sparse.configure(args.sparse)
     if getattr(args, "resolution", None):
         cfg.analysis.resolution = float(args.resolution)
     if getattr(args, "all_cores", False):
@@ -740,6 +744,10 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--gpu", choices=("auto", "on", "off"),
                         help="solver iterations on a GPU (PyTorch with CUDA/ROCm): auto uses one if there is one, "
                              "on requires it (default: analysis.gpu in the settings, auto)")
+        sp.add_argument("--sparse", choices=("auto", "superlu", "pardiso", "accelerate"),
+                        help="the preconditioner's sparse factorisation: auto takes Apple Accelerate on macOS and "
+                             "Intel MKL PARDISO where the mkl package is installed, else SuperLU (default: auto, or "
+                             "GROUNDTRUTH_SPARSE)")
         sp.add_argument("--resolution", type=float, choices=(1, 2, 4, 8, 16, 20, 25), metavar="N",
                         help="every model gets N times the nodes (cells 1/sqrt(N) in size): 1 (default), 2, 4, 8, "
                              "16, 20, 25; memory and time grow about as much")
