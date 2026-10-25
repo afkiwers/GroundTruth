@@ -63,6 +63,7 @@ from scipy.sparse.csgraph import connected_components
 from scipy.sparse.linalg import splu
 
 from . import gpu
+from . import sparse as _sparse
 from . import stats as _stats
 from .kernel import (GMD_FLAT, MU0, filament_mutual, leggauss, segment_mutual, segment_vector_potential, skin_thickness,
                      strip_kernel, strip_self, strip_self_numeric)
@@ -1325,6 +1326,11 @@ FILL_PER_UNKNOWN = {"sheet": 70, "diag": 35}    # SuperLU fill per branch unknow
 LU_COMMIT = 6.5                                 # SuperLU commits ~6.5x its fill on Windows (ARCHITECTURE "Memory
                                                 # use") [A38] ...
 LU_RESIDENT = 2.0                               # ... and keeps at most ~2x it resident elsewhere [A67]
+BACKEND_FILL = 0.45                             # a faster backend's fill per unknown against SuperLU's estimate,
+                                                # before its first factorisation (Accelerate on the M2 at 8x: 0.27
+                                                # board-wide, ~0.41 the others; PARDISO at 4x 0.5-0.6) [A69]
+BACKEND_MEMORY = 1.5                            # its memory per byte of fill: no SuperLU commit growth (PARDISO's
+                                                # own peak, Accelerate's measured: <= ~1.5x) [A69]
 GATE_SHARE = 0.8                                # of the available memory a factorisation may plan to commit
 GATE_WAIT_S = 1.0                               # a waiting factorisation looks at the memory again this often
 _STACKS: "weakref.WeakSet[PlaneStack]" = weakref.WeakSet()     # every stack alive: their caches can be freed
@@ -1334,9 +1340,12 @@ def lu_bytes(stack: "PlaneStack") -> int:
     """About the memory one factorisation of this model commits: its fill as measured on its largest factorisation
     so far (`lu_nnz`), else as estimated from its unknowns (FILL_PER_UNKNOWN; fill grows faster than the unknowns
     on finer grids, so the estimate is low at high resolutions until the first one is measured), x 16 bytes x
-    lu_commit() [A38] [A67]."""
-    nnz = getattr(stack, "lu_nnz", 0) or FILL_PER_UNKNOWN.get(stack.precond_mode, 70) * stack.nb
-    return int(nnz * 16 * lu_commit())
+    lu_commit() [A38] [A67]; with a faster backend (solver/sparse.py) its own fill and memory: BACKEND_FILL,
+    BACKEND_MEMORY [A69]."""
+    backend = _sparse.active() != "superlu"
+    nnz = getattr(stack, "lu_nnz", 0) or (FILL_PER_UNKNOWN.get(stack.precond_mode, 70) * stack.nb
+                                          * (BACKEND_FILL if backend else 1.0))
+    return int(nnz * 16 * (BACKEND_MEMORY if backend else lu_commit()))
 
 
 def lu_commit() -> float:
@@ -2099,9 +2108,13 @@ class PlaneStack:
                 if short and thresh:
                     thresh = 0.0
                     self.lu_memory_fallbacks = getattr(self, "lu_memory_fallbacks", 0) + 1
+                # a faster backend when one is configured and loads (solver/sparse.py: PARDISO, Accelerate),
+                # else None and SuperLU as before; the least-fill retries below stay SuperLU's
+                lu = _sparse.factorise(S) if not low else None
                 try:                    # made (and freed) in a host thread: see _LuHost
-                    lu = hosted_splu(S, permc_spec="MMD_AT_PLUS_A", diag_pivot_thresh=thresh,
-                                     options={"SymmetricMode": True})
+                    if lu is None:
+                        lu = hosted_splu(S, permc_spec="MMD_AT_PLUS_A", diag_pivot_thresh=thresh,
+                                         options={"SymmetricMode": True})
                 except RuntimeError as e:
                     # SuperLU reports a failed allocation as a RuntimeError: as a MemoryError the scheduler retries
                     # the solve with more room (simulate.MemoryRelief)

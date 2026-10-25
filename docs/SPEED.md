@@ -309,6 +309,67 @@ once needs smaller factorisations (M3) and a DC estimate nearer its real fill be
 
 M1 on the M2, then: job A 974 → 652 s (−33 %), job B 4 520 → 3 512-3 575 s (−21-22 %).
 
+### 5.3 M3 spike: PARDISO on Windows (branch `speed-m3`, 2026-10-25)
+
+`tools/dev/export_schur.py` wrote conv1's preconditioner matrices at 4x (`out/speed/m3/schur4/`);
+`tools/dev/sparse_bench.py` (in a venv of its own with `mkl`, never the project's) factorised and solved them with
+SuperLU as peec calls it and with MKL PARDISO, complex symmetric (mtype 6), through ctypes. This laptop, 1 thread
+unless noted:
+
+| Matrix (4x) | Solver | Analysis | Factorise | Fill | 1-column solve | Residual |
+|---|---|---|---|---|---|---|
+| board-wide, 130 075 | SuperLU | — | 38.4 s | 29.4 M | 93 ms | 2.8e-8 |
+| | PARDISO | 0.44 s | **0.83 s** (4 threads 0.36) | **14.2 M** | **59 ms** | 3.1e-8 |
+| conducted, 313 356 | SuperLU | — | 4.06 s | 11.5 M | **53 ms** | 4.8e-6 |
+| | PARDISO | 0.96 s | **0.46 s** (0.24) | **7.1 M** | 71 ms | 2.0e-6 |
+| DC, 903 653 | SuperLU | — | 17.4 s | 37.3 M | **189 ms** | 6.4e-6 |
+| | PARDISO | 2.80 s | **1.53 s** (0.75) | **22.7 M** | 208 ms | 2.5e-6 |
+
+- The analysis (METIS ordering, symbolic factorisation) is once per model: a refactorisation at another frequency
+  of the same model costs only the factorisation (the pattern does not change).
+- Bunch-Kaufman pivoting (`iparm[20] = 1`) matters: with 1x1 diagonal pivots the conducted model's solve took
+  235 ms. Iterative refinement was never taken (none perturbed); it is off for a preconditioner anyway.
+- Reproducible: the same bits on every run with conditional numerical reproducibility (`iparm[33]`, the thread
+  count); without it, 4 threads gave different solves.
+- 4 threads halve the factorisation, not the solves (memory bound).
+- PARDISO reports its own peak (board-wide 321 MB, DC 676 MB): no 6.5x Windows commit to plan for.
+
+What it means on job B's 8x mix (M2 figures, 5.2): the factorisations (490 s of solver time) mostly go; a
+board-wide iteration −17 % (its triangular solves ~47 % of it, now ~0.63 of the time); the inductive models'
+iterations +7 % (theirs ~21 %, ~1.3x slower); half the factorisation memory, so more solves at once.
+**Intel MKL does not run on Apple Silicon**: the M2 needs Apple Accelerate's sparse solvers instead, measured on
+the Mac itself (next).
+
+### 5.4 M3 spike: Apple Accelerate on the M2 (2026-10-25)
+
+`tools/dev/accelerate_pack.py` + `accelerate_bench.c` on the same three 4x matrices, on the M2 (macOS 26.6.2),
+complex symmetric LDLᵀ (`SparseSymmetric`, upper triangle). SBK pivoting, 1 thread (4 threads):
+
+| Matrix (4x) | Factorise | Refactorise | 1-column solve | 8 columns | Residual | Peak |
+|---|---|---|---|---|---|---|
+| board-wide, 130 075 | 0.53 s (0.28) | 0.45 s (0.21) | **35 ms** | 90 ms | 1e-8 | 427 MB |
+| conducted, 313 356 | 0.25 s (0.16) | 0.16 s (0.07) | **30 ms** | 121 ms | 5e-8 | 317 MB |
+| DC, 903 653 | 0.86 s (0.55) | 0.51 s (0.20) | **91 ms** | 367 ms | 8e-7 | 928 MB |
+
+Every run gave the same bits, with 4 threads too; the four LDLᵀ variants within ~10 % of each other. The Mac's
+python3 had no scipy, so SuperLU was not timed there; against this laptop's SuperLU (93 / 53 / 189 ms solves,
+38 / 4 / 17 s factorisations) and the M2's SuperLU in 4.3 (a board-wide factorisation ~10 s at 8x), Accelerate's
+solves are ~2-3x faster than the laptop's PARDISO and SuperLU and its factorisations 10-70x faster. A go on the
+M2 as on Windows.
+
+### 5.5 M3 as built (branch `speed-m3`)
+
+`solver/sparse.py` (ARCHITECTURE "Sparse solver backends"). Job B at 8x on the M2:
+
+| Run | Backend, planning | Groups | Factorisations | Time |
+|---|---|---|---|---|
+| `runs/2026-10-25_16-20-05` | SuperLU (the shim did not compile under root) | 13 | 471 s | 3 077 s |
+| `runs/2026-10-25_18-44-48` | Accelerate, planned as SuperLU | 13 | 74 s | 3 203 s (3.5 GB swapped) |
+| `runs/2026-10-25_19-59-18` | Accelerate, planned by its fill [A69] | **3** | 97 s | **2 669 s** (2.7 GB swapped) |
+
+The same 12 781 GMRES iterations in all; up to 4 solves at once, CPU 32 % (20). From M0: job B 4 520 → 2 669 s
+(−41 %). What is left is board-wide GMRES, three solves at once sharing the memory bus.
+
 ## 6. Researched, not planned (the user's choice, 2026-10-24)
 
 - **Board-wide model capped at 4x** (a setting, default min(resolution, 4)): −25-45 % at 8x, −60 % and more at 16x; 8x

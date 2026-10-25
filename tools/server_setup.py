@@ -1089,6 +1089,21 @@ def wait_ready(paths: dict, port: int, key: str, timeout: float = 120.0, task: s
     return False
 
 
+def install_shim(paths: dict):
+    """On a Mac: the Accelerate shim install_server.command built as the installing user (gt_accelerate.dylib beside
+    this file) into the install's folder, where solver/sparse.py looks first (PREBUILT). The service runs as root and
+    cannot compile it itself (Xcode's licence prompt; the M2, 2026-10-25). Without it the solver uses SuperLU."""
+    if not mac():
+        return
+    built = Path(__file__).resolve().with_name("gt_accelerate.dylib")
+    if not built.exists():
+        say("Apple Accelerate shim: not built (no Xcode command line tools?): the solver uses SuperLU")
+        return
+    if not DRY["on"]:
+        shutil.copy2(built, paths["root"] / "gt_accelerate.dylib")
+    say("Apple Accelerate shim: installed (the faster sparse factorisation)")
+
+
 def cmd_install(args, paths: dict, update: bool = False) -> int:
     """install / update (see the module), in numbered steps."""
     python = Path(args.python) if args.python else kicad_python()
@@ -1123,6 +1138,7 @@ def cmd_install(args, paths: dict, update: bool = False) -> int:
     if not DRY["on"]:
         paths["runner"].write_text(runner_text(paths), encoding="utf-8")
     trust_release_key(paths)
+    install_shim(paths)
     ask_remote_update(args, paths, update)
     ask_address(args, paths)
     cfg = write_settings(paths, args)

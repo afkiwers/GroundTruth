@@ -29,6 +29,8 @@ gpu = ["torch>=2.2"]
 # the compute server's signed remote updates (remote/release.py): checking a package's signature on the server,
 # signing the packages on the build PC; the KiCad plugin does not need it
 server = ["cryptography>=42"]
+# a faster sparse factorisation (solver/sparse.py, "pardiso"): Intel MKL PARDISO, x86 Windows and Linux only
+sparse = ["mkl>=2024; platform_machine == 'AMD64' or platform_machine == 'x86_64'"]
 dev = ["pytest>=8", "cryptography>=42"]
 
 [project.scripts]
@@ -42,6 +44,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "groundtruth.ui" = ["*.html", "icons/*.png"]   # the help pages, the window icons
+"groundtruth.solver" = ["*.c"]                 # the Accelerate shim, compiled on a Mac on first use (sparse.py)
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

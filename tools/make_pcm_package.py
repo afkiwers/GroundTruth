@@ -67,6 +67,7 @@ EPOCH = datetime(2026, 1, 1, tzinfo=timezone.utc)
 # separate GPU package, make_gpu_package.py, was dropped on 2026-10-14: these were all it held); and as
 # plugins/docs/REFERENCES.md the sources and assumptions, which the help's References section shows (ui/help.py)
 EXTRA = ("tools/install_gpu.py", "tools/check_gpu.py", "tools/install_gpu_amd.cmd", "tools/GPU_README.md",
+         "tools/install_sparse.py", "tools/install_sparse.cmd",   # PARDISO on Windows (solver/sparse.py)
          "docs/REFERENCES.md")
 
 
