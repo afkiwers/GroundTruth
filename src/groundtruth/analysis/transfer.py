@@ -80,7 +80,7 @@ class Response:
                 "step": _plain_step(getattr(self, "step", None)),
                 "transfer_function": {"numeric": _plain_normal(getattr(self, "normal", None)),
                                       "symbolic": {k: v for k, v in (getattr(self, "symbolic", None) or {}).items()
-                                                   if k in ("text", "latex")} or None},
+                                                   if k in ("text", "latex", "note") and v} or None},
                 "poles": pz_rows(self.poles), "zeros": pz_rows(self.zeros),
                 "f": [float(self.f[i]) for i in k], "magnitude": [float(self.magnitude()[i]) for i in k],
                 "phase_deg": [float(self.phase_deg()[i]) for i in k]}

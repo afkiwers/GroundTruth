@@ -481,6 +481,23 @@ def test_a_path_chain_lists_its_parts_in_route_order_and_what_is_across_it(tmp_p
     assert blocked.error.startswith("no copper path") and blocked.parts == []
 
 
+def test_a_capacitor_across_a_series_part_is_a_branch_in_parallel_with_it(tmp_path):
+    """A part whose two pins are on the nets a series part spans (a feedback capacitor across its resistor) is
+    listed in the chain's branches as parallel to it, not dropped as "both pins on the path"."""
+    from conftest import make
+    from boardgen import opamp_path_board
+    from groundtruth.analysis.route import path_chain
+    from groundtruth.config.settings import NetSpec
+    spec = NetSpec("SIG_A", "U1.1", ["U2.1"], 20e6, 1e-9, through=["R2"])
+    g = opamp_path_board(r_after="4k7", Gain="2")
+    g.two_pin("C9", "100n", (38.5, 14.0), "SIG_C", "SIG_D", kind="C")
+    board, sc, _ = make(tmp_path, g, "amp", nets=(spec,))
+    c = path_chain(board, sc.config, spec)
+    assert not c.error, c.error
+    at = [net for net, parts in c.branches if "C9 100n ∥ R2" in parts]
+    assert at and at[0] in ("SIG_C", "SIG_D"), c.branches
+
+
 def _pozar_alpha(f, w, z0, eeff, er, tan_d, sigma=5.8e7):
     """A microstrip's attenuation (Np/m) by Pozar's closed forms: conductor α_c = R_s/(Z0·W) with R_s = √(ωμ0/2σ)
     (δ ≪ t), dielectric α_d = k0·εr(εeff - 1)·tan δ / (2√εeff(εr - 1)) [Pozar 2012]."""
@@ -534,3 +551,23 @@ def test_the_return_plane_s_resistance_is_johnsons_spread_in_closed_form(w_over_
         assert plane_resistance(w, h) == pytest.approx(1 / (2 * math.pi * h), rel=0.01)
     if w_over_h >= 200:                       # the approach is slow, a (h/a)·ln(a/h) term: 96 % at w = 200 h
         assert plane_resistance(w, h) == pytest.approx(1 / w, rel=0.05)
+
+
+def test_a_path_notes_an_opamp_on_it_without_a_model(tmp_path):
+    """An op-amp by its pin names whose model is 'open' on a path's nets: the chain says it is left out."""
+    from conftest import make
+    from boardgen import opamp_path_board
+    from groundtruth.analysis.route import path_chain
+    from groundtruth.config.settings import NetSpec
+    from groundtruth.components.models import ComponentModel
+    spec = NetSpec("SIG_A", "U1.1", ["U2.1"], 20e6, 1e-9, through=["R2"])
+    g = opamp_path_board(r_after="4k7", Gain="2")
+    g.footprint("U7", "OPA376", "Package_TO_SOT_SMD:SOT-23-5", (25.0, 16.0), [
+        {"number": 3, "at": (-1.5, 0.0), "net": "SIG_C", "pintype": "input", "pinfunction": "+"},
+        {"number": 4, "at": (-0.5, 0.0), "net": "SIG_X", "pintype": "input", "pinfunction": "-"},
+        {"number": 1, "at": (1.5, 0.0), "net": "SIG_X", "pintype": "output", "pinfunction": ""},
+        {"number": 5, "at": (0.5, 0.0), "net": "GND", "pintype": "power_in", "pinfunction": "V+"}])
+    board, sc, _ = make(tmp_path, g, "amp", nets=(spec,))
+    sc.config.components["U7"].model = ComponentModel("open")
+    c = path_chain(board, sc.config, spec)
+    assert any(n.startswith("U7 looks like an op-amp") for n in c.notes), c.notes

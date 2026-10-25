@@ -417,6 +417,7 @@ class PathChain:
     # every 2-pin part hanging off the path, by the path's net it sits on (path order): [(net, ["R307 10k → GND",
     # "✗ C309 100n → GND (DNP)"])]: capacitors, pull-ups / -downs, to any other net; DNP ones marked (path_branches)
     branches: list = field(default_factory=list)
+    notes: list = field(default_factory=list)       # what the path's circuit leaves out (an op-amp without a model)
     error: str = ""
 
     def text(self) -> str:
@@ -441,6 +442,17 @@ def path_chain(board: Board, config: Config, spec) -> PathChain:
     chain.shunts = [f"{_part_text(board, config, fp.reference)} to {ret.net}"
                     for fp, _, _, ret in shunt_parts(board, config, route, set(config.reference_nets))]
     chain.branches = path_branches(board, config, route)
+    # an op-amp by its pins on the path's nets whose model is 'open' (not one the route passes): the circuit leaves
+    # it out, and with it what its feedback parts do
+    from .analog_net import opamp_pin_roles, unmodelled_note
+    nets = {route.driver.net, *route.nets, route.receiver.net}
+    passed = set(route.parts)
+    loose = [fp.reference for fp in board.footprints
+             if fp.reference not in passed and not fp.dnp and any(p.net in nets for p in fp.pads if p.net)
+             and (m := config.model_for(fp.reference)) is not None and m.kind == "open"
+             and opamp_pin_roles(fp) is not None]
+    if loose:
+        chain.notes.append(unmodelled_note(sorted(loose)))
     return chain
 
 
@@ -451,9 +463,17 @@ def path_branches(board: Board, config: Config, route: Route) -> list:
     """What hangs off a path, for the Signal paths tab (the user: "add branches to let's say GND or other nets to also
     show capacitors, pullups/downs. mark the ones ... that are DNP"): per net of the path, in path order, every 2-pin
     part with one pin on it and the other on another net, not one of the path's series parts, DNP ones included and
-    marked. Display only: the solver's shunts (shunt_parts) leave DNP parts out and take reference nets only."""
+    marked; a part across a series part's two nets is listed as parallel to it ("C2 100n ∥ R2"). Display only: the solver's shunts (shunt_parts) leave DNP parts out and take reference nets only."""
     order = list(dict.fromkeys(n for n in [route.driver.net, *route.nets, route.receiver.net] if n))
     series = set(route.parts)
+    # the net pair each series part spans: a part across the same two nets is in parallel with it (a feedback
+    # capacitor across its resistor, a speed-up capacitor across a series resistor)
+    spans: dict[frozenset, list[str]] = {}
+    for ref in route.parts:
+        sfp = board.footprint(ref)
+        snets = {p.net for p in sfp.pads if p.net} if sfp is not None else set()
+        if len(snets) == 2:
+            spans.setdefault(frozenset(snets), []).append(ref)
     found: dict[str, list[str]] = {n: [] for n in order}
     for fp in board.footprints:
         if fp.reference in series:
@@ -462,7 +482,14 @@ def path_branches(board: Board, config: Config, route: Route) -> list:
         if len(fp.pads) != 2 or len(set(nets)) != 2:
             continue
         on = [n for n in nets if n in found]
-        if len(on) != 1:                    # both pins on the path: a series part of another branch, not a shunt
+        if len(on) == 2:                    # both pins on the path: across a series part, or another branch's part
+            across = spans.get(frozenset(nets))
+            if across:
+                first = min(on, key=order.index)
+                text = f"{_part_text(board, config, fp.reference)} ∥ {', '.join(across)}"
+                found[first].append(f"{DNP_MARK} {text} (DNP)" if fp.dnp else text)
+            continue
+        if len(on) != 1:
             continue
         other = next(n for n in nets if n != on[0])
         text = f"{_part_text(board, config, fp.reference)} → {other}"

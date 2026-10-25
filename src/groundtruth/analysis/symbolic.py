@@ -155,7 +155,11 @@ def symbolic_transfer(schematic: dict) -> Optional[SymbolicTF]:
     # presentation MathML for the HTML report (browsers render it natively), wrapped in its <math> element
     mathml = ('<math xmlns="http://www.w3.org/1998/Math/MathML" display="block">'
               + sp.mathml(sp.Eq(sp.Symbol("H(s)"), expr), printer="presentation") + "</math>")
-    return SymbolicTF(text, latex, mathml, expr, {k_: v for k_, v in values.items() if v is not None})
+    notes = []
+    dnp = [ref for ref in schematic.get("dnp", ()) if any(p[0] == ref for p in parts)]
+    if dnp:                                       # in H(s) as drawn; the note lets a reader drop them elsewhere
+        notes.append(f"{', '.join(dnp)} not populated (DNP), kept in the circuit")
+    return SymbolicTF(text, latex, mathml, expr, {k_: v for k_, v in values.items() if v is not None}, notes)
 
 
 def _poly(expr, s) -> tuple[str, str]:

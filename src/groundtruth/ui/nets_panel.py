@@ -369,6 +369,8 @@ class NetsPanel(SelectableRows, wx.Panel):
             text = f"Path: {c.text()}"
             if c.branches:                  # what hangs off each net of the path (✗: not placed, DNP)
                 text += "\nBranches:" + "".join(f"\n  at {net}: " + ", ".join(parts) for net, parts in c.branches)
+            for note in c.notes:                # what the path's circuit leaves out
+                text += f"\n⚠ {note}"
         self.path_text.ChangeValue(text)
 
     def select(self, name: str):

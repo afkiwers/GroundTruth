@@ -1457,7 +1457,8 @@ def transfer_lines(view) -> list[tuple[str, str, str, str]]:
     out = []
     sym = next((r.symbolic for r in resp if getattr(r, "symbolic", None)), None)
     if sym and sym.get("latex"):
-        out.append(("ideal circuit", sym["latex"], sym.get("text") or "", ""))
+        note = sym.get("note")                  # e.g. "C3 not populated (DNP), kept in the circuit"
+        out.append((f"ideal circuit ({note})" if note else "ideal circuit", sym["latex"], sym.get("text") or "", ""))
     nf = getattr(resp[0], "normal", None)
     if nf and nf.get("latex") and (nf.get("poles") or nf.get("zeros")):
         plain, _, vals = nf["text"].partition(";  ")

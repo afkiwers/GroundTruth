@@ -408,7 +408,8 @@ def response_lines(r) -> list[str]:
         out.append(f"    {r.name}: step: {step_text(st['metrics'])}")
     sym, nf = getattr(r, "symbolic", None), getattr(r, "normal", None)
     if sym:
-        out.append(f"    {r.name}: {sym['text']}   (ideal circuit, part names)")
+        note = f"; {sym['note']}" if sym.get("note") else ""
+        out.append(f"    {r.name}: {sym['text']}   (ideal circuit, part names{note})")
     if nf:
         out.append(f"    {r.name}: {nf['text']}")
     return out
