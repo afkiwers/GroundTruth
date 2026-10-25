@@ -490,7 +490,7 @@ def test_a_job_on_a_server_that_is_gone_can_be_removed(tmp_path):
 
     jobs = LocalJobs(tmp_path)
     for jid in ("a", "b", "c"):
-        jobs.add({"id": jid, "server": "build_pc", "kind": "simulate", "state": "running"}, None)
+        jobs.add({"id": jid, "server": "build-pc", "kind": "simulate", "state": "running"}, None)
     why = stop_on_server(jobs, Server(False), "a", remove=True)
     assert why and "can't be reached" in why and jobs.get("a")["state"] == "running"
     remove_anyway(jobs, "a")

@@ -311,7 +311,7 @@ class Cluster:
     def targets(self) -> list[tuple[str, int]]:
         """Where beacons go: the broadcast address, the broadcast of each own address's /24 subnet, and the static
         peers (server.json "peers": "host", or "host:port" with the peer's BEACON port when it is not the default).
-        Windows sends 255.255.255.255 out of one network card only: on a PC with two (the user's build_pc, 198.51.100.6
+        Windows sends 255.255.255.255 out of one network card only: on a PC with two (the user's build-pc, 198.51.100.6
         and another network) the others' subnet may never hear it; a subnet's own broadcast address (198.51.100.255)
         is routed out of the card on that subnet."""
         out = [("255.255.255.255", self.beacon_port)]
@@ -417,7 +417,7 @@ def same_subnet(a: str, b: str) -> bool:
 def address_candidates(source: str, announced, own=()) -> list[str]:
     """A server's addresses to try, best first: the datagram's source when the server announced it; then the
     addresses it announced that share a subnet with one of ours (`own`); then its other announced ones; the
-    source last. The user, of Find servers listing build_pc at 172.20.0.1: Windows may send a server's datagram out
+    source last. The user, of Find servers listing build-pc at 172.20.0.1: Windows may send a server's datagram out
     of a virtual adapter (Hyper-V/WSL vEthernet) nobody else can reach, so the source alone can't be trusted;
     every server announces its real addresses (server.local_addresses) with its beacon."""
     announced = [a for a in (announced or []) if isinstance(a, str) and a]

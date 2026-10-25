@@ -820,7 +820,7 @@ class PreferencesDialog(wx.Dialog):
                 own = []
             for m in found:
                 # its address: the one of those it announced that this computer reaches (the datagram's source may be
-                # a virtual adapter's, the user saw build_pc at 172.20.0.1); then the host name when it leads there
+                # a virtual adapter's, the user saw build-pc at 172.20.0.1); then the host name when it leads there
                 # (it survives a new DHCP address), else that address
                 tries = address_candidates(m["address"], (m.get("info") or {}).get("addresses"), own)
                 m["address"] = reachable(tries, m.get("port") or 8765) or tries[0]

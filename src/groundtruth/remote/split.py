@@ -16,7 +16,7 @@ each other can't deadlock.
 Before a peer gets a board, it proves it holds the access key: its status answer is signed for a fresh nonce
 (protocol.sign_response). The cluster's table alone is not trusted with that (a beacon's address is not signed).
 
-The parts are followed every POLL_S: their progress makes the job's ("split over 3 servers: build_pc 40 %, ..."). A
+The parts are followed every POLL_S: their progress makes the job's ("split over 3 servers: build-pc 40 %, ..."). A
 finished part's result is fetched (and removed there) into this server's data folder. A part whose server can't be
 reached for LOST_S, or that fails, runs out of memory or is cancelled there, moves to the server it fits that
 would finish it soonest and where it was not tried (`_move`; noted in the progress and the result; an out-of-memory

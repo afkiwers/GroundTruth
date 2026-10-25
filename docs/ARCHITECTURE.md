@@ -2890,7 +2890,7 @@ the other powerful pc to do all the computation"; Windows 11 Pro server, local n
   A job process watches its parent and grandparent (`worker._end_with_parent`) and exits when the server is gone.
   Tried here without task/firewall/ACL: the venv from KiCad 10's Python, the libraries from PyPI (~3 min), the
   runner started the server and it answered. Tests: tests/test_server_setup.py, test_remote's orphan test.
-- **A server's address** (2026-10-16, the user: build_pc (198.51.100.6) in server-pc's cluster (203.0.113.128)
+- **A server's address** (2026-10-16, the user: build-pc (198.51.100.6) in server-pc's cluster (203.0.113.128)
   missing from Preferences' Servers; "it would be good if status shows the servers IP"; "can we start a server with
   a known address ... and then get presented the available options?"): server.json `address` (`install --address`:
   `server_setup.ask_address` lists `cluster.adapters()` (network card, IPv4) through the install's own Python, or
@@ -2973,7 +2973,7 @@ the other powerful pc to do all the computation"; Windows 11 Pro server, local n
     long key can be checked, `clean_key` strips quotes and a copied label; ≥16 characters; written to server.key;
     `key_check` lists the servers answering to it, cluster.find_servers), `--lead/--no-lead`, `--peers`, `--beacon-port`; the firewall
     rule gets a UDP rule for the beacon port (private, domain) under the same name (uninstall removes both).
-  - **Addresses** (2026-10-15, the user: Find servers listed build_pc at 172.20.0.1, its Hyper-V/WSL vEthernet: Windows
+  - **Addresses** (2026-10-15, the user: Find servers listed build-pc at 172.20.0.1, its Hyper-V/WSL vEthernet: Windows
     sent the answer out of the virtual adapter). Every server announces its real IPv4 addresses (beacon info
     `addresses`, server.local_addresses); `cluster.address_candidates(source, announced, own)` orders them: the
     source when announced or loopback, the announced ones on our subnet, the source when on our subnet, the other
@@ -3015,7 +3015,7 @@ the other powerful pc to do all the computation"; Windows 11 Pro server, local n
     the job goes back to the front of the queue marked `whole`. Each share is a "part" job (args: the job's input
     bytes unopened, the names, the checks flag): this server's at the front of its own queue (`submit(front=,
     parent=)`), the peers' through `client.Remote.submit` (CLIENT_KINDS lets "part" in). Followed every POLL_S:
-    progress weighted by cost ("split over 2 servers: build_pc 40 %, server-pc waiting"); done parts fetched and removed;
+    progress weighted by cost ("split over 2 servers: build-pc 40 %, server-pc waiting"); done parts fetched and removed;
     a peer unreachable for LOST_S (120 s), or failing/cancelling its part, has the part re-run here (a note); a
     failure of this server's own part fails the job. Cancel cancels every part; a server stopping leaves the job
     queued and drops its local parts at restart (`Job.parent`), the peers' parts expire. All in: a "merge" child

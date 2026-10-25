@@ -190,8 +190,8 @@ def test_a_lost_member_s_part_runs_on_the_lead_and_cancel_stops_every_part(tmp_p
 
 
 def test_two_stages_go_to_two_servers_whatever_their_cores():
-    """The user's refboard (two power stages switched on) on build_pc (16 cores, the lead) and laptop (8 cores):
-    one stage each ("it's not sharing the load": counting all cores put both on build_pc and ran the job whole). Cores
+    """The user's refboard (two power stages switched on) on build-pc (16 cores, the lead) and laptop (8 cores):
+    one stage each ("it's not sharing the load": counting all cores put both on build-pc and ran the job whole). Cores
     count up to SPEED_CORES; a busy server's speed drops; an idle server without an item gets one, a busy one not."""
     from groundtruth.analysis.split import SPEED_CORES, server_speed
     stages = [{"name": "buck conv1", "cost": 6.0}, {"name": "buck conv2", "cost": 6.0}]
@@ -220,8 +220,8 @@ def test_the_reason_a_simulate_ran_whole_reaches_the_plugin():
 
 def test_the_plan_follows_each_server_s_memory_and_speed():
     """The user: "scale the work load depending on the machines capabilities". refboard at 16x: two power
-    stages of ~9.6 GB each and four small nets; build_pc (18 GB free) and laptop (the user's laptop, 2.2 GB free): the
-    stages only where they fit (build_pc), the nets spread by speed, laptop gets what fits it; an item that fits no server
+    stages of ~9.6 GB each and four small nets; build-pc (18 GB free) and laptop (the user's laptop, 2.2 GB free): the
+    stages only where they fit (build-pc), the nets spread by speed, laptop gets what fits it; an item that fits no server
     goes to the one with the most free memory; a faster server (measured) gets more."""
     from groundtruth.analysis.split import FIT_SHARE, fits
     stages = [{"name": f"buck conv{k}", "cost": 6.0, "mem_gb": 9.6} for k in (1, 2)]
@@ -231,7 +231,7 @@ def test_the_plan_follows_each_server_s_memory_and_speed():
     plan = plan_split(stages + nets, [build_pc, xps])
     assert sorted(i["name"] for i in plan[0] if i["name"].startswith("buck")) == ["buck conv1", "buck conv2"]
     assert plan[1] and all(i["name"].startswith("net") for i in plan[1])
-    # nothing fits the laptop: it gets nothing, and the stages still run (on build_pc)
+    # nothing fits the laptop: it gets nothing, and the stages still run (on build-pc)
     plan = plan_split(stages, [build_pc, xps])
     assert [len(p) for p in plan] == [2, 0]
     # too big for every server: to the one with the most free memory
@@ -250,12 +250,12 @@ def test_what_a_split_measured_is_kept_and_used(tmp_path):
     everything survives a restart (a new Stats from the file)."""
     from groundtruth.remote.split import SPEED_MIN_S, Stats
     st = Stats(tmp_path)
-    assert st.mem("b.kicad_pcb", "buck conv1", 16) is None and st.speed("build_pc") is None
-    st.record_part("b.kicad_pcb", 16, "build_pc", [{"name": "buck conv1", "cost": 6.0}], 600.0, 9200.0)
-    st.record_part("b.kicad_pcb", 16, "build_pc", [{"name": "net", "cost": 1.0}], SPEED_MIN_S / 2, 300.0)
+    assert st.mem("b.kicad_pcb", "buck conv1", 16) is None and st.speed("build-pc") is None
+    st.record_part("b.kicad_pcb", 16, "build-pc", [{"name": "buck conv1", "cost": 6.0}], 600.0, 9200.0)
+    st.record_part("b.kicad_pcb", 16, "build-pc", [{"name": "net", "cost": 1.0}], SPEED_MIN_S / 2, 300.0)
     st.record_too_big("b.kicad_pcb", 16, [{"name": "buck conv2", "cost": 6.0}], 2.2)
     again = Stats(tmp_path)
-    assert again.speed("build_pc") == pytest.approx(6.0 / 600.0)          # the short part did not count for speed
+    assert again.speed("build-pc") == pytest.approx(6.0 / 600.0)          # the short part did not count for speed
     assert again.mem("b.kicad_pcb", "buck conv1", 16) == pytest.approx(9200 / 1024, abs=0.01)
     assert again.mem("b.kicad_pcb", "net", 16) == pytest.approx(300 / 1024, abs=0.01)
     assert again.mem("b.kicad_pcb", "buck conv2", 16) > 2.2 and again.mem("b.kicad_pcb", "buck conv1", 8) is None
@@ -268,12 +268,12 @@ def test_a_part_that_ran_out_of_memory_moves_to_a_server_it_fits(tmp_path, monke
     from types import SimpleNamespace as NS
     from groundtruth.remote import split as remote_split
     from groundtruth.remote.split import Part, SplitRun
-    monkeypatch.setattr(remote_split.socket, "gethostname", lambda: "build_pc")    # this server (the lead)
+    monkeypatch.setattr(remote_split.socket, "gethostname", lambda: "build-pc")    # this server (the lead)
     srv = NS(data=tmp_path)
     job = NS(id="j1", client="me", message="", fraction=0.0)
     run = SplitRun(srv, job)
     run.board, run.resolution = "b.kicad_pcb", 16.0
-    me = "build_pc"
+    me = "build-pc"
     run.servers = [{"host": me, "remote": None, "speed": 8.0, "free_gb": 18.0},
                    {"host": "laptop", "remote": None, "speed": 8.0, "free_gb": 2.2},
                    {"host": "other-pc", "remote": None, "speed": 8.0, "free_gb": 100.0}]

@@ -235,7 +235,7 @@ def test_the_history_tells_who_joined_left_came_back_or_restarted_and_who_leads(
 
 
 def test_a_server_is_reached_on_an_address_it_announced_not_a_virtual_adapter_s():
-    """The user's Find servers listed build_pc at 172.20.0.1, its Hyper-V/WSL vEthernet address (Windows sent the
+    """The user's Find servers listed build-pc at 172.20.0.1, its Hyper-V/WSL vEthernet address (Windows sent the
     answer out of that adapter): every server announces its real addresses, and the receiver uses the one it shares
     a subnet with (the source only when it was announced, or nothing was), checked with a connection."""
     import socket

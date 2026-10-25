@@ -143,7 +143,7 @@ def test_install_server_cmd_runs_through_cmd_exe(tmp_path):
 def test_the_status_is_a_tidy_block_with_the_gpus_cause_and_fix():
     """install_server.cmd status (and the end of install): one fact per line within the console's width, the GPU's
     cause in plain words and its one fix (the user, of the one long wrapped line: "this needs better formatting")."""
-    st = {"host": "build_pc", "version": "GroundTruth 0.1.41230 (108793a, built 2026-10-14 18:41)", "code": "ff760539f86f",
+    st = {"host": "build-pc", "version": "GroundTruth 0.1.41230 (108793a, built 2026-10-14 18:41)", "code": "ff760539f86f",
           "cores": 16, "memory_gb": 31.7, "free_gb": 21.3, "gpus": [], "workers": 1, "running": [], "queue": [],
           "threads": "-", "gpu": "auto", "keep_hours": 24.0,
           "gpu_note": "PyTorch does not load (not installed: install_server.cmd install --cuda cu126; or a DLL "
@@ -201,13 +201,13 @@ def test_the_cluster_key_is_shown_as_typed_cleaned_and_checked_on_the_network(tm
     real_check = server_setup.key_check
     monkeypatch.setattr(server_setup, "key_check",
                         lambda paths, k: real_check(paths, k, find=lambda kk: [
-                            {"host": "build_pc", "address": "192.0.2.127"}] if kk == key else []))
+                            {"host": "build-pc", "address": "192.0.2.127"}] if kk == key else []))
     paths = server_setup.layout(tmp_path)
     assert server_setup.make_key(paths, given=server_setup.ASK) == key
     assert paths["key"].read_text(encoding="utf-8").strip() == key
     out = capsys.readouterr().out
     assert "type or paste it here" not in out          # input()'s own prompt, not printed by say()
-    assert "used by: build_pc (192.0.2.127)" in out and f"{len(key)} characters" in out
+    assert "used by: build-pc (192.0.2.127)" in out and f"{len(key)} characters" in out
     assert "no server on this network answered" in real_check(paths, "x" * 20, find=lambda k: [])
     assert "could not ask" in real_check(paths, key, find=lambda k: 1 / 0)
 

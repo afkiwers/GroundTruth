@@ -29,7 +29,7 @@ COST_STAGE = 6.0
 COST_BRIDGE_LEG = 6.0
 # an item's peak memory before it was measured: per million nodes of its models' budget (analysis.max_nodes x the
 # resolution; the board-wide plane model's cavity_max_nodes x the resolution for a net with plane capacitance).
-# refboard's conv1 at 16x (budget 1.6 M, 1.18 M nodes) used ~9 GB on 4 threads on build_pc: ~6 GB per M
+# refboard's conv1 at 16x (budget 1.6 M, 1.18 M nodes) used ~9 GB on 4 threads on build-pc: ~6 GB per M
 GB_PER_MNODE = 6.0
 FIT_SHARE = 0.8                 # an item goes to a server only if its memory is within this share of the free memory
 
