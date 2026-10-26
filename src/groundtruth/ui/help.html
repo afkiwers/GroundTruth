@@ -273,7 +273,11 @@ in the schematic: see <a href="#siglabels">Labelling a signal path</a>.</p>
 <p>The switching power stages (DC-DC converters): name, topology, rail, switch node, ground, the switches (high
 side, low side, or an IC with its switches inside), switching frequency, input and output voltage, load current,
 edge time, and optionally C_oss / Q_oss, R_DS(on), the inductor's DCR, a diode's V_f, the stray capacitance to a
-chassis, the input and output connectors and the conducted standard. Hover over a field for what it means. C_oss,
+chassis, the input and output connectors and the conducted standard. Hover over a field for what it means.
+<b>Several stages at once:</b> Ctrl- or Shift-click them; the form shows each field they share, and <b>*</b> where
+they differ (a list gets a * entry), with each stage's own name and switches greyed. Change a field (e.g. V in) and
+press <b>Update selected</b>: only the fields you changed are set on every selected stage, a <b>*</b> left as it is
+keeps each stage's own value. C_oss,
 Q_oss, R_DS(on), DCR and V_f come from the parts' schematic fields where they have them: ◆ beside a field, or
 <font color="@WARN@">!</font> where a value set here differs; <b>Use schematic values</b> takes them back
 (<a href="#fields">Part parameters from the schematic</a>). The controller's

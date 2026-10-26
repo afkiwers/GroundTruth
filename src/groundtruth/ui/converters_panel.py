@@ -106,8 +106,9 @@ FIELD_TIPS = {
 }
 BUTTON_TIPS = {
     "Add": "Add a new power stage from the form.",
-    "Update selected": "Replace the selected power stage with the form's values (settings the form does not show, "
-                       "such as spread spectrum, are kept).",
+    "Update selected": "Replace the selected power stage with the form's values (settings the form does not show "
+                       "are kept). With several selected: the fields you changed go into each of them; a field "
+                       "showing * (they differ) or left as it was keeps each stage's own value.",
     "Remove selected": "Remove the selected power stages (also the Delete key).",
     "Mark reviewed": "Mark the selected auto-detected stages as checked by you (they stop showing in orange).",
     "Use schematic values": "Put the selected stages' part parameters (R_DS(on), C_oss, Q_oss, DCR, V_f, V_SD, Q_rr, "
@@ -162,6 +163,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self.board = None
         self.settings = None
         self.converters: list[ConverterSpec] = []
+        self._multi: Optional[dict] = None      # several rows selected: what the form showed (_form_for_selection)
 
         self.hint = wx.StaticText(self, label="No power stages yet: press Detect… to find switching converters, "
                                               "or fill in the form on the right and press Add.")
@@ -330,41 +332,169 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             self._show_enabled(i, c)
 
     def on_select(self, evt):
-        """A row was selected: fill the form with its stage, and the marks beside the part parameters."""
+        """A row was selected: fill the form with its stage and the marks beside the part parameters; once the
+        selection has settled, several rows show what they share (_form_for_selection)."""
         self._selection_changed()
-        c = self.converters[evt.GetIndex()]
-        self.name.SetValue(c.name)
-        self.topology.SetStringSelection(c.topology)
-        self.rail.SetValue(c.rail)
-        self.sw.SetValue(c.switch_node or "")
-        self.ground.SetValue(c.ground)
-        self.high.SetValue(", ".join(c.high_side))
-        self.low.SetValue(", ".join(c.low_side))
-        self.integrated.SetValue(", ".join(c.switch))
-        self.f_sw.SetValue(format_si(c.f_sw, "Hz"))
-        self.i_out.SetValue(f"{c.i_out:g}")
-        self.v_in.SetValue("" if c.v_in is None else f"{c.v_in:g}")
-        self.v_out.SetValue("" if c.v_out is None else f"{c.v_out:g}")
-        self.rise.SetValue(format_si(c.rise_time, "s"))
-        self.c_oss.SetValue("" if c.c_oss is None else format_si(c.c_oss, "F"))
-        self.q_oss.SetValue("" if c.q_oss is None else format_si(c.q_oss, "C"))
-        self.c_stray.SetValue("" if c.c_stray is None else format_si(c.c_stray, "F"))
-        for ctrl, v in ((self.rds_on, c.rds_on), (self.rds_on_low, c.rds_on_low), (self.dcr, c.dcr)):
-            ctrl.SetValue("" if v is None else format_si(v, "Ω"))
-        self.diode_vf.SetValue("" if c.diode_vf is None else f"{c.diode_vf:g}")
-        for ctrl, v in ((self.dead_rise, c.dead_rise), (self.dead_fall, c.dead_fall)):
-            ctrl.SetValue("" if v is None else format_si(v, "s"))
-        self.v_sd.SetValue("" if c.v_sd is None else f"{c.v_sd:g}")
-        self.q_rr.SetValue("" if c.q_rr is None else format_si(c.q_rr, "C"))
-        self.inp.SetValue(", ".join(c.input_connector))
-        self.out.SetValue(", ".join(c.output_connector))
-        self.standard.SetStringSelection(c.conducted or STANDARD_CHOICES[0])
-        self.spread.SetValue("" if not c.spread else f"{c.spread * 100:g}")
-        self.spread_mode.SetStringSelection(c.spread_mode if c.spread_mode in SPREAD_MODES else SPREAD_MODES[0])
-        self.spread_rate.SetValue("" if c.spread_rate is None else format_si(c.spread_rate, "Hz"))
-        self.interleave.SetValue(c.interleave)
-        self.phase_deg.SetValue("" if c.phase_deg is None else f"{c.phase_deg:g}")
+        wx.CallAfter(lambda: self and self._form_for_selection())
+        self._fill_one(self.converters[evt.GetIndex()])
+
+    # Several stages selected: the form shows the fields they can share, a value they differ in as MIXED, and
+    # Update selected writes only the fields the user changed into each of them (the user: "like under signals, I
+    # want to be able to select one and more and bulk change options. If parameters match show it if they mismatch
+    # shown an * and ignore unless the user puts in a proper new value"; nets_panel does the same for signal paths).
+    MIXED = "*"
+    OWN = ("name", "switch_node", "high_side", "low_side", "switch")      # a stage's own: greyed for several
+    # how a shared field is read back: required / optional numbers with their unit, nets, pin lists, choices, text
+    KINDS = {"f_sw": ("num!", "Hz"), "i_out": ("num!", "A"), "rise_time": ("num!", "s"), "v_in": ("num", "V"),
+             "v_out": ("num", "V"), "c_oss": ("num", "F"), "q_oss": ("num", "C"), "c_stray": ("num", "F"),
+             "rds_on": ("num", "Ω"), "rds_on_low": ("num", "Ω"), "dcr": ("num", "Ω"), "diode_vf": ("num", "V"),
+             "dead_rise": ("num", "s"), "dead_fall": ("num", "s"), "v_sd": ("num", "V"), "q_rr": ("num", "C"),
+             "spread_rate": ("num", "Hz"), "phase_deg": ("num", "°"), "rail": ("net", ""), "ground": ("net", ""),
+             "input_connector": ("pins", ""), "output_connector": ("pins", ""), "topology": ("choice", ""),
+             "conducted": ("choice", ""), "spread_mode": ("choice", ""), "spread": ("pct", ""),
+             "interleave": ("text", "")}
+
+    def _ctrls(self) -> dict:
+        """ConverterSpec field -> its control on the form."""
+        return {"name": self.name, "topology": self.topology, "rail": self.rail, "switch_node": self.sw,
+                "ground": self.ground, "high_side": self.high, "low_side": self.low, "switch": self.integrated,
+                "f_sw": self.f_sw, "i_out": self.i_out, "v_in": self.v_in, "v_out": self.v_out,
+                "rise_time": self.rise, "c_oss": self.c_oss, "q_oss": self.q_oss, "c_stray": self.c_stray,
+                "rds_on": self.rds_on, "rds_on_low": self.rds_on_low, "dcr": self.dcr, "diode_vf": self.diode_vf,
+                "dead_rise": self.dead_rise, "dead_fall": self.dead_fall, "v_sd": self.v_sd, "q_rr": self.q_rr,
+                "input_connector": self.inp, "output_connector": self.out, "conducted": self.standard,
+                "spread": self.spread, "spread_mode": self.spread_mode, "spread_rate": self.spread_rate,
+                "interleave": self.interleave, "phase_deg": self.phase_deg}
+
+    @staticmethod
+    def _texts(c: ConverterSpec) -> dict:
+        """Every field of stage c as the form shows it."""
+        def si(v, unit):
+            """A value with its SI prefix and unit, "" for none."""
+            return "" if v is None else format_si(v, unit)
+
+        def g(v):
+            """A plain number, "" for none."""
+            return "" if v is None else f"{v:g}"
+        return {"name": c.name, "topology": c.topology, "rail": c.rail, "switch_node": c.switch_node or "",
+                "ground": c.ground, "high_side": ", ".join(c.high_side), "low_side": ", ".join(c.low_side),
+                "switch": ", ".join(c.switch), "f_sw": format_si(c.f_sw, "Hz"), "i_out": f"{c.i_out:g}",
+                "v_in": g(c.v_in), "v_out": g(c.v_out), "rise_time": format_si(c.rise_time, "s"),
+                "c_oss": si(c.c_oss, "F"), "q_oss": si(c.q_oss, "C"), "c_stray": si(c.c_stray, "F"),
+                "rds_on": si(c.rds_on, "Ω"), "rds_on_low": si(c.rds_on_low, "Ω"), "dcr": si(c.dcr, "Ω"),
+                "diode_vf": g(c.diode_vf), "dead_rise": si(c.dead_rise, "s"), "dead_fall": si(c.dead_fall, "s"),
+                "v_sd": g(c.v_sd), "q_rr": si(c.q_rr, "C"), "input_connector": ", ".join(c.input_connector),
+                "output_connector": ", ".join(c.output_connector),
+                "conducted": c.conducted or STANDARD_CHOICES[0],
+                "spread": "" if not c.spread else f"{c.spread * 100:g}",
+                "spread_mode": c.spread_mode if c.spread_mode in SPREAD_MODES else SPREAD_MODES[0],
+                "spread_rate": si(c.spread_rate, "Hz"), "interleave": c.interleave, "phase_deg": g(c.phase_deg)}
+
+    def _set(self, ctrl, text: str):
+        """Show text in a control; a list (wx.Choice) gets a MIXED entry at the top while it shows one."""
+        if isinstance(ctrl, wx.Choice):
+            has = ctrl.GetCount() and ctrl.GetString(0) == self.MIXED
+            if text == self.MIXED:
+                if not has:
+                    ctrl.Insert(self.MIXED, 0)
+                ctrl.SetSelection(0)
+                return
+            if has:
+                ctrl.Delete(0)
+            if not ctrl.SetStringSelection(text):
+                ctrl.SetSelection(0)
+            return
+        ctrl.SetValue(text)
+
+    @staticmethod
+    def _text(ctrl) -> str:
+        """What a control shows now (a list's chosen entry)."""
+        return ctrl.GetStringSelection() if isinstance(ctrl, wx.Choice) else ctrl.GetValue().strip()
+
+    def _fill_one(self, c: ConverterSpec):
+        """The form shows one stage (its own fields enabled again)."""
+        self._multi = None
+        ctrls = self._ctrls()
+        for key in self.OWN:
+            ctrls[key].Enable(True)
+        for key, text in self._texts(c).items():
+            self._set(ctrls[key], text)
         self._show_marks(c)
+
+    def _form_for_selection(self):
+        """After the selection settled: several rows show their shared fields (a value they differ in as MIXED) and
+        their own fields greyed, without the part parameters' marks; back to one row, it shows itself."""
+        rows = self.selected_rows()
+        if len(rows) == 1 and getattr(self, "_multi", None) is not None:
+            self._fill_one(self.converters[rows[0]])
+        if len(rows) < 2:
+            return
+        texts = [self._texts(self.converters[i]) for i in rows if i < len(self.converters)]
+        ctrls, shown = self._ctrls(), {}
+        for key in self.KINDS:
+            values = {t[key] for t in texts}
+            shown[key] = values.pop() if len(values) == 1 else self.MIXED
+            self._set(ctrls[key], shown[key])
+        for key in self.OWN:
+            ctrls[key].Enable(False)
+        self._show_marks(None)
+        self._multi = shown
+
+    def _parse(self, key: str, text: str):
+        """(a shared field's value read from its text, problem or "")."""
+        kind, unit = self.KINDS[key]
+        if kind in ("num", "num!"):
+            if not text:
+                return (None, "") if kind == "num" else (None, "needs a number")
+            v = parse_field(text, unit)
+            if v is None or (kind == "num!" and not v > 0):
+                return None, f"'{text}' is not a {'positive ' if kind == 'num!' else ''}number"
+            return v, ""
+        if kind == "net":
+            return (text, "") if self.board is None or text in self.board.nets else (None, f"'{text}' is no net")
+        if kind == "pins":
+            return [r.strip() for r in text.split(",") if r.strip()], ""
+        if kind == "pct":
+            if not text:
+                return None, ""
+            v = parse_field(text.replace("%", ""), "")
+            return (v / 100 or None, "") if v is not None else (None, f"'{text}' is not a percentage")
+        if key == "conducted":
+            return (None if text == STANDARD_CHOICES[0] else text), ""
+        return text, ""
+
+    def _update_many(self, rows: list):
+        """Update selected with several rows: every shared field the user changed (not MIXED and not what was shown)
+        goes into each selected stage, linked to the schematic where it equals its field; the rest of each stage
+        stays its own."""
+        from ..components.fields import link_form
+        changes, problems = {}, []
+        ctrls = self._ctrls()
+        for key in self.KINDS:
+            text = self._text(ctrls[key])
+            if text == self.MIXED or text == self._multi.get(key):
+                continue
+            value, problem = self._parse(key, text)
+            if problem:
+                problems.append(f"{key.replace('_', ' ')}: {problem} (or * to leave each stage's own)")
+            else:
+                changes[key] = value
+        if problems:
+            message_box("\n".join(problems), "GroundTruth", wx.ICON_WARNING)
+            return
+        if not changes:
+            top = self.GetTopLevelParent()
+            if hasattr(top, "SetStatusText"):
+                top.SetStatusText(f"nothing changed in the form for the {len(rows)} selected power stages")
+            return
+        for i in rows:
+            old = self.converters[i]
+            new = replace(old, reviewed=True, **changes)
+            link_form(self.board, self.settings.config, new, old)
+            self.converters[i] = new
+        if self._commit():
+            self.reselect(rows)          # the list was rebuilt: the stages stay selected for the next edit
+            self._form_for_selection()
 
     def _show_marks(self, c: Optional[ConverterSpec]):
         """The part parameters' marks for stage c (◆ from the schematic, ! set here and different; none for None)."""
@@ -449,8 +579,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         """Replace the selected stage with the form's values, keeping what the form does not show."""
         rows = self.selected_rows()
         if len(rows) > 1:
-            message_box("Select a single power stage to update it from the form.", "GroundTruth",
-                          wx.ICON_INFORMATION)
+            if getattr(self, "_multi", None) is not None:
+                self._update_many(rows)
             return
         i = rows[0] if rows else -1
         spec = self._form() if rows else None

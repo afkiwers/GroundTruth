@@ -3428,3 +3428,44 @@ def test_save_configuration_as_picks_its_folder(app, frame, tmp_path, monkeypatc
     assert f._active["file"] == str(chosen / scenario.file_name("elsewhere"))
     f.save_config_as()
     assert started[-1] == str(chosen)
+
+
+def test_several_power_stages_are_edited_at_once_and_only_what_changed_applies(app, conv_frame):
+    """The user: "like under signals, I want to be able to select one and more and bulk change options. If
+    parameters match show it if they mismatch shown an * and ignore unless the user puts in a proper new value". Two
+    stages of different f_sw and spread mode: the form shows their common load current, * for f_sw and a * entry in
+    the spread mode's list, their own fields (name, switches) greyed; Update with V in changed sets it on both and
+    keeps each f_sw and spread mode; a value that is no number is refused; back to one row, it shows itself again
+    and the list loses its * entry."""
+    from groundtruth.config.settings import ConverterSpec
+    f = conv_frame
+    run_steps(app, f, [lambda: None])
+    p = f.converters
+    base = dict(rail="VIN", ground="GND", switch=["U1"], topology="buck", i_out=5.0, v_in=24.0, v_out=5.0,
+                rise_time=2e-9, input_connector=["J1.1", "J1.2"])
+    p.converters = [ConverterSpec(name="a", f_sw=750e3, spread=0.2, spread_mode="random", **base),
+                    ConverterSpec(name="b", f_sw=400e3, spread=0.2, spread_mode="triangle", spread_rate=10e3, **base)]
+    assert p._commit()
+    for i in (0, 1):
+        p.list.Select(i)
+    run_steps(app, f, [lambda: None])
+    assert p.f_sw.GetValue() == "*" and p.i_out.GetValue() == "5" and p.spread.GetValue() == "20"
+    assert p.spread_mode.GetStringSelection() == "*" and p.topology.GetStringSelection() == "buck"
+    assert not p.name.IsEnabled() and not p.integrated.IsEnabled() and p.v_in.IsEnabled()
+    p.v_in.SetValue("48")
+    p.on_update(None)
+    a, b = f.settings.config.converters
+    assert a.v_in == b.v_in == 48.0 and (a.f_sw, b.f_sw) == (750e3, 400e3)
+    assert (a.spread_mode, b.spread_mode) == ("random", "triangle") and a.reviewed and b.reviewed
+    assert p.selected_rows() == [0, 1] and p.v_in.GetValue() == "48"
+    p.f_sw.SetValue("fast")                              # no number: refused, nothing written
+    p.on_update(None)
+    assert [c.f_sw for c in f.settings.config.converters] == [750e3, 400e3]
+    p.spread_mode.SetStringSelection("random")           # a list set on purpose applies to both
+    p.f_sw.SetValue("*")
+    p.on_update(None)
+    assert [c.spread_mode for c in f.settings.config.converters] == ["random", "random"]
+    p.list.Select(1, False)
+    run_steps(app, f, [lambda: None])
+    assert p.f_sw.GetValue() == "750kHz" and p.name.IsEnabled() and p.name.GetValue() == "a"
+    assert p.spread_mode.GetString(0) != "*" and p.spread_mode.GetStringSelection() == "random"
