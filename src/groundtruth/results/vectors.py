@@ -45,7 +45,8 @@ def reference_density(maps) -> float:
 
 def arrow_field(grid, K: np.ndarray, Kx: np.ndarray, Ky: np.ndarray, n_across: int = N_ACROSS,
                 spacing_mm: float | None = None, max_arrows: int | None = None, gamma: float = 0.5,
-                seed: int = 1, ref: float | None = None, with_density: bool = False) -> list[tuple]:
+                seed: int = 1, ref: float | None = None, with_density: bool = False,
+                with_net: bool = False) -> list[tuple]:
     """[(x, y, dx, dy), ...] in board mm (y down): equal arrows whose number per area follows the current density.
 
     The map is divided into spots of b×b grid nodes (about `n_across` across the wider side, or `spacing_mm`
@@ -56,8 +57,11 @@ def arrow_field(grid, K: np.ndarray, Kx: np.ndarray, Ky: np.ndarray, n_across: i
     more arrows; 1 is strictly proportional. An 8×8 ordered-dither pattern switches on that fraction of
     the spots, spread evenly and the same on every run; each arrow sits at its spot's copper centroid (jittered a
     little where the spot is all copper), points along the spot's mean current and is ARROW spot spacings long.
+    A spot takes the copper of one net only (grid.label), the one carrying the most current in it: an arrow stays
+    on its own net's copper and reads that net's density, not an average with a quiet pour beside it.
     With `max_arrows`, the spacing grows until the arrows fit. with_density: each arrow also gets its spot's
-    mean current density, (x, y, dx, dy, K) in K's units (the board drawing sets the line width by it)."""
+    mean current density, (x, y, dx, dy, K) in K's units (the board drawing sets the line width by it); with_net:
+    then its net's name ("" on a grid without nets) as the last value (split_return takes it)."""
     node = np.asarray(grid.node, bool)
     nx, ny = node.shape
     Kn = np.where(node, np.asarray(K, float), 0.0)
@@ -70,6 +74,19 @@ def arrow_field(grid, K: np.ndarray, Kx: np.ndarray, Ky: np.ndarray, n_across: i
     b = max(1, round(spacing_mm / grid.d)) if spacing_mm else max(1, math.ceil(max(nx, ny) / max(n_across, 1)))
     # node indices, for the copper centroid of each spot
     i, j = np.meshgrid(np.arange(nx), np.arange(ny), indexing="ij")
+    # the copper by net (Grid.label): a spot takes the nodes of ONE net, the one carrying the most current in it, so
+    # a narrow strip between two pours of another net keeps its arrows on itself and at its own density (the user:
+    # refboard's 1 mm +VDC strip on In1.Cu between two GND pours had its arrows averaged with the idle ground and put
+    # on it, then drawn as GND's return current). Nets with no current worth an arrow are left out.
+    label = getattr(grid, "label", None)
+    if label is not None and getattr(grid, "nets", None):
+        lab = np.where(node, np.asarray(label), -1)
+        groups = [n for n in np.unique(lab[node & (Kn >= FLOOR * ref)]) if n >= 0]
+        masks = [lab == n for n in groups] or [node]
+        names = [grid.nets[n] for n in groups] or [""]
+    else:
+        masks, names = [node], [""]
+    Kxn, Kyn = np.where(node, np.asarray(Kx, float), 0.0), np.where(node, np.asarray(Ky, float), 0.0)
     while True:
         bx, by = math.ceil(nx / b), math.ceil(ny / b)
 
@@ -79,13 +96,17 @@ def arrow_field(grid, K: np.ndarray, Kx: np.ndarray, Ky: np.ndarray, n_across: i
             pad[:nx, :ny] = a
             return pad.reshape(bx, b, by, b).sum(axis=(1, 3))
 
-        count = blocks(node.astype(float))
+        # per net: its nodes, centroid sums, current and vector sums in each spot; then each spot's net
+        sums = np.array([[blocks(m.astype(float)), blocks(np.where(m, i, 0)), blocks(np.where(m, j, 0)),
+                          blocks(np.where(m, Kn, 0.0)), blocks(np.where(m, Kxn, 0.0)), blocks(np.where(m, Kyn, 0.0))]
+                         for m in masks])                                    # (nets, 6, bx, by)
+        pick = np.argmax(sums[:, 3], axis=0)                                 # the net with the most current
+        best = np.take_along_axis(sums, pick[None, None], axis=0)[0]
+        count = best[0]
         with np.errstate(invalid="ignore", divide="ignore"):
-            ci = blocks(np.where(node, i, 0)) / count
-            cj = blocks(np.where(node, j, 0)) / count
-            mag = blocks(Kn) / count
-            ux = blocks(np.where(node, Kx, 0.0)) / count
-            uy = blocks(np.where(node, Ky, 0.0)) / count
+            ci, cj = best[1] / count, best[2] / count
+            mag = best[3] / count
+            ux, uy = best[4] / count, best[5] / count
         norm = np.hypot(ux, uy)                 # the spot's mean current vector; its direction is the arrow's
         rel = np.nan_to_num(mag) / ref
         fill = np.where(rel >= FLOOR, np.clip(rel, 0.0, 1.0) ** gamma, 0.0)
@@ -107,7 +128,7 @@ def arrow_field(grid, K: np.ndarray, Kx: np.ndarray, Ky: np.ndarray, n_across: i
     k = np.nonzero(keep)
     # each arrow starts half its length before the spot's centre, so it is centred on the spot
     return [(float(x[a, c] - dx[a, c] / 2), float(y[a, c] - dy[a, c] / 2), float(dx[a, c]), float(dy[a, c]))
-            + ((float(mag[a, c]),) if with_density else ())
+            + ((float(mag[a, c]),) if with_density else ()) + ((names[pick[a, c]],) if with_net else ())
             for a, c in zip(*k)]
 
 
@@ -145,10 +166,14 @@ def return_rule(rr, config, board=None):
 def split_return(arrows: list[tuple], grid, is_return) -> tuple[list[tuple], list[tuple]]:
     """Arrows (x, y, dx, dy, ...) mm split into (the rest, the return current's) by the net of the copper at each
     arrow's foot (grid.net_at at its node, else at the nearest copper node within one pitch: an arrow sits at its
-    spot's copper centroid); an arrow on no labelled copper stays with the rest."""
+    spot's copper centroid); an arrow on no labelled copper stays with the rest. An arrow that names its net (a last
+    value that is a string: arrow_field's with_net) is split by that, and keeps it off the list it returns."""
     ahead, back = [], []
     nx, ny = grid.node.shape
     for a in arrows:
+        if a and isinstance(a[-1], str):
+            (back if is_return(a[-1]) else ahead).append(a[:-1])
+            continue
         i0, j0 = int(round((a[0] - grid.x0) / grid.d)), int(round((a[1] - grid.y0) / grid.d))
         net = ""
         for di, dj in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)):

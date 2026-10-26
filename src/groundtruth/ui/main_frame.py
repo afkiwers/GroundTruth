@@ -2372,12 +2372,12 @@ class MainFrame(ConfigActions, wx.Frame):
             ref = reference_density(maps)
             arrows = arrow_field(rr.layer_grids[plane_layer], rr.sheet_current[plane_layer], *vec,
                                  spacing_mm=BOARD_ARROW_SPACING_MM, max_arrows=MAX_BOARD_ARROWS, ref=ref,
-                                 with_density=True)
+                                 with_density=True, with_net=True)
             # line width by the density at each arrow (Preferences: Arrow lines), against the peak of all layers
             peak = max((float(m.max()) for m in maps if m.size), default=0.0)
             widths = arrow_widths([a[4] for a in arrows], peak, w_min, w_max)
-            arrows = [a[:4] + (w,) for a, w in zip(arrows, widths)]
-            # the return current's arrows apart, by the net of the copper under each one
+            arrows = [a[:4] + (w, a[5]) for a, w in zip(arrows, widths)]
+            # the return current's arrows apart, by the net each one stands on (its last value)
             from ..results.vectors import return_rule, split_return
             ahead, back = split_return(arrows, rr.layer_grids[plane_layer], return_rule(rr, cfg, board))
             # beside the board, on each layer, what its arrows are (KiCad's API cannot name a User layer)

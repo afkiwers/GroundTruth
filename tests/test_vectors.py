@@ -417,3 +417,28 @@ def test_board_arrows_get_thicker_with_the_current_density():
     assert _arrow_range({}) == {"arrow_min_mm": 0.01, "arrow_max_mm": 0.3}
     assert _arrow_range({"arrow_min_mm": 0.5, "arrow_max_mm": 0.1}) == {"arrow_min_mm": 0.1, "arrow_max_mm": 0.5}
     assert _arrow_range({"arrow_min_mm": -1, "arrow_max_mm": "x"}) == {"arrow_min_mm": 0.01, "arrow_max_mm": 0.3}
+
+
+def test_a_narrow_strip_between_quiet_pours_keeps_its_arrows_on_itself():
+    """arrow_field takes each spot's copper from one net, the one with the most current there: refboard's 1 mm +VDC
+    strip on In1.Cu between two GND pours had spots wider than it averaged with the idle ground (its arrows thinned,
+    put beside it on GND, and drawn as GND's return current by split_return). Each arrow now sits on the strip, reads
+    the strip's own density and names its net."""
+    from shapely.ops import unary_union
+    from groundtruth.results.vectors import return_rule, split_return
+    from types import SimpleNamespace as N
+    d = 0.33
+    gnd = unary_union([box(0, 0, 20, 2.0), box(0, 3.4, 20, 6)])
+    g = build_grid({"+VDC": box(0, 2.3, 20, 3.1), "GND": gnd}, (0, 0, 20, 6), d)
+    vdc = g.label == g.nets.index("+VDC")
+    K = np.where(vdc, 5.3, np.where(g.node, 0.45, 0.0))
+    Kx = np.where(vdc, 5.3, np.where(g.node, -0.45, 0.0))
+    arrows = arrow_field(g, K, Kx, np.zeros_like(K), spacing_mm=1.0, ref=5.3, with_density=True, with_net=True)
+    strip = [a for a in arrows if a[5] == "+VDC"]
+    assert len(strip) >= 10
+    for x, y, dx, dy, k, net in strip:
+        assert 2.3 - d <= y <= 3.1 + d and dx > 0 and k == pytest.approx(5.3)
+    ahead, back = split_return(arrows, g, return_rule(N(kind="converter", net="buck"), N(stages=lambda: [],
+                                                                                          dc_loads=[])))
+    assert len(ahead) == len(strip) and all(len(a) == 5 for a in ahead + back)
+    assert all(a[2] < 0 for a in back)                  # the ground's (flowing back) on the return layer
