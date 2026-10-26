@@ -253,7 +253,7 @@ def test_a_terminal_sheet_conducts_beside_the_copper_under_it(tmp_path):
     from groundtruth.solver.peec import SIGMA_CU
     r_cu = 1 / (SIGMA_CU * skin_thickness(35e-6, 10.0, SIGMA_CU))          # Ω per square, 35 µm at DC
     squares = 10.0 / 4.0
-    base = _terminal_strip_r(tmp_path, "thin", f"{1000 * r_cu}ohm")          # with its unit: a bare number is mΩ
+    base = _terminal_strip_r(tmp_path, "thin", f"{1000 * r_cu}ohm")          # with its unit (a bare number is Ω too)
     same = _terminal_strip_r(tmp_path, "same", f"{r_cu}ohm")
     perfect = _terminal_strip_r(tmp_path, "perfect", "0")
     assert base - same == pytest.approx(r_cu / 2 * squares, rel=0.04)

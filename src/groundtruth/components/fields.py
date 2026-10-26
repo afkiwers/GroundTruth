@@ -98,7 +98,7 @@ PARAMS = (
           "the capacitance at each capacitor's own DC voltage, interpolated"),
     Param(TERMINAL_SHEET, "inductor, capacitor, resistor, ferrite, FET",
           "the part's terminal metal (a clip, an end cap, a tab) over its pads as its sheet resistance, Ω per square "
-          "(0 or none: a perfect conductor)", "sheet", 1e-3, "mΩ/□", 0.0, 0.1, "0.5mΩ",
+          "(0 or none: a perfect conductor)", "sheet", 1.0, "Ω/□", 0.0, 0.1, "0.77mΩ",
           "how a pad's current is shared between the board copper and the terminal (DC paths, densities, Thermal)"),
     Param(TERMINAL_METAL, "inductor, capacitor, resistor, ferrite, FET",
           "the same terminal as its thickness and material (Terminal Sheet Resistance wins when both are given)",
@@ -201,8 +201,10 @@ def _special(text: str, p: Param) -> tuple[Optional[float], str]:
     t = text.strip().replace(" ", "").replace(",", ".")
     low = t.lower()
     try:
-        if p.quantity == "sheet":                       # Ω per square: "0.5mΩ", "0.5mOhm/sq", a bare number in mΩ
-            return parse_quantity(re.sub(r"(?i)(/sq|/□|persquare)$", "", t), "ohm", p.assumed)
+        if p.quantity == "sheet":                       # Ω per square: "0.77mΩ", "0.77mOhm/sq", a bare number in Ω
+            # an HTTP lib that appends the template's unit to a value typed with it ("0.77mOhm" + "Ohm"): once
+            t = re.sub(r"(?i)(ohm|Ω)(ohm|Ω)$", r"\1", re.sub(r"(?i)(/sq|/□|persquare)$", "", t))
+            return parse_quantity(t, "ohm", p.assumed)
         if p.quantity == "metal":
             # a thickness and material: its sheet resistance ρ/t ("0.15mm bronze"; copper when no material is named,
             # the materials of analysis/pins.py); "0" a perfect conductor

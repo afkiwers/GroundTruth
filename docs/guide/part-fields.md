@@ -35,7 +35,7 @@ the [README](../../README.md); how the fields are read in detail: [the settings 
 | `Cbias Curve` | capacitor | µF (text) | `95nF@10V, 66nF@30V, 39nF@50V` | the DC-bias curve as text; wins over `Cbias` | Bridges, Signal paths, Power integrity |
 | `Dielectric` | capacitor | text | `X7R` | `C0G` / `NP0`: no DC-bias curve applied | Bridges, Signal paths, Power integrity |
 | `Rated Voltage` | capacitor | V | `50V` | the half-rating point a single `Cbias` holds at | Run checks |
-| `Terminal Sheet Resistance` | inductor, capacitor, resistor, ferrite, FET | mΩ per square | `0.77mΩ` | the part's terminal metal over its pads: how a pad's current is shared between the board copper and the terminal (without it, or `0`: a perfect conductor, the pad dark with a sharp rim) | DC loads, Thermal |
+| `Terminal Sheet Resistance` | inductor, capacitor, resistor, ferrite, FET | Ω per square | `0.77mΩ` | the part's terminal metal over its pads: how a pad's current is shared between the board copper and the terminal (without it, or `0`: a perfect conductor, the pad dark with a sharp rim) | DC loads, Thermal |
 | `Terminal Metal` | inductor, capacitor, resistor, ferrite, FET | thickness and material | `0.15mm bronze` | the same terminal as thickness and material (copper, brass, bronze, becu, tellurium); `Terminal Sheet Resistance` wins when both are given | DC loads, Thermal |
 
 ### The control loop (a controller's fields)
@@ -141,7 +141,7 @@ The temperatures come from the losses of the power stages, bridges and DC loads,
 | `Rds(on)` | FET, switch IC | mΩ | `3.8milliohm` | the switches' conduction loss | Converters, Bridges |
 | `DCR` | inductor | mΩ | `6.9milliohm` | the winding loss | Converters, DC loads, Signal paths |
 | `ESR` | capacitor | mΩ | `5milliohm` | the capacitors' ripple loss | Converters, Bridges, Signal paths, Power integrity |
-| `Terminal Sheet Resistance` | inductor, capacitor, resistor, ferrite, FET | mΩ per square | `0.77mΩ` | where a part's DC current heats the copper under its pads | Converters, DC loads |
+| `Terminal Sheet Resistance` | inductor, capacitor, resistor, ferrite, FET | Ω per square | `0.77mΩ` | where a part's DC current heats the copper under its pads | Converters, DC loads |
 
 ## Run checks (voltage-aware safety checks)
 
