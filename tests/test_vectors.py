@@ -275,6 +275,43 @@ def test_arrows_on_the_board_are_one_group_of_segments():
     assert (h1.start.x, h1.start.y) == tip == (h2.start.x, h2.start.y)
     assert h1.end.x < tip[0] and h2.end.x < tip[0] and math.copysign(1, h1.end.y - tip[1]) != \
         math.copysign(1, h2.end.y - tip[1])
+    # the return current's arrows: a group of their own on their layer (User.6), enabled like any drawing layer;
+    # drawing the others again clears both groups (one name prefix), none to draw enables nothing
+    two = Board(("F.Cu", "B.Cu", "User.6", "User.7"))
+    assert draw_arrows(two, [(1.0, 1.0, 2.0, 0.0)], "User.7", "test") == 1
+    assert draw_arrows(two, [(1.0, 3.0, 2.0, 0.0)] * 2, "User.6", "test", group="arrows-return") == 2
+    assert [g.name for g in two.groups] == ["groundtruth-arrows", "groundtruth-arrows-return"]
+    assert {canonical_name(s.layer) for s in two.items} == {"User.6", "User.7"}
+    assert draw_arrows(two, [], "User.7", "test") == 0 and not two.groups
+    bare = Board(("F.Cu", "B.Cu"))
+    assert draw_arrows(bare, [], "User.6", "test", group="arrows-return") == 0 and not bare.set_calls
+
+
+def test_the_return_currents_arrows_are_told_apart_by_the_net_under_them():
+    """results/vectors.split_return with return_rule: a power or DC view's return is its ground (a stage's
+    `ground`, a DC load's return pin's net, a net named like a ground), a signal route's every net but its own; an
+    arrow just off its copper takes the nearest copper node's net, one on no copper stays with the rest."""
+    from types import SimpleNamespace as N
+    from groundtruth.results.vectors import return_rule, split_return
+    g = build_grid({"PWR": box(0, 0, 5, 2), "GND": box(0, 3, 5, 5), "PGND_X": box(6, 0, 9, 5)}, (0, 0, 10, 5), 0.1)
+    arrows = [(1.0, 1.0, 1, 0, 0.3), (1.0, 4.0, -1, 0, 0.2), (7.0, 2.0, 0, 1, 0.1), (2.0, 2.55, 1, 0, 0.1),
+              (2.0, 2.5 + 0.03, 1, 0, 0.1)]
+    stage = N(ground="PGND_X")
+    cfg = N(stages=lambda: [stage], dc_loads=[])
+    ahead, back = split_return(arrows, g, return_rule(N(kind="converter", net="buck"), cfg))
+    assert ahead == [arrows[0], arrows[3], arrows[4]] and back == [arrows[1], arrows[2]]
+    # a route over the PWR plane: its signal is "SIG" (not on this layer), so all of this copper is its return
+    route = N(kind="route", net="SIG", signal_nets=["SIG"])
+    ahead, back = split_return(arrows, g, return_rule(route, cfg))
+    assert back == arrows[:3] and ahead == arrows[3:]
+    route_on_pwr = N(kind="route", net="PWR", signal_nets=["PWR"])
+    assert split_return(arrows[:2], g, return_rule(route_on_pwr, cfg)) == ([arrows[0]], [arrows[1]])
+    # a DC load's return pin names its net, whatever it is called
+    pins = {"J1.2": N(net="PWR")}
+    load = N(source_return="J1.2", loads=[N(ret="")])
+    board = N(find_pin=lambda p: pins.get(p))
+    rule = return_rule(N(kind="dcload", net="rail"), N(stages=lambda: [], dc_loads=[load]), board)
+    assert rule("PWR") and rule("GND") and not rule("+5V") and not rule("")
 
 
 def test_heatmap_maps_use_the_space_and_zoom_together(tmp_path):

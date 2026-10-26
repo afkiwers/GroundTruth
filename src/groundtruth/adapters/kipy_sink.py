@@ -310,13 +310,17 @@ HEAD_ANGLE = math.radians(25)
 
 @_when_ready
 def draw_arrows(board: Any, arrows: list[tuple[float, float, float, float]], layer_name: str = "User.7",
-                label: str = "", width_mm: float = 0.05) -> int:
+                label: str = "", width_mm: float = 0.05, group: str = "arrows") -> int:
     """Current-direction arrows [(x, y, dx, dy) mm] from results.vectors.arrow_field, each as a shaft and two head
     strokes, in one group and one undo step (replacing the previous arrows). Returns the number of arrows. An arrow
     with a fifth value draws at that line width (mm; results.vectors.arrow_widths: thicker where the current
-    density is higher), else at width_mm."""
+    density is higher), else at width_mm. group: "arrows", or "arrows-return" for the return current's on a layer
+    of their own; drawing "arrows" clears both (their names share the prefix), "arrows-return" only its own."""
+    if not arrows:                              # nothing to draw: the previous ones go, no layer is enabled for it
+        clear(board, f"{GROUP_PREFIX}-{group}")
+        return 0
     layer = _drawing_layer(board, layer_name)
-    clear(board, f"{GROUP_PREFIX}-arrows")
+    clear(board, f"{GROUP_PREFIX}-{group}")
     items = []
     for arrow in arrows:
         x, y, dx, dy = arrow[:4]
@@ -333,7 +337,7 @@ def draw_arrows(board: Any, arrows: list[tuple[float, float, float, float]], lay
         for s in (1, -1):
             a = back + s * HEAD_ANGLE
             items.append(_segment(tip, (tip[0] + h * math.cos(a), tip[1] + h * math.sin(a)), layer, w))
-    _commit_group(board, items, f"{GROUP_PREFIX}-arrows", f"groundtruth: current arrows {label}")
+    _commit_group(board, items, f"{GROUP_PREFIX}-{group}", f"groundtruth: current arrows {label}")
     return len(items) // 3
 
 
