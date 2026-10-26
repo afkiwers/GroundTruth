@@ -135,6 +135,9 @@ class ConverterResult(RouteResult):
     input: Optional[dict] = None                        # DC input current from output power + losses (input_estimate)
     dc_branch: dict = field(default_factory=dict)       # path name -> (build, signed DC current per branch, A):
                                                         # the paths of all stages add up on the shared model (combine_dc)
+    # DC paths the settings keep from being modelled: [{path, connector, net, from, from_net, suggest}] (dc_plan:
+    # an output connector its inductor does not reach; suggest: the one that does, or None)
+    dc_missing: list = field(default_factory=list)
     cm: Optional[dict] = None                           # common mode: switch-node capacitance budget (and estimate)
     input_filter: Optional[dict] = None                 # first-order LC input-filter guidance for the conducted margin
     fixes: list = field(default_factory=list)           # the fix advisor's design changes (analysis/fix_advisor.py)
@@ -2164,6 +2167,16 @@ def _output_runs(model: BoardModel, setup: "ConverterSetup", sw_net: Optional[st
     if out_net and path is None:
         notes.append(f"output connector {plus.pin} ({plus.net}) does not reach {out_net} through parts with a "
                      "series model; DC output path not modelled")
+        # an issue too (_converter_issues: dc_path_missing), naming the connector that does reach it the way
+        # detection finds one (the user's stages kept connectors of an earlier layout: J104 on the other rail, and
+        # the output tracks showed no current with nothing but this note to say why)
+        from .detect import _centre, _connector_for
+        found = _connector_for(board, config, out_net, spec.ground, stop - {None, out_net},
+                               _centre(p for pads_, _, _ in src for p in pads_)) if src else None
+        res.dc_missing[:] = [m for m in res.dc_missing if m["path"] != "output"]     # planned again: once
+        res.dc_missing.append({"path": "output", "connector": list(spec.output_connector), "net": plus.net,
+                               "from": start, "from_net": out_net, "suggest": found,
+                               "at": tuple(float(v) for v in plus.position)})
     inp = board.find_pin(spec.input_connector[1]) if len(spec.input_connector) == 2 else None
     if inp is not None and not inp.net:
         inp = None
@@ -2673,6 +2686,16 @@ def _converter_issues(setup: ConverterSetup, rules, a):
                         f"{res.pulse_a:g} A in {spec.rise_time * 1e9:g} ns gives ≈{v_l:.1f} V of overshoot{ring_txt}: "
                         f"{frac * 100:.0f} % of {res.v_in:g} V", loc, severity=sev, layer=res.layer, key=f"{key}:loop",
                         details={"loop_nh": res.loop_nh, "overshoot_v": worst, "fraction": frac})
+    for miss in getattr(res, "dc_missing", None) or []:
+        # an output connector the stage's inductor does not reach (dc_plan): its copper shows no output current
+        conn, sugg = miss["connector"], miss["suggest"]
+        fix = (f": {sugg[0]} / {sugg[1]} does; set output_connector: [{sugg[0]}, {sugg[1]}]" if sugg else
+               ": set output_connector to the load's + and - pins")
+        setup.issue(rules, "dc_path_missing",
+                    f"{spec.name}: output connector {' / '.join(conn)} ({miss['net']}) is not reached from "
+                    f"{miss['from']} ({miss['from_net']}) through parts{fix}. Until then its DC output path "
+                    f"({spec.i_out:g} A) is not modelled: no loss, no heat, and its copper shows no current",
+                    miss.get("at") or loc, key=f"{key}:dc_output", details=dict(miss))
     for path in res.dc:
         worst_via = max(path["vias"], key=lambda v: v["a_mm2"], default=None)
         level = max(path["sustained_a_mm2"], worst_via["a_mm2"] if worst_via else 0.0)

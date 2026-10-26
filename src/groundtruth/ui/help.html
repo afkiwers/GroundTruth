@@ -773,7 +773,10 @@ Simulate again at another resolution (<a href="#prefs">Preferences</a>). The wor
 frequency, not one read between solves (if it cannot be, a note says so); when the solve budget
 (<code>analysis.max_solves</code>) ends before every gap near the limit is resolved, a note names where a resonance
 could still hide: raise the budget there. A <b>dc_unsolved</b> warning names a DC path (or a motor bridge's leg)
-whose solve failed: the stage's loss, input current and Thermal's heat leave it out. A connector's or other part's
+whose solve failed: the stage's loss, input current and Thermal's heat leave it out. A <b>dc_path_missing</b>
+warning is a stage whose output connector its inductor does not reach through parts (a connector of an earlier
+layout, or the other stage's): its DC output path is not modelled and its output copper shows no current; the
+warning names the connector that does reach it, to set as <code>output_connector</code>. A connector's or other part's
 soldered pin is not checked as a via: the pin carries the current between the layers.</p>
 <ul>
 <li>The columns: <b>#</b>, <b>Severity</b>, <b>Check</b> (the kind of issue), <b>Net</b>, <b>Location</b> (x, y in

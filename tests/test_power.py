@@ -813,3 +813,29 @@ def test_the_stages_dc_currents_add_up_on_one_board_model(tmp_path):
         assert len(art) == 2 and art[1].index("<img") < art[1].index("</article>")
         assert "Vias on the total current" in art[1] and f"{path['current_a']:.3g} A" in art[1]
         assert page.index("All stages: DC together") < page.index(f">{one.net}</a>")      # first in the contents
+
+
+def test_an_output_connector_the_inductor_does_not_reach_is_an_issue_naming_the_one_that_does(tmp_path):
+    """A stage whose output_connector is not reached from its inductor through parts (refboard's stages kept the
+    connectors of an earlier layout: each on the other stage's rail) has no DC output path, and its output copper
+    shows no current: a dc_path_missing warning says so at the connector and names the connector detection finds
+    (power.dc_plan, _converter_issues). With the right one there is no issue and the output path is solved."""
+    from dataclasses import replace
+    from boardgen import discrete_buck_board
+    from conftest import make
+    from groundtruth.analysis.detect import detect_converters
+    from groundtruth.analysis.simulate import simulate
+    board, sc, _ = make(tmp_path, discrete_buck_board(out_connector=True), "outconn", nets=(), solve_points=1)
+    good = replace(detect_converters(board, sc.config)[0].spec, i_out=3.0, v_in=24.0, v_out=5.0)
+    assert [p.split(".")[0] for p in good.output_connector] == ["J2", "J2"]
+    wrong = replace(good, output_connector=list(good.input_connector))          # J1: VIN / GND
+    res = simulate(board, replace(sc.config, converters=[wrong]))
+    stage = res.converters[0]
+    assert not any(p["name"].startswith("output") for p in stage.dc)
+    issue, = [i for i in res.issues if i.check == "dc_path_missing"]
+    assert issue.severity == "warning" and issue.net == wrong.name
+    assert f"set output_connector: [{good.output_connector[0]}, {good.output_connector[1]}]" in issue.message
+    assert issue.location == pytest.approx(board.find_pin(wrong.output_connector[0]).position, abs=1e-3)
+    res = simulate(board, replace(sc.config, converters=[good]))
+    assert not [i for i in res.issues if i.check == "dc_path_missing"]
+    assert any(p["name"].startswith("output") for p in res.converters[0].dc)
