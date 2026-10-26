@@ -119,14 +119,18 @@ def test_a_current_taken_out_at_a_lid_hands_over_like_a_contact():
     assert r == pytest.approx(rs * (10.0 / w) + rs * lam / w / math.tanh(L / lam), rel=0.002)
 
 
-def _buck(tmp_path, name, pins=None, tab_mm=None, monkeypatch=None):
+def _buck(tmp_path, name, pins=None, tab_mm=None, monkeypatch=None, fields=None):
     """tests/boardgen.discrete_buck_board's F.Cu (Q1's drain on the VIN pour, its 1.2 × 1.6 mm pads) with its stage
-    configured, Q1's pin values `pins`, simulate.TAB_MM as tab_mm: (board, model on a 0.1 mm grid)."""
+    configured, Q1's pin values `pins` and symbol fields `fields`, simulate.TAB_MM as tab_mm: (board, model on a
+    0.1 mm grid)."""
     from boardgen import discrete_buck_board
     from conftest import make
     from groundtruth.analysis import simulate
     from groundtruth.config.settings import ConverterSpec, SettingsFile
-    board, sc, _ = make(tmp_path, discrete_buck_board(), name, nets=())
+    gen = discrete_buck_board()
+    if fields:
+        gen.fields("Q1", **fields)
+    board, sc, _ = make(tmp_path, gen, name, nets=())
     sc.set_converters([ConverterSpec("buck 5V", "VIN", "GND", "SW", ["Q1"], ["Q2"], f_sw=400e3, i_out=3.0,
                                      v_in=24.0, v_out=5.0)])
     if pins:
@@ -259,3 +263,114 @@ def test_a_terminal_sheet_conducts_beside_the_copper_under_it(tmp_path):
     perfect = _terminal_strip_r(tmp_path, "perfect", "0")
     assert base - same == pytest.approx(r_cu / 2 * squares, rel=0.04)
     assert base - perfect == pytest.approx(r_cu * squares, rel=0.04)
+
+
+def _r_sheet_cu() -> float:
+    """35 µm copper's sheet resistance at DC, Ω per square."""
+    return 1 / (SIGMA_CU * skin_thickness(35e-6, 10.0, SIGMA_CU))
+
+
+def test_a_fed_tab_sheet_conducts_beside_the_copper_and_takes_its_current_evenly(tmp_path):
+    """A power stage's tab as a resistive sheet (simulate.part_lid's `fed`, st.side_spread [A70]), here C1's 10 mm pad
+    over boardgen.terminal_strip_board's 4 mm strip, soldered perfectly, its sheet the copper's. With no current of
+    its own it conducts beside the copper as a part's terminal does (the stretch's R drops by (R_cu/2)·L/w); with 1 A
+    fed in, it enters evenly over the tab (no hub between its nodes): towards U2 the lateral current grows linearly,
+    I·u/L, and the copper carries half of it, density(u)/density(beyond) = u/(2L). A perfect tab (no sheet) takes it
+    all in at its edge nearest U2: the copper under its middle carries none."""
+    from boardgen import terminal_strip_board
+    from conftest import make
+    from groundtruth.analysis import simulate
+    from groundtruth.analysis.power import _area_shares, dc_path
+    from groundtruth.components.models import ComponentModel
+    r_cu = _r_sheet_cu()
+
+    def model(name, sheet):
+        """The strip with C1 an open part and its first pad a fed tab of `sheet` Ω/□ (None: perfect)."""
+        board, sc, _ = make(tmp_path, terminal_strip_board(), name, nets=())
+        sc.set_component("C1", ComponentModel("open", {}))
+        st = simulate.BoardModel(board, sc.config).build((2.0, 6.0, 36.0, 18.0), ["F.Cu"], {"PWR", "AUX"}, 0.1, False)
+        pad = board.find_pin("C1.1")
+        lid, bonds = simulate.part_lid(st, [pad], "C1", 0.3, 0.0, sheet, fed=True)
+        st.branches += bonds
+        st.side_lids[("C1", "PWR")] = lid
+        return board, st, pad
+
+    def strip_r(board, st):
+        """U1 to U2 through the strip, Ω."""
+        inj = _area_shares(st, [board.find_pin("U1.1")], "F.Cu", 1.0) + \
+            _area_shares(st, [board.find_pin("U2.1")], "F.Cu", -1.0)
+        return dc_path(st, inj, 1.0, "strip")[0]["r_mohm"] * 1e-3
+
+    def profile(board, st, pad):
+        """1 A fed in at the tab, out at U2: the copper's density at x (mm, y = 10) over the one at x = 29."""
+        inj = _area_shares(st, [pad], "F.Cu", 1.0) + _area_shares(st, [board.find_pin("U2.1")], "F.Cu", -1.0)
+        assert sum(a for _, a in inj) == pytest.approx(0.0, abs=1e-12)
+        maps = dc_path(st, inj, 1.0, "tab")[1]["F.Cu"]
+        g = st.grids[0]
+        at = lambda x: float(maps[int(round((x - g.x0) / g.d)), int(round((10.0 - g.y0) / g.d))])   # noqa: E731
+        return lambda x: at(x) / at(29.0)
+
+    board, thin, _ = model("thin", 1000 * r_cu)
+    board, same, pad = model("same", r_cu)
+    assert len(same.side_spread[("C1", "PWR")]) > 1000                  # 10 × 4 mm at 0.1 mm
+    assert strip_r(board, thin) - strip_r(board, same) == pytest.approx(r_cu / 2 * 10.0 / 4.0, rel=0.05)
+    even = profile(board, same, pad)
+    for x in (16.5, 19.0, 21.5):                                         # the pad spans x 14-24
+        assert even(x) == pytest.approx((x - 14.0) / 20.0, abs=0.03), x
+    _, plate, pad = model("plate", None)
+    assert ("C1", "PWR") not in plate.side_spread
+    assert profile(board, plate, pad)(19.0) < 0.05
+
+
+def test_a_switch_tab_reads_its_terminal_sheet_resistance(tmp_path):
+    """simulate.switch_lids takes a tab switch's Terminal Sheet Resistance (the HTTP lib's field [A70]): Q1's drain
+    tab is then a sheet whose nodes the stage's current enters evenly (power._area_shares); without it, as before, a
+    perfect plate taking it all at its lid."""
+    from groundtruth.analysis.power import _area_shares
+    board, st = _buck(tmp_path, "sheet", fields={"Terminal Sheet Resistance": "0.1mOhm"})
+    tops = st.side_spread[("Q1", "VIN")]
+    assert len(tops) > 10 and st.side_lids[("Q1", "VIN")] in tops
+    assert any(b.kind == "bond" and isinstance(b.a, LidNode) and isinstance(b.b, LidNode) and
+               complex(b.z(0.0)).real == pytest.approx(1e-4) for b in st.branches)
+    drain = [p for p in board.footprint("Q1").pads if p.net == "VIN"]
+    shares = _area_shares(st, drain, "F.Cu", 1.0)
+    assert {n for n, _ in shares} == set(tops)
+    assert [a for _, a in shares] == pytest.approx([1.0 / len(tops)] * len(tops))
+    _, plain = _buck(tmp_path, "plain")
+    assert not plain.side_spread and ("Q1", "VIN") in plain.side_lids
+
+
+def test_a_fets_tab_sheet_lengthens_its_transfer_and_shares_the_current_with_the_copper(tmp_path):
+    """A vertical FET (simulate.die_side) with a Terminal Sheet Resistance: its drain tab is that sheet under the die
+    (die_branches' `sheet` [A70]), soldered perfectly to the copper beneath. The two then act as one sheet of
+    R_cu ∥ R_tab under the die's contact r_c = R·A [A68], so the transmission-line contact [Berger 1972] has
+    λ' = √(r_c / (R_cu ∥ R_tab)) and the copper carries R_tab / (R_cu + R_tab) of the lateral current:
+    I_cu(u) = R_tab / (R_cu + R_tab) · sinh((L−u)/λ')/sinh(L/λ'). The tab equal to the copper: half, λ' = √2·λ.
+    Without the field the tab adds nothing beside the copper: I_cu(u) = sinh((L−u)/λ)/sinh(L/λ)."""
+    from boardgen import fet_tab_board
+    from conftest import make
+    from groundtruth.analysis import simulate
+    from groundtruth.analysis.power import _area_shares, dc_path
+    from groundtruth.components.models import ComponentModel
+    r_cu, r_fet, L, w = _r_sheet_cu(), 6.5e-3, 10.0, 2.1
+
+    def profile(name, metal):
+        """The copper's density along the tab (x 14-24, y 8) over the strip's before it (x 9), 1 A U1 -> U2."""
+        board, sc, _ = make(tmp_path, fet_tab_board(metal), name, nets=())
+        sc.set_component("Q1", ComponentModel("resistor", {"R": r_fet}))
+        sc.set_component_pins("Q1", {"bond": 0.0})
+        st = simulate.BoardModel(board, sc.config).build((2.0, 4.0, 32.0, 12.0), ["F.Cu"], {"PWR", "OUT"}, 0.1, False)
+        assert {b.kind for b in st.branches if b.name == "Q1"} >= {"part", "bond"}
+        inj = _area_shares(st, [board.find_pin("U1.1")], "F.Cu", 1.0) + \
+            _area_shares(st, [board.find_pin("U2.1")], "F.Cu", -1.0)
+        maps = dc_path(st, inj, 1.0, "fet")[1]["F.Cu"]
+        g = st.grids[0]
+        at = lambda x: float(maps[int(round((x - g.x0) / g.d)), int(round((8.0 - g.y0) / g.d))])   # noqa: E731
+        return lambda u: at(14.0 + u) / at(9.0)
+
+    rc = r_fet * L * w * 1e-6                                            # Ω·m²: the die's contact over the tab
+    for metal, share, rs in ((None, 1.0, r_cu), (f"{r_cu}ohm", 0.5, r_cu / 2)):
+        lam = math.sqrt(rc / rs) * 1e3                                   # mm
+        cu = profile(f"tab_{share}", metal)
+        for u in (2.55, 5.05, 7.55):
+            assert cu(u) == pytest.approx(share * math.sinh((L - u) / lam) / math.sinh(L / lam), abs=0.025), (metal, u)

@@ -560,6 +560,13 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   `Terminal Sheet Resistance` (Ω/□) or `Terminal Metal` ("0.15mm bronze": ρ/t), else (and for 0) the perfect
   plate: nothing is assumed, so an uncharacterised part shows its dark pad and sharp rim (the user).
   Validated in tests/test_pad_bond.py against two sheets in parallel.
+  The tabs read it too (2026-10-26, the user: "it should definetly not ignore those"): a vertical FET's drain tab
+  (`die_branches(sheet=...)`, `terminal_nodes`) is the sheet under the die, the die's branches standing on its nodes
+  (the source side's r_e taken off them); a power stage's tab switch (`switch_lids`, `part_lid(fed=True)`) has no part
+  branch, its current is fed in, so there is no hub: `st.side_spread` lists the terminal's nodes and
+  `power._area_shares` / `switch_filaments` feed them evenly (the filament stands at the terminal node nearest the
+  centre). A hub there would join the terminal's nodes beside the sheet and put its r_e into the hot loop. Validated
+  against the transmission-line contact with R_cu ∥ R_tab under the die and the even feed's linear profile.
   The bonds' I²R is the joints', not the copper's: `power.dc_summary` gives each DC path `r_joints_mohm` and
   `joints` (per part), takes it out of `r_copper_mohm`, and Thermal heats it at the part ("solder joints, DC …"),
   so the copper heat maps still carry exactly the copper's loss (PA-4: the buck's hot loop 1.5 % in its joints).

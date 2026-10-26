@@ -376,6 +376,32 @@ def terminal_strip_board(metal: Optional[str] = None, length: float = 30.0, widt
     return g
 
 
+def fet_tab_board(metal: Optional[str] = None, length: float = 20.0, tab: float = 10.0, width: float = 2.1
+                  ) -> BoardGen:
+    """A vertical FET Q1 at the end of a PWR strip on F.Cu (`length` long from x=4, `width` wide): its drain tab
+    covers the strip's last `tab` mm (its whole width), its three small source pads sit on an OUT pour beyond; U1 feeds
+    the strip's start, U2 takes the current out of OUT. metal: Q1's Terminal Sheet Resistance. GND plane on In1."""
+    g = BoardGen(layers=4, size=(length + 20, 16.0))
+    x0, y = 4.0, 8.0
+    x_end = x0 + length
+    g.zone("PWR", "F.Cu", [(x0, y - width / 2), (x_end, y - width / 2), (x_end, y + width / 2), (x0, y + width / 2)])
+    g.zone("OUT", "F.Cu", [(x_end + 1.0, y - width / 2), (x_end + 6.0, y - width / 2), (x_end + 6.0, y + width / 2),
+                           (x_end + 1.0, y + width / 2)])
+    for ref, x, net in (("U1", x0, "PWR"), ("U2", x_end + 5.0, "OUT")):
+        g.footprint(ref, "IC", "Package_SO:Fake_IC", (x, y), [
+            {"number": 1, "at": (0, 0), "net": net, "size": (0.6, width - 0.4)},
+            {"number": 2, "at": (0, width / 2 + 1.5), "net": "GND", "size": (1.0, 1.0)}])
+        g.via((x, y + width / 2 + 1.5), "GND", ("F.Cu", "B.Cu"))
+    xd = x_end - tab / 2
+    g.footprint("Q1", "6m5", "Package_TO_SOT_SMD:Fake_tab", (xd, y), [
+        {"number": 1, "at": (0, 0), "net": "PWR", "size": (tab, width)}] + [
+        {"number": 2, "at": (tab / 2 + 1.8, dy), "net": "OUT", "size": (0.6, 0.45)} for dy in (-0.6, 0.0, 0.6)])
+    if metal is not None:
+        g.fields("Q1", **{"Terminal Sheet Resistance": metal})
+    g.plane("GND", "In1.Cu")
+    return g
+
+
 def hot_loop_board(length: float = 20.0, width: float = 4.0, caps: Sequence[tuple] = (("C1", "10u", "end", 0.0),),
                    connector: bool = False, sw_pin: bool = False, far_series: bool = False,
                    gnd_via_mm: Optional[float] = None, out_pin: bool = False) -> BoardGen:

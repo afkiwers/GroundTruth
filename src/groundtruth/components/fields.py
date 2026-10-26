@@ -96,11 +96,11 @@ PARAMS = (
     Param("Cbias Curve", "capacitor", "the DC-bias curve as text (an HTTP lib text parameter; wins over Cbias)",
           "F", 1e-6, "µF", 1e-13, 1.0, "95nF@10V, 66nF@30V, 39nF@50V, 20nF@80V",
           "the capacitance at each capacitor's own DC voltage, interpolated"),
-    Param(TERMINAL_SHEET, "inductor, capacitor, resistor, ferrite, FET",
+    Param(TERMINAL_SHEET, "inductor, capacitor, resistor, ferrite, FET, diode",
           "the part's terminal metal (a clip, an end cap, a tab) over its pads as its sheet resistance, Ω per square "
           "(0 or none: a perfect conductor)", "sheet", 1.0, "Ω/□", 0.0, 0.1, "0.77mΩ",
           "how a pad's current is shared between the board copper and the terminal (DC paths, densities, Thermal)"),
-    Param(TERMINAL_METAL, "inductor, capacitor, resistor, ferrite, FET",
+    Param(TERMINAL_METAL, "inductor, capacitor, resistor, ferrite, FET, diode",
           "the same terminal as its thickness and material (Terminal Sheet Resistance wins when both are given)",
           "metal", 1e-3, "mΩ/□", 0.0, 0.1, "0.15mm bronze",
           "how a pad's current is shared between the board copper and the terminal (DC paths, densities, Thermal)"),
