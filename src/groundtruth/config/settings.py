@@ -470,10 +470,12 @@ class ThermalSettings:
 
 @dataclass
 class DrawingSettings:
-    """The KiCad User layers the plugin draws on: issue markers, suggested fixes, current contours and arrows."""
+    """The KiCad User layers the plugin draws on: issue markers, suggested fixes, current contours and arrows, and
+    the return current's arrows apart (results/vectors.split_return)."""
     issues_layer: str = "User.9"
     suggest_layer: str = "User.8"
     current_layer: str = "User.7"
+    return_layer: str = "User.6"
 
 
 @dataclass
@@ -1296,7 +1298,7 @@ def config_from_data(data: Any) -> Config:
     cfg.report = ReportSettings(**{k: str(r.get(k) or "") for k in ("title", "company", "author", "document")})
     d = data.get("drawing") or {}
     cfg.drawing = DrawingSettings(str(d.get("issues_layer", "User.9")), str(d.get("suggest_layer", "User.8")),
-                                  str(d.get("current_layer", "User.7")))
+                                  str(d.get("current_layer", "User.7")), str(d.get("return_layer", "User.6")))
     cfg.safety = _safety_from_data(data.get("safety") or {}, errors)
     cfg.si = _si_from_data(data.get("si") or {}, errors)
 

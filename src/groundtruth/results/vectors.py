@@ -122,3 +122,39 @@ def arrow_widths(densities, peak: float, w_min: float, w_max: float, decades: fl
         t = 1.0 + math.log10(k / peak) / decades if k > 0 else 0.0
         out.append(w_min + (w_max - w_min) * min(max(t, 0.0), 1.0))
     return out
+
+
+def return_rule(rr, config, board=None):
+    """Which nets carry a view's return current, as a test of a net name (split_return): a signal route's return is
+    every net but its own (RouteResult.signal_nets: the plane under it, whatever its net); a power stage's, a DC
+    path's and a DC load's is the ground: the stages' `ground` nets, the loads' return pins' nets (from `board`) and
+    every net named like a ground (analysis.safety.is_ground: GND, VSS, 0V, ...RTN)."""
+    from ..analysis.safety import is_ground
+    if getattr(rr, "kind", "") == "route":
+        own = set(getattr(rr, "signal_nets", None) or [rr.net])
+        return lambda net: bool(net) and net not in own
+    grounds = {s.ground for s in config.stages() if s.ground}
+    for spec in getattr(config, "dc_loads", None) or []:
+        for pin in [spec.source_return, *(ld.ret for ld in spec.loads)]:
+            pad = board.find_pin(pin) if board is not None and pin else None
+            if pad is not None and pad.net:
+                grounds.add(pad.net)
+    return lambda net: bool(net) and (net in grounds or is_ground(net))
+
+
+def split_return(arrows: list[tuple], grid, is_return) -> tuple[list[tuple], list[tuple]]:
+    """Arrows (x, y, dx, dy, ...) mm split into (the rest, the return current's) by the net of the copper at each
+    arrow's foot (grid.net_at at its node, else at the nearest copper node within one pitch: an arrow sits at its
+    spot's copper centroid); an arrow on no labelled copper stays with the rest."""
+    ahead, back = [], []
+    nx, ny = grid.node.shape
+    for a in arrows:
+        i0, j0 = int(round((a[0] - grid.x0) / grid.d)), int(round((a[1] - grid.y0) / grid.d))
+        net = ""
+        for di, dj in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)):
+            i, j = i0 + di, j0 + dj
+            if 0 <= i < nx and 0 <= j < ny and grid.node[i, j]:
+                net = grid.net_at((i, j))
+                break
+        (back if is_return(net) else ahead).append(a)
+    return ahead, back

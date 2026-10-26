@@ -144,6 +144,7 @@ class RouteResult:
     emissions: list[dict] = field(default_factory=list)
     worst: Optional[dict] = None
     route_xy: list[tuple[str, list[tuple[float, float]]]] = field(default_factory=list)
+    signal_nets: list[str] = field(default_factory=list)  # the route's own nets (its signal): the rest is its return
     return_pins: tuple[str, str] = ("", "")
     notes: list[str] = field(default_factory=list)
     error: str = ""
@@ -2427,6 +2428,7 @@ def finish_route(model: BoardModel, setup: RouteSetup) -> RouteResult:
     # return statistics count the return copper only: a pour the route runs through carries the signal itself
     # (its current density still shows in the heatmap)
     own = set(route.nets)
+    res.signal_nets = sorted(own)
     share = rep.layer_share(_return_masks(setup.fine.build, own))
     names = setup.fine.build.names
     res.layer_share = {n: float(s) for n, s in zip(names, share)}

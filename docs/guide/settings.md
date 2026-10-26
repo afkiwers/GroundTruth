@@ -113,7 +113,7 @@ thermal and what-if keys are listed in their own sections below.
 | `rules.current_density_warning`, `rules.current_density_error` | 50, 100 | `current_density` in A/mm² (copper averaged over 1 mm, via plating). |
 | `rules.via_load_warning`, `rules.via_load_error` | 100, 150 | `via_overload` in % of a via's IPC-2221 capacity. |
 | `rules.severity` | `{}` | Per-check severity override (see "Checks and severities"). |
-| `drawing.issues_layer`, `drawing.suggest_layer`, `drawing.current_layer` | `User.9`, `User.8`, `User.7` | Layers the plugin draws issue markers, suggested fixes and contours/arrows on. |
+| `drawing.issues_layer`, `drawing.suggest_layer`, `drawing.current_layer`, `drawing.return_layer` | `User.9`, `User.8`, `User.7`, `User.6` | Layers the plugin draws issue markers, suggested fixes, contours/arrows and the return current's arrows on. |
 | `report.title`, `company`, `author`, `document` | empty | The HTML report's cover (title default "EMI and power analysis"). |
 | `waivers[].fingerprint`, `reason` | | An accepted issue: it is still listed, marked "waived" with the reason, but does not fail the run and is left out of the counts and the Code Quality report. |
 

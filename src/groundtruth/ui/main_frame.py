@@ -315,10 +315,10 @@ class Session:
         return draw_contours(self.kb, cmap, layer, label, line_mm, index_mm)
 
     @_kicad_call
-    def draw_arrows(self, arrows, layer, label):
-        """Current arrows on `layer`; the number drawn."""
+    def draw_arrows(self, arrows, layer, label, group: str = "arrows"):
+        """Current arrows on `layer` in drawing group `group` (kipy_sink.draw_arrows); the number drawn."""
         from ..adapters.kipy_sink import draw_arrows
-        return draw_arrows(self.kb, arrows, layer, label)
+        return draw_arrows(self.kb, arrows, layer, label, group=group)
 
     @_kicad_call
     def draw_suggestions(self, suggestions, layer):
@@ -2333,8 +2333,10 @@ class MainFrame(ConfigActions, wx.Frame):
                     kicad=True)
 
     def on_draw_arrows(self, rr, plane_layer):
-        """Results tab, "Draw arrows on board": the shown layer's current arrows on the current-drawing layer, as
-        a job (their number capped: each arrow is three KiCad items)."""
+        """Results tab, "Draw arrows on board": the shown layer's current arrows, as a job (their number capped: each
+        arrow is three KiCad items). The return current's arrows go on a layer of their own (drawing.return_layer,
+        User.6; results/vectors.split_return), the rest on the current-drawing layer (the user, of both on one layer:
+        "At the moment it's hard to say which arrows belong to what")."""
         if rr is None:                          # no view yet (the button is live before any Simulate)
             self.SetStatusText("run Simulate first: there is no map to draw")
             return
@@ -2352,7 +2354,9 @@ class MainFrame(ConfigActions, wx.Frame):
             self.SetStatusText(f"no current vectors for {plane_layer}: run the simulation again")
             return
         layer = self.settings.config.drawing.current_layer
+        back_layer = self.settings.config.drawing.return_layer
         label = f"{rr.net} {rr.driver}->{rr.receiver} on {plane_layer}"
+        board, cfg = self.board, self.settings.config
         from .prefs_dialog import defaults
         p = defaults(theme.prefs())
         w_min, w_max = p["arrow_min_mm"], p["arrow_max_mm"]
@@ -2371,12 +2375,23 @@ class MainFrame(ConfigActions, wx.Frame):
             # line width by the density at each arrow (Preferences: Arrow lines), against the peak of all layers
             peak = max((float(m.max()) for m in maps if m.size), default=0.0)
             widths = arrow_widths([a[4] for a in arrows], peak, w_min, w_max)
-            return self.session.draw_arrows([a[:4] + (w,) for a, w in zip(arrows, widths)], layer, label)
+            arrows = [a[:4] + (w,) for a, w in zip(arrows, widths)]
+            # the return current's arrows apart, by the net of the copper under each one
+            from ..results.vectors import return_rule, split_return
+            ahead, back = split_return(arrows, rr.layer_grids[plane_layer], return_rule(rr, cfg, board))
+            n = self.session.draw_arrows(ahead, layer, label)              # clears both groups first
+            m = self.session.draw_arrows(back, back_layer, f"{label} (return)", group="arrows-return")
+            return n, m
 
-        self._start("drawing the current arrows…", work,
-                    lambda n: self.SetStatusText(f"drew {n} current arrow(s) of {plane_layer} on {layer}, "
-                                                 f"{w_min:g} to {w_max:g} mm by current density"),
-                    what="draw the current arrows", cancellable=False, kicad=True)
+        def done(counts):
+            """Say how many arrows went where."""
+            n, m = counts
+            where = [f"{n} on {layer}"] * bool(n) + [f"{m} of the return current on {back_layer}"] * bool(m)
+            self.SetStatusText(f"drew the current arrows of {plane_layer}: {' and '.join(where) or 'none'}, "
+                               f"{w_min:g} to {w_max:g} mm by current density")
+
+        self._start("drawing the current arrows…", work, done, what="draw the current arrows", cancellable=False,
+                    kicad=True)
 
     # ------------------------------------------------------------------ fixes
     def on_suggest(self, local: bool = False):
