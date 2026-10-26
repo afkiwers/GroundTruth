@@ -438,7 +438,8 @@ def switch_filaments(st: StackBuild, z_phys: dict, elements: list[Element]
     Per element: from every `a` pad's grid node up to PACKAGE_H_MM, across to the package centre, across to above
     every `b` pad and down to its node; each pad carries a share of the element's current by its pin's copper area
     (pad_weights: overlapping pads of one pin count once [A51]). A side soldered as a tab (st.side_lids,
-    simulate.switch_lids [A65]) takes all of its current at its lid, the filament standing over the lid's cell. The
+    simulate.switch_lids [A65]) takes all of its current at its lid (evenly over its terminal's nodes when the tab is a
+    resistive sheet, st.side_spread [A70]), the filament standing over the lid's cell. The
     filaments start and end exactly at the injection nodes, so the loop (filaments + copper) is closed."""
     g0 = st.grids[0]
 
@@ -469,7 +470,11 @@ def switch_filaments(st: StackBuild, z_phys: dict, elements: list[Element]
                     raise SolverError(f"{p.pin} ({p.net}): no {p.net} copper reaches the pad in the model (an unrouted "
                                       "net or unfilled zones?)")
                 share = el.weight * frac
-                inj.append((n, sign * share))     # the current leaves the copper at a pads, enters at b pads
+                # the current leaves the copper at a pads, enters at b pads; a tab as a resistive sheet
+                # (st.side_spread [A70]) takes it evenly over its nodes, the filament standing at its lid (one of
+                # them): the lumped terminal carries it there, as a part's hub does
+                spread = getattr(st, "side_spread", {}).get((el.ref, group[0].net)) if lid is not None else None
+                inj += [(t, sign * share / len(spread)) for t in spread] if spread else [(n, sign * share)]
                 x, y = g0.xy(*n[1:])
                 base, top = P(x, y, st.z[n[0]]), P(x, y, z_top)
                 w = max(min(p.size), 0.3) * 1e-3
@@ -1544,7 +1549,10 @@ def _area_shares(st: StackBuild, pads: list[Pad], side: str, total: float) -> li
     for pin, ps in pins.items():
         lid = lids.get((ps[0].footprint, ps[0].net))
         if lid is not None:
-            out.append((lid, total * areas[pin] / sum(areas.values())))
+            # a tab as a resistive sheet (st.side_spread, simulate.part_lid's `fed` [A70]): evenly over its nodes
+            spread = getattr(st, "side_spread", {}).get((ps[0].footprint, ps[0].net)) or [lid]
+            share = total * areas[pin] / sum(areas.values())
+            out += [(t, share / len(spread)) for t in spread]
             continue
         nodes: list[tuple] = []
         for p in ps:

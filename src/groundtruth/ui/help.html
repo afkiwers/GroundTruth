@@ -1842,7 +1842,10 @@ smaller but dense, which a regular grid lets it apply with FFTs.</p>
     <code>entry:tab</code> keeps one soldered metal). A power stage's switch with a tab (a pad at least
     1 mm wide on a side: a silicon FET's drain, a diode's cathode) is soldered over its pads the same way, so the
     stage's currents enter the copper where it brings them; a chip-scale GaN FET's narrow bars keep their current
-    spread evenly over each pin's copper, which its die does (the pin value <code>entry</code> overrides).</li>
+    spread evenly over each pin's copper, which its die does (the pin value <code>entry</code> overrides). Both
+    tabs read the Terminal Sheet Resistance too: a FET's drain tab is then that sheet under its die, and a switch's tab
+    (a diode's cathode, an IC's exposed pad in a stage) takes the stage's current in evenly over the sheet; without
+    it they are perfect plates, dark with a sharp rim like any other part.</li>
   </ul>
   The integrals use Gauss–Legendre quadrature near by, filaments far away, and numerical integration for the self
   term.</li>
