@@ -223,3 +223,39 @@ def test_a_transistor_modelled_as_a_resistor_spreads_its_die_over_its_wider_side
     assert die_side(N(reference="U1"), fet, sides, None) is None
     assert die_side(N(reference="Q1"), N(kind="short", params={}), sides, None) is None
     assert die_side(N(reference="Q1"), fet, [[pad(0.6, 0.8)], [pad(0.6, 0.8)]], None) is None
+
+
+def _terminal_strip_r(tmp_path, name, metal, d=0.1):
+    """The DC resistance (Ω) of boardgen.terminal_strip_board between its end pads, C1's solder a perfect bond (its
+    pin value bond:0) and its Terminal Metal `metal`."""
+    from boardgen import terminal_strip_board
+    from conftest import make
+    from groundtruth.analysis import simulate
+    from groundtruth.analysis.power import _area_shares, dc_path
+    from groundtruth.components.models import ComponentModel
+    board, sc, _ = make(tmp_path, terminal_strip_board(metal), name, nets=())
+    # 10 Ω of ESR: the even entry's branches (1 % of it per side) are then large against the sheet and add no shortcut
+    sc.set_component("C1", ComponentModel("cap", {"C": 1e-6, "ESR": 10.0}))
+    sc.set_component_pins("C1", {"bond": 0.0})
+    st = simulate.BoardModel(board, sc.config).build((2.0, 6.0, 36.0, 18.0), ["F.Cu"], {"PWR", "AUX"}, d, False)
+    inj = _area_shares(st, [board.find_pin("U1.1")], "F.Cu", 1.0) + \
+        _area_shares(st, [board.find_pin("U2.1")], "F.Cu", -1.0)
+    path, _ = dc_path(st, inj, 1.0, "strip")
+    return path["r_mohm"] * 1e-3
+
+
+def test_a_terminal_sheet_conducts_beside_the_copper_under_it(tmp_path):
+    """A part's terminal as a resistive sheet (simulate.part_lid's `sheet`, the Terminal Metal field [A70]): over a
+    4 mm strip, a capacitor's 10 mm pad (open at DC: its terminal only conducts alongside the copper), soldered
+    perfectly. That stretch is then two sheets in parallel: with the terminal's sheet resistance equal to the
+    copper's it conducts twice as well, R drops by (R_cu/2)·L/w = 0.62 mΩ; a terminal 1000x the copper's changes
+    nothing; a perfect one (Terminal Metal 0, the plate of [A65]) shorts the stretch, −R_cu·L/w."""
+    from groundtruth.solver.kernel import skin_thickness
+    from groundtruth.solver.peec import SIGMA_CU
+    r_cu = 1 / (SIGMA_CU * skin_thickness(35e-6, 10.0, SIGMA_CU))          # Ω per square, 35 µm at DC
+    squares = 10.0 / 4.0
+    base = _terminal_strip_r(tmp_path, "thin", f"{1000 * r_cu}ohm")          # with its unit (a bare number is Ω too)
+    same = _terminal_strip_r(tmp_path, "same", f"{r_cu}ohm")
+    perfect = _terminal_strip_r(tmp_path, "perfect", "0")
+    assert base - same == pytest.approx(r_cu / 2 * squares, rel=0.04)
+    assert base - perfect == pytest.approx(r_cu * squares, rel=0.04)

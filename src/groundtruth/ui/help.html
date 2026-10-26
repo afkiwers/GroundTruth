@@ -1829,7 +1829,14 @@ smaller but dense, which a regular grid lets it apply with FFTs.</p>
   <li>a part is its model's Z(f) plus 0.3 nH mounting inductance between its two sides' metal (a terminal, a FET's
     drain or source), each soldered over the whole of its pads (75 µm of solder, a few tenths of a mΩ on a large
     pad): the current hands over to the part where the copper brings it to the pad, mostly at the edge it arrives
-    at, falling off across the pad, not at a few points of it. A transistor modelled as a resistor (a surge stopper,
+    at, falling off across the pad, not at a few points of it. That metal is taken as a perfect conductor unless the
+    part says otherwise, so a part whose terminal isn't given shows its pad <b>dark with a sharp bright rim</b>: the
+    cue to give it. An inductor's clip or a capacitor's or resistor's end cap is thin, about as resistive as the board
+    copper under it (0.17-0.77 mΩ per square), and then shares the pad's current with the copper across the whole pad.
+    Give it as a part field (an HTTP lib parameter, or typed into the symbol): <b>Terminal Sheet Resistance</b> in Ω
+    per square (<code>0.77mΩ</code>, or a bare number in Ω), or <b>Terminal Metal</b> as thickness and material
+    (<code>0.15mm bronze</code>: copper, brass, bronze, becu, tellurium); the sheet resistance wins when both are
+    there, <code>0</code> is a perfect conductor. A transistor modelled as a resistor (a surge stopper,
     a reverse-polarity FET) with a drain tab has its on-resistance spread evenly over the tab instead, as its die's
     cells are: the current leaves the copper all across the tab, not only at its edge and its vias (the pin value
     <code>entry:tab</code> keeps one soldered metal). A power stage's switch with a tab (a pad at least

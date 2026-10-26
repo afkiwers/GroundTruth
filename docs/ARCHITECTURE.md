@@ -552,6 +552,14 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   stage's current is fed in there (power._area_shares). The pin value `entry: tab` keeps the old lid.
   A part's own joint: the pin value `bond` (µm of solder; 0 a perfect bond, taken as 0.1 µm; analysis/pins.py, its
   GT field, the Parts tab's Pins cell or Pin defaults…). `part_pairs` is left for the PDN's ideal source.
+  **The terminal as a resistive sheet** (2026-10-26, [A70]; the user, of an inductor's pad dark inside with a bright
+  rim: "L501 seems to have an infinitly conductive edge like Q601 had before"): `part_lid(sheet=...)` puts a terminal
+  node above every grid node under the pads (each bonded to its own), joins neighbours by the sheet resistance (one
+  square per pitch) and feeds the part evenly over the terminal (equal branches from the part's node to every
+  terminal node, `ENTRY_SHARE` 1 % of its DC resistance per side, taken off the part's own branch). `terminal_of`: the part fields
+  `Terminal Sheet Resistance` (Ω/□) or `Terminal Metal` ("0.15mm bronze": ρ/t), else (and for 0) the perfect
+  plate: nothing is assumed, so an uncharacterised part shows its dark pad and sharp rim (the user).
+  Validated in tests/test_pad_bond.py against two sheets in parallel.
   The bonds' I²R is the joints', not the copper's: `power.dc_summary` gives each DC path `r_joints_mohm` and
   `joints` (per part), takes it out of `r_copper_mohm`, and Thermal heats it at the part ("solder joints, DC …"),
   so the copper heat maps still carry exactly the copper's loss (PA-4: the buck's hot loop 1.5 % in its joints).

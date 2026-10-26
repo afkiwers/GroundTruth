@@ -318,11 +318,11 @@ HL_X0, HL_Y = 10.0, 12.0     # left end and centre line of the hot-loop boards' 
 
 
 def split_strip_board(length: float = 10.0, gap: float = 0.6, joined: bool = False, width: float = 4.0,
-                      pad_depth: float = 0.8) -> BoardGen:
+                      pad_depth: float = 0.8, metal: Optional[str] = None) -> BoardGen:
     """Two 4 mm wide pours on F.Cu (PWR from x=4, OUT after a `gap`), each `length` long, joined by a part R1 whose
     two pads span the pours' whole width at the gap (a shunt, a FET's drain and source rows); a pad at each far end
     (U1 on PWR, U2 on OUT) to feed the current; GND plane on In1. joined: the same copper as one PWR pour across
-    the gap and no R1 (the reference: what the strip alone measures)."""
+    the gap and no R1 (the reference: what the strip alone measures). metal: R1's Terminal Sheet Resistance."""
     g = BoardGen(layers=4, size=(2 * length + gap + 16, 20.0))
     x0, y = 4.0, 10.0
     x_end = x0 + 2 * length + gap
@@ -343,6 +343,35 @@ def split_strip_board(length: float = 10.0, gap: float = 0.6, joined: bool = Fal
         g.footprint("R1", "1m", "Resistor_SMD:Fake_wide", ((xa + xb) / 2, y), [
             {"number": 1, "at": (-(gap + pad_depth) / 2, 0), "net": "PWR", "size": (pad_depth, width - 0.2)},
             {"number": 2, "at": ((gap + pad_depth) / 2, 0), "net": "OUT", "size": (pad_depth, width - 0.2)}])
+        if metal is not None:
+            g.fields("R1", **{"Terminal Sheet Resistance": metal})
+    g.plane("GND", "In1.Cu")
+    return g
+
+
+def terminal_strip_board(metal: Optional[str] = None, length: float = 30.0, width: float = 4.0,
+                         pad_length: float = 10.0) -> BoardGen:
+    """One 4 mm wide pour PWR on F.Cu, fed at its ends (U1, U2), with a capacitor C1 whose first pad (pad_length along
+    the strip, its whole width) lies on it halfway and whose second pad sits on a small AUX pour beside it: at DC the
+    capacitor is open, so its terminal over the strip only conducts alongside the copper. metal: C1's Terminal
+    Sheet Resistance field. GND plane on In1."""
+    g = BoardGen(layers=4, size=(length + 16, 24.0))
+    x0, y = 4.0, 10.0
+    x_end = x0 + length
+    g.zone("PWR", "F.Cu", [(x0, y - width / 2), (x_end, y - width / 2), (x_end, y + width / 2), (x0, y + width / 2)])
+    xc = (x0 + x_end) / 2
+    g.zone("AUX", "F.Cu", [(xc - 1.5, y + width / 2 + 1.0), (xc + 1.5, y + width / 2 + 1.0),
+                           (xc + 1.5, y + width / 2 + 3.0), (xc - 1.5, y + width / 2 + 3.0)])
+    for ref, x in (("U1", x0), ("U2", x_end)):
+        g.footprint(ref, "IC", "Package_SO:Fake_IC", (x, y), [
+            {"number": 1, "at": (0, 0), "net": "PWR", "size": (1.0, width - 0.4)},
+            {"number": 2, "at": (0, width / 2 + 1.5), "net": "GND", "size": (1.0, 1.0)}])
+        g.via((x, y + width / 2 + 1.5), "GND", ("F.Cu", "B.Cu"))
+    g.footprint("C1", "1u", "Capacitor_SMD:Fake_long", (xc, y), [
+        {"number": 1, "at": (0, 0), "net": "PWR", "size": (pad_length, width)},
+        {"number": 2, "at": (0, width / 2 + 2.0), "net": "AUX", "size": (2.0, 1.2)}])
+    if metal is not None:
+        g.fields("C1", **{"Terminal Sheet Resistance": metal})
     g.plane("GND", "In1.Cu")
     return g
 
