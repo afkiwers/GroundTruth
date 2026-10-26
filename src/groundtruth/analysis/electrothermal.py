@@ -104,6 +104,9 @@ def _hot_stage(model, dst, c):
     hot = copy.copy(c)
     for k in ("dc_vectors", "dc_branch", "dc_via", "dc_ripple_sq", "dc_ripple_branch", "dc_ripple_via"):
         setattr(hot, k, {})
+    # the terminals' current is shown only (results/terminals.py): the cold one stays, a copy so that the rescale of
+    # a hot path (power._rescale_path) leaves the cold result's alone
+    hot.dc_terminal = dict(getattr(c, "dc_terminal", {}))
     current = {p["name"]: p["current_a"] for p in c.dc}
     runs, ripple, extra = [], {}, {}
     for r in plan["runs"]:

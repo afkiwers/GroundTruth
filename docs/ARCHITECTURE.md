@@ -567,6 +567,14 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   `power._area_shares` / `switch_filaments` feed them evenly (the filament stands at the terminal node nearest the
   centre). A hub there would join the terminal's nodes beside the sheet and put its r_e into the hot loop. Validated
   against the transmission-line contact with R_cu ∥ R_tab under the die and the even feed's linear profile.
+  **Terminal current in the maps** (2026-10-26, the user: "F.CU has still a knive's edge", then "Can we add a
+  setting under preferences that enables option 2?"): a terminal's in-plane branches have their own kind `sheet`
+  (counted with the part's joints in dc_summary, like `bond`). `simulate.terminal_vectors` turns their currents into
+  a sparse field per layer (the terminal nodes only: dense maps per DC path would cost hundreds of MB), A/m per A or
+  A/mm² over the layer's copper thickness, kept beside each view's vectors (`terminal_vectors`; a stage's
+  `dc_terminal` per path, added for the combined view by `add_terminal_vectors`). `results/terminals.with_terminals`
+  makes the display copy, K' = √(K² + 2·V·T + |T|²), in the Results tab's render thread when the Preferences'
+  Terminal current is on; tiles, issues, Thermal and the report never see it.
   The bonds' I²R is the joints', not the copper's: `power.dc_summary` gives each DC path `r_joints_mohm` and
   `joints` (per part), takes it out of `r_copper_mohm`, and Thermal heats it at the part ("solder joints, DC …"),
   so the copper heat maps still carry exactly the copper's loss (PA-4: the buck's hot loop 1.5 % in its joints).

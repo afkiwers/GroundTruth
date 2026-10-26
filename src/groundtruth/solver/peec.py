@@ -979,7 +979,8 @@ class Branch:
     b: tuple[int, int, int]
     z: Callable[[float], complex]
     name: str = ""
-    kind: str = "part"        # part | via | track (a bridge: Grid.bridges) | bond (a solder joint: LidNode)
+    kind: str = "part"        # part | via | track (a bridge: Grid.bridges) | bond (a solder joint: LidNode) |
+                              # sheet (a part's terminal metal between two of its nodes)
     radius: float = 1.5e-4    # via barrel radius (m), for its coupling to the signal via
 
 

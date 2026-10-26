@@ -191,6 +191,7 @@ def defaults(prefs: dict) -> dict:
             "outlines": bool(prefs.get("outlines", False)),
             # the references came with the outlines before they had a switch of their own
             "names": bool(prefs.get("names", prefs.get("outlines", False))),
+            "terminals": bool(prefs.get("terminals", False)),
             "author": str(prefs.get("author", "") or ""),
             "company": str(prefs.get("company", "") or ""),
             "history": bool(prefs.get("history", True)),
@@ -589,6 +590,13 @@ class PreferencesDialog(wx.Dialog):
         self.names = wx.CheckBox(self, label="Write every part's reference over the maps")
         self.names.SetValue(p["names"])
         row(maps, "Part names", self.names, "at the middle of its outline (also without the outlines)")
+        self.terminals = wx.CheckBox(self, label="Add the current in the parts' terminals to the copper's")
+        self.terminals.SetValue(p["terminals"])
+        row(maps, "Terminal current", self.terminals,
+            "a part with a Terminal Sheet Resistance (a FET's tab, an inductor's clip) carries some of its pad's "
+            "current in its own metal; the maps show the copper only, which reads low under it with a sharp edge. "
+            "Ticked, they show what flows there, copper and terminal together, in the copper's units. The figures, "
+            "issues and Thermal stay the copper's.")
 
         board = group("Drawing on the board", "right")
         why = ("Draw arrows on board: each arrow's line width follows the current density there, on the heatmap's "
@@ -752,6 +760,7 @@ class PreferencesDialog(wx.Dialog):
                 "max_vias": int(v) if v.isdigit() else None,
                 "outlines": self.outlines.GetValue(),
                 "names": self.names.GetValue(),
+                "terminals": self.terminals.GetValue(),
                 "compute": "server" if self.compute.GetSelection() == 1 else "local",
                 "server": self.server.GetValue().strip(),
                 "server_key": self.server_key.GetValue().strip(),

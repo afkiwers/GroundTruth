@@ -587,6 +587,8 @@ def _heatmap_layout(rr, layers: list[str], w_in: float, h_in: float, vectors: bo
         note += "; arrows: current direction, more arrows = more current"
     if scale == "linear":
         note += "; linear colour scale"
+    if getattr(rr, "terminals_shown", False):       # the Preferences' Terminal current (results/terminals.py)
+        note += "; with the current in the parts' terminals"
     if linear:
         note = "× hot spot, ○ issues"
     head = _wrap(title, w_in - 0.3, FS_TITLE)

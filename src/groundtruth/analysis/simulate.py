@@ -115,6 +115,9 @@ class RouteResult:
     layer_grids: dict = field(default_factory=dict)       # layer -> Grid
     sheet_current: dict = field(default_factory=dict)     # layer -> |K| (A/m per A of signal)
     sheet_vectors: dict = field(default_factory=dict)     # layer -> (Kx, Ky) at the dominant phase (same units)
+    # layer -> the parts' terminal sheets' current over it, sparse (terminal_vectors, same units): shown added to the
+    # copper's with the Preferences' Terminal current (results/terminals.py), never in a figure or check
+    terminal_vectors: dict = field(default_factory=dict)
     layer_share: dict = field(default_factory=dict)       # layer -> fraction of plane current (incl. induced)
     transfers: list[dict] = field(default_factory=list)   # vias/parts/plane capacitance carrying the return
     section: dict = field(default_factory=dict)           # return per layer along the route (analysis/section.py)
@@ -149,7 +152,7 @@ class RouteResult:
     def summary(self) -> dict:
         """The result as plain data for the JSON report: the large arrays (maps, grids, cross-section) left out,
         the grid described by its origin, pitch and size."""
-        skip = ("grid", "layer_grids", "sheet_current", "sheet_vectors", "section", "board_maps")
+        skip = ("grid", "layer_grids", "sheet_current", "sheet_vectors", "terminal_vectors", "section", "board_maps")
         d = {k: v for k, v in self.__dict__.items() if k not in skip}
         d["responses"] = [r.summary() for r in getattr(self, "responses", ())]
         if self.grid is not None:
@@ -738,7 +741,8 @@ def terminal_nodes(st: StackBuild, nodes: list, r_bond: float, sheet: float, ref
                    ) -> tuple[dict, list[Branch]]:
     """A part's terminal metal as a resistive sheet over the grid nodes `nodes` under its pads [A70]: a terminal node
     (a LidNode) above each, soldered to it by a `bond` branch of r_bond (that node's share of the joint), and
-    neighbouring terminal nodes joined by `sheet` Ω (one square: a strip a pitch long and a pitch wide).
+    neighbouring terminal nodes joined by `sheet` Ω (one square: a strip a pitch long and a pitch wide), each a
+    `sheet` branch from a node to its +x or +y neighbour (terminal_vectors draws their currents).
     ({grid node: its terminal node}, the branches); part_lid and die_branches join the part to the terminal nodes."""
     top = {}
     for n in nodes:
@@ -748,8 +752,61 @@ def terminal_nodes(st: StackBuild, nodes: list, r_bond: float, sheet: float, ref
     for (k_, i, j), t in top.items():
         for nb in ((k_, i + 1, j), (k_, i, j + 1)):
             if nb in top:
-                branches.append(Branch(t, top[nb], (lambda f, R=sheet: complex(R)), ref, "bond"))
+                branches.append(Branch(t, top[nb], (lambda f, R=sheet: complex(R)), ref, "sheet"))
     return top, branches
+
+
+def terminal_vectors(st: StackBuild, sol: Solution, scale: float = 1.0, density: bool = False) -> dict:
+    """The current the parts' terminal sheets carry over each layer (terminal_nodes' `sheet` branches [A70]), as
+    sol.sheet_vectors gives the copper's: at each terminal node the mean of the sheet branches touching it in x and
+    in y, per pitch (A/m per A), at the solution's dominant phase, times `scale`; density: also over the layer's
+    copper thickness in A/mm² (as dc_vector_maps), so it adds to the copper's density as the current that flows
+    there in the part's metal instead (the Preferences' "Terminal current", results/terminals.py).
+    Sparse, only the terminal nodes: {layer: (i, j, Kx, Ky)} (int32, float32 arrays); {} without terminal sheets."""
+    branches = st.plane.branches
+    picks = [(n, b) for n, b in enumerate(branches) if b.kind == "sheet"]
+    if not picks:
+        return {}
+    cur = np.asarray(sol.I_branch)[[n for n, _ in picks]] * np.exp(-1j * sol.dominant_phase())
+    cur = cur.real
+    a = np.array([tuple(b.a) for _, b in picks])
+    b_ = np.array([tuple(b.b) for _, b in picks])
+    along_x = b_[:, 1] != a[:, 1]                      # a branch to its +x neighbour, else to its +y one
+    out = {}
+    for k in np.unique(a[:, 0]):
+        on = a[:, 0] == k
+        # both ends of every branch, each with its current in x or in y
+        ends = np.concatenate([a[on][:, 1:], b_[on][:, 1:]])
+        c2, x2 = np.concatenate([cur[on]] * 2), np.concatenate([along_x[on]] * 2)
+        keys, inv = np.unique(ends, axis=0, return_inverse=True)
+        inv = np.ravel(inv)
+        sx = np.bincount(inv, np.where(x2, c2, 0.0), len(keys))
+        nx = np.bincount(inv, x2.astype(float), len(keys))
+        sy = np.bincount(inv, np.where(x2, 0.0, c2), len(keys))
+        ny = np.bincount(inv, (~x2).astype(float), len(keys))
+        f = scale / (st.d * 1e-3) * (1.0 / st.t[int(k)] * 1e-6 if density else 1.0)
+        kx = np.where(nx > 0, sx / np.maximum(nx, 1), 0.0) * f
+        ky = np.where(ny > 0, sy / np.maximum(ny, 1), 0.0) * f
+        out[st.names[int(k)]] = (keys[:, 0].astype(np.int32), keys[:, 1].astype(np.int32),
+                                 kx.astype(np.float32), ky.astype(np.float32))
+    return out
+
+
+def add_terminal_vectors(fields: list[dict], weights: Optional[list[float]] = None) -> dict:
+    """Several terminal_vectors fields on one grid added (each times its weight): the DC paths together
+    (power.combine_dc). Nodes several fields share are summed."""
+    out = {}
+    for layer in {l for f in fields for l in f}:
+        parts = [(f[layer], w) for f, w in zip(fields, weights or [1.0] * len(fields)) if layer in f]
+        ii = np.concatenate([p[0] for p, _ in parts])
+        jj = np.concatenate([p[1] for p, _ in parts])
+        keys, inv = np.unique(np.stack([ii, jj], axis=1), axis=0, return_inverse=True)
+        inv = np.ravel(inv)
+        kx = np.bincount(inv, np.concatenate([p[2] * w for p, w in parts]), len(keys))
+        ky = np.bincount(inv, np.concatenate([p[3] * w for p, w in parts]), len(keys))
+        out[layer] = (keys[:, 0].astype(np.int32), keys[:, 1].astype(np.int32), kx.astype(np.float32),
+                      ky.astype(np.float32))
+    return out
 
 
 def die_side(fp, model, sides: list, entry: Optional[str]) -> Optional[int]:
@@ -2376,6 +2433,7 @@ def finish_route(model: BoardModel, setup: RouteSetup) -> RouteResult:
     res.sheet_current = {n: rep.sheet_current(k, setup.fine.build.d) for k, n in enumerate(names)}
     res.sheet_vectors = {n: tuple(v.astype(np.float32) for v in rep.sheet_vectors(k, setup.fine.build.d))
                          for k, n in enumerate(names)}
+    res.terminal_vectors = terminal_vectors(setup.fine.build, rep)
     res.reference_layer = names[int(np.argmax(share))]
     res.section = route_section(rep, setup.fine.build, route, own, corridor_mm(setup.h_mm))
     pins = [setup.drv_ret.position, setup.rcv_ret.position]
@@ -2774,7 +2832,7 @@ def transfers(st: StackBuild, plane: PlaneStack, sol: Solution, route: Optional[
             joint_sum[key] = joint_sum.get(key, 0j) + complex(cur)
             frac = abs(joint_sum[key])
         x, y = st.xy(b.a)
-        if b.kind in ("track", "bond"):       # a piece of track on one layer, a part's solder joint (part_lid): no
+        if b.kind in ("track", "bond", "sheet"):    # a piece of track on one layer, a part's solder joint or terminal: no
             continue                          # transfer between layers or nets of its own
         if b.kind == "via" and any(math.dist((x, y), p) < 1.0 for p in return_pins):
             continue

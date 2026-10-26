@@ -330,7 +330,7 @@ def test_a_switch_tab_reads_its_terminal_sheet_resistance(tmp_path):
     board, st = _buck(tmp_path, "sheet", fields={"Terminal Sheet Resistance": "0.1mOhm"})
     tops = st.side_spread[("Q1", "VIN")]
     assert len(tops) > 10 and st.side_lids[("Q1", "VIN")] in tops
-    assert any(b.kind == "bond" and isinstance(b.a, LidNode) and isinstance(b.b, LidNode) and
+    assert any(b.kind == "sheet" and isinstance(b.a, LidNode) and isinstance(b.b, LidNode) and
                complex(b.z(0.0)).real == pytest.approx(1e-4) for b in st.branches)
     drain = [p for p in board.footprint("Q1").pads if p.net == "VIN"]
     shares = _area_shares(st, drain, "F.Cu", 1.0)
@@ -374,3 +374,43 @@ def test_a_fets_tab_sheet_lengthens_its_transfer_and_shares_the_current_with_the
         cu = profile(f"tab_{share}", metal)
         for u in (2.55, 5.05, 7.55):
             assert cu(u) == pytest.approx(share * math.sinh((L - u) / lam) / math.sinh(L / lam), abs=0.025), (metal, u)
+
+
+def test_the_terminal_current_shown_with_the_copper_is_the_whole_lateral_current(tmp_path):
+    """The Preferences' Terminal current (results/terminals.with_terminals over simulate.terminal_vectors [A70]):
+    under a FET's drain tab of the copper's own sheet resistance the copper carries half of the lateral current,
+    the tab the other half; added, the map shows all of it, the transmission-line contact's
+    I(u) = sinh((L−u)/λ')/sinh(L/λ') [Berger 1972], with no step at the tab's edge. The copper's own map is left
+    as it was, and a view without terminal sheets is returned unchanged."""
+    from types import SimpleNamespace
+    from boardgen import fet_tab_board
+    from conftest import make
+    from groundtruth.analysis import simulate
+    from groundtruth.analysis.power import _area_shares, dc_summary, dc_vector_maps
+    from groundtruth.components.models import ComponentModel
+    from groundtruth.results.terminals import with_terminals
+    r_cu, r_fet, L = _r_sheet_cu(), 6.5e-3, 10.0
+    board, sc, _ = make(tmp_path, fet_tab_board(f"{r_cu}ohm"), "shown", nets=())
+    sc.set_component("Q1", ComponentModel("resistor", {"R": r_fet}))
+    sc.set_component_pins("Q1", {"bond": 0.0})
+    st = simulate.BoardModel(board, sc.config).build((2.0, 4.0, 32.0, 12.0), ["F.Cu"], {"PWR", "OUT"}, 0.1, False)
+    inj = _area_shares(st, [board.find_pin("U1.1")], "F.Cu", 1.0) + \
+        _area_shares(st, [board.find_pin("U2.1")], "F.Cu", -1.0)
+    sol = RouteExcitation(st.plane, [], injections=inj).solve(10.0)
+    _, maps = dc_summary(st, sol, 1.0, "fet")
+    rr = SimpleNamespace(sheet_current=maps, sheet_vectors=dc_vector_maps(st, sol, 1.0),
+                         terminal_vectors=simulate.terminal_vectors(st, sol, 1.0, density=True))
+    assert set(rr.terminal_vectors) == {"F.Cu"}
+    shown = with_terminals(rr)
+    g = st.grids[0]
+    at = lambda m, x: float(m["F.Cu"][int(round((x - g.x0) / g.d)), int(round((8.0 - g.y0) / g.d))])   # noqa: E731
+    lam = math.sqrt(r_fet * L * 2.1e-6 / (r_cu / 2)) * 1e3
+    for u in (0.55, 2.55, 5.05, 7.55):
+        expect = math.sinh((L - u) / lam) / math.sinh(L / lam)
+        assert at(shown.sheet_current, 14.0 + u) / at(maps, 9.0) == pytest.approx(expect, abs=0.03), u
+        assert at(maps, 14.0 + u) / at(maps, 9.0) == pytest.approx(expect / 2, abs=0.025), u
+    vx = shown.sheet_vectors["F.Cu"][0]
+    i, j = int(round((19.0 - g.x0) / g.d)), int(round((8.0 - g.y0) / g.d))
+    assert vx[i, j] == pytest.approx(2 * rr.sheet_vectors["F.Cu"][0][i, j], rel=0.05)    # the arrows too
+    assert shown.terminals_shown and rr.sheet_current is maps                            # the copper's own untouched
+    assert with_terminals(SimpleNamespace(sheet_current=maps, terminal_vectors={})).sheet_current is maps

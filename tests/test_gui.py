@@ -1836,10 +1836,12 @@ def test_drawn_buttons_click_like_buttons_and_the_top_bar_uses_them(app, frame, 
         dlg.theme.SetSelection(2)
         dlg.resolution.SetSelection(2)
         dlg.outlines.SetValue(True)
+        dlg.terminals.SetValue(True)
         values = dlg.values()
     f.apply_preferences(values)
     assert theme.load_pref() == "dark" and "next time" in f.GetStatusBar().GetStatusText(0)
     assert f.resolution() == 4 and f.results_panel.outlines and theme.prefs()["outlines"] is True
+    assert f.results_panel.terminals and theme.prefs()["terminals"] is True
     assert not f.results_panel.names and theme.prefs()["names"] is False         # a switch of its own
     assert defaults({"outlines": True})["names"] is True       # before it had one, the outlines brought the names
 

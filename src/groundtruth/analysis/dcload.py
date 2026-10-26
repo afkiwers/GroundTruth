@@ -28,7 +28,7 @@ from ..core.issues import Issue, resolve_severity
 from ..solver.peec import RouteExcitation, SolverError
 from .power import (DC_F, SUSTAINED_MM, ConverterResult, _area_shares, _side, dc_board_build, dc_board_of,
                     dc_summary, dc_vector_maps)
-from .simulate import BoardModel, ModelRun, StackBuild
+from .simulate import BoardModel, ModelRun, StackBuild, terminal_vectors
 
 
 @dataclass
@@ -49,7 +49,7 @@ class DcLoadResult(ConverterResult):
         """As plain data for the JSON report (without the maps)."""
         d = super().summary()
         d["kind"] = "dcload"
-        for k in ("sheet_current", "sheet_vectors", "layer_grids"):
+        for k in ("sheet_current", "sheet_vectors", "terminal_vectors", "dc_terminal", "layer_grids"):
             d.pop(k, None)
         return d
 
@@ -226,6 +226,8 @@ def finish_dc_load(model: BoardModel, setup: DcLoadSetup):
     res.dc, res.dc_maps = [summary], {name: maps}
     res.dc_grids = {name: dict(zip(run.build.names, run.build.grids))}
     res.dc_vectors = {name: dc_vector_maps(run.build, sol, total)}
+    res.dc_terminal = {name: terminal_vectors(run.build, sol, total, density=True)} \
+        if isinstance(run.build, StackBuild) else {}
     res.dc_branch = {name: (run.build, np.asarray(sol.I_branch).real * total)}
     if isinstance(run.build, StackBuild):       # the vias' currents, kept for Thermal's via heat [A43]
         db = dc_board_of(run.build)
@@ -257,6 +259,7 @@ def finish_dc_load(model: BoardModel, setup: DcLoadSetup):
     # the result is its own view: the DC map (as power.dc_view makes one of a stage's path)
     res.sheet_current = maps
     res.sheet_vectors = res.dc_vectors[name]
+    res.terminal_vectors = res.dc_terminal.get(name, {})
     res.layer_grids = res.dc_grids[name]
     res.grid = next(iter(res.layer_grids.values()), None)
     tot = sum(float(m.sum()) for m in maps.values()) or 1.0

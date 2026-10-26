@@ -415,6 +415,7 @@ class ResultsPanel(wx.Panel):
         p = defaults(theme.prefs())         # the Preferences dialog sets them (set_display)
         self.via_markers, self.vias_limit, self.outlines, self.names = (p["via_markers"], p["max_vias"], p["outlines"],
                                                                         p["names"])
+        self.terminals = p["terminals"]                 # maps with the parts' terminal current (results/terminals.py)
         b = theme.Button(self, "Draw contours on board")
         b.Bind(wx.EVT_BUTTON, lambda e: on_draw_contours(self.current(), self.selected_layer()))
         top.Add(b, 0, wx.RIGHT | wx.BOTTOM, 4)
@@ -864,6 +865,7 @@ class ResultsPanel(wx.Panel):
             self.board, self.issues
         scale = "log" if self.log_scale.GetValue() else "linear"
         view, max_vias, outlines, names = self._view, self.max_vias(), self.outlines, self.names
+        terminals = self.terminals
         if not maps_only:
             self._show_tiles(rr)
             text = self._summary(rr)
@@ -889,8 +891,11 @@ class ResultsPanel(wx.Panel):
                 from ..report.plots import draw_bode
                 draw_bode(fig, rr)
                 return
-            draw_heatmap(fig, board, rr, issues, layer=layer, vectors=vectors, scale=scale, view=view,
-                         max_vias=max_vias, outlines=outlines, names=names)
+            # the Preferences' Terminal current: the maps with the parts' terminals' current added (a copy, made
+            # here in the render thread); the tiles and issues keep the copper's own
+            from ..results.terminals import with_terminals
+            draw_heatmap(fig, board, with_terminals(rr) if terminals else rr, issues, layer=layer, vectors=vectors,
+                         scale=scale, view=view, max_vias=max_vias, outlines=outlines, names=names)
         views = [(self.canvas, heat)]
         if not maps_only:
             if self.canvas3.IsShown() and rr.kind == "bode":     # a Bode view's step responses
@@ -1024,9 +1029,11 @@ class ResultsPanel(wx.Panel):
         """How many via markers a map gets at most: 0 without via markers, else Vias shown (None: all)."""
         return self.vias_limit if self.via_markers else 0
 
-    def set_display(self, via_markers: bool, vias_limit: Optional[int], outlines: bool, names: bool = False):
+    def set_display(self, via_markers: bool, vias_limit: Optional[int], outlines: bool, names: bool = False,
+                    terminals: bool = False):
         """The Preferences' heatmap settings; the view shown is drawn again with them."""
         self.via_markers, self.vias_limit, self.outlines, self.names = via_markers, vias_limit, outlines, names
+        self.terminals = terminals
         if self.current() is not None:
             self.redraw()
 
