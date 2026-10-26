@@ -14,6 +14,8 @@ from typing import Optional
 from .values import format_si, parse_quantity
 
 REL_TOL = 1e-4          # an override this close to the schematic's value is the same value (format_si rounds)
+TERMINAL_METAL = "Terminal Metal"   # a lumped part's terminal as a sheet over its pads (simulate.part_lid, [A70])
+TERMINAL_SHEET = "Terminal Sheet Resistance"   # the same terminal given directly, Ω per square (wins over the metal)
 CONTROL_MODE = "Control Mode"   # a controller's text field: peak current | voltage | COT | internal (analysis/loop.py)
 
 
@@ -94,6 +96,14 @@ PARAMS = (
     Param("Cbias Curve", "capacitor", "the DC-bias curve as text (an HTTP lib text parameter; wins over Cbias)",
           "F", 1e-6, "µF", 1e-13, 1.0, "95nF@10V, 66nF@30V, 39nF@50V, 20nF@80V",
           "the capacitance at each capacitor's own DC voltage, interpolated"),
+    Param(TERMINAL_SHEET, "inductor, capacitor, resistor, ferrite, FET",
+          "the part's terminal metal (a clip, an end cap, a tab) over its pads as its sheet resistance, Ω per square "
+          "(0 or none: a perfect conductor)", "sheet", 1e-3, "mΩ/□", 0.0, 0.1, "0.5mΩ",
+          "how a pad's current is shared between the board copper and the terminal (DC paths, densities, Thermal)"),
+    Param(TERMINAL_METAL, "inductor, capacitor, resistor, ferrite, FET",
+          "the same terminal as its thickness and material (Terminal Sheet Resistance wins when both are given)",
+          "metal", 1e-3, "mΩ/□", 0.0, 0.1, "0.15mm bronze",
+          "how a pad's current is shared between the board copper and the terminal (DC paths, densities, Thermal)"),
     Param("Dielectric", "capacitor", "the ceramic's class: C0G / NP0 keep their capacitance (no DC-bias curve)",
           "text", 1.0, "", 0.0, 0.0, "X7R", "C0G / NP0: the DC-bias curve is not applied"),
     Param("Capacitance", "capacitor", "the capacitor model's C (else the Value field)", "F", 1.0, "F", 1e-13, 1.0,
@@ -172,7 +182,8 @@ def read(fp, name: str) -> Optional[Reading]:
         return None
     source = f"{fp.reference} {field_name} {text.strip()}"
     # gains, slew rates and dB values have no SI unit parse_quantity knows: _special reads those
-    value, why = _special(text, p) if p.quantity in ("gain", "V/s", "dB", "S", "deg") else parse_quantity(
+    value, why = _special(text, p) if p.quantity in ("gain", "V/s", "dB", "S", "deg", "metal", "sheet") else \
+        parse_quantity(
         text, p.quantity, p.assumed)
     if value is None:
         return Reading(None, text, source, why)
@@ -190,6 +201,21 @@ def _special(text: str, p: Param) -> tuple[Optional[float], str]:
     t = text.strip().replace(" ", "").replace(",", ".")
     low = t.lower()
     try:
+        if p.quantity == "sheet":                       # Ω per square: "0.5mΩ", "0.5mOhm/sq", a bare number in mΩ
+            return parse_quantity(re.sub(r"(?i)(/sq|/□|persquare)$", "", t), "ohm", p.assumed)
+        if p.quantity == "metal":
+            # a thickness and material: its sheet resistance ρ/t ("0.15mm bronze"; copper when no material is named,
+            # the materials of analysis/pins.py); "0" a perfect conductor
+            if re.fullmatch(r"0+(\.0*)?", low):
+                return 0.0, ""
+            m = re.match(r"^([0-9.]+)mm(.*)$", low)
+            if not m:
+                return None, f"'{text}': a thickness and material, e.g. 0.15mm bronze"
+            from ..analysis.pins import MATERIALS, _material
+            mat = _material(m.group(2) or "copper")
+            if mat not in MATERIALS or not float(m.group(1)) > 0:
+                return None, f"'{text}': a thickness above 0 mm and a material ({', '.join(MATERIALS)})"
+            return MATERIALS[mat] / (float(m.group(1)) * 1e-3), ""
         if p.quantity == "S":                           # a transconductance: "1.8mmho", "1.8mS", "1800uS", "0.0018"
             m = re.match(r"^([-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?)(.*)$", low)
             if not m:
@@ -234,7 +260,18 @@ def _special(text: str, p: Param) -> tuple[Optional[float], str]:
 
 def _symbol(p: Param) -> str:
     """The unit symbol for messages ("Ω" for ohm, else the quantity as it is: "F", "V" ...)."""
-    return {"ohm": "Ω", "deg": "°"}.get(p.quantity, p.quantity)
+    return {"ohm": "Ω", "deg": "°", "metal": "Ω/□", "sheet": "Ω/□"}.get(p.quantity, p.quantity)
+
+
+def terminal_sheet(fp) -> Optional[float]:
+    """A part's terminal as its sheet resistance (Ω per square, 0 a perfect conductor): its `Terminal Sheet
+    Resistance` field, else its `Terminal Metal` (thickness and material); None without either, or with a value that
+    can't be read (the part then keeps a perfect terminal, simulate.terminal_of)."""
+    for name in (TERMINAL_SHEET, TERMINAL_METAL):
+        r = read(fp, name)
+        if r is not None and r.value is not None and r.value >= 0:
+            return r.value
+    return None
 
 
 def _common(board, refs: list[str], name: str, times: int = 1) -> tuple[Optional[Reading], list[str]]:

@@ -696,7 +696,7 @@ def test_a_boosts_ground_return_splits_by_kirchhoff(tmp_path):
     assert via_current(3.0, 9.5) == pytest.approx(i_in, rel=0.01)                 # out at the input connector
 
 
-def _split_strip_r(tmp_path, name, joined, d=0.1, bond=None):
+def _split_strip_r(tmp_path, name, joined, d=0.1, bond=None, metal=None):
     """DC resistance (mΩ) of split_strip_board (R1 = 1 mΩ across the gap, or the joined reference strip) fed over
     its end pads, on a grid of d mm; also the path's parts and the model's part and bond branches. `bond`: R1's
     solder thickness, µm (its pin value; None: built in)."""
@@ -704,7 +704,7 @@ def _split_strip_r(tmp_path, name, joined, d=0.1, bond=None):
     from groundtruth.analysis import simulate
     from groundtruth.analysis.power import _area_shares, dc_path
     from groundtruth.components.models import ComponentModel
-    board, sc, _ = make(tmp_path, split_strip_board(joined=joined), name, nets=())
+    board, sc, _ = make(tmp_path, split_strip_board(joined=joined, metal=metal), name, nets=())
     if not joined:
         sc.set_component("R1", ComponentModel("resistor", {"R": 1e-3}))
         if bond is not None:

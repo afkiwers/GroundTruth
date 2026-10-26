@@ -514,8 +514,10 @@ class BoardModel:
                 st.branches += spread + bonds
                 st.side_lids[(fp.reference, other[0].net)] = lid
                 continue
-            lid_a, bonds_a = part_lid(st, sides[0], fp.reference, snap, bond)
-            lid_b, bonds_b = part_lid(st, sides[1], fp.reference, snap, bond)
+            # each side's terminal: a perfect plate, or a resistive sheet (its Terminal Metal field, else by kind [A70])
+            sheet = terminal_of(fp, model)
+            lid_a, bonds_a = part_lid(st, sides[0], fp.reference, snap, bond, sheet)
+            lid_b, bonds_b = part_lid(st, sides[1], fp.reference, snap, bond, sheet)
             if lid_a is None or lid_b is None:
                 continue
             st.branches.append(Branch(lid_a, lid_b, part_impedance(model), fp.reference, "part"))
@@ -643,10 +645,18 @@ def part_pairs(st: StackBuild, pads_a: list, pads_b: list) -> list[tuple]:
 SOLDER_UM = 75.0            # the solder between an SMD pad and the part's metal after reflow, µm [A65]
 BOND_RC = SOLDER_RHO * SOLDER_UM * 1e-6     # that joint's resistance per area, Ω·m²: ρ·t across its thickness [A65]
 BOND_MIN_UM = 0.1           # a perfect bond (the part's `bond:0`) as this thin a joint: a finite branch impedance
+def terminal_of(fp, model) -> Optional[float]:
+    """A lumped part's terminal metal as a sheet resistance (Ω per square) for part_lid: its `Terminal Sheet
+    Resistance` field, else its `Terminal Metal` (thickness and material; components/fields.terminal_sheet), None
+    without either or with 0: a perfect plate [A70]. No value is assumed (the user, 2026-10-26: "if none is
+    specified, it should be treated as perfect conductor so the User can identify it by seeing black areas and the
+    knife's edge"): a part whose terminal is not given shows its pad dark with a sharp rim, the cue to give it."""
+    from ..components.fields import terminal_sheet
+    return terminal_sheet(fp) or None
 
 
-def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optional[float] = None
-             ) -> tuple[Optional[LidNode], list[Branch]]:
+def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optional[float] = None,
+             sheet: Optional[float] = None) -> tuple[Optional[LidNode], list[Branch]]:
     """One side of a lumped part (its pads of one net): the part's metal on that side as a node of its own (its lid,
     peec.LidNode, over the pads' area-weighted centre) and a `bond` branch from every grid node of their net under
     the pads (pad_nodes; the nearest node when no node is under a pad smaller than a cell) to the lid. The bonds share
@@ -654,6 +664,12 @@ def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optiona
     `bond_um` µm (the part's pin value `bond`, analysis/pins.py; 0 a perfect bond, as BOND_MIN_UM), else SOLDER_UM.
     The metal itself is taken as a perfect conductor: the current hands over where the copper brings it, within the
     transfer length √(r_c / R_sheet) of where it reaches the pad [Berger 1972] (~0.14 mm in 35 µm copper at 75 µm).
+
+    `sheet` (Ω per square; terminal_of): the metal is a resistive sheet instead [A70]: a terminal node above every
+    grid node under the pads (each soldered to its own with that node's share of the joint), neighbouring terminal
+    nodes joined by `sheet` (a square of metal between two nodes a pitch apart), the part's current entering at the
+    terminal node nearest the pads' centre (the lid returned). A thin terminal (an inductor's clip) then shares a pad
+    with the copper under it, as two sheets in parallel, instead of bypassing it from its edge.
     (None, []) when no node of the pads' net is near."""
     from ..geometry.shapes import pad_shape
     nodes = pad_nodes(st, pads)
@@ -674,7 +690,22 @@ def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optiona
     st.n_lids += 1
     rc = BOND_RC if bond_um is None else SOLDER_RHO * max(bond_um, BOND_MIN_UM) * 1e-6
     r = rc / (max(float(areas.sum()), 1e-3) * 1e-6) * len(nodes)            # N bonds in parallel: the side's joint
-    return lid, [Branch(n, lid, (lambda f, r=r: complex(r)), ref, "bond") for n in nodes]
+    if not sheet or len(nodes) < 2:
+        return lid, [Branch(n, lid, (lambda f, r=r: complex(r)), ref, "bond") for n in nodes]
+    # the terminal as a sheet: its node above each grid node, the bonds between them, the sheet between neighbours
+    # (one square each: a strip a pitch long and a pitch wide); the lid (where the part's current enters) is the one
+    # nearest the pads' centre
+    top = {}
+    for n in nodes:
+        top[n] = LidNode(n[0], n[1], n[2], st.n_lids)
+        st.n_lids += 1
+    branches = [Branch(n, top[n], (lambda f, r=r: complex(r)), ref, "bond") for n in nodes]
+    for (k_, i, j), t in top.items():
+        for nb in ((k_, i + 1, j), (k_, i, j + 1)):
+            if nb in top:
+                branches.append(Branch(t, top[nb], (lambda f, R=sheet: complex(R)), ref, "bond"))
+    hub = min(nodes, key=lambda n: (n[1] - lid[1]) ** 2 + (n[2] - lid[2]) ** 2)
+    return top[hub], branches
 
 
 def die_side(fp, model, sides: list, entry: Optional[str]) -> Optional[int]:

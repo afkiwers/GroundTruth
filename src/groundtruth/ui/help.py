@@ -298,7 +298,7 @@ def field_rows() -> str:
     from ..components.values import format_si
     rows = []
     for p in PARAMS:
-        sym = {"ohm": "Ω"}.get(p.quantity, p.quantity)
+        sym = {"ohm": "Ω", "metal": "Ω/□", "sheet": "Ω/□"}.get(p.quantity, p.quantity)
         span = "text" if p.quantity == "text" else f"{format_si(p.lo, sym)} … {format_si(p.hi, sym)}"
         cells = (f"<b>{escape(p.field)}</b>", p.parts, p.keys, p.unit, span, f"<code>{escape(p.example)}</code>",
                  p.feeds)
