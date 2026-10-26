@@ -825,7 +825,9 @@ class ResultsPanel(wx.Panel):
         self.choice.SetToolTip(self.choice.GetStringSelection() or "the views of the last run")   # the full name
         share = getattr(rr, "layer_share", None) or {}      # a PDN rail has no maps (its curves instead)
         layers = sorted(share, key=lambda l: -share[l]) if rr else []
-        _set_items(self.layer, ["main layers"] + [f"{l} ({share[l] * 100:.0f} %)" for l in layers])
+        # "main layers": the (at most four) carrying most; "all layers": every copper layer, in stack order
+        # (plots.ALL_LAYERS); then each layer by its share
+        _set_items(self.layer, ["main layers", "all layers"] + [f"{l} ({share[l] * 100:.0f} %)" for l in layers])
         self._layers = layers
         self.layer.SetSelection(0)
         curves = rr is not None and rr.kind in CURVE_KINDS
@@ -845,12 +847,19 @@ class ResultsPanel(wx.Panel):
         return self.routes[k] if 0 <= k < len(self.routes) else None
 
     def selected_layer(self):
-        """The chosen plane layer, or the one carrying most return current for 'main layers'."""
+        """The chosen plane layer, or the one carrying most return current for 'main layers' and 'all layers'."""
         k = self.layer.GetSelection()
         layers = getattr(self, "_layers", [])
-        if k > 0:
-            return layers[k - 1]
+        if k > 1:
+            return layers[k - 2]
         return layers[0] if layers else None
+
+    def _map_layer(self):
+        """What the maps show: None ('main layers'), plots.ALL_LAYERS ('all layers') or the chosen layer."""
+        from ..report.plots import ALL_LAYERS
+        k = self.layer.GetSelection()
+        layers = getattr(self, "_layers", [])
+        return ALL_LAYERS if k == 1 else (layers[k - 2] if k > 1 else None)
 
     def redraw(self, maps_only: bool = False):
         """Show the selected view. The summary line changes at once; both figures are built and rendered in a
@@ -860,8 +869,7 @@ class ResultsPanel(wx.Panel):
         rr = self.current()
         if rr is None:
             return
-        k = self.layer.GetSelection()
-        layer, vectors, board, issues = self._layers[k - 1] if k > 0 else None, self.arrows.GetValue(), \
+        layer, vectors, board, issues = self._map_layer(), self.arrows.GetValue(), \
             self.board, self.issues
         scale = "log" if self.log_scale.GetValue() else "linear"
         view, max_vias, outlines, names = self._view, self.max_vias(), self.outlines, self.names

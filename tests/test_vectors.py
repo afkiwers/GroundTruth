@@ -442,3 +442,29 @@ def test_a_narrow_strip_between_quiet_pours_keeps_its_arrows_on_itself():
                                                                                           dc_loads=[])))
     assert len(ahead) == len(strip) and all(len(a) == 5 for a in ahead + back)
     assert all(a[2] < 0 for a in back)                  # the ground's (flowing back) on the return layer
+
+
+def test_all_layers_shows_every_copper_layer_of_the_board_in_stack_order(tmp_path):
+    """The Layer list's "all layers" (plots.ALL_LAYERS): every layer of the model with copper, in the board's stack
+    order, also those carrying less than 2 % (the user, of a 6-layer board's overview showing four: "add all layers
+    on a board to the overview"); "main layers" keeps the four carrying most, by share."""
+    from types import SimpleNamespace as N
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+    from boardgen import microstrip_board
+    from groundtruth.analysis.simulate import simulate
+    from groundtruth.report.plots import ALL_LAYERS, draw_heatmap, heatmap_layers
+    names = ["F.Cu", "In1.Cu", "In2.Cu", "In3.Cu", "In4.Cu", "B.Cu"]
+    share = dict(zip(names, (0.26, 0.16, 0.22, 0.11, 0.15, 0.10)))
+    copper = N(node=np.ones((3, 3), bool))
+    rr = N(sheet_current={n: np.ones((3, 3)) for n in names}, layer_share=share,
+           layer_grids={**{n: copper for n in names}, "In3.Cu": N(node=np.zeros((3, 3), bool))},
+           main_layers=lambda: [l for l in sorted(share, key=lambda l: -share[l]) if share[l] >= 0.02])
+    assert heatmap_layers(rr) == ["F.Cu", "In2.Cu", "In1.Cu", "In4.Cu"]
+    assert heatmap_layers(rr, ALL_LAYERS) == ["F.Cu", "In1.Cu", "In2.Cu", "In4.Cu", "B.Cu"]   # In3: no copper
+    board, sc, _ = make(tmp_path, microstrip_board(), "all", solve_points=1)
+    route = simulate(board, sc.config).routes[0]
+    fig = Figure(figsize=(12, 5))
+    FigureCanvasAgg(fig)
+    draw_heatmap(fig, board, route, layer=ALL_LAYERS)
+    assert [ax.get_title().split()[0] for ax in fig.axes[:-1]] == list(route.sheet_current)

@@ -378,9 +378,16 @@ def _switch_pins(ax, rr, lname: str, labels: bool = True) -> None:
                 bbox={"boxstyle": "round,pad=0.12", "fc": "#101018", "ec": "none", "alpha": 0.7}, zorder=6)
 
 
+ALL_LAYERS = "*all*"     # heatmap_layers' `layer` for every copper layer of the board (the Layer list's "all layers")
+
+
 def heatmap_layers(rr: RouteResult, layer: Optional[str] = None, max_layers: int = 4) -> list[str]:
-    """The layers a heatmap shows: the one asked for, else those carrying a noticeable share of the current (at
-    most max_layers), else the first layer."""
+    """The layers a heatmap shows: the one asked for, ALL_LAYERS: every layer of the model with copper on it, in
+    the board's stack order (the user, of the overview's four of six: "add all layers on a board to the
+    overview"), else those carrying a noticeable share of the current (at most max_layers), else the first layer."""
+    if layer == ALL_LAYERS:
+        grids = getattr(rr, "layer_grids", None) or {}
+        return [l for l in rr.sheet_current if l not in grids or np.asarray(grids[l].node).any()]
     if layer:
         return [layer] if layer in rr.sheet_current else []
     return rr.main_layers()[:max_layers] or list(rr.sheet_current)[:1]
