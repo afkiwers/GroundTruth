@@ -234,7 +234,8 @@ def _terminal_strip_r(tmp_path, name, metal, d=0.1):
     from groundtruth.analysis.power import _area_shares, dc_path
     from groundtruth.components.models import ComponentModel
     board, sc, _ = make(tmp_path, terminal_strip_board(metal), name, nets=())
-    sc.set_component("C1", ComponentModel("cap", {"C": 1e-6}))
+    # 10 Ω of ESR: the even entry's branches (1 % of it per side) are then large against the sheet and add no shortcut
+    sc.set_component("C1", ComponentModel("cap", {"C": 1e-6, "ESR": 10.0}))
     sc.set_component_pins("C1", {"bond": 0.0})
     st = simulate.BoardModel(board, sc.config).build((2.0, 6.0, 36.0, 18.0), ["F.Cu"], {"PWR", "AUX"}, d, False)
     inj = _area_shares(st, [board.find_pin("U1.1")], "F.Cu", 1.0) + \

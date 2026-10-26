@@ -516,11 +516,21 @@ class BoardModel:
                 continue
             # each side's terminal: a perfect plate, or a resistive sheet (its Terminal Metal field, else by kind [A70])
             sheet = terminal_of(fp, model)
-            lid_a, bonds_a = part_lid(st, sides[0], fp.reference, snap, bond, sheet)
-            lid_b, bonds_b = part_lid(st, sides[1], fp.reference, snap, bond, sheet)
+            # the even entry's resistance r_e per side: ENTRY_SHARE of the part's own DC resistance, large against the
+            # terminal sheet so the current divides evenly over it and does not take the hub as a shortcut between
+            # the terminal's nodes; the part's branch is that much (2·r_e) less, so the part keeps its value (a
+            # shunt's exactly). A part without DC resistance (a capacitor without ESR, open at DC): one square [A70]
+            from .power import DC_F                      # here: power imports this module
+            z_part = part_impedance(model)
+            r_dc = complex(z_part(DC_F)).real if sheet else 0.0
+            entry = ENTRY_SHARE * r_dc if sheet and r_dc > 0 else sheet
+            if sheet and r_dc > 0:
+                z_part = (lambda f, z=z_part, r=2 * entry: z(f) - r)
+            lid_a, bonds_a = part_lid(st, sides[0], fp.reference, snap, bond, sheet, entry)
+            lid_b, bonds_b = part_lid(st, sides[1], fp.reference, snap, bond, sheet, entry)
             if lid_a is None or lid_b is None:
                 continue
-            st.branches.append(Branch(lid_a, lid_b, part_impedance(model), fp.reference, "part"))
+            st.branches.append(Branch(lid_a, lid_b, z_part, fp.reference, "part"))
             st.branches += bonds_a + bonds_b
             st.side_lids[(fp.reference, pa.net)], st.side_lids[(fp.reference, pb.net)] = lid_a, lid_b
         switch_lids(st, board, config, plane_nets, pin_params, snap)
@@ -645,6 +655,9 @@ def part_pairs(st: StackBuild, pads_a: list, pads_b: list) -> list[tuple]:
 SOLDER_UM = 75.0            # the solder between an SMD pad and the part's metal after reflow, µm [A65]
 BOND_RC = SOLDER_RHO * SOLDER_UM * 1e-6     # that joint's resistance per area, Ω·m²: ρ·t across its thickness [A65]
 BOND_MIN_UM = 0.1           # a perfect bond (the part's `bond:0`) as this thin a joint: a finite branch impedance
+ENTRY_SHARE = 0.01          # a terminal's even entry: this share of the part's DC resistance per side (taken off it)
+
+
 def terminal_of(fp, model) -> Optional[float]:
     """A lumped part's terminal metal as a sheet resistance (Ω per square) for part_lid: its `Terminal Sheet
     Resistance` field, else its `Terminal Metal` (thickness and material; components/fields.terminal_sheet), None
@@ -656,7 +669,7 @@ def terminal_of(fp, model) -> Optional[float]:
 
 
 def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optional[float] = None,
-             sheet: Optional[float] = None) -> tuple[Optional[LidNode], list[Branch]]:
+             sheet: Optional[float] = None, entry_r: Optional[float] = None) -> tuple[Optional[LidNode], list[Branch]]:
     """One side of a lumped part (its pads of one net): the part's metal on that side as a node of its own (its lid,
     peec.LidNode, over the pads' area-weighted centre) and a `bond` branch from every grid node of their net under
     the pads (pad_nodes; the nearest node when no node is under a pad smaller than a cell) to the lid. The bonds share
@@ -667,8 +680,9 @@ def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optiona
 
     `sheet` (Ω per square; terminal_of): the metal is a resistive sheet instead [A70]: a terminal node above every
     grid node under the pads (each soldered to its own with that node's share of the joint), neighbouring terminal
-    nodes joined by `sheet` (a square of metal between two nodes a pitch apart), the part's current entering at the
-    terminal node nearest the pads' centre (the lid returned). A thin terminal (an inductor's clip) then shares a pad
+    nodes joined by `sheet` (a square of metal between two nodes a pitch apart), the part's current entering the
+    terminal evenly over it: from the lid (returned: the part's branch ends there) to every terminal node, equal
+    branches of `entry_r` in all (else one square, `sheet`). A thin terminal (an inductor's clip) then shares a pad
     with the copper under it, as two sheets in parallel, instead of bypassing it from its edge.
     (None, []) when no node of the pads' net is near."""
     from ..geometry.shapes import pad_shape
@@ -704,8 +718,14 @@ def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optiona
         for nb in ((k_, i + 1, j), (k_, i, j + 1)):
             if nb in top:
                 branches.append(Branch(t, top[nb], (lambda f, R=sheet: complex(R)), ref, "bond"))
-    hub = min(nodes, key=lambda n: (n[1] - lid[1]) ** 2 + (n[2] - lid[2]) ** 2)
-    return top[hub], branches
+    # the part's current enters its terminal evenly over it (the user, 2026-10-26: "spread evenly"; where a winding or
+    # element joins its terminal is not known [A70]): from the lid (the part's side, where its branch ends) to every
+    # terminal node, N branches of N·r_e in parallel (r_e in all), equal, so the current divides evenly as long as
+    # r_e is large against the sheet's own differences; r_e is one square of the terminal at most (entry_r)
+    re_ = entry_r if entry_r is not None else sheet
+    n = len(nodes)
+    branches += [Branch(lid, top[nd], (lambda f, r=n * re_: complex(r)), ref, "bond") for nd in nodes]
+    return lid, branches
 
 
 def die_side(fp, model, sides: list, entry: Optional[str]) -> Optional[int]:
