@@ -315,10 +315,11 @@ class Session:
         return draw_contours(self.kb, cmap, layer, label, line_mm, index_mm)
 
     @_kicad_call
-    def draw_arrows(self, arrows, layer, label, group: str = "arrows"):
-        """Current arrows on `layer` in drawing group `group` (kipy_sink.draw_arrows); the number drawn."""
+    def draw_arrows(self, arrows, layer, label, group: str = "arrows", legend=None):
+        """Current arrows on `layer` in drawing group `group`, with the `legend` text beside the board
+        (kipy_sink.draw_arrows); the number drawn."""
         from ..adapters.kipy_sink import draw_arrows
-        return draw_arrows(self.kb, arrows, layer, label, group=group)
+        return draw_arrows(self.kb, arrows, layer, label, group=group, legend=legend)
 
     @_kicad_call
     def draw_suggestions(self, suggestions, layer):
@@ -2379,8 +2380,18 @@ class MainFrame(ConfigActions, wx.Frame):
             # the return current's arrows apart, by the net of the copper under each one
             from ..results.vectors import return_rule, split_return
             ahead, back = split_return(arrows, rr.layer_grids[plane_layer], return_rule(rr, cfg, board))
-            n = self.session.draw_arrows(ahead, layer, label)              # clears both groups first
-            m = self.session.draw_arrows(back, back_layer, f"{label} (return)", group="arrows-return")
+            # beside the board, on each layer, what its arrows are (KiCad's API cannot name a User layer)
+            import datetime
+            from .. import __version__
+            from ..results.legend import arrow_legends, place
+            unit = getattr(rr, "heat_unit", None) or ("A/mm²" if getattr(rr, "view_of", None) else "A/m per A")
+            first, second = arrow_legends(rr, plane_layer, ahead, back, unit, (w_min, w_max), board,
+                                          "" if __version__ == "dev" else __version__,
+                                          datetime.date.today().isoformat())
+            place(board, rr.layer_grids[plane_layer], first, second)
+            n = self.session.draw_arrows(ahead, layer, label, legend=first.items())    # clears both groups first
+            m = self.session.draw_arrows(back, back_layer, f"{label} (return)", group="arrows-return",
+                                         legend=second.items())
             return n, m
 
         def done(counts):

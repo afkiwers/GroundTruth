@@ -99,9 +99,9 @@ def _circle(center, radius_mm: float, layer, width_mm: float = 0.15):
     return c
 
 
-def _text(pos, text: str, layer, size_mm: float = 0.6):
+def _text(pos, text: str, layer, size_mm: float = 0.6, stroke_mm: float = 0.0):
     """A label whose left end sits at pos (KiCad centres text on its position by default, which put labels
-    on top of the markers they belong to)."""
+    on top of the markers they belong to); its strokes stroke_mm wide (0: 15 % of its size)."""
     from kipy.board_types import BoardText
     from kipy.proto.common.types import HorizontalAlignment, VerticalAlignment
     t = BoardText()
@@ -109,7 +109,7 @@ def _text(pos, text: str, layer, size_mm: float = 0.6):
     t.position = _v(*pos)
     t.value = text
     t.attributes.size = _v(size_mm, size_mm)
-    t.attributes.stroke_width = int(size_mm * 0.15 * MM)
+    t.attributes.stroke_width = int((stroke_mm or size_mm * 0.15) * MM)
     t.attributes.horizontal_alignment = HorizontalAlignment.HA_LEFT
     t.attributes.vertical_alignment = VerticalAlignment.VA_CENTER
     return t
@@ -310,12 +310,14 @@ HEAD_ANGLE = math.radians(25)
 
 @_when_ready
 def draw_arrows(board: Any, arrows: list[tuple[float, float, float, float]], layer_name: str = "User.7",
-                label: str = "", width_mm: float = 0.05, group: str = "arrows") -> int:
+                label: str = "", width_mm: float = 0.05, group: str = "arrows", legend=None) -> int:
     """Current-direction arrows [(x, y, dx, dy) mm] from results.vectors.arrow_field, each as a shaft and two head
     strokes, in one group and one undo step (replacing the previous arrows). Returns the number of arrows. An arrow
     with a fifth value draws at that line width (mm; results.vectors.arrow_widths: thicker where the current
     density is higher), else at width_mm. group: "arrows", or "arrows-return" for the return current's on a layer
-    of their own; drawing "arrows" clears both (their names share the prefix), "arrows-return" only its own."""
+    of their own; drawing "arrows" clears both (their names share the prefix), "arrows-return" only its own.
+    legend: [(left middle, text, size mm, stroke mm)] (results.legend.Legend.items): the text beside the board that
+    says what the layer's arrows are, in the same group."""
     if not arrows:                              # nothing to draw: the previous ones go, no layer is enabled for it
         clear(board, f"{GROUP_PREFIX}-{group}")
         return 0
@@ -337,8 +339,10 @@ def draw_arrows(board: Any, arrows: list[tuple[float, float, float, float]], lay
         for s in (1, -1):
             a = back + s * HEAD_ANGLE
             items.append(_segment(tip, (tip[0] + h * math.cos(a), tip[1] + h * math.sin(a)), layer, w))
+    n = len(items) // 3                         # three strokes per arrow
+    items += [_text(at, text, layer, size, stroke) for at, text, size, stroke in legend or []]
     _commit_group(board, items, f"{GROUP_PREFIX}-{group}", f"groundtruth: current arrows {label}")
-    return len(items) // 3
+    return n
 
 
 def _segment(a, b, layer, width_mm: float = 0.12):

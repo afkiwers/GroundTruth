@@ -920,7 +920,11 @@ their state for next time. How vias and parts are marked is set in <a href="#pre
   go on a layer of their own, User.6 (settings: <code>drawing.return_layer</code>), so each can be shown or hidden
   in KiCad's Appearance panel: on a power stage's or a DC view, the arrows on the ground nets (the stages' ground,
   the loads' return pins' nets, nets named GND, VSS, 0V, ...RTN); on a signal route, every arrow off the signal's
-  own copper. The rest stay on the current-drawing layer.</li>
+  own copper. The rest stay on the current-drawing layer. KiCad cannot be told the layers' names, so each layer
+  says what it holds in a block of text beside the board's top right corner ("Current, supply side" or "Return
+  current", 2 mm high), with the view, the copper layer and its share of the current, the nets under the arrows,
+  their peak density and where, how to read the arrows, the busiest via and the version and date; Clear GT markers
+  removes it with the arrows. You can also name the layers yourself in Board Setup › Board Editor Layers.</li>
 <li><b>The contours read like a map's height lines.</b> KiCad draws a User layer in one colour, so each line has
   its value written along it, with a gap in the line where the value sits.
   <ul>

@@ -285,6 +285,39 @@ def test_arrows_on_the_board_are_one_group_of_segments():
     assert draw_arrows(two, [], "User.7", "test") == 0 and not two.groups
     bare = Board(("F.Cu", "B.Cu"))
     assert draw_arrows(bare, [], "User.6", "test", group="arrows-return") == 0 and not bare.set_calls
+    # the legend beside the board (results/legend.py): its texts in the arrows' group, not counted as arrows
+    named = Board(("F.Cu", "B.Cu", "User.7"))
+    text = [((50.0, 1.0), "Return current", 2.0, 0.4), ((50.0, 3.8), "View: x", 1.0, 0.15)]
+    assert draw_arrows(named, [(1.0, 1.0, 2.0, 0.0)], "User.7", "test", legend=text) == 1
+    title = named.items[3]
+    assert len(named.items) == 5 and title.value == "Return current"
+    assert title.attributes.stroke_width == int(0.4 * 1e6) and title.attributes.size.x == int(2.0 * 1e6)
+
+
+def test_the_arrow_legends_say_what_each_layer_holds_beside_the_board():
+    """results/legend: the supply side's block at the board's top right (GAP_MM out), the return current's under
+    it; a 2 x 2 mm heading with 0.4 mm strokes (the user), then the view, the layer and its share, the nets under the
+    arrows, the peak on them and how to read the arrows, at 1 mm."""
+    from types import SimpleNamespace as N
+    from groundtruth.results.legend import GAP_MM, arrow_legends, place
+    g = build_grid({"PWR": box(0, 0, 5, 2), "GND": box(0, 3, 5, 5)}, (0, 0, 10, 5), 0.1)
+    K = np.where(g.node, 1.0, 0.0)
+    K[20, 40] = 2500.0                                      # the GND copper's peak, at (2.0, 4.0)
+    rr = N(kind="converter", net="DC currents together", driver="", receiver="", layer_grids={"F.Cu": g},
+           sheet_current={"F.Cu": K}, map_frequency=0.0, layer_share={"F.Cu": 0.19}, transfers=[
+               {"kind": "via", "name": "GND @(1.0, 4.0)", "current_a": 3.2}], view_of="buck")
+    ahead, back = [(1.0, 1.0, 1, 0, 0.1)] * 3, [(1.0, 4.0, -1, 0, 0.1)] * 2
+    first, second = arrow_legends(rr, "F.Cu", ahead, back, "A/mm²", (0.01, 0.3), None, "0.1.9", "2026-10-27")
+    board = N(outline=[([(0.0, 0.0), (40.0, 0.0), (40.0, 30.0), (0.0, 30.0)], [])])
+    place(board, g, first, second)
+    assert first.at == (40.0 + GAP_MM, 0.0) and second.at[1] == pytest.approx(first.height() + GAP_MM)
+    (at, title, size, stroke), *lines = first.items()
+    assert (title, size, stroke) == ("Current, supply side", 2.0, 0.4) and all(l[2] == 1.0 for l in lines)
+    text = [l[1] for l in second.items()]
+    assert text[0] == "Return current" and "Copper layer: F.Cu, 19 % of the current" in text
+    assert "Nets: GND" in text and "Peak here: 2,500 A/mm² at (2.0, 4.0) mm" in text
+    assert "Busiest via of the view: GND @(1.0, 4.0), 3.20 A" in text and "2 arrows" in text[-3]
+    assert "Nets: PWR" in [l[1] for l in first.items()]
 
 
 def test_the_return_currents_arrows_are_told_apart_by_the_net_under_them():
