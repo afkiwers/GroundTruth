@@ -194,7 +194,8 @@ class ServerInfoDialog(wx.Dialog):
 
 # --------------------------------------------------------------------------- Update / Update all, confirmed
 UPDATE_COLUMNS = (("Server", "name", 220), ("Now", "now", 170), ("After the update", "after", 170))
-UPDATE_NOTES = ("Each server finishes its running jobs first; queued jobs wait and run after the update.",
+UPDATE_NOTES = ("A busy server cancels its running jobs and updates at once: their owners see why and run them again "
+                "on the new version. Queued jobs wait and run after the update.",
                 "It restarts by itself, and goes back to its old version if the new one does not start.",
                 "The servers are updated one after the other; the list shows how far each one is.")
 
