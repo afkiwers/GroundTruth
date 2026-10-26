@@ -67,6 +67,8 @@ def _maps(view, st, sol):
     out.sheet_current = {n: sol.sheet_current(k, st.d) for k, n in enumerate(st.names)}
     out.sheet_vectors = {n: tuple(v.astype(np.float32) for v in sol.sheet_vectors(k, st.d))
                          for k, n in enumerate(st.names)}
+    from .simulate import terminal_vectors
+    out.terminal_vectors = terminal_vectors(st, sol)
     return out
 
 
@@ -108,7 +110,7 @@ def _converter(model, view):
     """A power stage's view again on the finer model: a DC path's view from that path's DC model, the hot-loop
     view from the stage's loop model at LOOP_F."""
     from .power import DC_F, LOOP_F, dc_summary, dc_vector_maps, prepare_converter
-    from .simulate import transfers
+    from .simulate import terminal_vectors, transfers
     config = model.config
     spec = next((c for c in config.stages() if c.name == view.net), None)
     if spec is None:
@@ -135,6 +137,7 @@ def _converter(model, view):
         out.grid = st.grids[0]
         out.sheet_current = maps
         out.sheet_vectors = dc_vector_maps(st, sol, current)
+        out.terminal_vectors = terminal_vectors(st, sol, current, density=True)
         tot = sum(float(m.sum()) for m in maps.values()) or 1.0
         out.layer_share = {l: float(m.sum()) / tot for l, m in maps.items()}
         out.transfers = [{"name": x["name"], "kind": "via", "layers": list(maps), "x": x["x"], "y": x["y"],

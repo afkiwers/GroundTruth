@@ -53,6 +53,7 @@ from ..emi.spectrum import analysis_band, trapezoid_harmonics
 from ..solver.peec import Branch, RouteExcitation, Solution, SolverError, TraceSegment
 from .pins import feed_layers
 from .simulate import (BoardModel, ModelRun, RouteResult, StackBuild, _choose_pitch, _interp_loglog,
+                       add_terminal_vectors, terminal_vectors,
                        _solve_row, _top_plane_pair, band_moments, band_notes, band_top, indicative_text,
                        initial_frequencies, mark_quasi_static, resonance_text, transfers, unsolved_band,
                        unsolved_issue)
@@ -141,6 +142,8 @@ class ConverterResult(RouteResult):
     dc_maps: dict = field(default_factory=dict)         # path name -> {layer: A/mm² map} (not in the summary)
     dc_grids: dict = field(default_factory=dict)        # path name -> {layer: Grid} of the model it was solved on
     dc_vectors: dict = field(default_factory=dict)      # path name -> {layer: (Jx, Jy) A/mm²} (not in the summary)
+    dc_terminal: dict = field(default_factory=dict)     # path name -> its terminals' current (simulate.terminal_vectors,
+                                                        # A/mm² as dc_vectors; shown only, results/terminals.py)
     # the switch node's time variance (dc_runs): it carries the current from the high side for D and from the low
     # side for 1 - D, so besides the mean (dc_vectors) its heat has D(1-D)·|J_hs - J_ls|² (A²/mm⁴ per layer), and
     # the per-branch amplitude √(D(1-D))·I·I_hs-ls (A, with its build: combine_dc adds it in quadrature)
@@ -175,6 +178,7 @@ class ConverterResult(RouteResult):
         d.pop("dc_maps", None)
         d.pop("dc_grids", None)
         d.pop("dc_vectors", None)
+        d.pop("dc_terminal", None)
         d.pop("dc_branch", None)
         d.pop("dc_ripple_sq", None)
         d.pop("dc_ripple_branch", None)
@@ -1382,6 +1386,7 @@ def finish_converter(model: BoardModel, setup: ConverterSetup) -> ConverterResul
     res.sheet_current = {n: rep.sheet_current(k, st.d) for k, n in enumerate(st.names)}
     res.sheet_vectors = {n: tuple(v.astype(np.float32) for v in rep.sheet_vectors(k, st.d))
                          for k, n in enumerate(st.names)}
+    res.terminal_vectors = terminal_vectors(st, rep)
     res.reference_layer = st.names[int(np.argmax(share))]
     res.peak_density = {n: float(K.max()) * res.pulse_a * 1e-3 for n, K in res.sheet_current.items() if K.size}
     plane = setup.fine.exc.stack
@@ -1718,7 +1723,7 @@ def dc_summary(st: StackBuild, sol: Solution, current: float, name: str, plating
     flow_d: dict[str, complex] = {}
     joints: dict[str, float] = {}           # the parts' solder joints (simulate.part_lid's bonds [A65]): R share, Ω
     for b, cur, cd in zip(st.plane.branches, sol.I_branch, i_d):
-        if b.kind == "bond":
+        if b.kind in ("bond", "sheet"):     # its solder joints and its terminal's own metal (simulate.part_lid)
             # not the copper's: a part's terminal bridges its own pad, so current crosses its joints even where the
             # part itself carries none (a capacitor at DC); Thermal heats them at the part
             joints[b.name] = joints.get(b.name, 0.0) + ((float(abs(cur)) ** 2 + (k_r * float(abs(cd))) ** 2)
@@ -1947,6 +1952,8 @@ def _rescale_path(res, path: dict, k: float):
         res.dc_maps[name] = {l: m * k for l, m in res.dc_maps[name].items()}
     if name in res.dc_vectors:
         res.dc_vectors[name] = {l: tuple(c * k for c in v) for l, v in res.dc_vectors[name].items()}
+    if name in res.dc_terminal:
+        res.dc_terminal[name] = {l: (i, j, x * k, y * k) for l, (i, j, x, y) in res.dc_terminal[name].items()}
     if name in getattr(res, "dc_branch", {}):
         st, cur = res.dc_branch[name]
         res.dc_branch[name] = (st, cur * k)
@@ -2339,6 +2346,9 @@ def combine_dc(results, rules, plating_um: float = 25.0):
     view.dc = [path]
     view.dc_maps = {COMBINED_VIEW: {l: m.astype(np.float32) for l, m in maps.items()}}
     view.dc_vectors = {COMBINED_VIEW: {l: (jx.astype(np.float32), jy.astype(np.float32)) for l, (jx, jy) in vec.items()}}
+    # the terminals' current of every path, added as the copper's (shown only, results/terminals.py)
+    terms = [getattr(r, "dc_terminal", {}).get(name) for r, name, _, _ in paths]
+    view.dc_terminal = {COMBINED_VIEW: add_terminal_vectors([t for t in terms if t])} if any(terms) else {}
     view.dc_grids = {COMBINED_VIEW: dict(zip(st.names, st.grids))}
     view.dc_branch = {}
     view.dc_ripple_sq, view.dc_ripple_branch = {}, {}     # the view is never a heat source (thermal._stages)
@@ -2419,6 +2429,8 @@ def dc_analysis(model: BoardModel, setup: "ConverterSetup") -> tuple[list[dict],
         maps[name] = m
         grids[name] = dict(zip(run.build.names, run.build.grids))
         setup.res.dc_vectors[name] = dc_vector_maps(run.build, sol, current)          # the mean flow (arrows)
+        if isinstance(run.build, StackBuild):                   # the terminals' share of it (display only)
+            setup.res.dc_terminal[name] = terminal_vectors(run.build, sol, current, density=True)
         setup.res.dc_branch[name] = (run.build, np.asarray(sol.I_branch).real * current)
         db = dc_board_of(run.build) if isinstance(run.build, StackBuild) else None
         if db is not None:              # the vias' share, kept for Thermal after the branches go [A43]
@@ -2578,6 +2590,7 @@ def dc_view(c: "ConverterResult", name: str) -> "ConverterResult":
     path = next(p for p in c.dc if p["name"] == name)
     v.sheet_current = maps
     v.sheet_vectors = c.dc_vectors.get(name, {})
+    v.terminal_vectors = getattr(c, "dc_terminal", {}).get(name, {})
     v.layer_grids = c.dc_grids.get(name, c.layer_grids)
     v.grid = next(iter(v.layer_grids.values()), c.grid)
     tot = sum(float(m.sum()) for m in maps.values()) or 1.0

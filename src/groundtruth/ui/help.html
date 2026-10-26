@@ -878,6 +878,12 @@ their state for next time. How vias and parts are marked is set in <a href="#pre
   fabrication outline, else a box around its pads; top-side parts solid, bottom-side dashed), to see which current
   flows under which part; <b>Part names</b> writes each part's reference at its middle, with or without the
   outlines (off where the names crowd a busy map). Remembered for every board; the exported report follows them.</li>
+<li><b>Terminal current</b> (Preferences, off by default): a part with a Terminal Sheet Resistance (a FET's drain
+  tab, an inductor's clip) carries part of its pad's current in its own metal. The maps show the board's copper,
+  so under such a part the copper reads low, with a sharp edge where the current moves up into the part, and the
+  current seems to vanish there. Ticked, the maps and arrows show the copper's current plus the terminal's above
+  it, in the copper's units: what flows at that spot, as if the copper carried it (the map's note says so). The
+  tiles, issues, DC figures and Thermal stay the copper's own, and so does the exported report.</li>
 <li><b>Tiles</b>: the view's key numbers, coloured by your rules. Hover over a tile for what it means.</li>
 <li><b>Cross-section</b> (signal nets): the return current layer by layer along the route, driver on the
   left. Top: each plane layer's share of the return under the route (within the corridor beside the track) and
@@ -1259,6 +1265,8 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   <a href="#results">Results</a>).</td></tr>
 <tr><td valign="top"><b>Part outlines</b></td><td>every part's outline over the maps.</td></tr>
 <tr><td valign="top"><b>Part names</b></td><td>every part's reference over the maps (with or without the outlines).</td></tr>
+<tr><td valign="top"><b>Terminal current</b></td><td>the maps with the current in the parts' terminal metal added to
+  the copper's (parts with a Terminal Sheet Resistance); the figures stay the copper's.</td></tr>
 <tr><td valign="top"><b>Contour line</b>, <b>Index contour line</b></td><td>the line widths of <b>Draw contours on
   board</b>: the ordinary contour lines (0.04 mm by default) and the thicker index lines, every decade or every
   fifth isotherm (0.1 mm by default).</td></tr>

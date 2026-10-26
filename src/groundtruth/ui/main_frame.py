@@ -920,7 +920,8 @@ class MainFrame(ConfigActions, wx.Frame):
         old = theme.load_pref()
         theme.save_prefs(**values)
         self._show_server_tab()
-        self.results_panel.set_display(values["via_markers"], values["max_vias"], values["outlines"], values["names"])
+        self.results_panel.set_display(values["via_markers"], values["max_vias"], values["outlines"], values["names"],
+                                       values["terminals"])
         note = (f"; the {values['theme']} theme applies the next time GroundTruth opens"
                 if values["theme"] != old else "")
         self.SetStatusText(f"preferences saved: resolution {values['resolution']}×, threads {values['threads']}, "
