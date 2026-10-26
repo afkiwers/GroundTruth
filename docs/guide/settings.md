@@ -179,6 +179,7 @@ rules above decide.
 | `conducted_emission` | warning / error | Conducted estimate at the input (differential or common mode) within `emi_margin_db` of the limit / over it. |
 | `power_loop_broken` | error | A converter's hot loop cannot be closed in the copper. |
 | `current_density` | warning / error | DC (or a bridge's RMS) current density over the `current_density_*` limits. |
+| `dc_path_missing` | warning | A power stage's `output_connector` is not reached from its inductor through parts, so its DC output path is not modelled (its output copper shows no current). Names the connector that is reached. |
 | `via_overload` | warning / error | A via over `via_load_warning` / `via_load_error` % of its IPC-2221 capacity. |
 | `bridge_operating_point` | warning | A motor bridge cannot reach its phase current at this speed and bus voltage. |
 | `victim_coupling` | warning | A bridge's or power stage's switching puts noise or injected current on a victim net, or moves a victim part's ground. |
