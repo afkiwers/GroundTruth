@@ -801,8 +801,10 @@ their state for next time. How vias and parts are marked is set in <a href="#pre
 <ul>
 <li><b>View</b> lists a signal route as its net and driver → receiver, a converter's DC path as "DC" and the
   path's name, a bridge's RMS map as "RMS currents", and the bridge, sweep and thermal views by name.
-  <b>Layer</b>: <i>main layers</i>, or one copper layer with its share of the current in %, busiest first (the
-  drawing buttons use the busiest layer for <i>main layers</i>).</li>
+  <b>Layer</b>: <i>main layers</i> (the four carrying most of the current, at least 2 % each), <i>all layers</i>
+  (every copper layer of the board, top to bottom, also those carrying almost nothing; smaller maps), or one copper
+  layer with its share of the current in %, busiest first (the drawing buttons use the busiest layer for <i>main
+  layers</i> and <i>all layers</i>).</li>
 <li><b>A buck or boost stage's control loop</b> is one of its responses (the loop gain T): its crossover, phase
   margin and gain margin are in the stage's tiles and the report, an issue below 45° (30°: an error) or above f_sw/5
   (a boost: above a fifth of its right-half-plane zero, D'²·R_load/L, marked RHP). The parts
