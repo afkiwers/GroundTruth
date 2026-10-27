@@ -64,14 +64,17 @@ def test_pour_inductance_per_length_matches_a_wide_microstrip(pour_results):
 def test_the_pour_carries_the_whole_current_crowded_at_its_edges(pour_results):
     """Across the middle of the pour the sheet current integrates to the full 1 A, and at 10 MHz it crowds
     into the outermost cells (the edge singularity of a strip over a plane, within ~h/pi of the edge):
-    something a line model cannot show."""
+    something a line model cannot show. The map is the sheet current in the copper (per width of copper, as the
+    DC maps, since the density audit of 2026-10-27): a cut across it weighs each node by its copper share
+    (Grid.copper_area), so the pour's edge cells, partly copper, count with the copper they have."""
     rr = pour_results[40.0]
     g = rr.layer_grids["F.Cu"]
     K = rr.sheet_current["F.Cu"]
+    share = g.copper_area()
     i = int(round((X0 + 20.0 - g.x0) / g.d))
     js = [j for j in range(g.ny) if abs(g.y0 + j * g.d - Y) <= WIDTH / 2 + g.d / 2 and g.node[i, j]]
     profile = np.array([K[i, j] for j in js])
-    assert profile.sum() * g.d * 1e-3 == pytest.approx(1.0, rel=0.03)
+    assert float(np.sum(profile * [share[i, j] for j in js])) * g.d * 1e-3 == pytest.approx(1.0, rel=0.03)
     centre = profile[len(profile) // 2]
     assert profile[0] > 1.3 * centre and profile[-1] > 1.3 * centre
 

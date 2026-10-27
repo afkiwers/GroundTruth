@@ -862,7 +862,11 @@ their state for next time. How vias and parts are marked is set in <a href="#pre
 <li><b>Maps</b>: the current on each copper layer (a net's return current, a hot loop, a DC path's or a bridge's
   RMS current density), or the temperature. Arrows show which way the current flows, and their density how much.
   Green markers show the vias and parts that carry the current between layers, with their share.
-  <b>Log scale</b> shows weak current spread over a plane; untick it to see where most of it flows.</li>
+  <b>Log scale</b> shows weak current spread over a plane; untick it to see where most of it flows. Copper carrying
+  no current (another net's, idle copper) is the darkest colour on both scales, grey is where there is no copper.
+  Each node shows the current through the copper strips around it, from their heat: where current enters a plane
+  (a via, a pad) and spreads, that is where the map peaks. A value that is not a number (a failed solve) is left
+  blank and counted on its map's title.</li>
 <li><b>Vias on the maps</b>: a green ▲ marks a via that carries the view's current to another layer or net,
   a ■ a part that does. Every via with at least 1 % of the current is marked (on a DC path or a bridge's RMS map:
   of the path's current; on a signal route: of its return), drawn at its true size (pad and drill) for the wheel
