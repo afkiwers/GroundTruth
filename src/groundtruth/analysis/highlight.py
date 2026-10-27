@@ -38,18 +38,25 @@ ZOOM_STEP = 1.58       # KiCad's zoom out: its preset zoom levels (… 50, 80, 1
 ZOOM_STEPS_MAX = 12
 
 
-def zoom_steps(span_mm: float, extra: int = 0) -> int:
+def zoom_steps(span_mm: float, extra: int = 0, reach_mm: float = 0.0) -> int:
     """How many of KiCad's zoom-out steps follow "zoom to the selection" for a focus span_mm across: a focus under
     MIN_VIEW_MM is first stepped out to about that (log(1 mm / span) / log(ZOOM_STEP), rounded up: a 0.6 mm via 2),
     then the Preferences' `extra` steps ("Zoom out in KiCad"). KiCad's API can neither set nor read the view, only
     fit the selection and step out, so the setting is a count of KiCad's own steps, not millimetres: a millimetre
     target computed from assumed fit margins and step sizes showed 2-4x too much board (the user: "15mm is too far
-    zoomed out. And 1mm is pretty much spot on"; "Let's not call it mm, maybe call it just steps?")."""
+    zoomed out. And 1mm is pretty much spot on"; "Let's not call it mm, maybe call it just steps?").
+    reach_mm: the view must show this much (a spot beside the focus, Highlight.reach): the steps from the fit up to
+    it too."""
     import math
     base = 0 if span_mm >= MIN_VIEW_MM else int(math.ceil(math.log(MIN_VIEW_MM / max(span_mm, 0.05))
                                                            / math.log(ZOOM_STEP)))
+    fit = max(span_mm, MIN_VIEW_MM)
+    if reach_mm > fit:
+        base += int(math.ceil(math.log(reach_mm / fit) / math.log(ZOOM_STEP)))
     return min(base + max(int(extra), 0), ZOOM_STEPS_MAX)
 PLANE_MM = 25.0        # a zone wider than this is a plane: selected after the zoom, never zoomed to
+CLEARANCE_ZOOM_MM = 6.0  # a voltage-spacing issue zooms to the two sides' copper up to this size (_clearance)
+CLEARANCE_NEAR_MM = 2.0  # ... and as close to the gap as this (else the small copper around it)
 
 
 @dataclass
@@ -63,6 +70,7 @@ class Highlight:
     lit: list[str] = field(default_factory=list)   # focus copper on the nets to highlight (computed last)
     zoom_out: int = 0                    # zoom steps out after fitting the focus, so a short piece shows in context
     area: Optional[tuple[float, float, float, float]] = None   # bounding box of the focus, mm
+    reach: float = 0.0                   # mm the view must span around the focus (a spot beside it: _clearance)
     text: str = ""
 
     @property
@@ -74,6 +82,8 @@ class Highlight:
 def issue_highlight(issue: Issue, board: Board, config: Config, routes: Sequence = ()) -> Highlight:
     """The copper to show for `issue`. `routes`: the window's simulation results (RouteResult, ConverterResult),
     used for a route's return transfers and a power stage's capacitors; may be empty."""
+    if issue.check == "clearance_voltage":
+        return _clearance(issue, board, config)
     if issue.check in PIECE_CHECKS and not issue.key.startswith("noplane:"):
         h = _piece(issue, board, config)
     elif issue.check in ("no_reference", "off_plane"):
@@ -247,6 +257,75 @@ def _finish(h: Highlight, board: Board, config: Config, lit_nets: set[str]) -> H
 
 
 # ------------------------------------------------------------------------------------------------ per check
+def _clearance(issue: Issue, board: Board, config: Config) -> Highlight:
+    """A voltage spacing too small (safety.check_clearances): the issue sits in the gap between two nets' copper,
+    where no item is (the user: "clicking on a clearance_voltage check, it does not zoom into the location": it had
+    no items, so nothing was selected to zoom to). Each of the two nets' copper on the issue's layer closest to the
+    gap (a via, pad or track segment, else its pour) is selected and both nets lit (never a reference net). KiCad
+    can only zoom to what is selected, so only small items (CLEARANCE_ZOOM_MM) right at the gap (CLEARANCE_NEAR_MM)
+    are the zoom's focus; a long track or a pour would pull the view out to all of it (62 mm for a segment on
+    refboard) and is selected after the zoom (context). With neither side small and near, the small copper of any
+    net nearest the spot anchors the zoom (_small_around)."""
+    from shapely.geometry import Point
+    from ..geometry.shapes import pad_shape
+    at, layer = Point(issue.location), issue.layer
+    nets = [n for n in (issue.net, (issue.details or {}).get("other")) if n]
+    sides, found = [], []
+    for net in nets:
+        near = [(math.dist(v.position, issue.location) - v.size / 2, v.uuid) for v in board.vias if v.net == net]
+        near += [(s.distance(at), p.uuid) for p in board.pads() if p.net == net and p.uuid
+                 and (not layer or layer in p.layers) and (s := pad_shape(p)) is not None]
+        near += [(_dist_track(t, issue.location) - t.width / 2, t.uuid) for t in board.tracks
+                 if t.net == net and (not layer or t.layer == layer)]
+        pours = [(min(_shape(poly).distance(at) for poly in z.filled.get(layer, [])), z.uuid) for z in board.zones
+                 if z.net == net and not z.is_rule_area and z.filled.get(layer)]
+        small = min(near, default=None)
+        pour = min(pours, default=None)
+        # the small item when it is (about) as close as the pour: the pour's edge is the gap only when no pad or
+        # track of the net lies there
+        best = small if small is not None and (pour is None or small[0] <= pour[0] + 0.05) else pour
+        if best is not None:
+            sides.append(best)
+            found.append(net)
+    gap = (issue.details or {}).get("gap_mm")
+    text = f"{' and '.join(found) or 'no copper'} on {layer}" + (f", {gap:g} mm apart" if gap else "")
+    focus = [u for d, u in sides if d <= CLEARANCE_NEAR_MM and _span(board, u) <= CLEARANCE_ZOOM_MM]
+    rest = [u for _, u in sides if u not in focus]
+    if not focus:
+        focus = _small_around(board, issue.location, layer)
+    h = _finish(Highlight(focus=focus, context=rest, layer=layer, text=text), board, config, set(found))
+    if h.area:
+        # the view fits the focus and steps out: far enough that the gap beside it shows too (both ways round the
+        # focus's middle, and a millimetre around the gap)
+        cx, cy = (h.area[0] + h.area[2]) / 2, (h.area[1] + h.area[3]) / 2
+        h.reach = 2 * math.dist((cx, cy), issue.location) + 1.0
+    return h
+
+
+def _span(board: Board, uuid: str) -> float:
+    """The larger side of an item's bounding box, mm (inf for a zone or an unknown item: _bbox has no zones)."""
+    box = _bbox(board, [uuid])
+    return max(box[2] - box[0], box[3] - box[1]) if box else math.inf
+
+
+def _small_around(board: Board, at, layer: str, most: int = 3) -> list[str]:
+    """The `most` small items (vias, pads on `layer`, track segments on `layer`, each at most CLEARANCE_ZOOM_MM
+    across) of any net nearest the spot, looked for within 3, then 6, then 12 mm: something for KiCad to zoom to
+    where the spot's own copper is all large (two pours side by side, a long track)."""
+    from shapely.geometry import Point
+    from ..geometry.shapes import pad_shape
+    point = Point(at)
+    found = [(math.dist(v.position, at) - v.size / 2, v.uuid) for v in board.vias]
+    found += [(s.distance(point), p.uuid) for p in board.pads() if p.uuid and (not layer or layer in p.layers)
+              and (s := pad_shape(p)) is not None]
+    found += [(_dist_track(t, at) - t.width / 2, t.uuid) for t in board.tracks if not layer or t.layer == layer]
+    for reach in (3.0, 6.0, 12.0):
+        close = sorted((d, u) for d, u in found if d <= reach and _span(board, u) <= CLEARANCE_ZOOM_MM)
+        if close:
+            return [u for _, u in close[:most]]
+    return []
+
+
 def _piece(issue: Issue, board: Board, config: Config) -> Highlight:
     """A stretch of trace (length_mm, centred on location): every segment of the route's nets on the issue's
     layer that reaches into it, the offending segment first; the planes beside it as context."""
