@@ -702,11 +702,16 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
         ax.text(0.5, 0.5, rr.error or "no result", ha="center", va="center", transform=ax.transAxes)
         ax.set_axis_off()
         return
-    peak = max(float(np.nanmax(rr.sheet_current[l])) for l in layers) or 1.0
+    # the maps' values, a non-finite one (inf, NaN from a failed solve) blanked: one would set the colour scale's
+    # peak to inf and fail the whole figure ("Invalid vmin or vmax"); counted on each map's title instead
+    values = {l: np.where(np.isfinite(rr.sheet_current[l]), rr.sheet_current[l], np.nan) for l in layers}
+    bad = {l: int((rr.layer_grids[l].node & ~np.isfinite(rr.sheet_current[l])).sum()) for l in layers}
+    finite = [float(np.nanmax(values[l])) for l in layers if np.isfinite(values[l]).any()]
+    peak = (max(finite) if finite else 0.0) or 1.0
     linear = getattr(rr, "heat_scale", "log") == "linear"          # temperatures: °C from ambient up
     if linear:
-        norm = Normalize(vmin=getattr(rr, "ambient_c", None) or
-                         min(float(np.nanmin(rr.sheet_current[l])) for l in layers), vmax=peak)
+        lows = [float(np.nanmin(values[l])) for l in layers if np.isfinite(values[l]).any()]
+        norm = Normalize(vmin=getattr(rr, "ambient_c", None) or (min(lows) if lows else 0.0), vmax=peak)
     elif scale == "linear":
         norm = Normalize(vmin=0.0, vmax=peak)
     else:
@@ -721,17 +726,21 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
     im = None
     axes = []
     from ..results.vectors import reference_density
-    ref = reference_density([np.where(rr.layer_grids[l].node, rr.sheet_current[l], 0.0) for l in layers])
+    ref = reference_density([np.where(rr.layer_grids[l].node & np.isfinite(values[l]), values[l], 0.0) for l in layers])
     for n, lname in enumerate(layers):
         # shared axes: zooming or panning one layer shows the same spot on all of them
         ax = fig.add_subplot(rows, cols, n + 1, sharex=axes[0] if axes else None, sharey=axes[0] if axes else None)
         axes.append(ax)
         g = rr.layer_grids[lname]
-        K = np.where(g.node, rr.sheet_current[lname], np.nan)
+        K = np.where(g.node, values[lname], np.nan)
         fig._gt_maps = getattr(fig, "_gt_maps", {})          # for the plugin's value-under-the-mouse readout
         fig._gt_maps[ax] = (lname, g, K, getattr(rr, "heat_unit", None) or
                             ("A/mm²" if getattr(rr, "view_of", None) else "A/m per A"))
-        im = ax.imshow(K.T, origin="lower", extent=g.extent, cmap="inferno",
+        # on the log scale copper below its floor, no current at all included, takes the floor's (lowest) colour:
+        # LogNorm masks a 0 as invalid and drew it transparent, so a net's idle copper showed the figure's background
+        # (white) beside copper at a millionth of the peak in black, like a hole in the map; the readout keeps 0
+        shown = np.where(np.isnan(K), np.nan, np.maximum(K, norm.vmin * 0.5)) if isinstance(norm, LogNorm) else K
+        im = ax.imshow(shown.T, origin="lower", extent=g.extent, cmap="inferno",
                        norm=norm, interpolation="nearest")
         ax.imshow(np.where(g.node, np.nan, 1.0).T, origin="lower", extent=g.extent, cmap="Greys", vmin=0, vmax=3,
                   alpha=0.35, interpolation="nearest")
@@ -773,11 +782,13 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
         _place_labels(ax)
         ax.tick_params(labelsize=FS_TICK)
         share = rr.layer_share.get(lname)
+        blank = f", {bad[lname]} value(s) not finite: blank" if bad[lname] else ""
         if linear:
-            ax.set_title(f"{lname}  (max {float(np.nanmax(K)):.1f} °C)", fontsize=FS_TEXT)
+            hot = float(np.nanmax(K)) if np.isfinite(K).any() else float("nan")
+            ax.set_title(f"{lname}  (max {hot:.1f} °C{blank})", fontsize=FS_TEXT)
         else:
-            ax.set_title(f"{lname}" + (f"  ({share * 100:.0f} % of {what} current)" if share is not None else ""),
-                         fontsize=FS_TEXT)
+            ax.set_title(f"{lname}" + (f"  ({share * 100:.0f} % of {what} current{blank})" if share is not None
+                                       else (f"  ({blank[2:]})" if blank else "")), fontsize=FS_TEXT)
         if rr.kind == "thermal" and rr.hotspot_layer == lname:     # the thermal hot spot
             ax.plot(*rr.hotspot, marker="x", ms=10, mew=2, color="#00e5ff")
         # a DC path's or a bridge's RMS density map: its hottest sustained spot (where its density tile's click zooms;

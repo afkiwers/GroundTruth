@@ -2432,8 +2432,11 @@ def finish_route(model: BoardModel, setup: RouteSetup) -> RouteResult:
     share = rep.layer_share(_return_masks(setup.fine.build, own))
     names = setup.fine.build.names
     res.layer_share = {n: float(s) for n, s in zip(names, share)}
-    res.sheet_current = {n: rep.sheet_current(k, setup.fine.build.d) for k, n in enumerate(names)}
-    res.sheet_vectors = {n: tuple(v.astype(np.float32) for v in rep.sheet_vectors(k, setup.fine.build.d))
+    # the heat-consistent magnitude per copper width (node_field's copper=True, as the DC maps): the plain mean of a
+    # node's strips cancels where the return current enters a plane and spreads (a stitching via's node read 0)
+    # [VALIDATION_AUDIT round 5, ISSUE-12]
+    res.sheet_current = {n: rep.sheet_current(k, setup.fine.build.d, True) for k, n in enumerate(names)}
+    res.sheet_vectors = {n: tuple(v.astype(np.float32) for v in rep.sheet_vectors(k, setup.fine.build.d, True))
                          for k, n in enumerate(names)}
     res.terminal_vectors = terminal_vectors(setup.fine.build, rep)
     res.reference_layer = names[int(np.argmax(share))]
@@ -2878,8 +2881,8 @@ def board_maps(st: StackBuild, plane: PlaneStack, sol: Solution, board_transfers
     d = st.d
     rot = np.exp(-1j * sol.dominant_phase())
     out = {"f": float(sol.f), "layers": list(st.names), "grids": dict(zip(st.names, st.grids)),
-           "sheet_current": {n: sol.sheet_current(k, d).astype(np.float32) for k, n in enumerate(st.names)},
-           "sheet_vectors": {n: tuple(v.astype(np.float32) for v in sol.sheet_vectors(k, d))
+           "sheet_current": {n: sol.sheet_current(k, d, True).astype(np.float32) for k, n in enumerate(st.names)},
+           "sheet_vectors": {n: tuple(v.astype(np.float32) for v in sol.sheet_vectors(k, d, True))
                              for k, n in enumerate(st.names)},
            "displacement": {}, "transfers": point_transfers(board_transfers)}
     if plane.ncap and len(sol.I_cap):

@@ -169,8 +169,10 @@ def _mode(board, title: str, grids: dict, K: dict, vectors: dict, transfers: lis
     level = {l: i for i, l in enumerate(layers)}
     g0 = next(iter(grids.values()))
     x0, x1, y0, y1 = g0.extent
-    shown = [l for l in K if np.any(np.asarray(K[l]) > 0)]
-    peak = max((float(np.nanmax(K[l])) for l in shown), default=1.0) or 1.0
+    # a non-finite value (inf, NaN) left out, as on the heatmap: it would set the colour scale's peak to inf
+    K = {l: np.where(np.isfinite(np.asarray(m, float)), np.asarray(m, float), 0.0) for l, m in K.items()}
+    shown = [l for l in K if np.any(K[l] > 0)]
+    peak = max((float(np.max(K[l])) for l in shown), default=1.0) or 1.0
     norm = Normalize(0.0, peak) if scale == "linear" else LogNorm(peak * 1e-3, peak)
     from ..results.vectors import reference_density
     ref = reference_density([np.where(grids[l].node, K[l], 0.0) for l in shown]) if shown else 0.0

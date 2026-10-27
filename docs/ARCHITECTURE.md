@@ -421,6 +421,14 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
     sliver of the copper while its strips carry all of the current);
   - `Solution.node_field(copper=True)` keeps the mean's direction and sets the length so that ρ·|J|²·t·A is the
     node's half of its strips' I²R, exactly, whatever the pattern (a junction where the mean cancels included);
+    since the density audit of 2026-10-27 every map uses it: the routes', the hot loops', the board-wide model's and
+    the sharper maps were the plain mean (`copper=False`), which reads 0 at a node where current enters a plane
+    and spreads (a stitching via, a switch's pad: a hole where the density peaks; refboard's conv3 hot loop had 15)
+    and per cell width on a narrow track. A map's values are now the sheet current per width of copper everywhere:
+    a cut across a map adds up to the current with each node weighed by `Grid.copper_area`
+    (tests/test_density_maps.py, tests/test_pours.py). The heatmap draws copper below its log floor, idle copper at
+    0 included, in the lowest colour (LogNorm drew 0 transparent: the background), and blanks and counts a
+    non-finite value instead of failing (`plots.draw_heatmap`, `view3d._mode`);
   - cells join only within one connected piece of a net's copper (`build_grid`'s pieces, the polygons of the net's
     union; the track walk's own/free tests by piece): a track broken by a 0.15 mm gap was solved as connected.
   Results (tests/test_track_width.py, `tools/dev/track_width_check.py`): R' within 1 % of 1/(σwt) for 0.05-0.4 mm

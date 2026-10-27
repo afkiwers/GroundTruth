@@ -64,8 +64,8 @@ def _maps(view, st, sol):
     out = copy.copy(view)
     out.layer_grids = dict(zip(st.names, st.grids))
     out.grid = st.grids[0]
-    out.sheet_current = {n: sol.sheet_current(k, st.d) for k, n in enumerate(st.names)}
-    out.sheet_vectors = {n: tuple(v.astype(np.float32) for v in sol.sheet_vectors(k, st.d))
+    out.sheet_current = {n: sol.sheet_current(k, st.d, True) for k, n in enumerate(st.names)}   # as Simulate's
+    out.sheet_vectors = {n: tuple(v.astype(np.float32) for v in sol.sheet_vectors(k, st.d, True))
                          for k, n in enumerate(st.names)}
     from .simulate import terminal_vectors
     out.terminal_vectors = terminal_vectors(st, sol)

@@ -1386,8 +1386,11 @@ def finish_converter(model: BoardModel, setup: ConverterSetup) -> ConverterResul
     res.map_frequency = rep.f
     share = rep.layer_share()
     res.layer_share = {n: float(s) for n, s in zip(st.names, share)}
-    res.sheet_current = {n: rep.sheet_current(k, st.d) for k, n in enumerate(st.names)}
-    res.sheet_vectors = {n: tuple(v.astype(np.float32) for v in rep.sheet_vectors(k, st.d))
+    # the heat-consistent magnitude per copper width (Solution.node_field's copper=True, as the DC maps): the plain
+    # mean of a node's strips cancels where current enters and spreads (a switch's or capacitor's feed node read
+    # 0 where the density peaks), and reads a narrow track per cell width [VALIDATION_AUDIT round 5, ISSUE-12]
+    res.sheet_current = {n: rep.sheet_current(k, st.d, True) for k, n in enumerate(st.names)}
+    res.sheet_vectors = {n: tuple(v.astype(np.float32) for v in rep.sheet_vectors(k, st.d, True))
                          for k, n in enumerate(st.names)}
     res.terminal_vectors = terminal_vectors(st, rep)
     res.reference_layer = st.names[int(np.argmax(share))]
