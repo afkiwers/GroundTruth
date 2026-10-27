@@ -1554,7 +1554,8 @@ class MainFrame(ConfigActions, wx.Frame):
         from .prefs_dialog import checks_off, overrides, with_checks
         prefs = theme.prefs()
         base, r, over = self.settings.config, self.resolution(), overrides(prefs)
-        key = (r, tuple(sorted(over.items())), tuple(sorted(checks_off(prefs))), prefs.get("esd_mm"))
+        key = (r, tuple(sorted(over.items())), tuple(sorted(checks_off(prefs))), prefs.get("esd_mm"),
+               prefs.get("solder_mask"))
         cached = getattr(self, "_sim_cfg", None)
         if cached is None or cached[0] is not base or cached[1] != key:
             cfg = base if r == 1 and not over else replace(base, analysis=replace(base.analysis,

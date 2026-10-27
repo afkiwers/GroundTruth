@@ -1315,7 +1315,10 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   <b>Voltage spacing</b>, <b>Capacitor ratings</b>, <b>ESD at connectors</b>, <b>Differential pairs</b> (impedance
   and skew) and <b>Impedance targets</b>. An unticked check's issues are left out of Run checks and Simulate on this
   computer (a voltage-aware check that is off is not run at all); the command line runs every check.
-  <b>ESD search distance</b>: how close to a connector pin an ESD / TVS part on its net must be (10 mm by default);
+  <b>Solder mask</b> (Voltage spacing): <i>Counts as coating</i> (IPC-2221B B4 where the mask covers a gap),
+  <i>Left out</i> (all outer copper bare, B2, as safety standards treat ordinary mask) or <i>From the settings
+  file</i> (the default: the board's <code>safety.solder_mask</code>, else it counts); a choice replaces the file's
+  here. <b>ESD search distance</b>: how close to a connector pin an ESD / TVS part on its net must be (10 mm by default);
   it replaces the settings file's <code>safety.esd_mm</code> here. Beside each check, its <b>basis</b>: the standard,
   source or assumption it judges by, each a link to its entry under <a href="#references">References and
   assumptions</a> (a rule of thumb is an assumption there, with its reason): @CHECK_BASIS@.</td></tr>
