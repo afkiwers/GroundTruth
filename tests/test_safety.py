@@ -319,9 +319,9 @@ def test_clearances_do_not_depend_on_the_order_of_the_nets(monkeypatch):
 def test_the_solder_mask_decides_the_column(tmp_path):
     """The user: "does soler mask counts as coating?" IPC-2221B's B4 (permanent polymer coating) where the mask covers
     both conductors and the gap: the two tracks 0.2 mm apart under the mask pass at 48 V (B4 asks 0.13 mm), in an
-    opening they fail B2's 0.6 mm; a 0.1 mm gap fails B4 too. Two exposed pads (a 1206's, its terminations) 0.2 mm
-    from another net's exposed pad: A6 (0.4 mm at 48 V), A7 with a conformally coated assembly. A board read without
-    its mask (from KiCad alone): B2, as before (B4 with coated)."""
+    opening they fail B2's 0.6 mm; a 0.1 mm gap fails B4 too. Two exposed pads of two parts 0.2 mm apart: the
+    larger of the bare board's B2 and the assembly's A6 (0.6 mm at 48 V), A7 with a conformally coated assembly. A
+    board read without its mask (from KiCad alone): B2, as before (B4 with coated); an inner layer B1."""
     from boardgen import BoardGen
     from groundtruth.adapters.file_source import load_board
     from groundtruth.analysis.safety import exposed_copper, spacing_column
@@ -344,7 +344,8 @@ def test_the_solder_mask_decides_the_column(tmp_path):
     board = load_board(path)
     issues = _only([i for i in run_checks(board, sc.config).issues], "clearance_voltage")
     (i,) = [i for i in issues if i.layer == "F.Cu"]
-    assert i.details["column"].startswith("A6") and i.details["required_mm"] == 0.4
+    assert i.details["column"].startswith("B2") and i.details["required_mm"] == 0.6     # B2 0.6 over A6 0.4
+    assert "the larger of bare-board B2 and assembly A6" in i.message
     assert "an exposed pad in a solder-mask opening" in i.message
     exposed = exposed_copper(board, "F.Cu")
     pa, pb = Point(10.5, 10.0), Point(10.7, 10.0)
@@ -358,3 +359,17 @@ def test_the_solder_mask_decides_the_column(tmp_path):
     assert spacing_column(board, "F.Cu", exposed_copper(board, "F.Cu"), "+48V", "GND", pa, pb, False)[0] == "B2"
     assert spacing_column(board, "F.Cu", exposed_copper(board, "F.Cu"), "+48V", "GND", pa, pb, True)[0] == "B4"
     assert spacing_column(board, "In1.Cu", None, "+48V", "GND", pa, pb, False)[0] == "B1"
+
+
+def test_an_exposed_pad_takes_the_larger_of_b2_and_a6_and_the_mask_can_be_left_out(tmp_path):
+    """IPC-2221B's bare-board and assembly columns both bind an exposed pad: B2 to 100 V (0.6 mm at 48 V), A6 from
+    101 V (0.8 mm at 120 V against B2's 0.6). safety: solder_mask: bare (the mask left out, as safety standards treat
+    ordinary mask): the tracks 0.2 mm apart under the mask fail B2's 0.6 mm; an unknown value is refused."""
+    from groundtruth.analysis.safety import EXPOSED_PAD
+    assert required_mm(48, EXPOSED_PAD)[0] == 0.6 and required_mm(48, EXPOSED_PAD)[1].startswith("B2")
+    assert required_mm(120, EXPOSED_PAD)[0] == 0.8 and required_mm(120, EXPOSED_PAD)[1].startswith("A6")
+    assert not _only(_checks(tmp_path, "ipc", gap=0.2), "clearance_voltage")
+    (i,) = _only(_checks(tmp_path, "bare", {"solder_mask": "bare"}, gap=0.2), "clearance_voltage")
+    assert i.details["column"].startswith("B2") and "the solder mask left out" in i.message
+    with pytest.raises(ConfigError, match="solder_mask"):
+        config_from_data({"safety": {"solder_mask": "maybe"}})

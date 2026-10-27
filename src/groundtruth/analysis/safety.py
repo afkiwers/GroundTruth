@@ -59,6 +59,9 @@ PER_VOLT_ABOVE_500 = (0.0025, 0.005, 0.00305, 0.00305, 0.00305, 0.00305)
 COLUMNS = {"B1": (1, "B1 (internal)"), "B2": (2, "B2 (external, uncoated)"),
            "B4": (3, "B4 (external, under solder mask)"), "A5": (4, "A5 (external, conformally coated)"),
            "A6": (5, "A6 (exposed component termination)"), "A7": (6, "A7 (component termination, conformally coated)")}
+# an exposed pad: the larger of the bare board's B2 and the assembly's A6 (IPC-2221B splits its table into bare-board
+# and assembly columns; a board with exposed pads must meet both: B2 asks more up to 100 V, A6 from 101 V to 150 V)
+EXPOSED_PAD = "B2/A6"
 CHECK_FROM_V = 30.0             # pairs up to this difference need the basic spacing only (the fab's own rules)
 EXTERNAL = ("F.Cu", "B.Cu")
 CONNECTOR_PREFIXES = ("J", "P", "X", "CN", "CON")
@@ -314,6 +317,9 @@ def required_mm(dv: float, column: str = "B2", table: Optional[list] = None) -> 
     if column != "B1" and table:
         rows = sorted((float(v), float(mm)) for v, mm in table)
         return next((mm for v, mm in rows if dv <= v), rows[-1][1]), "your table (safety: clearance_mm)"
+    if column == EXPOSED_PAD:
+        b2, a6 = required_mm(dv, "B2")[0], required_mm(dv, "A6")[0]
+        return max(b2, a6), f"{'B2' if b2 >= a6 else 'A6'} (exposed pad: the larger of bare-board B2 and assembly A6)"
     col, name = COLUMNS[column]
     for row in IPC2221B:
         if dv <= row[0]:
@@ -355,31 +361,37 @@ def exposed_copper(board: Board, layer: str):
     return unary_union(geoms) if geoms else Polygon()
 
 
-def spacing_column(board: Board, layer: str, exposed, a: str, b: str, pa, pb, coated: bool) -> tuple[str, str]:
+def spacing_column(board: Board, layer: str, exposed, a: str, b: str, pa, pb, coated: bool,
+                   bare: bool = False) -> tuple[str, str]:
     """(IPC-2221B column, what the solder mask does there) for the gap from pa (on a's copper) to pb (on b's) on a
     layer [IPC-2221B, Table 6-1]: inside B1; outside without the mask known B2 (B4 with `coated`, as before); with
-    it known, B4 where the mask covers both ends and the gap, else A6 where only pads (component terminations) lie
-    open at it, B2 where bare copper does (a via, a track, a pour in an opening) or the gap itself is open; a
-    conformally coated assembly (`coated`) A7 for the pads, A5 for the bare copper."""
+    it known, B4 where the mask covers both ends and the gap, else EXPOSED_PAD (the larger of B2 and A6) where only
+    pads (component terminations) lie open at it, B2 where bare copper does (a via, a track, a pour in an opening)
+    or the gap itself is open; a conformally coated assembly (`coated`) A7 for the pads, A5 for the bare copper.
+    `bare` (safety: solder_mask: bare): the mask left out, every outer conductor open."""
     if layer not in EXTERNAL:
         return "B1", ""
-    if exposed is None:
+    if exposed is None and not bare:
         return ("B4", "") if coated else ("B2", "")
     from shapely.geometry import LineString
     from ..geometry.shapes import pad_shape
-    open_a, open_b = exposed.distance(pa) <= 1e-6, exposed.distance(pb) <= 1e-6
-    gap = LineString([pa, pb]) if pa.distance(pb) > 1e-9 else pa
-    if not (open_a or open_b or exposed.intersects(gap)):
-        return "B4", "under solder mask"
+    if bare:
+        open_a = open_b = True
+    else:
+        open_a, open_b = exposed.distance(pa) <= 1e-6, exposed.distance(pb) <= 1e-6
+        gap = LineString([pa, pb]) if pa.distance(pb) > 1e-9 else pa
+        if not (open_a or open_b or exposed.intersects(gap)):
+            return "B4", "under solder mask"
 
     def pad_at(net: str, point) -> bool:
         """A pad of the net on this layer at the point (an exposed termination, not bare copper)."""
         return any(p.net == net and layer in p.layers and (sh := pad_shape(p)) is not None
                    and sh.distance(point) <= 1e-6 for p in board.pads())
     ends = [(net, pt) for net, pt, is_open in ((a, pa, open_a), (b, pb, open_b)) if is_open]
+    where = "the solder mask left out" if bare else None
     if ends and all(pad_at(net, pt) for net, pt in ends):
-        return ("A7" if coated else "A6"), "an exposed pad in a solder-mask opening"
-    return ("A5" if coated else "B2"), "bare copper in a solder-mask opening"
+        return ("A7" if coated else EXPOSED_PAD), where or "an exposed pad in a solder-mask opening"
+    return ("A5" if coated else "B2"), where or "bare copper in a solder-mask opening"
 
 
 Add = Callable[..., None]       # checker.add(check, net, message, location, **kw)
@@ -392,6 +404,7 @@ def check_clearances(board: Board, copper, model: Volts, safety, add: Add) -> in
     close."""
     from shapely import STRtree
     coated, table = getattr(safety, "coated", False), getattr(safety, "clearance_mm", None)
+    bare = getattr(safety, "solder_mask", "ipc") == "bare"      # the mask left out: all outer copper uncoated
     volts = model.peak
     vmax = max((v for v, _ in volts.values()), default=0.0)
     found = 0
@@ -438,9 +451,9 @@ def check_clearances(board: Board, copper, model: Volts, safety, add: Add) -> in
                 # the column for this gap: on an outer layer the solder mask decides (B4 covered, A6 an exposed pad,
                 # B2 bare copper in an opening) [IPC-2221B, Table 6-1] (the user: "does soler mask counts as
                 # coating?" It does, where it covers the gap)
-                if external and exposed is None and getattr(board, "mask_known", False):
+                if external and exposed is None and not bare and getattr(board, "mask_known", False):
                     exposed = exposed_copper(board, layer)
-                column, how = spacing_column(board, layer, exposed, a, b, pa, pb, coated)
+                column, how = spacing_column(board, layer, exposed, a, b, pa, pb, coated, bare)
                 need, col = required_mm(dv, column, table)
                 if d >= need - 1e-6:
                     continue

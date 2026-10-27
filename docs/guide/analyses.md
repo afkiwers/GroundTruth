@@ -87,6 +87,7 @@ short or resistor model: its drain and source, not its gate). Your own win:
 safety:
   voltages: {/Surge/V_BATT: 58V, Net-(U303-BOOST1): 57V}   # peak, V
   coated: false             # a conformally coated assembly: IPC-2221B A5 / A7 where the solder mask is open
+  solder_mask: ipc          # ipc: the mask counts as coating where it covers a gap (B4); bare: left out
   clearance_mm: [[50, 0.6], [100, 1.5]]   # your own table for external layers ([V, mm], e.g. B3 above 3050 m)
   cap_derating: {ceramic: 50%, tantalum: 50%, electrolytic: 80%}
   resistor_derating: 50%
@@ -100,11 +101,13 @@ safety:
   difference (over 30 V only: below, the fab's basic spacing applies). The column follows the solder mask at the gap,
   read from the board (pads' mask openings and margins, vias' tenting, openings drawn on F.Mask / B.Mask): B1 on
   inner layers; B4 where the mask covers both conductors and the gap (a permanent polymer coating: 0.13 mm at
-  31-100 V); A6 where a pad lies open in its mask opening (an exposed component termination: 0.4-0.5 mm); B2 where
+  31-100 V); where a pad lies open in its mask opening the larger of the bare board's B2 and the assembly's A6
+  (0.6 mm up to 100 V, A6's 0.8 mm at 101-150 V); B2 where
   bare copper lies open (a via that isn't tented, a track or pour in an opening: 0.6 mm). With `coated: true` (a
   conformally coated assembly) A7 for the pads and A5 for bare copper. A board read from KiCad whose mask cannot be
   matched counts as bare (B2; B4 with `coated`), as before. Solder mask counts as coating for IPC-2221B's spacing
-  only: safety standards (IEC 62368-1, IEC 60664) don't credit it as insulation. Measured edge to edge at the
+  only: safety standards (IEC 62368-1, IEC 60664) don't credit it as insulation; `solder_mask: bare` leaves it out
+  (all outer copper uncoated) for a board you want spaced that way. Measured edge to edge at the
   closest point, the largest difference at any moment: a switch node swings
   from 0 V to its rail (so beside its rail it is the rail's voltage apart at times), a FET's gate rides on its source
   and a bootstrap net (a capacitor to the switch node and a driver pin) on its switch node, up to `gate_drive_v`
