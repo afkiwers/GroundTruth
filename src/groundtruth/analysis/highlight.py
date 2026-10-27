@@ -30,6 +30,8 @@ from ..core.issues import Issue
 
 PIECE_CHECKS = ("gap_crossing", "off_plane", "edge_proximity", "reference_net")
 ROUTE_CHECKS = ("return_path_broken", "return_detour", "plane_resonance", "emi_margin")
+# issues about parts rather than copper: their footprints are what is shown (_parts_issue)
+PART_CHECKS = ("cap_voltage", "resistor_power", "esd_protection", "part_temperature", "decap_missing")
 NEAR_MM = 1.5          # around a piece of trace: the plane zones on either side of a gap or along an edge
 SMALL_MM = 3.0         # a focus smaller than this is zoomed out twice after the fit, below SMALL_MM*3 once
 MIN_VIEW_MM = 1.0      # a focus smaller than this is zoomed out to about this much first (the user: "1mm is pretty
@@ -84,6 +86,8 @@ def issue_highlight(issue: Issue, board: Board, config: Config, routes: Sequence
     used for a route's return transfers and a power stage's capacitors; may be empty."""
     if issue.check == "clearance_voltage":
         return _clearance(issue, board, config)
+    if issue.check in PART_CHECKS:
+        return _parts_issue(issue, board, config)
     if issue.check in PIECE_CHECKS and not issue.key.startswith("noplane:"):
         h = _piece(issue, board, config)
     elif issue.check in ("no_reference", "off_plane"):
@@ -300,6 +304,28 @@ def _clearance(issue: Issue, board: Board, config: Config) -> Highlight:
         cx, cy = (h.area[0] + h.area[2]) / 2, (h.area[1] + h.area[3]) / 2
         h.reach = 2 * math.dist((cx, cy), issue.location) + 1.0
     return h
+
+
+def _parts_issue(issue: Issue, board: Board, config: Config) -> Highlight:
+    """An issue about parts, not copper (a capacitor's voltage, a resistor's loss, a part's temperature, a connector
+    without ESD protection, an IC without decoupling): their footprints selected and zoomed to, and an ESD issue's
+    bare pins (the user: "pressing on a cap_voltage entry does not highlight the part on the PCB": the issue named
+    no item, so nothing was selected). The parts come from the issue's details ("parts", "part"), its key's last
+    field (cap_voltage:C1, thermal:part:Q1) or its net, which these checks set to the part's reference. Nothing is
+    lit: the issue is about the part, not a net."""
+    details = issue.details or {}
+    refs = list(details.get("parts") or []) + ([details["part"]] if details.get("part") else [])
+    for name in (issue.key.rsplit(":", 1)[-1] if issue.key else "", issue.net):
+        if not refs and name and board.footprint(name) is not None:
+            refs = [name]
+    fps = [fp for fp in (board.footprint(r) for r in dict.fromkeys(refs)) if fp is not None]
+    pins = {str(p) for p in details.get("pins") or []}
+    pads = [p.uuid for fp in fps for p in fp.pads if p.pin in pins and p.uuid]
+    focus = pads + [fp.uuid for fp in fps if fp.uuid]
+    names = ", ".join(fp.reference for fp in fps[:6]) + (" …" if len(fps) > 6 else "")
+    h = Highlight(focus=focus, nets=False, layer="",
+                  text=(names + (f" (pins {', '.join(sorted(pins))})" if pads else "")) if fps else "no part found")
+    return _finish(h, board, config, set())
 
 
 def _span(board: Board, uuid: str) -> float:

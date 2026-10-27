@@ -319,3 +319,25 @@ def test_a_voltage_spacing_issue_zooms_to_the_gap_between_its_two_nets(tmp_path)
     assert not set(h.focus) & {z.uuid for z in board.zones}
     assert h.reach >= 2 * 1.9 and zoom_steps(0.6, 0, h.reach) > zoom_steps(0.6)    # far enough out to show the gap
     assert not h.lit or all(u in h.focus for u in h.lit)
+
+
+def test_an_issue_about_a_part_selects_the_part(tmp_path):
+    """cap_voltage, resistor_power, esd_protection, part_temperature, decap_missing name no copper item (the user:
+    "pressing on a cap_voltage entry does not highlight the part on the PCB"): the part's footprint is selected and
+    zoomed to (an ESD issue's bare pins too), nothing lit; the part comes from the details, the key or the net."""
+    from boardgen import safety_board
+    board, sc, _ = make(tmp_path, safety_board(gap=1.0, tvs=False), "parts", nets=())
+    issues = run_checks(board, sc.config).issues
+    c1, j1 = board.footprint("C1"), board.footprint("J1")
+    cap, = [i for i in issues if i.check == "cap_voltage"]                         # 48 V on a 50 V ceramic
+    h = issue_highlight(cap, board, sc.config)
+    assert h.focus == [c1.uuid] and not h.lit and h.area and "C1" in h.text
+    esd, = [i for i in issues if i.check == "esd_protection"]
+    h = issue_highlight(esd, board, sc.config)
+    pin = next(p.uuid for p in j1.pads if p.pin == "J1.1")
+    assert h.focus == [pin, j1.uuid] and "J1.1" in h.text
+    hot = Issue("part_temperature", "error", "thermal", "C1: 130 °C", c1.position, key="thermal:part:C1")
+    assert issue_highlight(hot, board, sc.config).focus == [c1.uuid]
+    many = Issue("part_temperature", "error", "thermal", "2 parts", c1.position, key="thermal:parts:heated",
+                 details={"parts": ["C1", "R1"]})
+    assert issue_highlight(many, board, sc.config).focus == [c1.uuid, board.footprint("R1").uuid]
