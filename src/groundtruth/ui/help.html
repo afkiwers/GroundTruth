@@ -767,7 +767,9 @@ circuits.</p>
 <p>Every problem found, by severity (error, warning, info). Clicking one shows it in KiCad: the copper concerned
 is selected, its net highlighted and the view zoomed to it (nothing in the design changes); <b>Zoom to it</b> and
 <b>Highlight its net</b> switch those off, <b>Show in KiCad</b> shows the selected issue again after you moved
-KiCad's view. <b>Draw markers on board</b> puts numbered markers on a drawing layer. (These need GroundTruth started
+KiCad's view. A voltage spacing issue (<b>clearance_voltage</b>) sits in the gap between two nets: both nets'
+copper closest to the gap is selected and the view zoomed to the gap (a long track or a pour beside it is selected
+without pulling the view out to all of it). <b>Draw markers on board</b> puts numbered markers on a drawing layer. (These need GroundTruth started
 from KiCad.) A finding you accept can be waived with <b>Waive selected…</b>
 (with a reason, kept in the settings file). Issue kinds include gap crossings, missing stitching vias or capacitors at layer changes, return
 detours, plane resonances, emission margins, hot-loop overshoot, conducted emission, current density, via

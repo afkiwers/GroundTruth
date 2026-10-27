@@ -357,7 +357,7 @@ class Session:
                 from ..analysis.highlight import zoom_steps
                 from .prefs_dialog import defaults
                 span = max(h.area[2] - h.area[0], h.area[3] - h.area[1])
-                zoom_out = zoom_steps(span, defaults(theme.prefs())["kicad_zoom_steps"])
+                zoom_out = zoom_steps(span, defaults(theme.prefs())["kicad_zoom_steps"], getattr(h, "reach", 0.0))
             r = show_items(self.kb, h.lit, h.focus, h.context, nets=nets and h.nets, zoom=zoom,
                            zoom_out=zoom_out, layer=target, clear_old=self.net_lit, wait=wait)
             self.net_lit = r["lit"]

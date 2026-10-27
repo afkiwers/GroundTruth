@@ -284,3 +284,38 @@ def test_kicad_zooms_out_the_preferences_steps_after_the_fit(monkeypatch):
     monkeypatch.setattr(theme, "prefs", lambda: {"kicad_zoom_steps": 3})
     session.show_issue(h)
     assert seen == [2, 5]
+
+
+def test_a_voltage_spacing_issue_zooms_to_the_gap_between_its_two_nets(tmp_path):
+    """clearance_voltage names no item (the user: "clicking on a clearance_voltage check, it does not zoom into the
+    location"): each net's copper closest to the gap is selected and both nets lit (never a reference net), and
+    only small items at the gap are what KiCad zooms to. Two tracks: both are the focus. A long track and a pour:
+    selected after the zoom, the small copper nearest the spot anchors it, with the view reaching the gap. Two
+    pours side by side: the same."""
+    from boardgen import BoardGen
+    from groundtruth.analysis.highlight import CLEARANCE_ZOOM_MM, zoom_steps
+    g = BoardGen(layers=2, size=(60.0, 60.0))
+    hv = g.track((10, 10), (14, 10), "HV", width=0.3)
+    sig = g.track((11, 10.45), (13, 10.45), "SIG", width=0.3)
+    long = g.track((5, 20), (55, 20), "LONG", width=0.3)            # 50 mm: never zoomed to
+    g.zone("PWR", "F.Cu", [(5, 20.4), (30, 20.4), (30, 30), (5, 30)])
+    g.zone("GND", "F.Cu", [(5, 30.3), (30, 30.3), (30, 40), (5, 40)])
+    anchor = g.via((33, 30.15), "NC", size=0.6)                     # the small copper nearest a gap in the pours
+    board, sc, _ = make(tmp_path, g, "gap", nets=())
+
+    def show(net, other, at):
+        """The highlight of a clearance issue between net and other at `at` on F.Cu."""
+        issue = Issue("clearance_voltage", "error", net, "too close", at, layer="F.Cu",
+                      details={"other": other, "gap_mm": 0.15})
+        return issue_highlight(issue, board, sc.config)
+    h = show("HV", "SIG", (12.0, 10.225))
+    assert set(h.focus) == {hv, sig} and set(h.lit) == {hv, sig} and h.layer == "F.Cu"
+    assert max(h.area[2] - h.area[0], h.area[3] - h.area[1]) <= CLEARANCE_ZOOM_MM and h.reach < 2.0
+    h = show("LONG", "PWR", (12.0, 20.3))
+    pwr = next(z.uuid for z in board.zones if z.net == "PWR")
+    assert long not in h.focus and {long, pwr} <= set(h.context + h.focus) and h.focus
+    h = show("PWR", "GND", (31.0, 30.15))
+    assert h.focus == [anchor] or anchor in h.focus
+    assert not set(h.focus) & {z.uuid for z in board.zones}
+    assert h.reach >= 2 * 1.9 and zoom_steps(0.6, 0, h.reach) > zoom_steps(0.6)    # far enough out to show the gap
+    assert not h.lit or all(u in h.focus for u in h.lit)
