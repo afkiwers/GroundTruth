@@ -564,8 +564,14 @@ or resistor model on the Parts tab (its drain and source, not its gate). A volta
 <code>safety: voltages</code>).</p>
 <ul>
 <li><b>clearance_voltage</b> (Run checks): copper of two nets on one layer closer than IPC-2221B Table 6-1 asks for
-  their voltage difference, at the closest point: B1 on inner layers, B2 on outer layers, B4 when the board is
-  <b>coated</b> (<code>safety: coated: true</code>); only above 30 V (below it the fab's basic spacing applies). An
+  their voltage difference, at the closest point; only above 30 V (below it the fab's basic spacing applies). The
+  column follows the solder mask at the gap, as the board has it: B1 on inner layers; <b>B4</b> where the mask
+  covers both sides and the gap (0.13 mm at 31-100 V); where a pad lies open in its mask opening the larger of
+  the bare board's <b>B2</b> and the assembly's <b>A6</b> (0.6 mm up to 100 V); <b>B2</b> where bare copper lies
+  open, an untented via or a track in an opening (0.6 mm); a
+  conformally coated assembly (<code>safety: coated: true</code>) A7 for the pads, A5 for bare copper. The message
+  says which and why. Solder mask counts for IPC-2221B's spacing only, not as insulation for a safety standard:
+  <code>safety: solder_mask: bare</code> leaves it out (all outer copper uncoated). An
   error; a <b>warning</b> when the other net's voltage is not known and is taken as 0 V (give it under
   <code>safety: voltages</code>). Voltages are ranges: a switch node swings from 0 V to its rail; a FET's gate
   rides on its source and a bootstrap net on its switch node, up to the gate drive (<code>gate_drive_v</code>,

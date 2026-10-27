@@ -6,10 +6,11 @@ bridge's bus and phase nodes its v_bus; a PDN rail's voltage; and the settings' 
 win. A net with no voltage known is taken as a low-voltage one (0 V) next to a high-voltage net.
 
 Run checks (no solve):
-- clearance_voltage: copper of two nets closer on a layer than IPC-2221B Table 6-1 asks for their voltage difference
-  (B1 internal layers; B2 external uncoated, sea level to 3050 m; B4 external with a permanent coating, `safety:
-  coated`); pairs whose difference needs more than the basic spacing (over 30 V), one issue per pair and layer, at the
-  closest point. A table of your own (`clearance_mm`: [[V, mm], ...], e.g. B3 above 3050 m, which public sources
+- clearance_voltage: copper of two nets closer on a layer than IPC-2221B Table 6-1 asks for their voltage difference,
+  in the column the solder mask at the gap decides (spacing_column: B1 internal layers; B4 under the mask, a
+  permanent polymer coating; A6 an exposed pad, a component termination; B2 bare copper in an opening, sea level to
+  3050 m; a conformally coated assembly, `safety: coated`, A7 / A5); pairs whose difference needs more than the
+  basic spacing (over 30 V), one issue per pair and layer, at the closest point. A table of your own (`clearance_mm`: [[V, mm], ...], e.g. B3 above 3050 m, which public sources
   do not reproduce reliably) replaces the external columns.
 - cap_voltage: a capacitor's voltage (between its nets) against its rating (its Rated Voltage or Voltage field, or
   "50V" in its value), derated by kind (ceramic 50 %, tantalum 50 %, aluminium 80 %, by default): over the rating an
@@ -44,12 +45,23 @@ from ..core.board import Board, Footprint
 
 # IPC-2221B Table 6-1 (electrical conductor spacing) [IPC-2221B], mm, by the voltage between the conductors (DC or AC
 # peak): (upper end of the band V, B1 internal layers, B2 external uncoated up to 3050 m, B4 external with permanent
-# polymer coating). Above 500 V: the 500 V value plus PER_VOLT_ABOVE_500 per volt over it. Two independent reproductions
-# and the table as remembered agree on these columns (the A5-A7 and B3 columns are not built in).
-IPC2221B = ((15, 0.05, 0.10, 0.05), (30, 0.05, 0.10, 0.05), (50, 0.10, 0.60, 0.13), (100, 0.10, 0.60, 0.13),
-            (150, 0.20, 0.60, 0.40), (170, 0.20, 1.25, 0.40), (250, 0.20, 1.25, 0.40), (300, 0.20, 1.25, 0.40),
-            (500, 0.25, 2.50, 0.80))
-PER_VOLT_ABOVE_500 = (0.0025, 0.005, 0.00305)
+# polymer coating (solder mask), A5 external with conformal coating over the assembly, A6 external component lead or
+# termination uncoated, A7 the same conformally coated). Above 500 V: the 500 V value plus PER_VOLT_ABOVE_500 per volt
+# over it. Two independent reproductions and the table as remembered agree on B1, B2 and B4; A5-A7 as a published
+# reproduction gives them (Altair PollEx's IPC Material table, checked 2026-10-27), the B3 column is not built in.
+IPC2221B = ((15, 0.05, 0.10, 0.05, 0.13, 0.13, 0.13), (30, 0.05, 0.10, 0.05, 0.13, 0.25, 0.13),
+            (50, 0.10, 0.60, 0.13, 0.13, 0.40, 0.13), (100, 0.10, 0.60, 0.13, 0.13, 0.50, 0.13),
+            (150, 0.20, 0.60, 0.40, 0.40, 0.80, 0.40), (170, 0.20, 1.25, 0.40, 0.40, 0.80, 0.40),
+            (250, 0.20, 1.25, 0.40, 0.40, 0.80, 0.40), (300, 0.20, 1.25, 0.40, 0.40, 0.80, 0.80),
+            (500, 0.25, 2.50, 0.80, 0.80, 1.50, 0.80))
+PER_VOLT_ABOVE_500 = (0.0025, 0.005, 0.00305, 0.00305, 0.00305, 0.00305)
+# a column's place in a row and how the issues name it
+COLUMNS = {"B1": (1, "B1 (internal)"), "B2": (2, "B2 (external, uncoated)"),
+           "B4": (3, "B4 (external, under solder mask)"), "A5": (4, "A5 (external, conformally coated)"),
+           "A6": (5, "A6 (exposed component termination)"), "A7": (6, "A7 (component termination, conformally coated)")}
+# an exposed pad: the larger of the bare board's B2 and the assembly's A6 (IPC-2221B splits its table into bare-board
+# and assembly columns; a board with exposed pads must meet both: B2 asks more up to 100 V, A6 from 101 V to 150 V)
+EXPOSED_PAD = "B2/A6"
 CHECK_FROM_V = 30.0             # pairs up to this difference need the basic spacing only (the fab's own rules)
 EXTERNAL = ("F.Cu", "B.Cu")
 CONNECTOR_PREFIXES = ("J", "P", "X", "CN", "CON")
@@ -296,20 +308,90 @@ def _through_series_parts(board: Board, config, out: dict, skip: set = frozenset
                 out[n] = (v, f"{src} through {via}")
 
 
-def required_mm(dv: float, external: bool, coated: bool = False, table: Optional[list] = None) -> tuple[float, str]:
-    """IPC-2221B Table 6-1's minimum spacing (mm) for a voltage difference dv on an internal or external layer
-    (uncoated B2, or coated B4), and the column's name; `table` [[V, mm], ...] (a user's, for external layers)
-    instead: the first row whose voltage is not below dv (its last row's value beyond)."""
+def required_mm(dv: float, column: str = "B2", table: Optional[list] = None) -> tuple[float, str]:
+    """IPC-2221B Table 6-1's minimum spacing (mm) for a voltage difference dv in a column (COLUMNS: B1 internal,
+    B2 external uncoated, B4 under solder mask, A5 conformally coated, A6 / A7 a component's termination uncoated /
+    coated) and the column's name; `table` [[V, mm], ...] (a user's, for external layers) instead for any external
+    column: the first row whose voltage is not below dv (its last row's value beyond)."""
     dv = abs(dv)
-    if external and table:
+    if column != "B1" and table:
         rows = sorted((float(v), float(mm)) for v, mm in table)
         return next((mm for v, mm in rows if dv <= v), rows[-1][1]), "your table (safety: clearance_mm)"
-    col = 1 if not external else (3 if coated else 2)
-    name = {1: "B1 (internal)", 2: "B2 (external, uncoated)", 3: "B4 (external, coated)"}[col]
+    if column == EXPOSED_PAD:
+        b2, a6 = required_mm(dv, "B2")[0], required_mm(dv, "A6")[0]
+        return max(b2, a6), f"{'B2' if b2 >= a6 else 'A6'} (exposed pad: the larger of bare-board B2 and assembly A6)"
+    col, name = COLUMNS[column]
     for row in IPC2221B:
         if dv <= row[0]:
             return row[col], name
     return IPC2221B[-1][col] + PER_VOLT_ABOVE_500[col - 1] * (dv - 500.0), name
+
+
+def worst_mm(dv: float, external: bool, table: Optional[list] = None) -> float:
+    """The most any column that can apply asks for dv: B1 inside; outside the larger of bare copper's B2 and an
+    exposed termination's A6 (A6 asks more from 101 V to 150 V)."""
+    if not external:
+        return required_mm(dv, "B1", table)[0]
+    return max(required_mm(dv, "B2", table)[0], required_mm(dv, "A6", table)[0])
+
+
+def exposed_copper(board: Board, layer: str):
+    """The solder mask's openings over an outer copper layer as one shapely geometry (pads open on that side, each
+    widened by its mask margin; vias not tented; the openings drawn on the mask layer), None when the board's mask
+    is not known (a board read from KiCad without its file) or for an inner layer."""
+    if layer not in EXTERNAL or not getattr(board, "mask_known", False):
+        return None
+    from shapely.geometry import LineString, Point, Polygon
+    from shapely.ops import unary_union
+    from ..geometry.shapes import pad_shape
+    side = layer[0]
+    geoms = []
+    for p in board.pads():
+        if side in (p.mask or "") and layer in p.layers:
+            shape = pad_shape(p)
+            if shape is not None and not shape.is_empty:
+                geoms.append(shape.buffer(p.mask_margin) if p.mask_margin else shape)
+    geoms += [Point(v.position).buffer(v.size / 2) for v in board.vias if side in (v.mask or "")
+              and layer in v.layers]
+    for item in (getattr(board, "mask_shapes", None) or {}).get(side, []):
+        if item[0] == "poly" and len(item[1]) >= 3:
+            geoms.append(Polygon(item[1]).buffer(0))
+        elif item[0] == "stroke" and len(item[1]) >= 2:
+            geoms.append(LineString(item[1]).buffer(max(item[2], 0.01) / 2))
+    return unary_union(geoms) if geoms else Polygon()
+
+
+def spacing_column(board: Board, layer: str, exposed, a: str, b: str, pa, pb, coated: bool,
+                   bare: bool = False) -> tuple[str, str]:
+    """(IPC-2221B column, what the solder mask does there) for the gap from pa (on a's copper) to pb (on b's) on a
+    layer [IPC-2221B, Table 6-1]: inside B1; outside without the mask known B2 (B4 with `coated`, as before); with
+    it known, B4 where the mask covers both ends and the gap, else EXPOSED_PAD (the larger of B2 and A6) where only
+    pads (component terminations) lie open at it, B2 where bare copper does (a via, a track, a pour in an opening)
+    or the gap itself is open; a conformally coated assembly (`coated`) A7 for the pads, A5 for the bare copper.
+    `bare` (safety: solder_mask: bare): the mask left out, every outer conductor open."""
+    if layer not in EXTERNAL:
+        return "B1", ""
+    if exposed is None and not bare:
+        return ("B4", "") if coated else ("B2", "")
+    from shapely.geometry import LineString
+    from ..geometry.shapes import pad_shape
+    if bare:
+        open_a = open_b = True
+    else:
+        open_a, open_b = exposed.distance(pa) <= 1e-6, exposed.distance(pb) <= 1e-6
+        gap = LineString([pa, pb]) if pa.distance(pb) > 1e-9 else pa
+        if not (open_a or open_b or exposed.intersects(gap)):
+            return "B4", "under solder mask"
+
+    def pad_at(net: str, point) -> bool:
+        """A pad of the net on this layer at the point (an exposed termination, not bare copper)."""
+        return any(p.net == net and layer in p.layers and (sh := pad_shape(p)) is not None
+                   and sh.distance(point) <= 1e-6 for p in board.pads())
+    ends = [(net, pt) for net, pt, is_open in ((a, pa, open_a), (b, pb, open_b)) if is_open]
+    where = "the solder mask left out" if bare else None
+    if ends and all(pad_at(net, pt) for net, pt in ends):
+        return ("A7" if coated else EXPOSED_PAD), where or "an exposed pad in a solder-mask opening"
+    return ("A5" if coated else "B2"), where or "bare copper in a solder-mask opening"
 
 
 Add = Callable[..., None]       # checker.add(check, net, message, location, **kw)
@@ -322,11 +404,13 @@ def check_clearances(board: Board, copper, model: Volts, safety, add: Add) -> in
     close."""
     from shapely import STRtree
     coated, table = getattr(safety, "coated", False), getattr(safety, "clearance_mm", None)
+    bare = getattr(safety, "solder_mask", "ipc") == "bare"      # the mask left out: all outer copper uncoated
     volts = model.peak
     vmax = max((v for v, _ in volts.values()), default=0.0)
     found = 0
     for layer in board.copper_layers:
         external = layer in EXTERNAL
+        exposed = None                  # the solder mask's openings on this layer, made at its first close pair
         # sorted: nets_on is a set, whose order differs between processes; the pairs (and which net of a pair
         # leads the issue) must not (one board named +VDC and SW2's pair either way round between two runs)
         nets = sorted(n for n in copper.nets_on(layer) if n)
@@ -342,7 +426,7 @@ def check_clearances(board: Board, copper, model: Volts, safety, add: Add) -> in
             if ga is None or ga.is_empty:
                 continue
             va = volts[a][0]
-            reach, _ = required_mm(va + vmax, external, coated, table)
+            reach = worst_mm(va + vmax, external, table)
             for k in tree.query(ga.buffer(reach)):
                 b = names[int(k)]
                 if b == a or (b, a) in done:
@@ -351,19 +435,28 @@ def check_clearances(board: Board, copper, model: Volts, safety, add: Add) -> in
                 dv = model.dv(a, b)
                 if dv <= CHECK_FROM_V:
                     continue
-                need, col = required_mm(dv, external, coated, table)
+                most = worst_mm(dv, external, table)        # the most any column asks: the pairs to look at
                 gb = geoms[b]
                 d = ga.distance(gb)
-                if d >= need - 1e-6:
+                if d >= most - 1e-6:
                     continue
                 # a part's own pins are spaced and rated by its maker (an EPC2306's interleaved drain and source,
                 # a controller's 0.5 mm pitch): its pads against each other don't count, a track against them does.
                 # Into names of their own: `ga` is a's whole copper for every other net b (overwriting it here took
                 # one part's pads out of a for the nets after it, so a pair could be missed depending on the order)
                 ca, cb, d = _without_own_pads(board, layer, a, b, ga, gb, d)
-                if d >= need - 1e-6:
+                if d >= most - 1e-6:
                     continue
                 pa, pb = nearest_points(ca, cb)
+                # the column for this gap: on an outer layer the solder mask decides (B4 covered, A6 an exposed pad,
+                # B2 bare copper in an opening) [IPC-2221B, Table 6-1] (the user: "does soler mask counts as
+                # coating?" It does, where it covers the gap)
+                if external and exposed is None and not bare and getattr(board, "mask_known", False):
+                    exposed = exposed_copper(board, layer)
+                column, how = spacing_column(board, layer, exposed, a, b, pa, pb, coated, bare)
+                need, col = required_mm(dv, column, table)
+                if d >= need - 1e-6:
+                    continue
                 at = ((pa.x + pb.x) / 2, (pa.y + pb.y) / 2)
                 found += 1
                 known = b in volts
@@ -371,11 +464,12 @@ def check_clearances(board: Board, copper, model: Volts, safety, add: Add) -> in
                 # drive or a bootstrap net sits near its rail's voltage: set it under safety: voltages)
                 add("clearance_voltage", a,
                     f"{a} ({model.text(a)}) and {b} ({model.text(b) if known else 'voltage not known, taken as 0 V'})"
-                    f" are {d:.2f} mm apart on {layer}: IPC-2221B {col} asks {need:.2f} mm for {dv:g} V"
+                    f" are {d:.2f} mm apart on {layer}{' (' + how + ')' if how else ''}: IPC-2221B {col} asks "
+                    f"{need:.2f} mm for {dv:g} V"
                     + ("" if known else f" (give {b}'s voltage under safety: voltages)"), at, layer=layer,
                     severity=None if known else "warning", key=f"clearance:{layer}:{a}:{b}",
                     details={"other": b, "gap_mm": round(d, 3), "required_mm": need, "dv": dv, "column": col,
-                             "other_known": known})
+                             "other_known": known, "mask": how})
     return found
 
 

@@ -161,6 +161,7 @@ class Via:
     via_type: str = "through"  # through | blind | buried | micro
     uuid: str = ""
     line: int = 0
+    mask: str = ""             # the sides its solder mask leaves open, "F" / "B" / "FB" (not tented); "" tented
 
 
 @dataclass
@@ -182,6 +183,8 @@ class Pad:
     uuid: str = ""
     pin_type: str = ""       # schematic electrical type: input | output | bidirectional | tri_state | passive | ...
     pin_function: str = ""   # schematic pin name, e.g. "PA5"
+    mask: str = ""           # the sides with a solder-mask opening over it, "F" / "B" / "FB" ("" none, or not known)
+    mask_margin: float = 0.0  # mm the opening is wider than the pad (its own, its footprint's, else the board's)
 
     @property
     def pin(self) -> str:
@@ -261,6 +264,11 @@ class Board:
     file_version: str = ""
     generator_version: str = ""
     warnings: list[str] = field(default_factory=list)
+    # the solder mask's openings (safety.check_clearances, IPC-2221B's coated and uncoated columns): known when the
+    # board file was read (pads' and vias' `mask`), plus the openings drawn on F.Mask / B.Mask, per side "F" / "B":
+    # [("poly", points) | ("stroke", points, width mm)]
+    mask_known: bool = False
+    mask_shapes: dict = field(default_factory=dict)
 
     @property
     def copper_layers(self) -> list[str]:
@@ -344,18 +352,21 @@ class Board:
                        [(m.name, r(m.thickness), r(m.epsilon_r)) if m else None for m in (st.mask_top, st.mask_bottom)])),
                  repr(("nets", sorted(self.nets)))]
         items = [repr(("t", point(t.start), point(t.end), r(t.width), t.layer, t.net, point(t.mid))) for t in self.tracks]
-        items += [repr(("v", point(v.position), r(v.size), r(v.drill), list(v.layers), v.net, v.via_type))
+        items += [repr(("v", point(v.position), r(v.size), r(v.drill), list(v.layers), v.net, v.via_type, v.mask))
                   for v in self.vias]
         for fp in self.footprints:
             pads = sorted(repr((p.number, point(p.position), r(p.angle), point(p.size), p.shape, list(p.layers), p.net,
                                 p.pad_type, r(p.drill), poly(p.polygon), r(p.roundrect_ratio), p.pin_type,
-                                p.pin_function)) for p in fp.pads)
+                                p.pin_function, p.mask, r(p.mask_margin))) for p in fp.pads)
             items.append(repr(("f", fp.reference, fp.value, fp.lib_id, point(fp.position), r(fp.angle), fp.layer, fp.dnp,
                                fp.exclude_from_sim, sorted(fp.fields.items()), fp.sheet, pads)))
         items += [repr(("z", z.net, list(z.layers), z.is_rule_area, z.name,
                         sorted((layer, [poly(p) for p in polys]) for layer, polys in z.filled.items()), poly(z.outline)))
                   for z in self.zones]
         items += [repr(("o", poly(o))) for o in self.outline]
+        # the solder mask's openings (voltage spacing reads them): whether known, and the ones drawn on the mask
+        items.append(repr(("mask", self.mask_known, sorted((side, [repr(i) for i in shapes])
+                                                           for side, shapes in self.mask_shapes.items()))))
         h = hashlib.sha256()
         for s in parts + sorted(items):
             h.update(s.encode("utf-8"))
