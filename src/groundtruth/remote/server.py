@@ -664,14 +664,16 @@ class ComputeServer:
         if method == "POST" and parts == ["jobs"]:
             from .worker import CLIENT_KINDS
             kind = q.get("kind", "")
-            if kind not in CLIENT_KINDS or (kind == "sleep" and not os.environ.get("GROUNDTRUTH_SERVER_TEST")):
-                h._json(400, {"error": f"unknown job kind {kind!r}"}, nonce)
-                return
+            # the version first: a newer plugin's job kind (thermal_coupled) on an older server is a version
+            # mismatch to fix by updating it, not an "unknown job kind"
             if q.get("code") != self.code:
                 from .. import build_version
                 h._json(409, {"error": f"the server runs {build_version()} (code {self.code}), this plugin "
                                        f"{q.get('version', '?')} (code {q.get('code')}): install the same package on "
                                        "both"}, nonce)
+                return
+            if kind not in CLIENT_KINDS or (kind == "sleep" and not os.environ.get("GROUNDTRUTH_SERVER_TEST")):
+                h._json(400, {"error": f"unknown job kind {kind!r}"}, nonce)
                 return
             import numpy
             if q.get("numpy", "").split(".")[0] != numpy.__version__.split(".")[0]:

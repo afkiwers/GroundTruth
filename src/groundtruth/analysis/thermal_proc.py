@@ -71,10 +71,11 @@ def run_in_process(board, config, converters, progress: Optional[Progress] = Non
     """run_thermal's result (ThermalResult, issues), solved in a child process, or with `server` (a
     remote.client.Remote) on the compute server; the inputs are prepared here either way (fast), and so are the DC
     paths at the solved temperatures (with_dc_at_temperature: the stages' maps stay here)."""
-    from .thermal import NO_STAGES, _empty, thermal_inputs, with_dc_at_temperature
-    inputs = thermal_inputs(board, config, converters, progress)
-    if inputs is None:
-        return _empty(config, NO_STAGES), []
+    if server is not None and config.thermal.electrothermal:
+        # the whole coupling on the compute server, one job: its rounds of DC paths at temperature need the stages'
+        # results (their DC plans) and the whole-board DC model, which it builds itself (the user, of the rounds'
+        # DC solves running on the laptop between the server's thermal solves: "option 1 please")
+        return server.run("thermal_coupled", (board, config, portable_results(converters)), progress)
 
     def solve(inputs):
         """One thermal solve of these inputs, on the compute server or in the child."""
@@ -84,9 +85,20 @@ def run_in_process(board, config, converters, progress: Optional[Progress] = Non
         if peak:
             res.mesh["memory_mb"] = round(peak)
         return res, issues
+    return thermal_with_coupling(board, config, converters, solve, progress, cancel)
+
+
+def thermal_with_coupling(board, config, converters, solve, progress: Optional[Progress] = None, cancel=None):
+    """(ThermalResult, issues) of these results: thermal_inputs (fast), solve(inputs) -> (ThermalResult, issues),
+    then with thermal.electrothermal the rounds of DC paths at temperature, each followed by solve() again
+    (electrothermal.couple), else the DC paths at the solved temperatures (with_dc_at_temperature). The plugin runs
+    it with solve in a child process or on the compute server; the server's thermal_coupled job runs all of it."""
+    from .thermal import NO_STAGES, _empty, thermal_inputs, with_dc_at_temperature
+    inputs = thermal_inputs(board, config, converters, progress)
+    if inputs is None:
+        return _empty(config, NO_STAGES), []
     res, issues = solve(inputs)
     if config.thermal.electrothermal:
-        # rounds of DC paths at temperature (solved here, where the stages' excitations are) and Thermal (there)
         from ..thermal.solver.common import Cancelled
         from .electrothermal import couple
         try:
@@ -96,6 +108,21 @@ def run_in_process(board, config, converters, progress: Optional[Progress] = Non
             raise ThermalCancelled("thermal solve cancelled") from e
         return res, issues
     return with_dc_at_temperature(res, board, converters), issues
+
+
+def portable_results(results: list) -> list:
+    """Copies of the stages' (and DC loads', bridges') results to send to the compute server: each DC path's model
+    replaced by its DcBoard and via currents (power.compact_dc_branch, as a split Simulate's parts send them); the
+    plugin's own results stay as they are."""
+    import copy
+    from .power import compact_dc_branch
+    out = []
+    for r in results:
+        if getattr(r, "dc_branch", None) or getattr(r, "dc_ripple_branch", None):
+            r = copy.copy(r)
+            compact_dc_branch(r)
+        out.append(r)
+    return out
 
 
 def capacity_in_process(board, config, converters, progress: Optional[Progress] = None, cancel=None,

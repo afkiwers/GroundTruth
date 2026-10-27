@@ -1097,7 +1097,7 @@ round that changes more than the one before ends it with the round before kept; 
 solves. Copper's resistance rising with temperature makes the rounds converge: one or two usually settle it. The
 result's notes and the electro-thermal tile say whether it settled, in how many rounds, and how the busiest via's
 current moved (at 20 °C → at temperature); the report lists the busiest vias both ways. Each round costs one DC
-solve and one thermal solve. Simulate's own DC tables stay at 20 °C. Bridges' RMS currents are not re-solved, and
+solve and one thermal solve; with a compute server the whole coupling, rounds and all, is one job there. Simulate's own DC tables stay at 20 °C. Bridges' RMS currents are not re-solved, and
 Current capacity keeps the 20 °C current pattern (only the heat follows the temperature there).</p>
 <p>
 Current capacity adds one view per stage or bridge at its capacity (replacing earlier capacity views), and the
