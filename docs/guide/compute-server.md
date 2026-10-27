@@ -44,7 +44,7 @@ lists the job, and its result comes back by itself whenever the server can be re
 home only delay it) and is shown, or offered there (Show results). Only the user cancels a job (Cancel job, or
 Remove from list, which also takes it off the list; a job whose server can't be reached any more is removed after a
 second question). Check in Simulate,
-Compare what-if, Thermal and Current capacity run there too while the window waits. Jobs queue first come, first
+Compare what-if, Thermal and Current capacity run there too while the window waits (Thermal with its electro-thermal rounds as one job: each round's DC paths are solved on the server too). Jobs queue first come, first
 served (`workers` at once; with as many workers as GPUs, one GPU each); every job lives on the server's disk, so a
 restart keeps the queue and the results; a result waits 24 h (`keep_hours`) and is removed once fetched. The server's
 settings are in `%LOCALAPPDATA%\GroundTruth\server.json` (made on the first start; options override them). A server

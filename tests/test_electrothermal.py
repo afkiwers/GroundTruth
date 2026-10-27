@@ -180,3 +180,36 @@ def test_the_settings(tmp_path):
     sc.save()
     with pytest.raises(ConfigError, match="electrothermal_rounds"):
         SettingsFile.load(sc.path)
+
+
+def test_the_coupling_runs_whole_on_the_compute_server_in_one_job(buck):
+    """With a compute server the electro-thermal rounds run there too (the user, of the rounds' DC solves on the
+    laptop between the server's thermal solves: "option 1 please"): run_in_process sends one "thermal_coupled" job
+    with the stages' results made portable (thermal_proc.portable_results: through the server's protocol and its
+    restricted unpickler), and the worker's coupling gives what the plugin's own does; without the coupling the plain
+    "thermal" job, as before."""
+    from groundtruth.analysis.thermal import run_thermal
+    from groundtruth.analysis.thermal_proc import run_in_process
+    from groundtruth.remote import worker
+    from groundtruth.remote.protocol import dumps, loads
+    board, cfg, stages = buck
+    on = _on(cfg, electrothermal_rounds=5)
+
+    class Server:
+        """A compute server in this process: each job through the wire format and the worker."""
+        kinds = []
+
+        def run(self, kind, args, progress=None):
+            self.kinds.append(kind)
+            return worker.run(kind, loads(dumps(args)), progress=progress)
+    server = Server()
+    th, issues = run_in_process(board, on, stages, server=server)
+    assert server.kinds == ["thermal_coupled"]
+    here, _ = run_thermal(board, on, stages)
+    assert th.electrothermal["rounds"] == here.electrothermal["rounds"] and th.electrothermal["settled"]
+    assert th.t_max == pytest.approx(here.t_max, abs=1e-6)
+    assert [r["r_mohm"] for r in th.dc_hot] == pytest.approx([r["r_mohm"] for r in here.dc_hot], rel=1e-9)
+    assert any(n.startswith("electro-thermal: settled in") for n in th.notes)
+    server.kinds.clear()
+    run_in_process(board, cfg, stages, server=server)
+    assert server.kinds == ["thermal"]

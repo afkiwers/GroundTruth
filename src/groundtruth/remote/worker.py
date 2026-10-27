@@ -12,6 +12,8 @@ The kinds:
 - "suggest" (board, config): suggest_fixes(); the two simulations it keeps, without their models;
 - "thermal" (board, config, (heat, losses, notes)) and "capacity" (board, config, inputs): the thermal solve and the
   current-capacity search, with the inputs the plugin prepared (thermal_inputs / capacity_inputs, fast);
+- "thermal_coupled" (board, config, results): Thermal with the electro-thermal rounds (thermal.electrothermal), all
+  here (thermal_proc.thermal_with_coupling): the stages' results come compacted (thermal_proc.portable_results);
 - "sleep" (seconds,): only with GROUNDTRUTH_SERVER_TEST set, for the queue's tests ("out of memory": a
   MemoryError instead).
 
@@ -91,6 +93,15 @@ def run(kind: str, args: tuple, threads: str = "-", gpu: str = "-", progress=Non
         from ..analysis.thermal import solve_thermal
         board, config, (heat, losses, notes) = args
         return solve_thermal(board, config, heat, losses, notes, progress)
+    if kind == "thermal_coupled":
+        # Thermal with the electro-thermal rounds, all here: the inputs from the stages' results, each round's DC
+        # paths on the whole-board DC model built here, Thermal solved again in this process
+        from ..analysis.thermal import solve_thermal
+        from ..analysis.thermal_proc import thermal_with_coupling
+        board, config, results = args
+        return thermal_with_coupling(board, config, results,
+                                     lambda inputs: solve_thermal(board, config, *inputs, progress=progress),
+                                     progress)
     if kind == "capacity":
         from ..analysis.thermal import solve_capacity
         board, config, inputs = args
@@ -108,8 +119,8 @@ def run(kind: str, args: tuple, threads: str = "-", gpu: str = "-", progress=Non
     raise ValueError(f"unknown job kind {kind!r}")
 
 
-KINDS = ("simulate", "suggest", "thermal", "capacity", "sleep", "items", "part", "merge")
-CLIENT_KINDS = ("simulate", "suggest", "thermal", "capacity", "sleep", "part")   # what POST /v1/jobs takes
+KINDS = ("simulate", "suggest", "thermal", "thermal_coupled", "capacity", "sleep", "items", "part", "merge")
+CLIENT_KINDS = ("simulate", "suggest", "thermal", "thermal_coupled", "capacity", "sleep", "part")   # what POST /v1/jobs takes
 PARENT_CHECK_S = 5.0
 
 
