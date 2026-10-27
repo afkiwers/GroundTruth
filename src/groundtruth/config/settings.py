@@ -484,7 +484,8 @@ class SafetySettings:
     PDN rails and net names; the clearance table's column choice; the derating of capacitors, resistors and switches;
     where ESD protection is looked for."""
     voltages: dict = field(default_factory=dict)        # net -> V (peak), winning over what is known otherwise
-    coated: bool = False                                # external layers with a permanent coating: IPC-2221B B4
+    coated: bool = False        # a conformally coated assembly: IPC-2221B A5 / A7 where the solder mask is open
+                                # (under the mask B4 either way; safety.spacing_column)
     clearance_mm: Optional[list] = None                 # [[V, mm], ...] for external layers instead of B2 / B4
     cap_derating: dict = field(default_factory=dict)    # {ceramic, tantalum, electrolytic: fraction of the rating}
     resistor_derating: float = 0.5                      # a resistor's loss up to this fraction of its rating

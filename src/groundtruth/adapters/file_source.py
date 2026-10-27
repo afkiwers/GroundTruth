@@ -80,6 +80,32 @@ def _net_name(node: SList) -> str:
     return a
 
 
+def _tenting(node: Optional[SList]) -> dict:
+    """A (tenting ...) block as {"F": tented, "B": tented} for the sides it names: KiCad 10's (tenting (front yes)
+    (back no)), and the bare (tenting front back) of earlier files (the sides listed are tented)."""
+    if node is None:
+        return {}
+    out = {}
+    for name, side in (("front", "F"), ("back", "B")):
+        sub = node.find(name)
+        if sub is not None:
+            out[side] = (sub.atoms()[:1] or ["yes"])[0] != "no"
+    if not out:
+        atoms = node.atoms()
+        out = {"F": "front" in atoms, "B": "back" in atoms}
+    return out
+
+
+def _filled(item: SList) -> bool:
+    """A graphic shape drawn filled: (fill yes) or (fill solid), or (fill (type solid)) of older files."""
+    fill = item.find("fill")
+    if fill is None:
+        return False
+    atoms = fill.atoms()
+    sub = fill.find("type")
+    return "yes" in atoms or "solid" in atoms or (sub is not None and "solid" in sub.atoms())
+
+
 def _pts(node: Optional[SList]) -> list[Point]:
     """A (pts ...) list's points: (xy x y) points, and (arc ...) entries sampled into points (KiCad's zone fills and
     polygons may mix both). A point shared by an arc and its predecessor is kept once."""
@@ -238,8 +264,13 @@ class _Loader:
             span = list(self.copper_names)
         net = _net_name(node)
         self.nets.add(net)
+        # the solder mask: open over the via on an outer side it reaches that is not tented (its own (tenting ...),
+        # else the board's)
+        tent = {**self.tenting, **_tenting(node.find("tenting"))}
+        open_ = "".join(side for side, layer in (("F", "F.Cu"), ("B", "B.Cu"))
+                        if layer in span and not tent.get(side, True))
         return Via((at[0], at[1]), node.float("size", 0.6), node.float("drill", 0.3), span, net, vtype,
-                   node.value("uuid", ""), node.line)
+                   node.value("uuid", ""), node.line, open_)
 
     def _footprint(self, node: SList) -> Footprint:
         """A (footprint ...) as a Footprint: reference, value and the symbol's other fields (properties), DNP and
@@ -274,6 +305,8 @@ class _Loader:
                        sheet=path.rsplit("/", 1)[0] if "/" in path else "",
                        sheet_name=(node.value("sheetname", "") or "").strip("/").split("/")[-1],
                        sheet_file=node.value("sheetfile", "") or "")
+        self.fp_margin = node.float("solder_mask_margin", 0.0) if node.find("solder_mask_margin") is not None \
+            else None
         for pnode in node.find_all("pad"):
             pad = self._pad(pnode, fp)
             if pad is not None:
@@ -346,8 +379,17 @@ class _Loader:
             self.nets.add(net)
         pin_type = (node.value("pintype", "") or "").split("+")[0]   # "input+no_connect" -> "input"
         pin_function = re.sub(r"_\d+$", "", node.value("pinfunction", "") or "")  # "PA5_12" -> "PA5"
+        # its solder-mask opening: the sides its layers name a mask on, widened by its own margin, else its
+        # footprint's, else the board's pad_to_mask_clearance
+        atoms = layers_node.atoms() if layers_node is not None else []
+        mask = "".join(side for side in ("F", "B")
+                       if f"{side}.Mask" in atoms or "*.Mask" in atoms or "F&B.Mask" in atoms)
+        own = node.float("solder_mask_margin", 0.0) if node.find("solder_mask_margin") is not None else None
+        fp_margin = getattr(self, "fp_margin", None)
+        margin = own if own is not None else fp_margin if fp_margin is not None else self.mask_clearance
         return Pad(fp.reference, str(number), pos, angle, (size[0], size[1]), shape, layers, net, ptype, drill,
-                   polygon, node.float("roundrect_rratio", 0.0), node.value("uuid", ""), pin_type, pin_function)
+                   polygon, node.float("roundrect_rratio", 0.0), node.value("uuid", ""), pin_type, pin_function,
+                   mask, margin)
 
     def _custom_pad(self, node: SList, pos: Point, angle: float, size) -> Optional[Polygon]:
         """A custom pad's outline: its anchor rectangle united with its polygon primitives (widened by their
@@ -445,6 +487,76 @@ class _Loader:
                     handle(item, tf)
         return polygonize_outline(segments, closed)
 
+    def _mask_shapes(self) -> dict:
+        """The openings drawn on F.Mask / B.Mask (the board's graphics, the footprints' turned and moved with them,
+        and zones on a mask layer), per side: [("poly", points) | ("stroke", points, width)]. A filled rectangle,
+        circle or polygon opens its area, a line, an arc or an unfilled shape the band its stroke covers."""
+        out: dict[str, list] = {}
+
+        def handle(item: SList, tf=None):
+            """Collect one graphic item if it is on a mask layer (tf: the footprint's local-to-board transform)."""
+            layer = self.layer_alias.get(item.value("layer", ""), item.value("layer", ""))
+            if layer not in ("F.Mask", "B.Mask"):
+                return
+            t = tf or (lambda p: p)
+            tag = item.tag.split("_", 1)[-1]
+            stroke = item.find("stroke")
+            width = (stroke.float("width", 0.0) if stroke is not None else item.float("width", 0.0)) or 0.0
+            pts: list[Point] = []
+            if tag == "line":
+                pts = [t(item.xy("start")[:2]), t(item.xy("end")[:2])]
+            elif tag == "arc":
+                pts = arc_points(t(item.xy("start")[:2]), t(item.xy("mid")[:2]), t(item.xy("end")[:2]))
+            elif tag == "rect":
+                (x0, y0), (x1, y1) = item.xy("start")[:2], item.xy("end")[:2]
+                pts = [t((x0, y0)), t((x1, y0)), t((x1, y1)), t((x0, y1)), t((x0, y0))]
+            elif tag == "circle":
+                c, e = item.xy("center")[:2], item.xy("end")[:2]
+                r = math.dist(c, e)
+                pts = [t((c[0] + r * math.cos(a * math.pi / 32), c[1] + r * math.sin(a * math.pi / 32)))
+                       for a in range(65)]
+            elif tag == "poly":
+                pts = [t(p) for p in _pts(item.find("pts"))]
+                pts = pts + pts[:1] if pts else pts
+            if len(pts) < 2:
+                return
+            side = out.setdefault(layer[0], [])
+            filled = tag in ("rect", "circle", "poly") and _filled(item)
+            if filled:
+                side.append(("poly", pts[:-1]))
+            if width > 0 or not filled:
+                side.append(("stroke", pts, width))
+
+        for item in self.root:
+            if not isinstance(item, SList):
+                continue
+            if item.tag.startswith("gr_"):
+                handle(item)
+            elif item.tag == "zone":
+                layers_node = item.find("layers")
+                names = [item.value("layer", "")] + (layers_node.atoms() if layers_node is not None else [])
+                for layer in ("F.Mask", "B.Mask"):
+                    if layer not in names:
+                        continue
+                    fills = [_pts(f.find("pts")) for f in item.find_all("filled_polygon")
+                             if f.value("layer", layer) == layer]
+                    if not fills and item.find("polygon") is not None:
+                        fills = [_pts(item.find("polygon").find("pts"))]
+                    out.setdefault(layer[0], []).extend(("poly", f) for f in fills if len(f) >= 3)
+        for fp in self.root.find_all("footprint"):
+            at = fp.xy("at")
+            pos, ang = (at[0], at[1]), (at[2] if len(at) > 2 else 0.0)
+
+            def tf(p, pos=pos, ang=ang):
+                """A footprint-local point in board coordinates."""
+                r = rotate(p, ang)
+                return (pos[0] + r[0], pos[1] + r[1])
+
+            for item in fp:
+                if isinstance(item, SList) and item.tag.startswith("fp_"):
+                    handle(item, tf)
+        return out
+
     # ---------------------------------------------------------------- main
     def load(self) -> Board:
         """The whole board: layers and stackup, then every top-level item (tracks, arcs, vias, footprints, zones),
@@ -457,6 +569,11 @@ class _Loader:
         if not self.copper_names:
             raise BoardLoadError(f"{self.source}: no copper layers found")
         stackup = self._stackup()
+        setup = self.root.find("setup")
+        # the solder mask's board settings: a pad's opening beyond it, and whether vias are tented (KiCad 10:
+        # (tenting (front yes) (back yes)); tented when the file says nothing)
+        self.mask_clearance = setup.float("pad_to_mask_clearance", 0.0) if setup is not None else 0.0
+        self.tenting = {"F": True, "B": True, **_tenting(setup.find("tenting") if setup is not None else None)}
         board = Board(self.source, stackup, file_version=version, generator_version=gen_version)
         for item in self.root:
             if not isinstance(item, SList):
@@ -479,6 +596,7 @@ class _Loader:
             elif tag == "net" and len(item) >= 3:  # old net table
                 self.nets.add(item[2])
         board.outline = self._outline()
+        board.mask_known, board.mask_shapes = True, self._mask_shapes()
         if not board.outline:
             self.warnings.append("no closed board outline on Edge.Cuts; using copper extents")
         self.nets.discard("")

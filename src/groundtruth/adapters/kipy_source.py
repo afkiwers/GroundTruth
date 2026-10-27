@@ -346,7 +346,37 @@ class _KipyReader:
         unfilled = board.unfilled_zones()
         if unfilled:
             board.warnings.append(f"{len(unfilled)} zone(s) are not filled; use 'Refill zones' first")
+        self._mask(board)
         return board
+
+    def _mask(self, board: Board):
+        """The solder mask's openings (pads' mask sides and margins, vias' tenting, the openings drawn on the mask
+        layers: safety's voltage spacing, IPC-2221B B4 under the mask), from the open board in KiCad's file format
+        (get_as_string: unsaved edits too; ~1 s on refboard), matched to this board's pads and vias by uuid. Left
+        not known (the check then takes the copper as bare) when KiCad can't give it or an item does not match."""
+        get = getattr(self.kb, "get_as_string", None)
+        if get is None:
+            return
+        try:
+            from .file_source import loads_board
+            saved = loads_board(get(), "kicad-ipc (file format)")
+        except Exception as e:                          # noqa: BLE001 - said, the check falls back to bare copper
+            board.warnings.append(f"the solder mask could not be read ({e}): voltage spacing takes outer copper as "
+                                  "bare (IPC-2221B B2)")
+            return
+        pads = {p.uuid: p for p in saved.pads() if p.uuid}
+        vias = {v.uuid: v for v in saved.vias if v.uuid}
+        mine = [p for p in board.pads() if p.uuid]
+        if any(p.uuid not in pads for p in mine) or any(v.uuid and v.uuid not in vias for v in board.vias):
+            board.warnings.append("the solder mask's openings did not match the board's pads and vias: voltage "
+                                  "spacing takes outer copper as bare (IPC-2221B B2)")
+            return
+        for p in mine:
+            p.mask, p.mask_margin = pads[p.uuid].mask, pads[p.uuid].mask_margin
+        for v in board.vias:
+            if v.uuid:
+                v.mask = vias[v.uuid].mask
+        board.mask_shapes, board.mask_known = saved.mask_shapes, True
 
 
 def read_board(kicad_board: Any) -> Board:

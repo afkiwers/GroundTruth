@@ -73,6 +73,13 @@ class BoardGen:
                           f'\t\t(min_thickness 0.2)\n\t\t(fill yes)\n\t\t(polygon\n\t\t\t(pts {pts})\n\t\t)\n{fill}\t)')
         return u
 
+    def mask_rect(self, layer: str, x0: float, y0: float, x1: float, y1: float) -> str:
+        """A filled rectangle on a solder-mask layer (F.Mask / B.Mask): an opening in the mask there."""
+        u = _u()
+        self.items.append(f'\t(gr_rect\n\t\t(start {x0} {y0})\n\t\t(end {x1} {y1})\n\t\t(stroke\n\t\t\t(width 0)\n'
+                          f'\t\t\t(type default)\n\t\t)\n\t\t(fill yes)\n\t\t(layer {_q(layer)})\n\t\t(uuid {_q(u)})\n\t)')
+        return u
+
     def plane(self, net: str, layer: str, holes: Sequence[Sequence[Pt]] = (), inset: float = 0.3) -> str:
         w, h = self.size
         return self.zone(net, layer, [(inset, inset), (w - inset, inset), (w - inset, h - inset), (inset, h - inset)],
@@ -934,17 +941,19 @@ def pdn_board(caps: Sequence[tuple] = (), source: bool = False, size: Pt = (40.0
 
 
 def safety_board(gap: float = 0.4, layer: str = "F.Cu", cap_value: str = "100n 50V", tvs: bool = True,
-                 other_net: str = "GND", **fields: dict) -> BoardGen:
+                 other_net: str = "GND", mask_open: bool = False, **fields: dict) -> BoardGen:
     """Voltage-aware checks (analysis/safety.py), 4 layers: a +48V track (0.5 mm wide, y = 10, x 5-35) on `layer`
     with a 0.5 mm `other_net` track beside it `gap` mm away edge to edge; a 1206 capacitor C1 (`cap_value`, pads 2 mm
     apart) from +48V to GND; a 0805 0R R1 from +48V to AUX (a net that takes +48V's voltage through it); a connector
     J1 (SIG, GND, an unconnected pin 3), SIG on to R2, with an ESD diode D1 (PESD5V0S1BL) on SIG 2 mm from J1.1
-    (`tvs`). fields: {ref: {name: value}}
-    symbol fields for the parts."""
+    (`tvs`). mask_open: the two tracks in an opening of the layer's solder mask (bare copper), else under it.
+    fields: {ref: {name: value}} symbol fields for the parts."""
     g = BoardGen(layers=4, size=(40.0, 30.0))
     g.track((5.0, 10.0), (35.0, 10.0), "+48V", layer, width=0.5)
     y2 = 10.0 + 0.5 + gap
     g.track((5.0, y2), (35.0, y2), other_net, layer, width=0.5)
+    if mask_open and layer in ("F.Cu", "B.Cu"):
+        g.mask_rect(f"{layer[0]}.Mask", 4.0, 9.0, 36.0, y2 + 1.0)
     g.footprint("C1", cap_value, "Capacitor_SMD:C_1206_3216Metric", (20.0, 22.0), [
         {"number": 1, "at": (-1.5, 0.0), "net": "+48V", "size": (1.0, 1.6)},
         {"number": 2, "at": (1.5, 0.0), "net": "GND", "size": (1.0, 1.6)}])

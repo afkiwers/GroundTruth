@@ -31,26 +31,33 @@ def _only(issues, check):
 
 
 def test_the_table_is_ipc_2221b_table_6_1():
-    """B1 internal, B2 external uncoated, B4 external coated (mm) at the band edges, and above 500 V the 500 V value
-    plus 0.0025 / 0.005 / 0.00305 mm per volt (1000 V: 1.5 / 5 / 2.325 mm)."""
-    for dv, b1, b2, b4 in ((15, 0.05, 0.1, 0.05), (30, 0.05, 0.1, 0.05), (31, 0.1, 0.6, 0.13), (100, 0.1, 0.6, 0.13),
-                           (101, 0.2, 0.6, 0.4), (151, 0.2, 1.25, 0.4), (300, 0.2, 1.25, 0.4), (500, 0.25, 2.5, 0.8)):
-        assert required_mm(dv, False)[0] == b1 and required_mm(dv, True)[0] == b2
-        assert required_mm(dv, True, coated=True)[0] == b4
-    assert required_mm(1000, False)[0] == pytest.approx(1.5)
-    assert required_mm(1000, True)[0] == pytest.approx(5.0)
-    assert required_mm(1000, True, coated=True)[0] == pytest.approx(2.325)
-    assert required_mm(60, True, table=[[50, 1.0], [100, 2.0]])[0] == 2.0      # a table of your own: the next row up
+    """B1 internal, B2 external uncoated, B4 under solder mask, A5 conformally coated, A6 / A7 a component's
+    termination uncoated / coated (mm) at the band edges, and above 500 V the 500 V value plus 0.0025 / 0.005 /
+    0.00305 mm per volt (1000 V: 1.5 / 5 / 2.325 mm; A6 3.025)."""
+    rows = ((15, 0.05, 0.1, 0.05, 0.13, 0.13, 0.13), (30, 0.05, 0.1, 0.05, 0.13, 0.25, 0.13),
+            (31, 0.1, 0.6, 0.13, 0.13, 0.4, 0.13), (100, 0.1, 0.6, 0.13, 0.13, 0.5, 0.13),
+            (101, 0.2, 0.6, 0.4, 0.4, 0.8, 0.4), (151, 0.2, 1.25, 0.4, 0.4, 0.8, 0.4),
+            (300, 0.2, 1.25, 0.4, 0.4, 0.8, 0.8), (500, 0.25, 2.5, 0.8, 0.8, 1.5, 0.8))
+    for dv, *values in rows:
+        assert [required_mm(dv, c)[0] for c in ("B1", "B2", "B4", "A5", "A6", "A7")] == values, dv
+    assert required_mm(1000, "B1")[0] == pytest.approx(1.5)
+    assert required_mm(1000, "B2")[0] == pytest.approx(5.0)
+    assert required_mm(1000, "B4")[0] == pytest.approx(2.325)
+    assert required_mm(1000, "A6")[0] == pytest.approx(3.025)
+    assert required_mm(60, "B2", table=[[50, 1.0], [100, 2.0]])[0] == 2.0      # a table of your own: the next row up
+    assert required_mm(60, "B4", table=[[50, 1.0], [100, 2.0]])[0] == 2.0      # ... for every external column
 
 
 def test_copper_closer_than_the_table_for_its_voltage(tmp_path):
-    """+48V beside GND 0.4 mm apart on F.Cu: B2 asks 0.6 mm for 48 V, an error at the measured gap; 0.7 mm apart:
-    nothing; coated (B4: 0.13 mm): nothing; on an inner layer (B1: 0.1 mm) 0.4 mm passes and 0.08 mm does not."""
-    (i,) = _only(_checks(tmp_path, "near", gap=0.4), "clearance_voltage")
+    """+48V beside GND 0.4 mm apart on F.Cu in an opening of the solder mask (bare copper): B2 asks 0.6 mm for 48 V,
+    an error at the measured gap; 0.7 mm apart: nothing; a conformally coated assembly (A5: 0.13 mm): nothing; on an
+    inner layer (B1: 0.1 mm) 0.4 mm passes and 0.08 mm does not."""
+    (i,) = _only(_checks(tmp_path, "near", gap=0.4, mask_open=True), "clearance_voltage")
     assert i.severity == "error" and i.layer == "F.Cu" and "GND" in i.message
     assert i.details["gap_mm"] == pytest.approx(0.4, abs=0.01) and i.details["required_mm"] == 0.6
-    assert not _only(_checks(tmp_path, "far", gap=0.7), "clearance_voltage")
-    assert not _only(_checks(tmp_path, "coated", {"coated": True}, gap=0.4), "clearance_voltage")
+    assert "B2" in i.message and "bare copper in a solder-mask opening" in i.message
+    assert not _only(_checks(tmp_path, "far", gap=0.7, mask_open=True), "clearance_voltage")
+    assert not _only(_checks(tmp_path, "coated", {"coated": True}, gap=0.4, mask_open=True), "clearance_voltage")
     assert not _only(_checks(tmp_path, "inner", gap=0.4, layer="In1.Cu"), "clearance_voltage")
     (i,) = _only(_checks(tmp_path, "tight", gap=0.08, layer="In1.Cu"), "clearance_voltage")
     assert i.details["required_mm"] == 0.1 and "B1" in i.message and i.layer == "In1.Cu"
@@ -59,10 +66,10 @@ def test_copper_closer_than_the_table_for_its_voltage(tmp_path):
 def test_a_net_of_unknown_voltage_next_to_a_high_one_is_a_warning(tmp_path):
     """The other track on a net with no known voltage (SENSE): taken as 0 V, a warning that says what to set; with
     its voltage given (45 V, 3 V from +48V) nothing."""
-    (i,) = _only(_checks(tmp_path, "unknown", gap=0.4, other_net="SENSE"), "clearance_voltage")
+    (i,) = _only(_checks(tmp_path, "unknown", gap=0.4, other_net="SENSE", mask_open=True), "clearance_voltage")
     assert i.severity == "warning" and "SENSE" in i.message and "safety: voltages" in i.message
-    assert not _only(_checks(tmp_path, "given", {"voltages": {"SENSE": "45V"}}, gap=0.4, other_net="SENSE"),
-                     "clearance_voltage")
+    assert not _only(_checks(tmp_path, "given", {"voltages": {"SENSE": "45V"}}, gap=0.4, other_net="SENSE",
+                             mask_open=True), "clearance_voltage")
 
 
 def test_capacitor_ratings_and_derating(tmp_path):
@@ -307,3 +314,47 @@ def test_clearances_do_not_depend_on_the_order_of_the_nets(monkeypatch):
             (net, kw["details"]["other"])))
         seen.add(tuple(found))
     assert seen == {(("A", "C"),)}          # C beside A's pad found, B (the part's own pads) not, always as A-C
+
+
+def test_the_solder_mask_decides_the_column(tmp_path):
+    """The user: "does soler mask counts as coating?" IPC-2221B's B4 (permanent polymer coating) where the mask covers
+    both conductors and the gap: the two tracks 0.2 mm apart under the mask pass at 48 V (B4 asks 0.13 mm), in an
+    opening they fail B2's 0.6 mm; a 0.1 mm gap fails B4 too. Two exposed pads (a 1206's, its terminations) 0.2 mm
+    from another net's exposed pad: A6 (0.4 mm at 48 V), A7 with a conformally coated assembly. A board read without
+    its mask (from KiCad alone): B2, as before (B4 with coated)."""
+    from boardgen import BoardGen
+    from groundtruth.adapters.file_source import load_board
+    from groundtruth.analysis.safety import exposed_copper, spacing_column
+    from shapely.geometry import Point
+    assert not _only(_checks(tmp_path, "masked", gap=0.2), "clearance_voltage")
+    (i,) = _only(_checks(tmp_path, "open", gap=0.2, mask_open=True), "clearance_voltage")
+    assert i.details["column"].startswith("B2")
+    (i,) = _only(_checks(tmp_path, "thin", gap=0.1), "clearance_voltage")
+    assert i.details["column"].startswith("B4") and i.details["required_mm"] == 0.13
+    assert "under solder mask" in i.message
+    # pads: P1 on +48V and P2 on GND (two parts: a part's own pins are its maker's), 0.2 mm apart, both in their own
+    # mask openings (F.Mask in their layers)
+    g = BoardGen(layers=4, size=(20.0, 20.0))
+    g.footprint("P1", "pad", "Fake:pad", (10.0, 10.0), [{"number": 1, "at": (0.0, 0.0), "net": "+48V",
+                                                          "size": (1.0, 1.0)}])
+    g.footprint("P2", "pad", "Fake:pad", (11.2, 10.0), [{"number": 1, "at": (0.0, 0.0), "net": "GND",
+                                                          "size": (1.0, 1.0)}])
+    via = g.via((10.0, 14.0), "+48V")
+    _, sc, path = make(tmp_path, g, "pads", nets=())
+    board = load_board(path)
+    issues = _only([i for i in run_checks(board, sc.config).issues], "clearance_voltage")
+    (i,) = [i for i in issues if i.layer == "F.Cu"]
+    assert i.details["column"].startswith("A6") and i.details["required_mm"] == 0.4
+    assert "an exposed pad in a solder-mask opening" in i.message
+    exposed = exposed_copper(board, "F.Cu")
+    pa, pb = Point(10.5, 10.0), Point(10.7, 10.0)
+    assert spacing_column(board, "F.Cu", exposed, "+48V", "GND", pa, pb, True)[0] == "A7"
+    assert exposed.distance(Point(10.0, 14.0)) > 0.1            # the via is tented (the board says nothing)
+    board.vias[0].mask = "F"                                     # not tented: open on the front, bare copper
+    near = Point(10.0, 14.3)
+    assert spacing_column(board, "F.Cu", exposed_copper(board, "F.Cu"), "+48V", "GND", near,
+                          Point(10.0, 14.5), False)[0] == "B2"
+    board.mask_known = False                                     # read from KiCad without its file: as before
+    assert spacing_column(board, "F.Cu", exposed_copper(board, "F.Cu"), "+48V", "GND", pa, pb, False)[0] == "B2"
+    assert spacing_column(board, "F.Cu", exposed_copper(board, "F.Cu"), "+48V", "GND", pa, pb, True)[0] == "B4"
+    assert spacing_column(board, "In1.Cu", None, "+48V", "GND", pa, pb, False)[0] == "B1"
