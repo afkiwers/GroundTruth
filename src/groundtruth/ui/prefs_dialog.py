@@ -72,6 +72,9 @@ CHECK_BASIS = {
     "check_impedance": ("Paul 2008",),
 }
 ESD_MM_MIN, ESD_MM_MAX = 0.5, 100.0       # the ESD search distance in Preferences (SafetySettings.esd_mm: 10 mm)
+# Voltage spacing's solder mask (SafetySettings.solder_mask): the list's text -> the value ("" the settings file's)
+SOLDER_MASK = {"From the settings file": "", "Counts as coating (IPC-2221B B4)": "ipc",
+               "Left out (bare copper)": "bare"}
 GAP = 6                  # the dialog's spacing unit (DIP): rows and labels one apart, groups and margins two
 MIN_PANE_DIP = 200       # the scrolled pane of groups is never shorter (the dialog's minimum height)
 
@@ -163,13 +166,15 @@ def checks_off(prefs: dict) -> frozenset:
 
 
 def with_checks(cfg, prefs: dict):
-    """The settings with this computer's check choices: the checks switched off (Config.checks_off) and the ESD
-    search distance (safety.esd_mm, which Preferences replaces). The same object when nothing changes."""
+    """The settings with this computer's check choices: the checks switched off (Config.checks_off), the ESD
+    search distance (safety.esd_mm, which Preferences replaces) and Voltage spacing's solder mask when one is chosen
+    (safety.solder_mask; "From the settings file" keeps the board's). The same object when nothing changes."""
     from dataclasses import replace
     off, esd = checks_off(prefs), _esd_mm(prefs)
-    if cfg is None or (cfg.checks_off == off and cfg.safety.esd_mm == esd):
+    mask = defaults(prefs)["solder_mask"] or (cfg.safety.solder_mask if cfg is not None else "ipc")
+    if cfg is None or (cfg.checks_off == off and cfg.safety.esd_mm == esd and cfg.safety.solder_mask == mask):
         return cfg
-    return replace(cfg, checks_off=off, safety=replace(cfg.safety, esd_mm=esd))
+    return replace(cfg, checks_off=off, safety=replace(cfg.safety, esd_mm=esd, solder_mask=mask))
 
 
 def defaults(prefs: dict) -> dict:
@@ -201,6 +206,7 @@ def defaults(prefs: dict) -> dict:
             "kicad_zoom_steps": _kicad_zoom(prefs),
             **{key: bool(prefs.get(key, True)) for key, *_ in CHECK_TOGGLES},
             "esd_mm": _esd_mm(prefs),
+            "solder_mask": prefs.get("solder_mask") if prefs.get("solder_mask") in ("ipc", "bare") else "",
             "compute": "server" if prefs.get("compute") == "server" else "local",
             "server": str(prefs.get("server", "") or ""),
             "server_key": str(prefs.get("server_key", "") or ""),
@@ -333,7 +339,7 @@ class ServersPanel(wx.Panel):
                                "development copy): update them with the server package, or install a built plugin.")
         else:
             self.note.SetLabel(f"{len(old)} server(s) out of date; Update installs this plugin's version on them "
-                               "(their running jobs finish first).")
+                               "at once (a busy one cancels its running jobs: their owners run them again).")
         self.note.Wrap(max(200, self.list.GetSize().width))
         self.GetParent().Layout()
         self._enable()
@@ -652,6 +658,16 @@ class PreferencesDialog(wx.Dialog):
             self.checks[key].SetValue(p[key])
             row(checks, label, self.checks[key], tip + ". Unticked: Run checks and Simulate leave it out on this "
                                                        "computer.", extra=self._basis_links(key))
+        self.solder_mask = wx.Choice(self, choices=list(SOLDER_MASK))
+        self.solder_mask.SetStringSelection(next(k for k, v in SOLDER_MASK.items() if v == p["solder_mask"]))
+        row(checks, "Solder mask", self.solder_mask,
+            "Voltage spacing: whether the solder mask counts as IPC-2221B's permanent polymer coating where it covers "
+            "a gap (B4: 0.13 mm at 31-100 V), or is left out and all outer copper taken as bare (B2: 0.6 mm), as "
+            "safety standards treat ordinary mask. From the settings file: the board's safety.solder_mask (else it "
+            "counts). Replaces it on this computer (the command line keeps reading the file's)")
+        spacing = self.checks["check_clearance_voltage"]
+        spacing.Bind(wx.EVT_CHECKBOX, lambda e: self.solder_mask.Enable(spacing.GetValue()))
+        self.solder_mask.Enable(p["check_clearance_voltage"])
         self.esd_mm = wx.SpinCtrlDouble(self, min=ESD_MM_MIN, max=ESD_MM_MAX, inc=0.5, initial=p["esd_mm"])
         self.esd_mm.SetDigits(1)
         row(checks, "ESD search distance (mm)", self.esd_mm,
@@ -756,6 +772,7 @@ class PreferencesDialog(wx.Dialog):
                 "kicad_zoom_steps": _kicad_zoom({"kicad_zoom_steps": self.kicad_zoom.GetValue()}),
                 **{key: box.GetValue() for key, box in self.checks.items()},
                 "esd_mm": _esd_mm({"esd_mm": self.esd_mm.GetValue()}),
+                "solder_mask": SOLDER_MASK[self.solder_mask.GetStringSelection()],
                 "via_markers": self.via_markers.GetValue(),
                 "max_vias": int(v) if v.isdigit() else None,
                 "outlines": self.outlines.GetValue(),

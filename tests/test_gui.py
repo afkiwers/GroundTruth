@@ -2561,6 +2561,31 @@ def test_preferences_switch_each_check_and_set_the_esd_distance(app, frame):
     with PreferencesDialog(frame, defaults(v)) as dlg:
         assert not dlg.checks["check_diff_pairs"].GetValue() and dlg.esd_mm.GetValue() == 4.5
 
+
+def test_preferences_choose_whether_the_solder_mask_counts_for_voltage_spacing(app, frame):
+    """The user, of safety.solder_mask: "is that a dropdown?", then "where is that setting?". Preferences > Run
+    checks > Solder mask: From the settings file (the default: the board's), Counts as coating, Left out; greyed
+    while Voltage spacing is unticked; with_checks puts the choice into the settings Run checks and Simulate use,
+    and From the settings file keeps the board's."""
+    from groundtruth.config.settings import config_from_data
+    from groundtruth.ui.prefs_dialog import PreferencesDialog, defaults, with_checks
+    with PreferencesDialog(frame, defaults({})) as dlg:
+        assert dlg.solder_mask.GetStringSelection() == "From the settings file" and dlg.solder_mask.IsEnabled()
+        spacing = dlg.checks["check_clearance_voltage"]
+        spacing.SetValue(False)
+        spacing.ProcessEvent(wx.CommandEvent(wx.wxEVT_CHECKBOX, spacing.GetId()))
+        assert not dlg.solder_mask.IsEnabled()
+        spacing.SetValue(True)
+        dlg.solder_mask.SetStringSelection("Left out (bare copper)")
+        v = dlg.values()
+    assert v["solder_mask"] == "bare"
+    with PreferencesDialog(frame, defaults(v)) as dlg:
+        assert dlg.solder_mask.GetStringSelection() == "Left out (bare copper)"
+    cfg = config_from_data({"safety": {"solder_mask": "ipc"}})
+    assert with_checks(cfg, v).safety.solder_mask == "bare"
+    assert with_checks(cfg, defaults({})).safety.solder_mask == "ipc"            # the board's
+    assert with_checks(config_from_data({"safety": {"solder_mask": "bare"}}), defaults({})).safety.solder_mask == "bare"
+
 def test_each_check_shows_its_basis_as_links_into_the_references(app, frame):
     """The user: "add the standards used to judge these options. e.g. Voltage spacing (IPC....)", then "add reference
     to the assumptions with clickable links that open the doc and jump to the section". Preferences shows each Run
