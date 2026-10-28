@@ -422,7 +422,7 @@ class ResultsPanel(wx.Panel):
         self.draw_button = b
         b2 = theme.Button(self, "Draw arrows on board")
         b2.SetToolTip("the current arrows of the selected layer, on the current-drawing User layer")
-        b2.Bind(wx.EVT_BUTTON, lambda e: on_draw_arrows and on_draw_arrows(self.current(), self.selected_layer()))
+        b2.Bind(wx.EVT_BUTTON, lambda e: on_draw_arrows and on_draw_arrows(self.current(), self.arrow_layers()))
         top.Add(b2, 0, wx.RIGHT | wx.BOTTOM, 4)
         self.arrow_button = b2
         b3 = theme.Button(self, "Open in window")
@@ -853,6 +853,18 @@ class ResultsPanel(wx.Panel):
         if k > 1:
             return layers[k - 2]
         return layers[0] if layers else None
+
+    def arrow_layers(self):
+        """What Draw arrows on board draws: the chosen layer, or for "main layers" / "all layers" every layer the
+        maps show (plots.heatmap_layers), drawn together."""
+        from ..report.plots import heatmap_layers
+        rr = self.current()
+        chosen = self._map_layer()
+        if rr is None or not getattr(rr, "sheet_current", None) or not hasattr(rr, "main_layers"):
+            return self.selected_layer()        # no maps (a Bode view, ...): on_draw_arrows says why
+        if chosen is not None and chosen in rr.sheet_current:
+            return chosen
+        return heatmap_layers(rr, chosen) or self.selected_layer()
 
     def _map_layer(self):
         """What the maps show: None ('main layers'), plots.ALL_LAYERS ('all layers') or the chosen layer."""
