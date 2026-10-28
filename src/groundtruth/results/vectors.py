@@ -13,7 +13,8 @@ N_ACROSS = 45          # candidate spots across the wider side of a map (plots)
 ARROW = 0.7            # arrow length, fraction of the spot spacing
 JITTER = 0.25          # random offset of a spot, fraction of the spacing (breaks up the lattice look)
 REF_PERCENTILE = 95    # full fill at this percentile of the copper's density (not at one hot pad corner)
-FLOOR = 0.01           # no arrows below this fraction of the reference (idle copper, numerical noise)
+FLOOR = 1e-3           # no arrows below this fraction of the reference: the heatmap's log floor (three decades)
+MIN_FILL = 0.1         # a spot above the floor gets at least this fill: weak current shows sparse arrows, never none
 
 
 def _bayer(n: int = 8) -> np.ndarray:
@@ -46,11 +47,15 @@ def reference_density(maps) -> float:
 def arrow_field(grid, K: np.ndarray, Kx: np.ndarray, Ky: np.ndarray, n_across: int = N_ACROSS,
                 spacing_mm: float | None = None, max_arrows: int | None = None, gamma: float = 0.5,
                 seed: int = 1, ref: float | None = None, with_density: bool = False,
-                with_net: bool = False) -> list[tuple]:
+                with_net: bool = False, floor: float | None = None) -> list[tuple]:
     """[(x, y, dx, dy), ...] in board mm (y down): equal arrows whose number per area follows the current density.
 
     The map is divided into spots of b×b grid nodes (about `n_across` across the wider side, or `spacing_mm`
-    apart). A spot's fill is its mean density over `ref`, raised to `gamma`, capped at 1, and 0 below FLOOR·ref.
+    apart). A spot's fill is its mean density over `ref`, raised to `gamma`, capped at 1, at least MIN_FILL, and 0
+    below `floor` (an absolute density, the heatmap's colour floor: its peak / 1000; default FLOOR·ref). Every
+    connected region of one net's spots above the floor shows at least one arrow, at its strongest spot (the user:
+    "even when the density is a lot less, it should still draw a few on the lightest setting and never omit
+    them!": a pour carrying 0.1-0.4 A/mm² beside 10 A paths fell under the old floor, 1 % of a 38 A/mm² reference).
     `ref` defaults to reference_density of this map; pass a shared one when several maps are shown together, so
     a layer carrying little current also shows few arrows. gamma 0.5 (default) compresses the decades a current
     density spans (a return current falls off fast beside its trace) while staying monotonic: more current,
@@ -71,6 +76,7 @@ def arrow_field(grid, K: np.ndarray, Kx: np.ndarray, Ky: np.ndarray, n_across: i
     ref = ref or reference_density([Kn[node]])
     if ref <= 0:
         return []
+    floor = FLOOR * ref if floor is None else float(floor)
     b = max(1, round(spacing_mm / grid.d)) if spacing_mm else max(1, math.ceil(max(nx, ny) / max(n_across, 1)))
     # node indices, for the copper centroid of each spot
     i, j = np.meshgrid(np.arange(nx), np.arange(ny), indexing="ij")
@@ -81,7 +87,7 @@ def arrow_field(grid, K: np.ndarray, Kx: np.ndarray, Ky: np.ndarray, n_across: i
     label = getattr(grid, "label", None)
     if label is not None and getattr(grid, "nets", None):
         lab = np.where(node, np.asarray(label), -1)
-        groups = [n for n in np.unique(lab[node & (Kn >= FLOOR * ref)]) if n >= 0]
+        groups = [n for n in np.unique(lab[node & (Kn >= floor) & (Kn > 0)]) if n >= 0]
         masks = [lab == n for n in groups] or [node]
         names = [grid.nets[n] for n in groups] or [""]
     else:
@@ -109,7 +115,8 @@ def arrow_field(grid, K: np.ndarray, Kx: np.ndarray, Ky: np.ndarray, n_across: i
             ux, uy = best[4] / count, best[5] / count
         norm = np.hypot(ux, uy)                 # the spot's mean current vector; its direction is the arrow's
         rel = np.nan_to_num(mag) / ref
-        fill = np.where(rel >= FLOOR, np.clip(rel, 0.0, 1.0) ** gamma, 0.0)
+        above = (np.nan_to_num(mag) >= floor) & (np.nan_to_num(mag) > 0)
+        fill = np.where(above, np.maximum(np.clip(rel, 0.0, 1.0) ** gamma, MIN_FILL), 0.0)
         ix, iy = np.meshgrid(np.arange(bx), np.arange(by), indexing="ij")
         # ordered dithering: a spot shows an arrow when its fill exceeds the Bayer threshold of its place in the
         # 8x8 tile, so a region filled to f shows arrows on about a fraction f of its spots, evenly spread
@@ -117,6 +124,7 @@ def arrow_field(grid, K: np.ndarray, Kx: np.ndarray, Ky: np.ndarray, n_across: i
         if max_arrows is None or keep.sum() <= max_arrows or b > max(nx, ny):
             break
         b = math.ceil(b * 1.25)
+    keep = _every_region(keep, (count > 0) & (norm > 0) & (fill > 0), pick, np.nan_to_num(mag))
     pitch = b * grid.d
     jit = np.random.default_rng(seed).uniform(-JITTER, JITTER, (bx, by, 2)) * pitch
     full = count == b * b                                   # jitter only where it cannot leave the copper
@@ -130,6 +138,23 @@ def arrow_field(grid, K: np.ndarray, Kx: np.ndarray, Ky: np.ndarray, n_across: i
     return [(float(x[a, c] - dx[a, c] / 2), float(y[a, c] - dy[a, c] / 2), float(dx[a, c]), float(dy[a, c]))
             + ((float(mag[a, c]),) if with_density else ()) + ((names[pick[a, c]],) if with_net else ())
             for a, c in zip(*k)]
+
+
+def _every_region(keep: np.ndarray, candidates: np.ndarray, net: np.ndarray, mag: np.ndarray) -> np.ndarray:
+    """`keep` with one more spot in every 4-connected region of one net's candidate spots that the dithering left
+    without an arrow: its strongest spot (a narrow strip or a small pour carrying weak current has few spots, and
+    the 8 x 8 pattern can miss all of them)."""
+    from scipy import ndimage
+    keep = keep.copy()
+    for n in np.unique(net[candidates]):
+        regions, count = ndimage.label(candidates & (net == n))
+        if not count:
+            continue
+        index = np.arange(1, count + 1)
+        shown = ndimage.maximum(keep.astype(float), regions, index)
+        for r in index[np.asarray(shown) == 0]:
+            keep[ndimage.maximum_position(mag, regions, r)] = True
+    return keep
 
 
 def arrow_widths(densities, peak: float, w_min: float, w_max: float, decades: float = 3.0) -> list[float]:

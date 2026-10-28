@@ -46,7 +46,9 @@ from .tabbook import SETUP_HUES, TabBook
 from .config_menu import ConfigActions, initial_state
 
 BOARD_ARROW_SPACING_MM = 0.8   # spot spacing of the current arrows drawn on the board (arrows 0.56 mm long)
-MAX_BOARD_ARROWS = 1500        # three graphic segments each; the spacing grows beyond that
+MAX_BOARD_ARROWS = 3000        # three graphic segments each; the spacing grows beyond that (1500 until weak current
+                               # got its sparse arrows: refboard's layers need 1300-1950 at 0.8 mm, and the growth to
+                               # 1.2 mm halved every layer's arrows)
 FOLLOW_MS = 500                # the Parts tab looks at KiCad's selection this often (only while it shows)
 STATUS_LINES = 3               # a long status message wraps onto up to this many lines (the bar grows)
 
@@ -2371,11 +2373,12 @@ class MainFrame(ConfigActions, wx.Frame):
             # current gets few arrows
             maps = [np.where(rr.layer_grids[n].node, K, 0.0) for n, K in rr.sheet_current.items()]
             ref = reference_density(maps)
+            peak = max((float(m.max()) for m in maps if m.size), default=0.0)
+            # arrows down to the heatmap's log floor (peak / 1000): weak current shows sparse arrows, never none
             arrows = arrow_field(rr.layer_grids[plane_layer], rr.sheet_current[plane_layer], *vec,
                                  spacing_mm=BOARD_ARROW_SPACING_MM, max_arrows=MAX_BOARD_ARROWS, ref=ref,
-                                 with_density=True, with_net=True)
+                                 with_density=True, with_net=True, floor=peak * 1e-3)
             # line width by the density at each arrow (Preferences: Arrow lines), against the peak of all layers
-            peak = max((float(m.max()) for m in maps if m.size), default=0.0)
             widths = arrow_widths([a[4] for a in arrows], peak, w_min, w_max)
             arrows = [a[:4] + (w, a[5]) for a, w in zip(arrows, widths)]
             # the return current's arrows apart, by the net each one stands on (its last value)

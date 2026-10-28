@@ -393,7 +393,8 @@ def heatmap_layers(rr: RouteResult, layer: Optional[str] = None, max_layers: int
     return rr.main_layers()[:max_layers] or list(rr.sheet_current)[:1]
 
 
-def _arrows(ax, rr, lname: str, n_across: int, ref: float, view: Optional[tuple] = None) -> int:
+def _arrows(ax, rr, lname: str, n_across: int, ref: float, view: Optional[tuple] = None,
+            floor: Optional[float] = None) -> int:
     """Current-direction arrows on one heatmap panel (none when the result has no vector field). With a `view`
     (x0, x1, y0, y1, a zoomed-in part of the map) they are laid out over that part only, n_across over its
     width: zooming in shows the flow in more detail, not the same arrows larger."""
@@ -414,7 +415,7 @@ def _arrows(ax, rr, lname: str, n_across: int, ref: float, view: Optional[tuple]
         crop = (slice(i0, i1), slice(j0, j1))
         g = SimpleNamespace(node=g.node[crop], d=g.d, x0=g.x0 + i0 * g.d, y0=g.y0 + j0 * g.d)
         K, Kx, Ky = K[crop], Kx[crop], Ky[crop]
-    arrows = arrow_field(g, K, Kx, Ky, n_across=n_across, ref=ref)
+    arrows = arrow_field(g, K, Kx, Ky, n_across=n_across, ref=ref, floor=floor)
     if not arrows:
         return 0
     x, y, dx, dy = (np.array(c) for c in zip(*arrows))
@@ -745,7 +746,8 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
         ax.imshow(np.where(g.node, np.nan, 1.0).T, origin="lower", extent=g.extent, cmap="Greys", vmin=0, vmax=3,
                   alpha=0.35, interpolation="nearest")
         if vectors:
-            _arrows(ax, rr, lname, 45 if len(layers) == 1 else 30, ref, view)
+            # arrows wherever the log scale colours the copper: down to its floor, peak / 1000
+            _arrows(ax, rr, lname, 45 if len(layers) == 1 else 30, ref, view, floor=peak * vmin_frac)
         _route(ax, board, rr)
         if outlines or names:
             _part_outlines(ax, board, view if view is not None else g.extent, outlines, names)

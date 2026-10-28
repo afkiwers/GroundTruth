@@ -77,7 +77,7 @@ def _canvas(grid, px: int):
     return fig, ax
 
 
-def _map_png(grid, K, vec, norm, ref: float, px: int = SHEET_PX) -> str:
+def _map_png(grid, K, vec, norm, ref: float, px: int = SHEET_PX, floor: Optional[float] = None) -> str:
     """|K| in the heatmap's colours; transparent off the copper, faint on idle copper, more opaque where more
     current flows; arrows as on the heatmap."""
     from matplotlib import colormaps
@@ -92,7 +92,7 @@ def _map_png(grid, K, vec, norm, ref: float, px: int = SHEET_PX) -> str:
     ax.imshow(np.transpose(rgba, (1, 0, 2)), origin="lower", extent=grid.extent, interpolation="nearest",
               aspect="auto")
     if vec is not None:
-        arrows = arrow_field(grid, K, *vec, n_across=ARROWS_ACROSS, ref=ref)
+        arrows = arrow_field(grid, K, *vec, n_across=ARROWS_ACROSS, ref=ref, floor=floor)
         if arrows:
             x, y, dx, dy = (np.array(c) for c in zip(*arrows))
             length = float(np.hypot(dx[0], dy[0]))
@@ -180,7 +180,7 @@ def _mode(board, title: str, grids: dict, K: dict, vectors: dict, transfers: lis
     for l in layers:
         s = {"name": l, "level": level[l], "img": None, "note": ""}
         if l in K:
-            s["img"] = _map_png(grids[l], K[l], vectors.get(l), norm, ref)
+            s["img"] = _map_png(grids[l], K[l], vectors.get(l), norm, ref, floor=peak * 1e-3)
             if shares and l in shares:
                 s["note"] = f"{shares[l] * 100:.0f} %"
         sheets.append(s)
