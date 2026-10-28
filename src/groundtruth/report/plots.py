@@ -839,6 +839,9 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
     fig.subplots_adjust(left=fx0, right=fx1, bottom=fy0, top=fy1, wspace=gap_w / cell_w, hspace=gap_h / cell_h)
     for ax in axes:                              # the maps shrink to their aspect ratio: match the bar to them
         ax.apply_aspect()
+        p = ax.get_position()                   # kept for fit_box: a toolbar zoom must not grow the box
+        fig._gt_boxes = getattr(fig, "_gt_boxes", {})
+        fig._gt_boxes[ax] = (p.width * w_in, p.height * h_in)
     x0 = min(ax.get_position().x0 for ax in axes)
     x1 = max(ax.get_position().x1 for ax in axes)
     y0 = min(ax.get_position().y0 for ax in axes)
@@ -854,6 +857,27 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
     cb.ax.tick_params(labelsize=FS_TICK)
     cb.set_label(getattr(rr, "heat_label", None) or
                  ("|K| (A/m per A of " + ("loop current)" if converter else "signal)")), fontsize=FS_TEXT)
+
+
+def fit_box(fig: Figure) -> None:
+    """After a toolbar zoom or pan: widen each map's limits (about their centre) to the shape its box had when drawn
+    (draw_heatmap's _gt_boxes). The maps keep equal scales by resizing their box (adjustable "box"), so a zoom
+    rectangle wider than the box grew it over the colour bar beside it (the user: "when zooming in on a heatmap, the
+    legend ends up being inside the zoomed area"); with the limits fitted, the box stays where it was."""
+    for ax, (bw, bh) in (getattr(fig, "_gt_boxes", None) or {}).items():
+        (x0, x1), (ya, yb) = sorted(ax.get_xlim()), ax.get_ylim()
+        y0, y1 = sorted((ya, yb))
+        w, h = x1 - x0, y1 - y0
+        if w <= 0 or h <= 0 or bw <= 0 or bh <= 0:
+            continue
+        want = bh / bw                                  # data height per data width the box shows at equal scales
+        if h / w < want:
+            h = w * want
+        else:
+            w = h / want
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        ax.set_xlim(cx - w / 2, cx + w / 2)
+        ax.set_ylim((cy + h / 2, cy - h / 2) if ya > yb else (cy - h / 2, cy + h / 2))     # keeps y pointing down
 
 
 # the emission panels: (rows attribute, reading key, limit key, unit, colour)
