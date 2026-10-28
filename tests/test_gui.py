@@ -536,6 +536,23 @@ def test_converters_tab_adds_a_stage_and_simulate_shows_its_hot_loop(app, conv_f
     h.redraw()                                                  # and the tab carries on without it
     wait_rendered(f)
     h.arrows.SetValue(True)
+    # a button per map ("⤢ F.Cu", the user: "add a button for each heatmap layer that when clicked opens the
+    # associated layer in a new window and shows it in full size"): that layer alone, one window per layer
+    from groundtruth.report.plots import heatmap_layers
+    shown = heatmap_layers(h.current(), h._map_layer())
+    labels = [c.GetWindow().GetLabel() for c in h.layer_row.GetChildren()]
+    assert shown and labels == [f"⤢ {l}" for l in shown]
+    lname = shown[-1]
+    h.open_window(lname)
+    lw = h.layer_windows[lname]
+    wait_for(app, lambda: not h.rendering() and lw.canvas.figure is lw.fig and lw.fig.axes)
+    assert {m[0] for m in lw.fig._gt_maps.values()} == {lname} and lname in lw.GetTitle()
+    h.open_window(lname)                                        # its button again brings the same window up
+    assert h.layer_windows[lname] is lw and h.window is None
+    lw.Close()
+    wait_for(app, lambda: lname not in h.layer_windows)
+    h.redraw()
+    wait_rendered(f)
     # the DC input path is a heatmap of its own (current density on the grid it was solved on)
     k = next(i for i, r in enumerate(f.routes) if getattr(r, "view_of", "").startswith("input J1.1"))
     f.results_panel.choice.SetSelection(k)

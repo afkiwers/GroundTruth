@@ -309,16 +309,24 @@ def zoomed(view: tuple, full: tuple, x: float, y: float, step: float) -> Optiona
 class HeatmapWindow(wx.Frame):
     """The heatmap on its own, in a window that can be enlarged or maximised (the tab's maps are small): the
     tab's view (route, layer, arrows) with matplotlib's toolbar (zoom, pan, save). Rendered in the tab's
-    background thread like the tab itself; matplotlib's own redraws (zoom, pan, resize) render here."""
+    background thread like the tab itself; matplotlib's own redraws (zoom, pan, resize) render here.
 
-    def __init__(self, parent, on_closed):
-        """A window at least as large as the main one, with the toolbar and a readout above the canvas;
-        on_closed() is called when it closes."""
+    With a `layer` it shows that one copper layer alone (a layer button over the tab's maps), opened maximised: the
+    user, of the side-by-side maps: "add a button for each heatmap layer that when clicked opens the associated layer
+    in a new window and shows it in full size"."""
+
+    def __init__(self, parent, on_closed, layer: Optional[str] = None):
+        """A window at least as large as the main one, with the toolbar and a readout above the canvas (maximised
+        for one `layer`); on_closed() is called when it closes."""
         top = wx.GetTopLevelParent(parent)
         size = top.GetSize() if top else wx.Size(1200, 800)
-        super().__init__(top, title=f"{top.GetTitle() if top else 'GroundTruth'}: heatmap",
+        self.layer = layer
+        what = f"{layer} heatmap" if layer else "heatmap"
+        super().__init__(top, title=f"{top.GetTitle() if top else 'GroundTruth'}: {what}",
                          size=(max(size.width, 1000), max(size.height, 750)))
         theme.set_icon(self)
+        if layer:
+            self.Maximize()
         self.fig = Figure(figsize=(12, 8))
         self.canvas = PrerenderedCanvas(self, -1, self.fig)
         self.toolbar = ZoomToolbar(self.canvas)
@@ -470,7 +478,8 @@ class ResultsPanel(wx.Panel):
         top.Add(b5, 0, wx.BOTTOM, 4)
         self.capacity_button = b5
         self.window: Optional[HeatmapWindow] = None
-        self.rules = None                       # the settings' rules: the tiles' colours (set_rules)
+        self.layer_windows: dict[str, HeatmapWindow] = {}     # one copper layer each, opened by its layer button
+        self.rules = None                      # the settings' rules: the tiles' colours (set_rules)
         self.tiles = wx.Panel(self)             # KPI tiles (ui/kpi.py), rebuilt per view
         self.tiles.SetSizer(wx.WrapSizer(wx.HORIZONTAL))
         self.metrics = wx.StaticText(self, label="Run the simulation to see the return current.")
@@ -520,6 +529,10 @@ class ResultsPanel(wx.Panel):
         s.Add(self.metrics, 0, wx.LEFT | wx.BOTTOM | wx.TOP, 6)
         tool_row = wx.BoxSizer(wx.HORIZONTAL)
         tool_row.Add(self.toolbar, 0, wx.EXPAND)
+        # a button per map shown ("⤢ F.Cu"): that layer alone in a maximised window (open_window; _layer_buttons)
+        self.layer_row = wx.BoxSizer(wx.HORIZONTAL)
+        self._button_layers: list = []
+        tool_row.Add(self.layer_row, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 8)
         tool_row.Add(self.readout, 1, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
         # a Bode view's H(s) to the clipboard, plain text and LaTeX (shown for Bode views only, _fit_page)
         self.copy_tf = theme.Button(self, "Copy H(s)")
@@ -666,8 +679,9 @@ class ResultsPanel(wx.Panel):
             from ..report.plots import section_value
             text = section_value(sec, event.xdata)
         target = self.readout
-        if self.window and event.canvas is self.window.canvas:
-            target = self.window.readout
+        win = next((w for w in self._windows() if event.canvas is w.canvas), None)
+        if win is not None:
+            target = win.readout
         elif not text:
             text = ZOOM_HINT                    # nothing under the mouse: how the wheel works on this page
         if target and target.GetLabel() != text:
@@ -729,24 +743,61 @@ class ResultsPanel(wx.Panel):
         self.redraw(maps_only=True)
         return True
 
-    def open_window(self):
+    def open_window(self, layer: Optional[str] = None):
         """The heatmap in a window of its own (raised if already open); it follows this tab's choices and is
-        rendered by the same background thread."""
-        if self.window:
-            self.window.Raise()
+        rendered by the same background thread. With a `layer` (its button over the maps): that layer alone,
+        maximised, one window per layer; it keeps its layer when the tab's Layer list changes."""
+        win = self.layer_windows.get(layer) if layer else self.window
+        if win:
+            win.Raise()
             return
-        self.window = HeatmapWindow(self, self._window_closed)
-        self.window.canvas.defer = self.rendering
-        self.window.toolbar.on_home = self.reset_zoom
-        self.window.on_resized = self.redraw
-        self.window.canvas.mpl_connect("motion_notify_event", self._hover)
-        self._connect_zoom(self.window.canvas)
-        self.window.Show()
+        win = HeatmapWindow(self, lambda: self._window_closed(layer), layer=layer)
+        if layer:
+            self.layer_windows[layer] = win
+        else:
+            self.window = win
+        win.canvas.defer = self.rendering
+        win.toolbar.on_home = self.reset_zoom
+        win.on_resized = self.redraw
+        win.canvas.mpl_connect("motion_notify_event", self._hover)
+        self._connect_zoom(win.canvas)
+        win.Show()
         wx.CallAfter(self.redraw)               # once the window has its size
 
-    def _window_closed(self):
-        """The enlarged window closed: stop rendering for it."""
-        self.window = None
+    def _window_closed(self, layer: Optional[str] = None):
+        """An enlarged window closed (the tab's, or one layer's): stop rendering for it."""
+        if layer:
+            self.layer_windows.pop(layer, None)
+        else:
+            self.window = None
+
+    def _windows(self) -> list:
+        """The enlarged windows open now: the tab's ("Open in window") first, then the layers' ones."""
+        return [w for w in [self.window, *self.layer_windows.values()] if w]
+
+    def _layer_buttons(self, rr, layer) -> None:
+        """One button per map the tab shows ("⤢ F.Cu"), in the order of the maps; none for a view without maps (curves,
+        a bridge's drive). Made again only when the maps' layers change (window creation on the GUI thread)."""
+        from ..report.plots import heatmap_layers
+        maps = (rr is not None and rr.kind not in CURVE_KINDS and rr.kind != "bridge"
+                and getattr(rr, "grid", None) is not None and bool(getattr(rr, "sheet_current", None)))
+        layers = heatmap_layers(rr, layer) if maps else []
+        if layers == self._button_layers:
+            return
+        self._button_layers = layers
+        self.Freeze()
+        try:
+            self.layer_row.Clear(delete_windows=True)
+            for l in layers:
+                b = theme.Button(self, f"⤢ {l}")
+                b.SetToolTip(f"{l} alone in a window of its own, maximised: the view, arrows, scale and markers "
+                             "chosen here; the wheel zooms (every map together), the toolbar zooms, pans and "
+                             "saves it")
+                b.Bind(wx.EVT_BUTTON, lambda e, l=l: self.open_window(l))
+                self.layer_row.Add(b, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
+            self.Layout()
+        finally:
+            self.Thaw()
 
     def open_3d(self):
         """Write the selected view's 3D page (report/view3d.py) and open it in the browser, in the background: the
@@ -916,10 +967,19 @@ class ResultsPanel(wx.Panel):
                 self._blank_canvases()
                 self.canvas3.Show(want)
             self._fit_page(rr, layer, vectors, scale)       # the canvases get their final size before it is read
+            self._layer_buttons(rr, layer)
 
-        def heat(fig):
-            """The maps of this view, with every choice copied above (the render thread must not read the GUI)."""
-            if rr.kind == "pdn":                # a rail's PDN: its impedance curves instead of maps
+        def heat(fig, layer=layer, alone=False):
+            """The maps of this view, with every choice copied above (the render thread must not read the GUI);
+            alone: one layer's window, which says so when this view has no map of its layer."""
+            if alone and layer not in (getattr(rr, "sheet_current", None) or {}):
+                fig.clear()
+                ax = fig.add_subplot(111)
+                ax.text(0.5, 0.5, f"this view has no current map on {layer}", ha="center", va="center",
+                        transform=ax.transAxes)
+                ax.set_axis_off()
+                return
+            if rr.kind == "pdn":              # a rail's PDN: its impedance curves instead of maps
                 from ..report.plots import draw_pdn
                 draw_pdn(fig, rr)
                 return
@@ -949,6 +1009,8 @@ class ResultsPanel(wx.Panel):
                 views.append((self.canvas2, lambda fig: draw_spectrum(fig, rr)))
         if self.window:                         # the enlarged window shows the same view
             views.append((self.window.canvas, heat))
+        for l, w in self.layer_windows.items():     # and each layer's window its layer alone
+            views.append((w.canvas, lambda fig, l=l: heat(fig, l, alone=True)))
         sizes = [(c.figure.dpi, c.get_width_height(physical=True)) for c, _ in views]
         self._asked += 1
         asked = self._asked
@@ -980,10 +1042,11 @@ class ResultsPanel(wx.Panel):
         self.fig2 = next((fig for canvas, fig, _ in done if canvas is self.canvas2), self.fig2)
         self.fig3 = next((fig for canvas, fig, _ in done if canvas is self.canvas3), self.fig3)
         self.toolbar.update()                   # the zoom history belonged to the previous figure
-        win = next((fig for canvas, fig, _ in done if self.window and canvas is self.window.canvas), None)
-        if win is not None:
-            self.window.fig = win
-            self.window.toolbar.update()
+        for w in self._windows():
+            fig = next((fig for canvas, fig, _ in done if canvas is w.canvas), None)
+            if fig is not None:
+                w.fig = fig
+                w.toolbar.update()
         self._shown = asked
 
     def _render_failed(self, e: Exception):
