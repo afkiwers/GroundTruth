@@ -264,6 +264,52 @@ def test_the_reports_maps_have_no_labels():
     texts, marks2, outlines2, legend = drawn(False)
     assert texts == [] and len(marks2) == len(marks) == 2 and len(outlines2) == len(outlines) > 0
     assert legend == ["drain", "source"]
+    # each kind on its own (draw_heatmap's marks): the pins' outlines and letters without the switch's name, the
+    # name alone, the vias without the parts' ■
+    fig = Figure()
+    ax = fig.add_subplot(111)
+    _switch_pins(ax, rr, "F.Cu", True, pads=False, refs=True)
+    assert [t.get_text() for t in ax.texts] == ["Q1"] and not ax.get_lines()
+    _switch_pins(ax, rr, "F.Cu", True, pads=True, refs=False)
+    assert sorted(t.get_text() for t in ax.texts) == ["D", "Q1", "S"]
+    fig = Figure()
+    ax = fig.add_subplot(111)
+    assert [t["kind"] for t in _carriers(ax, NS(vias=[]), rr, "F.Cu", None, True, parts=False)] == ["via"]
+    assert [l.get_marker() for l in ax.get_lines() if l.get_marker() in ("^", "s")] == ["^"]
+
+
+def test_each_marker_can_be_left_off_the_maps(route):
+    """The user: "implement an option that can toggle all the lable like the ones shown. I disabled, I only want to
+    see the heatmap, no vias etc. A toggle for each of the components would be handy and a master switch".
+    draw_heatmap's marks: none leaves only the heatmap (no marker, ring, text or hover target), each one alone
+    brings back its own markers only, None (the CLI's report) all of them."""
+    import copy
+    from matplotlib.collections import LineCollection
+    board, rr, issues = route
+    rr = copy.copy(rr)
+    rr.transfers = rr.transfers + [{"kind": "via", "name": "via GND @(30.00, 10.00)", "layers": list(rr.layer_grids),
+                                    "x": 30.0, "y": 10.0, "fraction": 0.4, "distance_mm": 0.0}]
+
+    def drawn(marks):
+        fig = Figure(figsize=(9, 6), dpi=100)
+        FigureCanvasAgg(fig)
+        draw_heatmap(fig, board, rr, issues, vectors=False, outlines=True, names=True, marks=marks)
+        ax = next(iter(fig._gt_marks))
+        points = [l for l in ax.get_lines() if l.get_marker() not in (None, "", "None")]
+        lines = sum(len(c.get_segments()) for c in ax.collections if isinstance(c, LineCollection))
+        texts = [t.get_text() for t in ax.texts]
+        return {m[2] for m in fig._gt_marks[ax]}, points, texts, lines, fig._gt_note.get_text()
+    hover, points, texts, bare, note = drawn(set())
+    assert hover == set() and points == [] and texts == [] and note == ""      # no caption for markers not shown
+    hover, points, texts, lines, note = drawn(None)
+    assert hover == {0, 1} and {"^", "o"} <= {l.get_marker() for l in points} and {"U1", "U2", "40 %"} <= set(texts)
+    assert lines > bare and "▲ via / ■ part carrying it (% of the current; white ring: the busiest via)" in note
+    assert drawn({"parts"})[4] == "(■ part carrying it)"
+    assert drawn({"issues"})[0] == {0} and drawn({"vias"})[0] == {1}
+    assert drawn({"shares"})[2] == []                   # the shares belong to markers: none without them
+    assert "40 %" in drawn({"vias", "shares"})[2]
+    assert set(drawn({"names"})[2]) >= {"U1", "U2"} and drawn({"names"})[1] == []
+    assert drawn({"route"})[3] > bare and drawn({"outlines"})[3] > bare and drawn({"outlines"})[2] == []
 
 
 def test_hovering_a_marker_says_what_it_is(route):

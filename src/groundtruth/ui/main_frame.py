@@ -1449,6 +1449,7 @@ class MainFrame(ConfigActions, wx.Frame):
             suggestions=suggestions, converters=converters, bridges=bridges, thermal=thermal, capacity=capacity,
             solver=self._solver, config=cfg, max_vias=self.results_panel.max_vias(),
             outlines=self.results_panel.outlines, names=self.results_panel.names, dc_combined=combined,
+            marks=self.results_panel.marks_shown(),     # the report's maps show the markers the tab shows
             # views sharpened with "Sharper map": the report draws their finer maps (the user: "export the highest
             # resolution images available")
             sharper=[v for v in views if getattr(v, "sharper", None)],

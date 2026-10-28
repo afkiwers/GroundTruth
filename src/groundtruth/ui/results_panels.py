@@ -12,7 +12,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg, NavigationToolbar2WxAgg
 from matplotlib.figure import Figure
 
-from ..report.plots import draw_heatmap, draw_section, draw_spectrum
+from ..report.plots import MARKS, draw_heatmap, draw_section, draw_spectrum
 from . import theme
 from .background import LatestOnly
 
@@ -394,6 +394,23 @@ class ResultsPanel(wx.Panel):
                                "copper has none). The colour is the current density.")
         self.arrows.Bind(wx.EVT_CHECKBOX, lambda e: self.redraw())
         top.Add(self.arrows, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT | wx.BOTTOM, 8)
+        # the markers over the maps (plots.MARKS), each on its own in the ▾ menu, and a master box: ticked all of
+        # them, unticked none, mixed some (a click on a mixed box hides them all, the next shows them all)
+        self.marks = self._load_marks()
+        marks = wx.BoxSizer(wx.HORIZONTAL)
+        self.marks_box = wx.CheckBox(self, label="Markers", style=wx.CHK_3STATE)
+        self.marks_box.SetToolTip("everything drawn over the heatmap but the arrows: via and part markers, their "
+                                  "shares, switch pins and names, issue rings, the hot spot, the route, part outlines "
+                                  "and names. Ticked: all of them, unticked: none (only the heatmap); ▾ picks each "
+                                  "one. The exported report shows the same.")
+        self.marks_box.Bind(wx.EVT_CHECKBOX, self._on_marks_box)
+        marks.Add(self.marks_box, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 2)
+        self.marks_button = theme.Button(self, "▾")
+        self.marks_button.SetToolTip("which markers the maps show, one by one")
+        self.marks_button.Bind(wx.EVT_BUTTON, lambda e: self._marks_menu())
+        marks.Add(self.marks_button, 0, wx.ALIGN_CENTER_VERTICAL)
+        top.Add(marks, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT | wx.BOTTOM, 8)
+        self._sync_marks_box()
         self.log_scale = wx.CheckBox(self, label="Log scale")
         self.log_scale.SetValue(True)
         self.log_scale.SetToolTip("colours over three decades below the peak, so that even weak current spread over "
@@ -413,8 +430,7 @@ class ResultsPanel(wx.Panel):
         top.Add(self.section_box, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT | wx.BOTTOM, 8)
         from .prefs_dialog import defaults
         p = defaults(theme.prefs())         # the Preferences dialog sets them (set_display)
-        self.via_markers, self.vias_limit, self.outlines, self.names = (p["via_markers"], p["max_vias"], p["outlines"],
-                                                                        p["names"])
+        self.vias_limit = p["max_vias"]     # via markers on or off, outlines and names: self.marks
         self.terminals = p["terminals"]                 # maps with the parts' terminal current (results/terminals.py)
         b = theme.Button(self, "Draw contours on board")
         b.Bind(wx.EVT_BUTTON, lambda e: on_draw_contours(self.current(), self.selected_layer()))
@@ -885,7 +901,7 @@ class ResultsPanel(wx.Panel):
             self.board, self.issues
         scale = "log" if self.log_scale.GetValue() else "linear"
         view, max_vias, outlines, names = self._view, self.max_vias(), self.outlines, self.names
-        terminals = self.terminals
+        terminals, marks = self.terminals, self.marks_shown()
         if not maps_only:
             self._show_tiles(rr)
             text = self._summary(rr)
@@ -915,7 +931,7 @@ class ResultsPanel(wx.Panel):
             # here in the render thread); the tiles and issues keep the copper's own
             from ..results.terminals import with_terminals
             draw_heatmap(fig, board, with_terminals(rr) if terminals else rr, issues, layer=layer, vectors=vectors,
-                         scale=scale, view=view, max_vias=max_vias, outlines=outlines, names=names)
+                         scale=scale, view=view, max_vias=max_vias, outlines=outlines, names=names, marks=marks)
         views = [(self.canvas, heat)]
         if not maps_only:
             if self.canvas3.IsShown() and rr.kind == "bode":     # a Bode view's step responses
@@ -1052,10 +1068,84 @@ class ResultsPanel(wx.Panel):
     def set_display(self, via_markers: bool, vias_limit: Optional[int], outlines: bool, names: bool = False,
                     terminals: bool = False):
         """The Preferences' heatmap settings; the view shown is drawn again with them."""
-        self.via_markers, self.vias_limit, self.outlines, self.names = via_markers, vias_limit, outlines, names
-        self.terminals = terminals
+        self.marks.update(vias=bool(via_markers), outlines=bool(outlines), names=bool(names))
+        self.vias_limit, self.terminals = vias_limit, terminals
+        self._sync_marks_box()
         if self.current() is not None:
             self.redraw()
+
+    # the markers whose switch is also in Preferences keep its ui.json key; the others are "mark_<name>"
+    MARK_PREFS = {"vias": "via_markers", "outlines": "outlines", "names": "names"}
+
+    @property
+    def via_markers(self) -> bool:
+        """The carrying vias' ▲ are drawn (Markers menu, Preferences' Via markers)."""
+        return self.marks["vias"]
+
+    @property
+    def outlines(self) -> bool:
+        """Every part's outline is drawn (Markers menu, Preferences' Part outlines)."""
+        return self.marks["outlines"]
+
+    @property
+    def names(self) -> bool:
+        """Every part's reference is written (Markers menu, Preferences' Part names)."""
+        return self.marks["names"]
+
+    def _load_marks(self) -> dict:
+        """Each marker on or off as this computer keeps it (ui.json): the Preferences' three with their defaults
+        (outlines and names off), every other one on until unticked."""
+        from .prefs_dialog import defaults
+        saved = theme.prefs()
+        p = defaults(saved)
+        return {k: p[self.MARK_PREFS[k]] if k in self.MARK_PREFS else saved.get(f"mark_{k}", True) is not False
+                for k in MARKS}
+
+    def marks_shown(self) -> set:
+        """The markers the maps show now (draw_heatmap's and the report's `marks`)."""
+        return {k for k, on in self.marks.items() if on}
+
+    def set_marks(self, **values: bool) -> None:
+        """Turn markers on or off (by their MARKS name), keep the choice (ui.json) and draw the view again."""
+        self.marks.update({k: bool(v) for k, v in values.items() if k in self.marks})
+        theme.save_prefs(**{self.MARK_PREFS.get(k, f"mark_{k}"): self.marks[k] for k in values if k in self.marks})
+        self._sync_marks_box()
+        if self.current() is not None:
+            self.redraw()
+
+    def _sync_marks_box(self) -> None:
+        """The master box shows whether all, none or some of the markers are on."""
+        n = sum(self.marks.values())
+        self.marks_box.Set3StateValue(wx.CHK_CHECKED if n == len(self.marks) else
+                                      wx.CHK_UNCHECKED if n == 0 else wx.CHK_UNDETERMINED)
+
+    def _on_marks_box(self, evt) -> None:
+        """The master box clicked: every marker on (ticked) or off (unticked)."""
+        on = self.marks_box.Get3StateValue() == wx.CHK_CHECKED
+        self.set_marks(**{k: on for k in MARKS})
+
+    def _marks_menu(self) -> None:
+        """The ▾ menu under its button: Show all, Hide all, then each marker as a check item."""
+        menu = wx.Menu()
+        picks = {menu.Append(wx.ID_ANY, "Show all").GetId(): True, menu.Append(wx.ID_ANY, "Hide all").GetId(): False}
+        menu.AppendSeparator()
+        items = {}
+        for k, label in MARKS.items():
+            item = menu.AppendCheckItem(wx.ID_ANY, label)
+            item.Check(self.marks[k])
+            items[item.GetId()] = k
+
+        def pick(evt):
+            """A menu entry chosen: all on, all off, or that one marker flipped."""
+            if evt.GetId() in picks:
+                self.set_marks(**{k: picks[evt.GetId()] for k in MARKS})
+            elif evt.GetId() in items:
+                k = items[evt.GetId()]
+                self.set_marks(**{k: not self.marks[k]})
+        menu.Bind(wx.EVT_MENU, pick)
+        b = self.marks_button
+        self.PopupMenu(menu, b.GetPosition() + wx.Point(0, b.GetSize().height))
+        menu.Destroy()
 
     def section_shown(self, rr=None) -> bool:
         """The cross-section is wanted (its box ticked) and the view has one (a signal route)."""

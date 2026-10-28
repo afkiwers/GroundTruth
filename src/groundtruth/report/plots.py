@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import io
 import math
-from typing import Optional
+from typing import Collection, Optional
 
 import numpy as np
 from matplotlib import patheffects
@@ -183,6 +183,14 @@ def _route(ax, board: Board, rr: RouteResult):
         ax.add_collection(LineCollection(runs, colors=layer_colour(board, rl), linewidths=1.2, label=rl))
 
 
+# what the maps can show over the heatmap, each on its own (draw_heatmap's `marks`; the Results tab's Markers
+# menu, which the plugin's report follows too). The user, of a map crowded with markers and labels: "I only want to
+# see the heatmap, no vias etc. A toggle for each of the components would be handy and a master switch"
+MARKS = {"vias": "Via markers (▲)", "parts": "Part markers (■)", "shares": "Shares at the markers (12 %)",
+         "pins": "Switch pins (S, D, SW, …)", "switch_names": "Switch names (Q301, U502, …)",
+         "issues": "Issue rings", "hot_spot": "Hot spot (×)", "route": "Signal route",
+         "outlines": "Part outlines", "names": "Part names"}
+
 CARRIER = "#39e75f"         # vias and parts that carry the current between layers / nets
 MIN_LABEL = 0.05            # their share of the current is written next to them from this share on
 # where a carrier's label may go, in points from its marker (first free one wins; the busiest is placed first):
@@ -265,7 +273,7 @@ def _place_labels(ax) -> None:
 
 
 def _carriers(ax, board: Board, rr: RouteResult, lname: str, max_vias: Optional[int] = None,
-              labels: bool = True) -> list[dict]:
+              labels: bool = True, parts: bool = True) -> list[dict]:
     """The vias (▲) and parts (■) that carry this layer's current to another layer or net (RouteResult.transfers),
     with their share of it ("63 %"). The user, after all 338 vias of a board were drawn: "Only the ones that carry
     current should be drawn. However, the current symbol is a bit small and hard to see": so a larger symbol with a
@@ -274,7 +282,7 @@ def _carriers(ax, board: Board, rr: RouteResult, lname: str, max_vias: Optional[
     over the whole pair and comes from the board-wide model at another frequency (a square labelled "1286 %" at
     its weighted centre said nothing about where it flows); the tiles and the transfer list give it.
     max_vias: mark at most that many vias, the view's busiest (the user's "Vias shown"; 0: "Via markers"
-    unticked); None: every one. labels False: the markers without their shares (the report).
+    unticked); None: every one. labels False: the markers without their shares. parts False: no part's ■.
     The via with the largest share gets a white ring (the "busiest via" tile's, on a DC path's map); the shares are
     queued on the axes and written by _place_labels once the view is final, apart from each other."""
     shown = rr.transfers
@@ -282,6 +290,8 @@ def _carriers(ax, board: Board, rr: RouteResult, lname: str, max_vias: Optional[
         busiest = sorted((t for t in shown if t.get("kind") == "via"), key=lambda t: -t["fraction"])[:max_vias]
         keep = {id(t) for t in busiest}
         shown = [t for t in shown if t.get("kind") != "via" or id(t) in keep]
+    if not parts:
+        shown = [t for t in shown if t.get("kind") == "via"]
     ts = [t for t in shown if lname in t["layers"] and t.get("kind") != "capacitance"]
     if not ts:
         return []
@@ -338,19 +348,21 @@ def _pad_outline(p: dict) -> tuple[list, list]:
     return [q[0] for q in pts], [q[1] for q in pts]
 
 
-def _switch_pins(ax, rr, lname: str, labels: bool = True) -> None:
+def _switch_pins(ax, rr, lname: str, labels: bool = True, pads: bool = True, refs: Optional[bool] = None) -> None:
     """The switches' drain and source (a diode's cathode and anode, an IC's VIN / SW / GND) on a power stage's
-    map: the pads outlined on their own layer (with a dark halo so they read on any colour), and with `labels` a
-    role letter at each group's centre and the part's name above it on every layer (where the switch sits over an
-    inner plane). Without them the outlines' colours and the legend tell the roles (the report)."""
+    map: with `pads` the pads outlined on their own layer (with a dark halo so they read on any colour) and, with
+    `labels`, a role letter at each group's centre; with `refs` (default: `labels`) the part's name above it on every
+    layer (where the switch sits over an inner plane). Without the letters the outlines' colours and the legend tell
+    the roles."""
     pins = getattr(rr, "switch_pins", None) or []
-    if not pins:
+    refs = labels if refs is None else refs
+    if not pins or not (pads or refs):
         return
     groups: dict[tuple, list] = {}
     for p in pins:
         groups.setdefault((p["ref"], p["role"]), []).append(p)
     seen_roles = set()
-    for (_, role), ps in groups.items():
+    for (_, role), ps in (groups.items() if pads else ()):
         colour, word = PIN_ROLES.get(role, ("#ffffff", role))
         for p in ps:
             if lname not in p["layers"]:          # other layers: the letters only (outlines there were clutter)
@@ -368,7 +380,7 @@ def _switch_pins(ax, rr, lname: str, labels: bool = True) -> None:
             # the legend names the colour's role: with labels "S = source", without them the colour is the key
             ax.plot([], [], color=colour, lw=1.2, label=f"{role} = {word}" if labels else word)
             seen_roles.add(role)
-    if not labels:
+    if not refs:
         return
     for ref in dict.fromkeys(p["ref"] for p in pins):    # the part's name just above its pads
         ps = [p for p in pins if p["ref"] == ref]
@@ -580,8 +592,10 @@ def map_value(hit, x: float, y: float) -> str:
     return f"{where}   {v:.3g} {unit}" if unit != "°C" else f"{where}   {v:.1f} °C"
 
 
-def _heatmap_layout(rr, layers: list[str], w_in: float, h_in: float, vectors: bool, scale: str):
-    """draw_heatmap's text and layout for a w_in x h_in figure: the title and the note over the maps (wrapped),
+def _heatmap_layout(rr, layers: list[str], w_in: float, h_in: float, vectors: bool, scale: str,
+                    marks: Optional[Collection[str]] = None):
+    """draw_heatmap's text and layout for a w_in x h_in figure: the title and the note over the maps (wrapped; it
+    explains only the markers shown, `marks` as draw_heatmap's),
     margins in inches from the text they hold (each map's title, the tick labels, the legend of the route's
     layers in one row under the maps, the colour bar's strip on the right), the gaps between the maps and their
     rows x cols."""
@@ -590,7 +604,15 @@ def _heatmap_layout(rr, layers: list[str], w_in: float, h_in: float, vectors: bo
     what = _what(rr)
     title = getattr(rr, "heat_title", None) or (f"{rr.net}  {rr.driver}→{rr.receiver}  {what} current @ "
                                                   f"{rr.map_frequency / 1e6:.4g} MHz")
-    note = "▲ via / ■ part carrying it (% of the current; white ring: the busiest via), red / orange ○ issue"
+    on = set(MARKS) if marks is None else set(marks)
+    parts = []
+    carriers = " / ".join(t for t, m in (("▲ via", "vias"), ("■ part", "parts")) if m in on)
+    if carriers:
+        about = [t for t, m in (("% of the current", "shares"), ("white ring: the busiest via", "vias")) if m in on]
+        parts.append(f"{carriers} carrying it" + (f" ({'; '.join(about)})" if about else ""))
+    if "issues" in on:
+        parts.append("red / orange ○ issue")
+    note = ", ".join(parts)
     if vectors and getattr(rr, "sheet_vectors", None):
         note += "; arrows: current direction, more arrows = more current"
     if scale == "linear":
@@ -598,9 +620,10 @@ def _heatmap_layout(rr, layers: list[str], w_in: float, h_in: float, vectors: bo
     if getattr(rr, "terminals_shown", False):       # the Preferences' Terminal current (results/terminals.py)
         note += "; with the current in the parts' terminals"
     if linear:
-        note = "× hot spot, ○ issues"
+        note = ", ".join(t for t, m in (("× hot spot", "hot_spot"), ("○ issues", "issues")) if m in on)
+    note = note.lstrip("; ")
     head = _wrap(title, w_in - 0.3, FS_TITLE)
-    notes = _wrap(f"({note})", w_in - 0.3, FS_TEXT)
+    notes = _wrap(f"({note})", w_in - 0.3, FS_TEXT) if note else []
     keys = len({l for l, _ in rr.route_xy}) + len({p["role"] for p in getattr(rr, "switch_pins", None) or []})
     key_rows = -(-keys // 8)
     tick_in = 0.10 + _lh(FS_TICK)
@@ -673,7 +696,8 @@ def _what(rr) -> str:
 def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[list[Issue]] = None,
                  layer: Optional[str] = None, vmin_frac: float = 1e-3, vectors: bool = True,
                  scale: str = "log", view: Optional[tuple] = None, max_vias: Optional[int] = None,
-                 outlines: bool = False, names: bool = False, labels: bool = True) -> None:
+                 outlines: bool = False, names: bool = False, labels: bool = True,
+                 marks: Optional[Collection[str]] = None) -> None:
     """Return-current density on one plane layer, or side by side on the layers that carry it. With `vectors`,
     arrows show which way the current flows (at its dominant phase) and where it concentrates.
 
@@ -692,11 +716,17 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
     actually not helping": on a stage's map they piled up over the switches), the plugin keeps them (False: the
     markers, pad outlines and arrows only).
 
+    marks: which of MARKS the maps show (None: all of them; the Results tab's Markers menu). The arrows are
+    `vectors`; outlines and names need both their argument and their mark.
+
     A motor bridge's view (kind "bridge") has no map: its drive's currents are drawn instead (draw_bridge)."""
     if rr.kind == "bridge":
         draw_bridge(fig, rr)
         return
     fig.clear()
+    on = set(MARKS) if marks is None else set(marks)
+    max_vias = max_vias if "vias" in on else 0
+    outlines, names = outlines and "outlines" in on, names and "names" in on
     layers = heatmap_layers(rr, layer)
     if rr.grid is None or not layers:
         ax = fig.add_subplot(111)
@@ -720,7 +750,7 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
     converter = rr.kind in ("converter", "dcload")
     what = _what(rr)
     w_in, h_in = fig.get_size_inches()
-    lay = _heatmap_layout(rr, layers, w_in, h_in, vectors, scale)
+    lay = _heatmap_layout(rr, layers, w_in, h_in, vectors, scale, on)
     head, notes, tick_in, rows, cols = lay.head, lay.notes, lay.tick_in, lay.rows, lay.cols
     gap_w, gap_h = lay.gap_w, lay.gap_h
     fx0, fx1, fy0, fy1 = _frame(fig, lay.left, lay.right, lay.bottom, lay.top)
@@ -748,12 +778,13 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
         if vectors:
             # arrows wherever the log scale colours the copper: down to its floor, peak / 1000
             _arrows(ax, rr, lname, 45 if len(layers) == 1 else 30, ref, view, floor=peak * vmin_frac)
-        _route(ax, board, rr)
+        if "route" in on:
+            _route(ax, board, rr)
         if outlines or names:
             _part_outlines(ax, board, view if view is not None else g.extent, outlines, names)
-        _switch_pins(ax, rr, lname, labels)
-        carried = _carriers(ax, board, rr, lname, max_vias, labels)
-        mine = view_issues(rr, issues or [])
+        _switch_pins(ax, rr, lname, labels, pads="pins" in on, refs=labels and "switch_names" in on)
+        carried = _carriers(ax, board, rr, lname, max_vias, labels and "shares" in on, parts="parts" in on)
+        mine = view_issues(rr, issues or []) if "issues" in on else []
         # issues whose rings would overlap at this view's scale are one ring, in the worst one's colour, with their
         # count beside it (zooming in parts them again). The user, of a thermal map with a ring per hot part (dozens
         # on top of each other, on every layer): "the heatmap is cluttered with circles. we need to find a better way"
@@ -791,11 +822,11 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
         else:
             ax.set_title(f"{lname}" + (f"  ({share * 100:.0f} % of {what} current{blank})" if share is not None
                                        else (f"  ({blank[2:]})" if blank else "")), fontsize=FS_TEXT)
-        if rr.kind == "thermal" and rr.hotspot_layer == lname:     # the thermal hot spot
+        if "hot_spot" in on and rr.kind == "thermal" and rr.hotspot_layer == lname:     # the thermal hot spot
             ax.plot(*rr.hotspot, marker="x", ms=10, mew=2, color="#00e5ff")
         # a DC path's or a bridge's RMS density map: its hottest sustained spot (where its density tile's click zooms;
         # the RMS map had none before 2026-10-21)
-        spot = hot_spot(rr) if getattr(rr, "view_of", None) else None
+        spot = hot_spot(rr) if getattr(rr, "view_of", None) and "hot_spot" in on else None
         if spot and spot["layer"] == lname:
             ax.plot(spot["x"], spot["y"], marker="x", ms=9, mew=2, color="#00e5ff")
     fig.suptitle("\n".join(head), fontsize=FS_TITLE, y=1 - 0.08 / h_in, va="top")

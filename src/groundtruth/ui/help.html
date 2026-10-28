@@ -809,7 +809,14 @@ soldered pin is not checked as a via: the pin carries the current between the la
 <hr><a name="results"></a><h3>Results tab</h3>
 <p>One view per analysed item: pick it in the <b>View</b> list at the top, and the copper layer in <b>Layer</b>.
 <b>Current arrows</b>, <b>Log scale</b> and <b>Cross-section</b> switch those parts of the view on and off and keep
-their state for next time. How vias and parts are marked is set in <a href="#prefs">Preferences</a>.</p>
+their state for next time. <b>Markers</b> does the same for everything else drawn over the heatmap: ticked, all of
+it; unticked, none (only the heatmap, and the arrows if they are on); a mixed box, some. Its <b>▾</b> menu picks
+them one by one (<b>Show all</b>, <b>Hide all</b>, then each): via markers (▲), part markers (■), the shares written
+at the markers (12 %), a power stage's switch pins (their outlines and S / D / SW letters), the switches' names,
+issue rings, the hot spot (×), the signal route, part outlines and part names. The choices are kept for next time
+(Via markers, Part outlines and Part names are the same switches as in <a href="#prefs">Preferences</a>), and the
+exported report and each Simulate's kept report show the same markers. How many vias are marked at most is set in
+Preferences (<b>Vias shown</b>).</p>
 <ul>
 <li><b>View</b> lists a signal route as its net and driver → receiver, a converter's DC path as "DC" and the
   path's name, a bridge's RMS map as "RMS currents", and the bridge, sweep and thermal views by name.
@@ -1298,7 +1305,9 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   current, and how many at most (All, 5, 10, 20, 50, the busiest first; greyed while Via markers is unticked; see
   <a href="#results">Results</a>).</td></tr>
 <tr><td valign="top"><b>Part outlines</b></td><td>every part's outline over the maps.</td></tr>
-<tr><td valign="top"><b>Part names</b></td><td>every part's reference over the maps (with or without the outlines).</td></tr>
+<tr><td valign="top"><b>Part names</b></td><td>every part's reference over the maps (with or without the outlines).
+  Via markers, Part outlines and Part names are also in the Results tab's <b>Markers ▾</b> menu, with the other
+  markers.</td></tr>
 <tr><td valign="top"><b>Terminal current</b></td><td>the maps with the current in the parts' terminal metal added to
   the copper's (parts with a Terminal Sheet Resistance); the figures stay the copper's.</td></tr>
 <tr><td valign="top"><b>Contour line</b>, <b>Index contour line</b></td><td>the line widths of <b>Draw contours on
@@ -1332,8 +1341,8 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   assumptions</a> (a rule of thumb is an assumption there, with its reason): @CHECK_BASIS@.</td></tr>
 </table>
 <p>The exported report follows the heatmap settings and names the resolution it was simulated at. The working
-toggles keep their last state for next time too: the Results tab's <b>Current arrows</b>, <b>Log scale</b> and
-<b>Cross-section</b>, the Issues tab's <b>Zoom to it</b> and <b>Highlight its net</b>.</p>
+toggles keep their last state for next time too: the Results tab's <b>Current arrows</b>, <b>Log scale</b>,
+<b>Cross-section</b> and <b>Markers</b>, the Issues tab's <b>Zoom to it</b> and <b>Highlight its net</b>.</p>
 
 <hr><a name="export"></a><h3>Export report</h3>
 <p><b>Export report…</b> (top bar) writes the results shown as one HTML page to share, archive or print: a cover
