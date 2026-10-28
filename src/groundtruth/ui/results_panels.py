@@ -291,6 +291,14 @@ class ZoomToolbar(NavigationToolbar2WxAgg):
             return
         super().home(*args)
 
+    def release_zoom(self, event):
+        """A zoom rectangle: matplotlib's zoom, then the maps' limits fitted to their boxes (plots.fit_box), so the
+        maps keep their size and stay clear of the colour bar."""
+        super().release_zoom(event)
+        from ..report.plots import fit_box
+        fit_box(self.canvas.figure)
+        self.canvas.draw_idle()
+
 
 def zoomed(view: tuple, full: tuple, x: float, y: float, step: float) -> Optional[tuple]:
     """The view (x0, x1, y0, y1) after zooming by `step` (< 1: in) about (x, y), kept inside `full` (shifted,

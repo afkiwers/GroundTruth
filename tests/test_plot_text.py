@@ -452,3 +452,30 @@ def test_close_vias_get_their_shares_apart_the_busiest_ringed_and_their_amperes_
     assert carrier_text(ts[2]) == "via GND @(138.25, 75.70): 12 % of the current, 1.2 A"
     assert carrier_text({**ts[2], "rms": True}).endswith("1.2 A RMS")
     assert carrier_text({k: v for k, v in ts[2].items() if k != "current_a"}).endswith("12 % of the current")
+
+
+def test_a_toolbar_zoom_keeps_the_maps_clear_of_the_colour_bar(route):
+    """The user: "when zooming in on a heatmap, the legend ends up being inside the zoomed area". A zoom rectangle of
+    another shape than a map made matplotlib grow the map's box (equal scales, adjustable "box") over the colour bar;
+    plots.fit_box (the plugin's toolbar calls it after a zoom) widens the limits instead, so the boxes stay put."""
+    import numpy as np
+    from groundtruth.report.plots import fit_box
+    board, rr, issues = route
+    for x0, x1, y0, y1 in ((0.0, 40.0, 5.0, 6.0), (10.0, 11.0, 0.0, 20.0)):    # far wider, far taller than a map
+        fig = Figure(figsize=(9, 6), dpi=100)
+        canvas = FigureCanvasAgg(fig)
+        draw_heatmap(fig, board, rr, issues, vectors=False)
+        canvas.draw()
+        bar = fig.axes[-1].get_position()
+        maps = list(fig._gt_boxes)
+        before = [ax.get_position().bounds for ax in maps]
+        maps[0].set_xlim(x0, x1)
+        maps[0].set_ylim(y1, y0)
+        fit_box(fig)
+        canvas.draw()
+        for ax, b in zip(maps, before):
+            assert np.allclose(ax.get_position().bounds, b, atol=1e-3)
+            assert ax.get_position().x1 < bar.x0
+        (lx0, lx1), (ly1, ly0) = maps[0].get_xlim(), maps[0].get_ylim()
+        assert lx0 <= x0 + 1e-9 and lx1 >= x1 - 1e-9 and ly0 <= y0 + 1e-9 and ly1 >= y1 - 1e-9   # all of it shown
+        assert ly1 > ly0                                                    # y still points down
