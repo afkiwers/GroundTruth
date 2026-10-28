@@ -5,7 +5,8 @@
 
 The board (and the settings file) is copied into DIR first, so nothing is written next to a real board. Each tab
 in --tabs is saved as DIR/<theme>_<tab>.png; --scroll adds the Results tab's page scrolled to its end
-(<theme>_Results_scrolled.png: the cross-section and the spectrum under the maps). --runs N simulates N times
+(<theme>_Results_scrolled.png: the cross-section and the spectrum under the maps); a tab "Layer window" opens the
+last map's layer alone (its ⤢ button) and saves <theme>_layer_<layer>.png. --runs N simulates N times
 (kept in DIR/groundtruth/history when Preferences keep runs); the History tab is captured with its two newest runs
 compared. Captured with Win32 PrintWindow, which works while the screen
 itself cannot be read (a locked or minimised remote desktop)."""
@@ -127,6 +128,20 @@ def main() -> int:
                     return
                 path = out / f"{args.theme}_Results_scrolled.png"
                 print(f"{path}: {'ok' if capture(f, path) else 'PrintWindow failed'}")
+                return
+            if name == "Layer window":                    # the last map's layer alone, as its ⤢ button opens it
+                rp = f.results_panel
+                if state.get("layer") is None:
+                    if not rp._button_layers:
+                        print("  no layer buttons: no maps in the view shown")
+                        return
+                    state["layer"] = rp._button_layers[-1]
+                    rp.open_window(state["layer"])
+                    tabs.insert(0, name)                  # capture once rendered and painted
+                    return
+                win = rp.layer_windows.get(state["layer"])
+                path = out / f"{args.theme}_layer_{state['layer'].replace('.', '_')}.png"
+                print(f"{path}: {'ok' if win and capture(win, path) else 'PrintWindow failed'}")
                 return
             if name == "History" and len(f.history.runs) >= 2 and state.get("compared") is None:
                 f.history.list.Select(0)
