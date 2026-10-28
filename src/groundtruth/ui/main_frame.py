@@ -49,6 +49,7 @@ BOARD_ARROW_SPACING_MM = 0.8   # spot spacing of the current arrows drawn on the
 MAX_BOARD_ARROWS = 3000        # three graphic segments each; the spacing grows beyond that (1500 until weak current
                                # got its sparse arrows: refboard's layers need 1300-1950 at 0.8 mm, and the growth to
                                # 1.2 mm halved every layer's arrows)
+MAX_BOARD_ARROWS_LAYERS = 6000  # several copper layers drawn together ("main / all layers"): shared among them
 FOLLOW_MS = 500                # the Parts tab looks at KiCad's selection this often (only while it shows)
 STATUS_LINES = 3               # a long status message wraps onto up to this many lines (the bar grows)
 
@@ -2340,7 +2341,10 @@ class MainFrame(ConfigActions, wx.Frame):
         """Results tab, "Draw arrows on board": the shown layer's current arrows, as a job (their number capped: each
         arrow is three KiCad items). The return current's arrows go on a layer of their own (drawing.return_layer,
         User.6; results/vectors.split_return), the rest on the current-drawing layer (the user, of both on one layer:
-        "At the moment it's hard to say which arrows belong to what")."""
+        "At the moment it's hard to say which arrows belong to what"). `plane_layer` a list (the Layer list's "main
+        layers" / "all layers"): every one of them, overlaid on the same two User layers (the user: "if I choose all
+        layers it is omitted. It should be drawn though!"), each with its own spot jitter so that layers' arrows on
+        the same spot don't land on each other, MAX_BOARD_ARROWS_LAYERS shared among them."""
         if rr is None:                          # no view yet (the button is live before any Simulate)
             self.SetStatusText("run Simulate first: there is no map to draw")
             return
@@ -2351,15 +2355,18 @@ class MainFrame(ConfigActions, wx.Frame):
             self.SetStatusText("a temperature map has no current arrows: pick a current view (or Draw contours for "
                                "isotherms)")
             return
-        if plane_layer is None or self._refuse_if_busy() or not self._need_live():
+        if not plane_layer or self._refuse_if_busy() or not self._need_live():
             return
-        vec = (getattr(rr, "sheet_vectors", None) or {}).get(plane_layer)
-        if vec is None:
+        planes = [plane_layer] if isinstance(plane_layer, str) else list(plane_layer)
+        vectors = getattr(rr, "sheet_vectors", None) or {}
+        planes = [pl for pl in planes if pl in vectors]
+        if not planes:
             self.SetStatusText(f"no current vectors for {plane_layer}: run the simulation again")
             return
         layer = self.settings.config.drawing.current_layer
         back_layer = self.settings.config.drawing.return_layer
-        label = f"{rr.net} {rr.driver}->{rr.receiver} on {plane_layer}"
+        named = planes[0] if len(planes) == 1 else f"{len(planes)} layers"
+        label = f"{rr.net} {rr.driver}->{rr.receiver} on {named}"
         board, cfg = self.board, self.settings.config
         from .prefs_dialog import defaults
         p = defaults(theme.prefs())
@@ -2374,35 +2381,41 @@ class MainFrame(ConfigActions, wx.Frame):
             maps = [np.where(rr.layer_grids[n].node, K, 0.0) for n, K in rr.sheet_current.items()]
             ref = reference_density(maps)
             peak = max((float(m.max()) for m in maps if m.size), default=0.0)
-            # arrows down to the heatmap's log floor (peak / 1000): weak current shows sparse arrows, never none
-            arrows = arrow_field(rr.layer_grids[plane_layer], rr.sheet_current[plane_layer], *vec,
-                                 spacing_mm=BOARD_ARROW_SPACING_MM, max_arrows=MAX_BOARD_ARROWS, ref=ref,
-                                 with_density=True, with_net=True, floor=peak * 1e-3)
-            # line width by the density at each arrow (Preferences: Arrow lines), against the peak of all layers
-            widths = arrow_widths([a[4] for a in arrows], peak, w_min, w_max)
-            arrows = [a[:4] + (w, a[5]) for a, w in zip(arrows, widths)]
-            # the return current's arrows apart, by the net each one stands on (its last value)
             from ..results.vectors import return_rule, split_return
-            ahead, back = split_return(arrows, rr.layer_grids[plane_layer], return_rule(rr, cfg, board))
+            rule = return_rule(rr, cfg, board)
+            cap = MAX_BOARD_ARROWS if len(planes) == 1 else MAX_BOARD_ARROWS_LAYERS // len(planes)
+            ahead, back = {}, {}
+            for k, pl in enumerate(planes):
+                # arrows down to the heatmap's log floor (peak / 1000): weak current shows sparse arrows, never none;
+                # each layer its own jitter (seed), so that layers drawn together don't put arrows on each other
+                arrows = arrow_field(rr.layer_grids[pl], rr.sheet_current[pl], *vectors[pl],
+                                     spacing_mm=BOARD_ARROW_SPACING_MM, max_arrows=cap, ref=ref, seed=k + 1,
+                                     with_density=True, with_net=True, floor=peak * 1e-3)
+                # line width by the density at each arrow (Preferences: Arrow lines), against the peak of all layers
+                widths = arrow_widths([a[4] for a in arrows], peak, w_min, w_max)
+                arrows = [a[:4] + (w, a[5]) for a, w in zip(arrows, widths)]
+                # the return current's arrows apart, by the net each one stands on (its last value)
+                ahead[pl], back[pl] = split_return(arrows, rr.layer_grids[pl], rule)
             # beside the board, on each layer, what its arrows are (KiCad's API cannot name a User layer)
             import datetime
             from .. import __version__
             from ..results.legend import arrow_legends, place
             unit = getattr(rr, "heat_unit", None) or ("A/mm²" if getattr(rr, "view_of", None) else "A/m per A")
-            first, second = arrow_legends(rr, plane_layer, ahead, back, unit, (w_min, w_max), board,
+            first, second = arrow_legends(rr, planes, ahead, back, unit, (w_min, w_max), board,
                                           "" if __version__ == "dev" else __version__,
                                           datetime.date.today().isoformat())
-            place(board, rr.layer_grids[plane_layer], first, second)
-            n = self.session.draw_arrows(ahead, layer, label, legend=first.items())    # clears both groups first
-            m = self.session.draw_arrows(back, back_layer, f"{label} (return)", group="arrows-return",
-                                         legend=second.items())
+            place(board, rr.layer_grids[planes[0]], first, second)
+            n = self.session.draw_arrows([a for pl in planes for a in ahead[pl]], layer, label,
+                                         legend=first.items())                        # clears both groups first
+            m = self.session.draw_arrows([a for pl in planes for a in back[pl]], back_layer, f"{label} (return)",
+                                         group="arrows-return", legend=second.items())
             return n, m
 
         def done(counts):
             """Say how many arrows went where."""
             n, m = counts
             where = [f"{n} on {layer}"] * bool(n) + [f"{m} of the return current on {back_layer}"] * bool(m)
-            self.SetStatusText(f"drew the current arrows of {plane_layer}: {' and '.join(where) or 'none'}, "
+            self.SetStatusText(f"drew the current arrows of {', '.join(planes)}: {' and '.join(where) or 'none'}, "
                                f"{w_min:g} to {w_max:g} mm by current density")
 
         self._start("drawing the current arrows…", work, done, what="draw the current arrows", cancellable=False,

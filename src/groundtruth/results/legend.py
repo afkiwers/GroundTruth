@@ -68,41 +68,57 @@ def _value(v: float, unit: str) -> str:
     return (f"{v:,.0f}" if abs(v) >= 1000 else f"{v:.3g}") + f" {unit}"
 
 
-def arrow_legends(rr, plane_layer: str, ahead: list, back: list, unit: str, widths: tuple[float, float],
+def arrow_legends(rr, plane_layer, ahead, back, unit: str, widths: tuple[float, float],
                   board=None, version: str = "", when: str = "") -> tuple[Legend, Legend]:
     """The text for the supply side's layer and for the return current's (Legend each, placed beside the board:
-    the first at the board's top right, the second under it), from view `rr`, the copper layer drawn, the arrows of
-    each side (results.vectors.split_return), the maps' unit and the arrow line widths (Preferences)."""
-    grid = rr.layer_grids[plane_layer]
-    K = np.where(grid.node, np.asarray(rr.sheet_current[plane_layer], float), 0.0)
+    the first at the board's top right, the second under it), from view `rr`, the copper layer drawn (or several:
+    a list, with `ahead` / `back` as {layer: arrows}, drawn together for "all layers"), the arrows of each side
+    (results.vectors.split_return), the maps' unit and the arrow line widths (Preferences)."""
+    layers = [plane_layer] if isinstance(plane_layer, str) else list(plane_layer)
+    ahead = ahead if isinstance(ahead, dict) else {layers[0]: ahead}
+    back = back if isinstance(back, dict) else {layers[0]: back}
     route = getattr(rr, "kind", "") == "route"
     what = (f"{rr.net}" if getattr(rr, "view_of", None) or rr.kind in ("converter", "dcload") else
             f"{rr.net} {rr.driver}->{rr.receiver}")
     f = getattr(rr, "map_frequency", 0.0) or 0.0
     at_f = "DC" if f <= 0 else (f"{f / 1e6:.4g} MHz" if f >= 1e6 else f"{f / 1e3:.4g} kHz")
-    share = (getattr(rr, "layer_share", None) or {}).get(plane_layer)
-    head = [f"View: {what} ({at_f})",
-            f"Copper layer: {plane_layer}" + (f", {share * 100:.0f} % of the current" if share is not None else "")]
+    shares = getattr(rr, "layer_share", None) or {}
+    if len(layers) == 1:
+        share = shares.get(layers[0])
+        where = f"Copper layer: {layers[0]}" + (f", {share * 100:.0f} % of the current" if share is not None else "")
+    else:
+        where = "Copper layers, drawn together: " + ", ".join(
+            f"{l}" + (f" {shares[l] * 100:.0f} %" if l in shares else "") for l in layers)
+    head = [f"View: {what} ({at_f})", where]
 
-    def side(arrows, title: str, about: str) -> Legend:
+    def side(by_layer: dict, title: str, about: str) -> Legend:
         """One side's block: its nets, its peak density and where, and how to read the arrows."""
-        nets = _nets(arrows, grid)
+        count, top = Counter(), None
+        for layer in layers:
+            grid = rr.layer_grids[layer]
+            arrows = by_layer.get(layer, [])
+            nets = _nets(arrows, grid)
+            count.update({n: c for n, c in Counter(_nets_all(arrows, grid)).items()})
+            if not nets or grid.label is None:
+                continue
+            K = np.where(grid.node, np.asarray(rr.sheet_current[layer], float), 0.0)
+            ids = [k for k, n in enumerate(grid.nets) if n in set(nets)]
+            on = np.isin(grid.label, ids) & grid.node
+            if on.any():
+                k = int(np.argmax(np.where(on, K, -1.0)))
+                i, j = np.unravel_index(k, K.shape)
+                if top is None or K[i, j] > top[0]:
+                    top = (float(K[i, j]), grid.x0 + i * grid.d, grid.y0 + j * grid.d, layer)
         lines = list(head)
+        nets = [n for n, _ in count.most_common()]
         if nets:
             lines.append("Nets: " + ", ".join(nets[:4]) + (f" and {len(nets) - 4} more" if len(nets) > 4 else ""))
-        on = np.zeros_like(K, bool)
-        names = set(nets)
-        if names and grid.label is not None:
-            ids = [k for k, n in enumerate(grid.nets) if n in names]
-            on = np.isin(grid.label, ids) & grid.node
-        if on.any():
-            k = int(np.argmax(np.where(on, K, -1.0)))
-            i, j = np.unravel_index(k, K.shape)
-            x, y = grid.x0 + i * grid.d, grid.y0 + j * grid.d
-            lines.append(f"Peak here: {_value(float(K[i, j]), unit)} at ({x:.1f}, {y:.1f}) mm")
+        if top is not None:
+            lines.append(f"Peak here: {_value(top[0], unit)} at ({top[1]:.1f}, {top[2]:.1f}) mm"
+                         + (f" on {top[3]}" if len(layers) > 1 else ""))
         lines.append(about)
-        lines.append(f"{len(arrows)} arrows; more arrows and thicker lines ({widths[0]:g}-{widths[1]:g} mm) = "
-                     "more current")
+        n = sum(len(a) for a in by_layer.values())
+        lines.append(f"{n} arrows; more arrows and thicker lines ({widths[0]:g}-{widths[1]:g} mm) = more current")
         busiest = max((t for t in getattr(rr, "transfers", None) or [] if t.get("kind") == "via"),
                       key=lambda t: t.get("current_a", t.get("fraction", 0.0)), default=None)
         if busiest is not None and busiest.get("current_a") is not None:
@@ -125,6 +141,18 @@ def arrow_legends(rr, plane_layer: str, ahead: list, back: list, unit: str, widt
         second = side(back, "Return current", "Back through ground: it should stay close under the supply "
                                               "side's current")
     return first, second
+
+
+def _nets_all(arrows, grid) -> list[str]:
+    """The net under each arrow (one entry per arrow; _nets ranks them)."""
+    out = []
+    for a in arrows:
+        i, j = int(round((a[0] - grid.x0) / grid.d)), int(round((a[1] - grid.y0) / grid.d))
+        if 0 <= i < grid.node.shape[0] and 0 <= j < grid.node.shape[1] and grid.node[i, j]:
+            net = grid.net_at((i, j))
+            if net:
+                out.append(net)
+    return out
 
 
 def place(board, grid, first: Legend, second: Legend) -> None:

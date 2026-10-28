@@ -326,6 +326,18 @@ def test_the_arrow_legends_say_what_each_layer_holds_beside_the_board():
     assert "Nets: GND" in text and "Peak here: 2,500 A/mm² at (2.0, 4.0) mm" in text
     assert "Busiest via of the view: GND @(1.0, 4.0), 3.20 A" in text and "2 arrows" in text[-3]
     assert "Nets: PWR" in [l[1] for l in first.items()]
+    # several copper layers drawn together ("main / all layers"): every layer named, nets and arrows counted over
+    # all of them, the peak on the layer that has it
+    K2 = np.where(g.node, 1.0, 0.0)
+    K2[20, 10] = 4000.0                                     # In1.Cu's PWR copper beats F.Cu's
+    rr.layer_grids, rr.sheet_current = {"F.Cu": g, "In1.Cu": g}, {"F.Cu": K, "In1.Cu": K2}
+    rr.layer_share = {"F.Cu": 0.19, "In1.Cu": 0.6}
+    first, second = arrow_legends(rr, ["F.Cu", "In1.Cu"], {"F.Cu": ahead, "In1.Cu": ahead[:1]},
+                                  {"F.Cu": back, "In1.Cu": []}, "A/mm²", (0.01, 0.3))
+    text = [l[1] for l in first.items()]
+    assert "Copper layers, drawn together: F.Cu 19 %, In1.Cu 60 %" in text
+    assert "Peak here: 4,000 A/mm² at (2.0, 1.0) mm on In1.Cu" in text and "4 arrows" in text[-3]
+    assert "2 arrows" in [l[1] for l in second.items()][-3]
 
 
 def test_the_return_currents_arrows_are_told_apart_by_the_net_under_them():
