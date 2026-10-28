@@ -407,10 +407,10 @@ class _Figures:
     """Figure rendering with progress (the plugin's export runs as a background job and says how far it is)."""
 
     def __init__(self, total: int, progress: Optional[Callable[[str, float], None]], max_vias: Optional[int] = None,
-                 outlines: bool = False, names: bool = False):
+                 outlines: bool = False, names: bool = False, marks=None):
         """total: the figures expected (for the progress fraction); the display options the maps follow."""
         self.total, self.done, self.progress = max(total, 1), 0, progress
-        self.max_vias, self.outlines, self.names = max_vias, outlines, names
+        self.max_vias, self.outlines, self.names, self.marks = max_vias, outlines, names, marks
         self.sharper: dict = {}             # _view_key -> the view sharpened in the plugin ("Sharper map")
 
     def png(self, what: str, draw, *args, size=(9.5, 5.5), dpi: int = DPI, **kw) -> bytes:
@@ -421,13 +421,15 @@ class _Figures:
         return figure_png(draw, *args, size=size, dpi=dpi, **kw)
 
     def heat(self, what: str, board, rr, *args, size=(9.5, 5.5)) -> bytes:
-        """A view's maps (draw_heatmap), with at most max_vias via markers and, if asked, the parts' outlines and
-        names; at the resolution its model has (heatmap_dpi: every cell at least 1.5 pixels, up to MAP_DPI_MAX).
+        """A view's maps (draw_heatmap), with at most max_vias via markers, the markers chosen (`marks`, the
+        plugin's Markers menu: the user, of the report's maps, "I want them to only appear if they are selected in the
+        settings") and, if asked, the parts' outlines and names; at the resolution its model has (heatmap_dpi: every cell at least 1.5 pixels, up to MAP_DPI_MAX).
         Without the maps' text boxes (shares, pin letters, switch names: the user found they did not help; the
         tables under the maps list the vias' shares)."""
         rr = self.sharper.get(_view_key(rr), rr)            # a view sharpened in the plugin: its finer maps
         return self.png(what, draw_heatmap, board, rr, *args, size=size, dpi=heatmap_dpi(rr, size, DPI, MAP_DPI_MAX),
-                        max_vias=self.max_vias, outlines=self.outlines, names=self.names, labels=False)
+                        max_vias=self.max_vias, outlines=self.outlines, names=self.names, labels=False,
+                        marks=self.marks)
 
 
 # --------------------------------------------------------------------------------------------- the page
@@ -436,7 +438,8 @@ def render_html(board: Board, issues: list[Issue], routes: list, mode: str, sett
                 thermal=None, capacity: list = (), solver: Optional[dict] = None, config=None,
                 progress: Optional[Callable[[str, float], None]] = None, max_vias: Optional[int] = None,
                 outlines: bool = False, names: bool = False, dc_combined=None, sharper: list = (),
-                dc_loads: list = (), pdn: list = (), si=None, capacitors: Optional[list] = None) -> str:
+                dc_loads: list = (), pdn: list = (), si=None, capacitors: Optional[list] = None,
+                marks=None) -> str:
     """The report page. si: the signal-integrity figures (analysis/si.SiResult), their own part. capacitors: each
     capacitor with a DC-bias curve at its DC voltage (analysis/bias.CapBias; None: worked out here from the board
     and `config`, as the run did). converters: power-stage results (a motor bridge's legs are shown with their bridge);
@@ -447,7 +450,7 @@ def render_html(board: Board, issues: list[Issue], routes: list, mode: str, sett
     lines); view3d: link each view to its 3D page (view3d_<stem>.html next to the report, written by the CLI);
     max_vias: via markers per map at most, the busiest (the plugin's "Vias shown"; None: every carrying via);
     outlines, names: the parts' outlines and references over the maps (the plugin's "Part outlines", "Part
-    names"); dc_loads: DcLoadResults (analysis/dcload.py), their own part; sharper: views sharpened in the plugin ("Sharper map"), drawn instead of the ones they replace. Every
+    names"); marks: the markers the maps show (plots.MARKS; None: all, the CLI); dc_loads: DcLoadResults (analysis/dcload.py), their own part; sharper: views sharpened in the plugin ("Sharper map"), drawn instead of the ones they replace. Every
     map is drawn with as many pixels as its model has cells (up to MAP_DPI_MAX dpi); a click on a figure shows it at
     full resolution."""
     from .. import build_version
@@ -464,7 +467,7 @@ def render_html(board: Board, issues: list[Issue], routes: list, mode: str, sett
     n_figs = (sum(3 for _ in routes) + sum(2 + len(c.dc) for c in stages) + (combined is not None)
               + sum(4 + len(legs[b.net]) + bool(b.sweep) for b in bridges) + (2 if thermal else 0) + len(capacity)
               + len(dc_loads or ()) + len(pdn or ()) + (1 if si is not None and (si.nets or si.pairs) else 0))
-    figs = _Figures(n_figs, progress, max_vias, outlines, names)
+    figs = _Figures(n_figs, progress, max_vias, outlines, names, marks)
     figs.sharper = {_view_key(v): v for v in sharper or ()}
     # live KiCad boards read "kicad-ipc:<name>": the cover shows the name
     board_name = (board.source.split(":", 1)[1] if board.source.startswith("kicad-ipc:")

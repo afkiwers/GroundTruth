@@ -486,6 +486,32 @@ def test_converters_tab_adds_a_stage_and_simulate_shows_its_hot_loop(app, conv_f
     wait_rendered(f)
     assert not isinstance(f.results_panel.fig.axes[0].images[0].norm, LogNorm)
     f.results_panel.log_scale.SetValue(True)
+    # Markers: the master box takes everything off the heatmap and puts it back (the user: "I only want to see the
+    # heatmap, no vias etc. ... a master switch that enables all or disables all"), set_marks (the ▾ menu) one at
+    # a time; each choice kept in ui.json, the report following it (_report_args)
+    from groundtruth.report.plots import MARKS
+    from groundtruth.ui import theme
+    h = f.results_panel
+
+    def drawn():
+        """Markers, rings and text boxes over the maps (not the titles)."""
+        return ([l for ax in h.fig.axes for l in ax.get_lines() if l.get_marker() not in (None, "", "None")]
+                + [t for ax in h.fig.axes for t in ax.texts])
+    assert drawn() and h.marks_box.Get3StateValue() == wx.CHK_UNDETERMINED      # part outlines and names off
+    h.marks_box.Set3StateValue(wx.CHK_UNCHECKED)
+    h._on_marks_box(None)
+    wait_rendered(f)
+    assert not drawn() and h.marks_shown() == set() and h.max_vias() == 0
+    assert theme.prefs()["via_markers"] is False and theme.prefs()["mark_pins"] is False
+    assert f._report_args()[5]["marks"] == set()
+    h.set_marks(pins=True)
+    wait_rendered(f)
+    assert drawn() and h.marks_box.Get3StateValue() == wx.CHK_UNDETERMINED and h.marks_shown() == {"pins"}
+    h.marks_box.Set3StateValue(wx.CHK_CHECKED)
+    h._on_marks_box(None)
+    assert h.marks_shown() == set(MARKS) and h.outlines and h.names and theme.prefs()["outlines"] is True
+    h.set_marks(outlines=False, names=False)
+    wait_rendered(f)
     moves = f.results_panel.canvas.callbacks.callbacks.get("motion_notify_event", {}).values()
     assert any(getattr(ref(), "__name__", "") == "mouse_move" for ref in moves)
     f.results_panel.arrows.SetValue(True)
@@ -2233,8 +2259,9 @@ def test_every_button_works_before_and_after_a_simulate(app, frame, monkeypatch)
     old_log = wx.Log.SetActiveTarget(Log())
     try:
         run_steps(app, f, [])
-        # Configuration ▾ pops a menu up (a loop of its own waiting for the mouse): its entries are tested on their own
-        skip = {"Suggest fixes", "Compare what-if", "Simulate", "Reload board", "Cancel", "Configuration ▾"}
+        # Configuration ▾ and the Markers ▾ pop a menu up (a loop of its own waiting for the mouse): their entries are
+        # tested on their own
+        skip = {"Suggest fixes", "Compare what-if", "Simulate", "Reload board", "Cancel", "Configuration ▾", "▾"}
         clicked = []
 
         def buttons(w):
