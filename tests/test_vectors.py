@@ -92,9 +92,17 @@ def test_arrow_field_on_a_strip():
     left = sum(1 for a in a2 if a[0] + a[2] / 2 < 5)
     right = len(a2) - left
     assert 0.18 < right / left < 0.32, (left, right)                            # a quarter of the density
-    floor = np.where(g.node, np.where(xs < 5, 1.0, 0.005), 0.0)                 # 0.5 %: below the floor
-    a3 = arrow_field(g, floor, floor, np.zeros_like(floor), n_across=40)
-    assert a3 and all(a[0] + a[2] / 2 < 5 + b * g.d for a in a3)               # (one spot may straddle x = 5)
+    # weak current: never left without arrows (the user: "it should still draw a few on the lightest setting and
+    # never omit them!"): 0.5 % of the reference, above the heatmap's floor (1/1000), gets sparse ones (MIN_FILL);
+    # below the floor none
+    from groundtruth.results.vectors import MIN_FILL
+    weak = np.where(g.node, np.where(xs < 5, 1.0, 0.005), 0.0)
+    a3 = arrow_field(g, weak, weak, np.zeros_like(weak), n_across=40)
+    right = [a for a in a3 if a[0] + a[2] / 2 >= 5 + b * g.d]
+    assert 0.5 * MIN_FILL * spots / 2 <= len(right) <= 2 * MIN_FILL * spots / 2, (len(right), spots)
+    floor = np.where(g.node, np.where(xs < 5, 1.0, 0.0005), 0.0)                # 0.05 %: below the floor
+    a4 = arrow_field(g, floor, floor, np.zeros_like(floor), n_across=40)
+    assert a4 and all(a[0] + a[2] / 2 < 5 + b * g.d for a in a4)               # (one spot may straddle x = 5)
     assert len(arrow_field(g, np.hypot(kx, ky), kx, ky, n_across=40, max_arrows=10)) <= 10
 
 
@@ -468,3 +476,26 @@ def test_all_layers_shows_every_copper_layer_of_the_board_in_stack_order(tmp_pat
     FigureCanvasAgg(fig)
     draw_heatmap(fig, board, route, layer=ALL_LAYERS)
     assert [ax.get_title().split()[0] for ax in fig.axes[:-1]] == list(route.sheet_current)
+
+
+def test_weak_current_beside_strong_is_never_left_without_arrows():
+    """The user, of a +VDC pour carrying 0.1-0.4 A/mm² to a 12 V converter beside 10 A paths (38 A/mm² reference):
+    "even when the density is a lot less, it should still draw a few on the lightest setting and never omit them!".
+    Every connected region of copper above the heatmap's floor (peak / 1000) shows arrows: a wide weak pour sparse
+    ones (MIN_FILL), a small weak island (fewer spots than the 8 x 8 pattern needs) at least one, at its strongest
+    spot; copper below the floor none."""
+    from shapely.geometry import MultiPolygon
+    from groundtruth.results.vectors import MIN_FILL
+    pour, island, strip = box(0, 0, 10, 4), box(14, 0, 15, 0.6), box(0, 6, 20, 6.4)
+    g = build_grid({"A": MultiPolygon([pour, island]), "B": strip}, (0, 0, 20, 8), 0.1)
+    xs = g.x0 + np.arange(g.nx)[:, None] * g.d
+    ys = g.y0 + np.arange(g.ny)[None, :] * g.d
+    K = np.where(g.node, np.where(ys > 5, 30.0, np.where(xs > 12, 0.2, 0.3)), 0.0)    # strong strip, weak A
+    arrows = arrow_field(g, K, K, np.zeros_like(K), spacing_mm=0.8, ref=30.0, floor=30.0 * 1e-3, with_net=True)
+    in_pour = [a for a in arrows if a[1] < 4.5 and a[0] + a[2] / 2 < 11]
+    in_island = [a for a in arrows if a[1] < 4.5 and a[0] + a[2] / 2 > 13]
+    spots = 10 / 0.8 * 4 / 0.8
+    assert len(in_pour) >= 0.5 * MIN_FILL * spots and in_island, (len(in_pour), len(in_island))
+    below = np.where(g.node, np.where(ys > 5, 30.0, 0.01), 0.0)                         # A at 1/3000 of the peak
+    assert not [a for a in arrow_field(g, below, below, np.zeros_like(below), spacing_mm=0.8, ref=30.0,
+                                       floor=30.0 * 1e-3) if a[1] < 4.5]
