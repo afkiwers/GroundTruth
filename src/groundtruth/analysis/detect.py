@@ -605,15 +605,17 @@ def _switch_fets(board: Board) -> dict[str, tuple[str, set[str]]]:
             and not fp.dnp and fp.reference not in tags.ignored and (t := fet_terms(fp)) is not None}
 
 
-def _leg_nodes(board: Board, config: Config, fets: Optional[dict] = None) -> set[str]:
+def _leg_nodes(board: Board, config: Config, fets: Optional[dict] = None, grounded=None) -> set[str]:
     """Nets between two transistors of which one goes to ground and one to another (non-ground) net: half-bridge
-    switch nodes, a converter's or a motor bridge's."""
+    switch nodes, a converter's or a motor bridge's. grounded(net): what counts as ground (default _is_ground; a
+    motor bridge's finder also takes a net that reaches ground through a shunt, _LegFinder.grounded)."""
     fets = _switch_fets(board) if fets is None else fets
+    grounded = grounded or (lambda n: _is_ground(config, n))
     to_ground, to_other = set(), set()
     for _gate, power in fets.values():
         for n in power:
             other = next(iter(power - {n}))
-            (to_ground if _is_ground(config, other) else to_other).add(n)
+            (to_ground if grounded(other) else to_other).add(n)
     return {n for n in to_ground & to_other if not _is_ground(config, n)}
 
 
@@ -1145,6 +1147,8 @@ class _Leg:
     phase: Optional[str] = None          # from a label (hbA_hs)
     sheet_phase: Optional[str] = None    # from the sheet copy's name ("Phase B")
     labelled: bool = False
+    ret: str = ""                        # the low side's own net when it reaches `ground` through series parts
+    shunt: list[str] = field(default_factory=list)     # those parts (a current-sense shunt, a 0R)
 
 
 class _LegFinder:
@@ -1156,6 +1160,23 @@ class _LegFinder:
         self.board, self.config, self.tags, self.sensors = board, config, tags, sensors
         self.by_net, self.fp_of = _index(board)
         self.fets = _switch_fets(board)
+        self._grounds: dict[str, dict[str, list[str]]] = {}
+
+    def grounds(self, net: str) -> dict[str, list[str]]:
+        """The ground nets `net` is or reaches through series parts that pass current (0R, shunts, ferrites,
+        current-sense ICs, resistors up to power.INPUT_PATH_MAX_OHMS: the threshold between a shunt and a load or
+        bleeder [A71]), each with the parts crossed (none for `net` itself). A low side on a phase's own net with a shunt
+        to ground is on ground through it. Never through another switching transistor's non-ground net (a node, a
+        rail, another phase's own return)."""
+        if net not in self._grounds:
+            stop = {n for _, power in self.fets.values() for n in power if not _is_ground(self.config, n)} - {net}
+            reach = _series_reach(self.board, self.config, net, stop, self.by_net, self.sensors, depth=2)
+            self._grounds[net] = {n: parts for n, parts in reach.items() if _is_ground(self.config, n)}
+        return self._grounds[net]
+
+    def grounded(self, net: str) -> bool:
+        """A transistor's far end on ground, directly or through a shunt (grounds)."""
+        return _is_ground(self.config, net) or bool(self.grounds(net))
 
     def far_end(self, ref: str, node: str) -> str:
         """A transistor's power net other than the node."""
@@ -1169,12 +1190,36 @@ class _LegFinder:
         taken = self.tags.used("conv") | {r for leg in out for r in leg.hs + leg.ls}
         free = {r: t for r, t in self.fets.items() if r not in taken}
         converter_nodes = {c.switch_node for c in self.config.converters if c.switch_node}
-        for node in sorted(_leg_nodes(self.board, self.config, self.fets)):
+        for node in sorted(_leg_nodes(self.board, self.config, self.fets, self.grounded)):
             if node not in converter_nodes and node not in taken_nodes:
                 leg = self.unlabelled(node, free)
                 if leg is not None:
                     out.append(leg)
+        self.common_grounds(out)
         return out
+
+    def common_grounds(self, legs: list[_Leg]) -> None:
+        """Each leg's ground becomes the ground net most legs reach (grounds), so that legs whose low sides sit on
+        a phase's own net with a shunt to ground (per-phase current sensing) are one bridge with legs straight on
+        ground (the user: "Some might not have shunts, so it should work both ways"). Ties: the fewest series parts
+        on the way, summed over the legs (ranked over all legs at once: one leg's own phase net, reached by the
+        others through two shunts, never wins over the ground between them). A leg whose own net is not that ground
+        keeps it as its return (`ret`) with the parts between."""
+        reached = {id(leg): self.grounds(leg.ground) for leg in legs}
+        count, parts = Counter(), Counter()
+        for r in reached.values():
+            for n, crossed in r.items():
+                count[n] += 1
+                parts[n] += len(crossed)
+        for leg in legs:
+            r = reached[id(leg)]
+            if not r:
+                continue
+            best = max(r, key=lambda n: (count[n], -parts[n], n == leg.ground, n))
+            if best != leg.ground:
+                leg.ret, leg.shunt, leg.ground = leg.ground, list(r[best]), best
+                leg.reasons.append(f"low side on {leg.ret.split('/')[-1]}, to {best.split('/')[-1]} through "
+                                   f"{', '.join(leg.shunt)} (shunt)")
 
     def labelled(self, st) -> Optional[_Leg]:
         """The leg a GT label set makes: its high and low sides must be transistors that share exactly one net
@@ -1203,8 +1248,8 @@ class _LegFinder:
         """A leg at `node` from the unlabelled transistors: those to a non-ground net are the high side, those to
         ground the low side. None without both, or when an inductor hangs on the node (a converter's)."""
         on_node = [r for r, (_, power) in free.items() if node in power]
-        hs = sorted((r for r in on_node if not _is_ground(self.config, self.far_end(r, node))), key=_natural_key)
-        ls = sorted((r for r in on_node if _is_ground(self.config, self.far_end(r, node))), key=_natural_key)
+        hs = sorted((r for r in on_node if not self.grounded(self.far_end(r, node))), key=_natural_key)
+        ls = sorted((r for r in on_node if self.grounded(self.far_end(r, node))), key=_natural_key)
         if not hs or not ls:
             return None
         rail, ground, n_rails = self.rail_ground(node, hs, ls)
@@ -1360,7 +1405,8 @@ def _bridge(board: Board, config: Config, tags, sensors: dict, pass_fets: dict, 
     name = f"bridge {conns.pop()}" if len(conns) == 1 else f"bridge {rail.split('/')[-1]}"
     spec = BridgeSpec(name, rail, ground, legs=[
         LegSpec(lab, m.node, m.hs, m.ls, output=m.out.pin if m.out is not None else "", driver=m.driver,
-                inputs=m.inputs, snubber=m.snubber) for m, lab in zip(members, labels)],
+                inputs=m.inputs, snubber=m.snubber, ground_return=m.ret, shunt=list(m.shunt))
+        for m, lab in zip(members, labels)],
         input_connector=conn or [], rise_time=2e-9 if fast else 10e-9, source="auto", reviewed=False,
         note=reasons[0])
     _from_fields(board, config, spec, reasons)

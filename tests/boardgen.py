@@ -625,7 +625,8 @@ BR_X = (18.0, 30.0, 42.0)    # the bridge board's leg centres (mirror symmetric 
 
 def bridge_board(legs: int = 3, pinfunctions: str = "EPC", sense_ic: bool = True, snubber: bool = True,
                  inductor_on_a: bool = False, load_switch: bool = False, caps_per_leg: int = 1,
-                 esc: bool = False, header_gnd_pins: int = 0, unstitched: str = "") -> BoardGen:
+                 esc: bool = False, header_gnd_pins: int = 0, unstitched: str = "", phase_shunts: str = "",
+                 shunt_net: str = "PH{}_GND", shunt_r: str = "2m") -> BoardGen:
     """A motor bridge, 4 layers, 60 x 34 mm, GND plane on In1: a VBUS strip on F.Cu (x 10-50, y 4-9.6), and per
     leg k (centre x = BR_X[k], phase A / B / C) a high-side FET Q<2k+1> (drain in the strip at y 9, source on the
     PH<phase> pour at y 12), a low-side FET Q<2k+2> (drain on PH<k> at y 18.5, source on an F.Cu GND strip with vias at y 21.5), the PH<k>
@@ -643,11 +644,15 @@ def bridge_board(legs: int = 3, pinfunctions: str = "EPC", sense_ic: bool = True
     single-pad wire tab per phase (J4 / J5 / J6, pad 1) instead of J1, and the battery on two tabs: J2 on VBUS and
     J3 on IS-, which reaches GND through a 1 mOhm shunt R9 (no sensor IC).
     unstitched: the phases whose low side's GND strip gets no vias (its return reaches the plane through the
-    other legs' vias)."""
+    other legs' vias).
+    phase_shunts: the phases whose low side is on a net of its own (shunt_net, "PH{}_GND": PHA_GND ...): an F.Cu
+    island x - 2 to x + 1.5 under the source pad, with a shunt R<51+k> (shunt_r) at (x + 2, 22.25) to GND and a GND via
+    beside it; the strip is then an island per phase (the others on GND with their vias)."""
     g = BoardGen(layers=4, size=(60.0, 34.0))
     g.plane("GND", "In1.Cu")
     g.zone("VBUS", "F.Cu", [(10.0, 4.0), (50.0, 4.0), (50.0, 9.6), (10.0, 9.6)])
-    g.zone("GND", "F.Cu", [(14.0, 21.0), (46.0, 21.0), (46.0, 23.5), (14.0, 23.5)])
+    if not phase_shunts:
+        g.zone("GND", "F.Cu", [(14.0, 21.0), (46.0, 21.0), (46.0, 23.5), (14.0, 23.5)])
     gn, dn, sn = ("GN", "DN", "SN") if pinfunctions == "EPC" else ("G", "D", "S")
     phases = "ABC"[:legs]
     esc_pads: list[dict] = []
@@ -655,13 +660,20 @@ def bridge_board(legs: int = 3, pinfunctions: str = "EPC", sense_ic: bool = True
         x = BR_X[k]
         node = f"PH{ph}"
         g.zone(node, "F.Cu", [(x - 2.0, 11.4), (x + 1.2, 11.4), (x + 1.2, 18.6), (x - 2.0, 18.6)])
+        low = shunt_net.format(ph) if ph in phase_shunts else "GND"
+        if phase_shunts:                    # an island per phase: the low side's own net, or GND
+            g.zone(low, "F.Cu", [(x - 2.0, 21.0), (x + (1.5 if low != "GND" else 2.0), 21.0),
+                                 (x + (1.5 if low != "GND" else 2.0), 23.5), (x - 2.0, 23.5)])
+        if low != "GND":                    # the phase's shunt to GND, and GND's via to the plane beside it
+            g.two_pin(f"R{51 + k}", shunt_r, (x + 2.0, 22.25), low, "GND", package="1206")
+            g.via((x + 2.9, 22.25), "GND")
         for ref, y, d_net, s_net, gate in ((f"Q{2 * k + 1}", 10.5, "VBUS", node, f"G_H{ph}"),
-                                           (f"Q{2 * k + 2}", 20.0, node, "GND", f"G_L{ph}")):
+                                           (f"Q{2 * k + 2}", 20.0, node, low, f"G_L{ph}")):
             g.footprint(ref, "EPC2302" if pinfunctions == "EPC" else "SiR500", "Package_GAN:Fake_EPC", (x, y), [
                 {"number": 3, "at": (0.0, -1.5), "net": d_net, "size": (2.4, 1.2), "pinfunction": dn},
                 {"number": 2, "at": (0.0, 1.5), "net": s_net, "size": (2.4, 1.2), "pinfunction": sn},
                 {"number": 1, "at": (2.0, 0.0), "net": gate, "size": (0.6, 0.6), "pinfunction": gn}])
-        for vx in (x - 0.8, x + 0.8) if ph not in unstitched else ():
+        for vx in (x - 0.8, x + 0.8) if ph not in unstitched and low == "GND" else ():
             g.via((vx, 22.8), "GND")
         drv_pads = [
             {"number": 4, "at": (0.0, 0.0), "net": node, "size": (0.6, 0.6), "pinfunction": f"SH{ph}" if esc else "SW"},

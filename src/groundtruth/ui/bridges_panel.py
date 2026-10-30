@@ -149,7 +149,7 @@ class BridgesPanel(SelectableRows, wx.Panel):
         self.list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_select)
         self.leg_list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
         for i, (c, w) in enumerate([("Phase", 50), ("Switch node", 150), ("High side", 90), ("Low side", 90),
-                                    ("Output", 60), ("Driver", 55), ("Driven from", 220)]):
+                                    ("Return", 110), ("Output", 60), ("Driver", 55), ("Driven from", 220)]):
             self.leg_list.InsertColumn(i, c, width=w)
         self.leg_list.SetMinSize(wx.Size(320, 90))
         self.leg_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_leg_select)
@@ -277,9 +277,17 @@ class BridgesPanel(SelectableRows, wx.Panel):
         self.sweep_i, self.sweep_rpm = T(), T()
         self.leg_phase, self.leg_node, self.leg_high, self.leg_low, self.leg_out = (
             T(), wx.ComboBox(fw, style=wx.CB_DROPDOWN), T(), T(), T())
+        # a low side on a net of its own with a shunt to the bridge's ground (per-phase current sensing): that net
+        # and the shunt; empty when the low side is on the ground itself
+        self.leg_return, self.leg_shunt = wx.ComboBox(fw, style=wx.CB_DROPDOWN), T()
+        self.leg_return.SetToolTip("the low side's own net when it reaches the bridge's ground through a shunt (a "
+                                   "current-sense resistor per phase), e.g. /Phase A/PHASE_GND; empty when the low "
+                                   "side is on the ground")
+        self.leg_shunt.SetToolTip("the parts between that net and the ground, e.g. R12")
         self._add_rows(("Sweep", ("Sweep currents (A)", self.sweep_i), ("Sweep speeds (rpm)", self.sweep_rpm),
                         "Selected leg", ("Phase", self.leg_phase), ("Switch node", self.leg_node),
-                        ("High side", self.leg_high), ("Low side", self.leg_low), ("Output pin", self.leg_out)))
+                        ("High side", self.leg_high), ("Low side", self.leg_low),
+                        ("Ground return", self.leg_return), ("Shunt", self.leg_shunt), ("Output pin", self.leg_out)))
 
     def _form_layout(self):
         """The form laid out, and the tab with it."""
@@ -294,7 +302,7 @@ class BridgesPanel(SelectableRows, wx.Panel):
     def load(self, board, settings):
         """Show this board's bridges, and the GT labels found on it in the help box's status line."""
         self.board, self.settings = board, settings
-        for combo in (self.rail, self.ground, self.leg_node):
+        for combo in (self.rail, self.ground, self.leg_node, self.leg_return):
             set_lazy_items(combo, board.nets)
         self.bridges = list(settings.config.bridges)
         from ..analysis.tags import board_tags
@@ -372,8 +380,10 @@ class BridgesPanel(SelectableRows, wx.Panel):
         self.leg_list.DeleteAllItems()
         for leg in self.legs:
             i = self.leg_list.InsertItem(self.leg_list.GetItemCount(), leg.phase)
-            for col, v in enumerate([leg.switch_node, ", ".join(leg.high_side), ", ".join(leg.low_side), leg.output,
-                                     leg.driver, ", ".join(n.split("/")[-1] for n in leg.inputs)], 1):
+            ret = (f"{leg.ground_return.split('/')[-1]} via {', '.join(leg.shunt)}" if leg.shunt
+                   else leg.ground_return.split("/")[-1])
+            for col, v in enumerate([leg.switch_node, ", ".join(leg.high_side), ", ".join(leg.low_side), ret,
+                                     leg.output, leg.driver, ", ".join(n.split("/")[-1] for n in leg.inputs)], 1):
                 self.leg_list.SetItem(i, col, v)
 
     def on_select(self, evt):
@@ -432,6 +442,8 @@ class BridgesPanel(SelectableRows, wx.Panel):
             self.leg_high.SetValue(", ".join(leg.high_side))
             self.leg_low.SetValue(", ".join(leg.low_side))
             self.leg_out.SetValue(leg.output)
+            self.leg_return.SetValue(leg.ground_return)
+            self.leg_shunt.SetValue(", ".join(leg.shunt))
             self._selection_changed(lambda: self._leg_names(leg.phase))
 
     def _leg_names(self, phase: str) -> list[str]:
@@ -450,7 +462,8 @@ class BridgesPanel(SelectableRows, wx.Panel):
         """The Selected leg fields as a LegSpec (phase numbered when empty), or None when the switch node or a side
         is missing."""
         leg = LegSpec(self.leg_phase.GetValue().strip() or str(len(self.legs) + 1), self.leg_node.GetValue().strip(),
-                      _refs(self.leg_high.GetValue()), _refs(self.leg_low.GetValue()), self.leg_out.GetValue().strip())
+                      _refs(self.leg_high.GetValue()), _refs(self.leg_low.GetValue()), self.leg_out.GetValue().strip(),
+                      ground_return=self.leg_return.GetValue().strip(), shunt=_refs(self.leg_shunt.GetValue()))
         if not leg.switch_node or not leg.high_side or not leg.low_side:
             message_box("A leg needs its switch node, high side and low side.", "groundtruth", wx.ICON_WARNING)
             return None

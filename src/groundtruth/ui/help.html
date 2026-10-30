@@ -416,6 +416,17 @@ selected</b> (or <b>Add</b>) stores them with the bridge. Clicking a bridge show
 hot loop and switch node; the leg as stored, so after <b>Update selected</b> for one changed in the form). The other buttons are those of the Signal paths tab;
 <b>Detect…</b> shows the bridges found (legs, bus, input, confidence, why) with the complete, likely ones
 ticked.</p>
+<p><b>Per-phase current sensing.</b> A leg's low side may sit straight on the ground, or on a net of its own that
+reaches the ground through a current-sense shunt (one per phase, e.g. <code>/Phase A/PHASE_GND</code>). Detection
+takes such a net as ground when the parts between it and a ground net pass current: 0 Ω links, ferrites,
+current-sense ICs and resistors up to 10 Ω, at most two in series (a larger resistor is a load, not a shunt). The legs
+are then one bridge on the common ground, each with its own net and shunt as its <b>Return</b> (the leg list's
+column; <b>Ground return</b> and <b>Shunt</b> in the Selected leg fields); legs with and without shunts mix. Simulate
+closes each leg's hot loop through its shunt: the shunt and its copper are in the loop, its RMS current and loss
+in the bridge's results. <b>When detection still splits a drive</b> into several bridges (a shunt above 10 Ω, a return
+net it cannot follow), tick one of them in Detect…, then add the other legs to it with <b>Add leg</b> (their
+switch node, high and low side, ground return, shunt and output pin) and set the common <b>Ground net</b>; or label
+the switches <code>hbA_hs</code>, <code>hbA_ls</code>, … (<a href="#labels">Detection labels</a>).</p>
 <p>Simulate then, per bridge:</p>
 <ul>
 <li><b>drives the motor in six-step</b> at the operating point and finds the duty for the phase current (an

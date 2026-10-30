@@ -280,10 +280,11 @@ class ConverterSetup:
 
 # --------------------------------------------------------------------------- the stage on the board
 def elements_of(board: Board, spec: ConverterSpec) -> list[Element]:
-    """The switches in loop order: high side (rail -> switch node), low side (switch node -> ground), or the
-    integrated stage (rail -> ground)."""
+    """The switches in loop order: high side (rail -> switch node), low side (switch node -> ground, or to the leg's
+    own return net that reaches ground through a shunt: spec.low_return), or the integrated stage (rail -> ground)."""
     groups = [(spec.switch, spec.rail, spec.ground)] if spec.switch else \
-        [(spec.high_side, spec.rail, spec.switch_node), (spec.low_side, spec.switch_node, spec.ground)]
+        [(spec.high_side, spec.rail, spec.switch_node),
+         (spec.low_side, spec.switch_node, spec.low_return or spec.ground)]
     out = []
     for refs, na, nb in groups:
         for ref in refs:
@@ -552,8 +553,10 @@ def stage_power_nets(board: Board, config: Config, specs) -> dict[str, str]:
 
 
 def converter_nets(board: Board, config: Config, spec: ConverterSpec, with_input: bool = True) -> set[str]:
-    """Nets the converter's model must solve (pours or tracks): rail, switch node, ground, the input path."""
-    nets = {spec.rail, spec.ground} | ({spec.switch_node} if spec.switch_node else set())
+    """Nets the converter's model must solve (pours or tracks): rail, switch node, ground, the low side's own return
+    net (a leg with a per-phase shunt: the shunt between it and ground is then a lumped branch of the model, as every
+    part between two solved nets is), the input path."""
+    nets = {spec.rail, spec.ground, spec.low_return} | ({spec.switch_node} if spec.switch_node else set())
     if not with_input:
         return {n for n in nets if n}
     for pin in spec.input_connector:
