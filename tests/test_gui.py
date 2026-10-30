@@ -1165,7 +1165,7 @@ def test_add_kicad_selection_button(app, tmp_path, monkeypatch):
     class LiveFromFile(main_frame.Session):                     # KiCad stand-in: the board comes from the file
         live = True
 
-        def load(self):
+        def load(self, progress=None):
             return load_board(self.file_path), self.file_path
 
         def selected_nets(self):
@@ -1312,7 +1312,7 @@ class LiveSlotBoard:
         class LiveFromFile(main_frame.Session):
             live = True
 
-            def load(self):
+            def load(self, progress=None):
                 return load_board(self.file_path), self.file_path
         board, sc, path = make(tmp_path, gen or microstrip_board(slot=(19.5, 4, 20.5, 16)), "slot",
                                **({"nets": ()} if converters else {}))
