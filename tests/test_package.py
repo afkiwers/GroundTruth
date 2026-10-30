@@ -26,6 +26,13 @@ def test_the_pcm_package_has_kicads_layout_and_valid_metadata(tmp_path):
     plugin = json.loads(z.read("plugins/plugin.json"))
     assert m["identifier"] == plugin["identifier"] and m["type"] == "plugin"
     assert len(m["description"]) <= 150 and "contact" in m["author"]
+    # KiCad's add-on guidelines (dev-docs.kicad.org/en/addons): every field within 1000 characters unless noted, the
+    # identifier reverse-DNS in the namespace of where the source is hosted, the source and its issues linked
+    assert all(len(x) <= 1000 for x in (m["name"], m["description_full"], m["author"]["name"]))
+    assert re.fullmatch(r"[a-zA-Z][-a-zA-Z0-9.]{0,98}[a-zA-Z0-9]", m["identifier"])
+    assert m["identifier"].startswith("io.github.afkiwers.")
+    assert m["resources"]["github"].startswith("https://github.com/afkiwers/") and "issues" in m["resources"]
+    assert not {"download_sha256", "download_url", "download_size"} & set(m["versions"][0])
     assert all(re.fullmatch(r"[a-z][-a-z0-9]{0,48}[a-z0-9]", t) for t in m["tags"])          # the schema's rule
     (v,) = m["versions"]
     assert v["runtime"] == "ipc" and v["kicad_version"] == "10.0" and v["status"] in ("stable", "testing")

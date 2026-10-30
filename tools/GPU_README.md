@@ -1,7 +1,7 @@
 # GroundTruth: GPU support for the plugin
 
 The plugin's `tools` folder (after a Plugin and Content Manager install:
-`<Documents>\KiCad\10.0\3rdparty\plugins\io_github_iwers_groundtruth\tools`) adds GPU support to the GroundTruth
+`<Documents>\KiCad\10.0\3rdparty\plugins\io_github_afkiwers_groundtruth\tools`) adds GPU support to the GroundTruth
 plugin installed on this PC, for Simulate running on this PC. (A compute server gets its GPU support from its own
 installer: `install_server.cmd install --cuda cu126`.) It installs PyTorch with GPU
 support into the plugin's own Python environment: CUDA for an NVIDIA card, ROCm for an AMD Radeon (see "AMD
@@ -41,7 +41,7 @@ on some machines that `python.exe` shows nothing in the console it was started f
    ```
 
    It finds the plugin's environment
-   (`%LOCALAPPDATA%\KiCad\10.0\python-environments\io.github.iwers.groundtruth`) and first prints it, with the
+   (`%LOCALAPPDATA%\KiCad\10.0\python-environments\io.github.afkiwers.groundtruth`) and first prints it, with the
    CUDA version the driver supports (from `nvidia-smi`) and the build it installs. Then it installs PyTorch from
    PyTorch's CUDA 12.6 index there (`pip install torch --index-url https://download.pytorch.org/whl/cu126`) and
    checks the GPU. The last line should read
@@ -102,7 +102,7 @@ on some machines that `python.exe` shows nothing in the console it was started f
 | `install_gpu.py --cuda rocm6.3` | An AMD card on Linux, from PyTorch's own index (an older ROCm than `--amd`). |
 | `install_gpu.py --dry-run` | Shows what it would run, changes nothing. |
 | `install_gpu.py --python PATH` / `check_gpu.py --python PATH` | Another environment, e.g. a venv the `groundtruth` command line runs from. |
-| `check_gpu.py --plugin DIR` | The plugin is not where KiCad puts it under `Documents\KiCad\10.0` (`3rdparty\plugins\io_github_iwers_groundtruth` from the Plugin and Content Manager, or `plugins\io.github.iwers.groundtruth`): DIR is the folder that holds its `groundtruth` package. |
+| `check_gpu.py --plugin DIR` | The plugin is not where KiCad puts it under `Documents\KiCad\10.0` (`3rdparty\plugins\io_github_afkiwers_groundtruth` from the Plugin and Content Manager, or `plugins\io.github.afkiwers.groundtruth`): DIR is the folder that holds its `groundtruth` package. |
 
 Pick a build not newer than the "CUDA Version" `nvidia-smi` shows; `install_gpu.py` prints that version but does not
 choose the build for you.
@@ -125,5 +125,5 @@ otherwise the CPU); `on` refuses to run without the GPU, `off` never uses it.
 
 ## Remove it
 
-Delete the folder `%LOCALAPPDATA%\KiCad\10.0\python-environments\io.github.iwers.groundtruth` with KiCad closed.
+Delete the folder `%LOCALAPPDATA%\KiCad\10.0\python-environments\io.github.afkiwers.groundtruth` with KiCad closed.
 KiCad rebuilds it without PyTorch on the next start, and GroundTruth runs on the CPU as before.

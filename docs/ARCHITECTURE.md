@@ -2377,7 +2377,7 @@ a History tab with a comparison (and the CLI).
   (`groundtruth_add_net.py`, toolbar button with a green plus) and `clear` (`groundtruth_clear.py`). KiCad 10
   starts an action's entry script **without** plugin.json's `args` (`API_PLUGIN_MANAGER::InvokeAction` runs
   `Execute({ pluginFile })`), so each action has its own script. The schema has no context-menu or hotkey
-  field: plugins cannot add right-click entries. Manifest: identifier `io.github.iwers.groundtruth`, runtime
+  field: plugins cannot add right-click entries. Manifest: identifier `io.github.afkiwers.groundtruth`, runtime
   python ≥ 3.11, scope `pcb`; `analyse` and `add-net` have toolbar buttons (`show-button`), `clear` none (the
   window's top bar has Clear GT markers too); light and dark icons at 24/48 px in `plugin/icons/` (drawn by
   `tools/make_icons.py`).
@@ -2391,7 +2391,7 @@ a History tab with a comparison (and the CLI).
   also compiles `solver/_mac.py`). `plugin/demo/` is the demo project (`tools/make_demo.py`: the test suite's
   layer-change board, zones filled by kicad-cli, checked in). Delivery: `tools/install_plugin.py` (a copy, below)
   or `tools/make_pcm_package.py` (a Plugin and Content Manager zip, `out/dist/groundtruth-<ver>-<commit>-pcm.zip`,
-  installed to `3rdparty/plugins/io_github_iwers_groundtruth`; `build_package.cmd` wraps it); only one of the two
+  installed to `3rdparty/plugins/io_github_afkiwers_groundtruth`; `build_package.cmd` wraps it); only one of the two
   may be installed.
 - **Add selected net** (`ui/app.py` `_add_selected_net`, `ui/inbox.py`): every action is a process of its own,
   so the button's process reads KiCad's selection (`kipy_source.selected_nets`: the nets of selected tracks,
@@ -2403,7 +2403,7 @@ a History tab with a comparison (and the CLI).
   window stays the only writer of the settings file. `AllowSetForegroundWindow` lets the window come to the
   front. Requests are validated (≤ 50 names of ≤ 300 characters) and written atomically.
   `requirements.txt` is installed by KiCad into the plugin venv. `tools/install_plugin.py` copies
-  `plugin/` + `src/groundtruth` into `<Documents>/KiCad/<10+>/plugins/io.github.iwers.groundtruth`.
+  `plugin/` + `src/groundtruth` into `<Documents>/KiCad/<10+>/plugins/io.github.afkiwers.groundtruth`.
 - **Start-up** (`ui/app.py` `plugin_main`): the entry script's first line takes the time. A small
   `StartWindow` ("GroundTruth – starting", pulsing bar) appears as soon as wx is imported; a worker thread then
   connects to KiCad and imports the analysis modules (numpy, scipy, matplotlib, shapely: ~1.7 s) while the start

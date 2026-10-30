@@ -7,7 +7,7 @@
 Layout (dev-docs.kicad.org/en/addons): metadata.json at the root, the plugin directly in plugins/ (plugin.json,
 the entry scripts, icons, requirements.txt, the groundtruth package, the demo project), the 64 px package icon in
 resources/icon.png. The version entry says runtime "ipc" (KiCad 9.0.1+: an IPC API plugin) and kicad_version
-10.0. KiCad installs it to <Documents>/KiCad/10.0/3rdparty/plugins/io_github_iwers_groundtruth and builds the
+10.0. KiCad installs it to <Documents>/KiCad/10.0/3rdparty/plugins/io_github_afkiwers_groundtruth and builds the
 plugin's Python environment from requirements.txt on the next start, as for a copied plugin.
 
 By default the files come from the last commit (git archive): a package then matches a commit (its name says
@@ -31,7 +31,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
-IDENTIFIER = "io.github.iwers.groundtruth"
+IDENTIFIER = "io.github.afkiwers.groundtruth"
 DESCRIPTION = "Return-path and EMI analysis: plane gaps, missing stitching vias, return-current heatmaps, " \
               "radiated and conducted emission estimates, power stages."
 DESCRIPTION_FULL = """GroundTruth analyses where the return currents of fast nets and switching power stages flow on a \
@@ -43,15 +43,15 @@ plane edges.
 plane resonances and a radiated emission estimate per net.
 - Power stages: the hot loop, input capacitors, conducted emission with a LISN, DC paths and current density, and \
 a thermal solve of copper and part temperatures with the current capacity.
-- Suggest fixes: stitching vias and capacitors placed where they are legal, predicted with the solver and verified \
-together; what-if edits to compare.
+- Suggest fixes: stitching vias and capacitors where they fit, checked with the solver; what-if edits to compare.
 
 Needs the KiCad API (Preferences > Plugins > Enable KiCad API). On first start KiCad builds the plugin's Python \
 environment (several hundred MB, a few minutes). A demo project is in the plugin folder (demo/README.txt).
 
-GPU (NVIDIA, or AMD on Linux): run tools/install_gpu.py from the plugin folder once, with KiCad's Python \
-("C:/Program Files/KiCad/10.0/bin/python.exe" tools/install_gpu.py on Windows). It installs PyTorch with CUDA into \
-the plugin's environment, and the solver then uses the GPU (analysis.gpu: auto)."""
+GPU support (optional): tools/GPU_README.md."""
+# KiCad's add-on guidelines: every metadata field at most 1000 characters unless noted (description: 150)
+DESCRIPTION_MAX, FIELD_MAX = 150, 1000
+REPO = "https://github.com/afkiwers/GroundTruth"
 
 
 def git(*args: str) -> bytes:
@@ -181,13 +181,16 @@ def main() -> int:
         "description_full": DESCRIPTION_FULL,
         "identifier": IDENTIFIER,
         "type": "plugin",
-        "author": {"name": "afkiwers & his trusty AI sidekick claude 🤝🤖", "contact": {"email": "iwers11@gmail.com"}},
+        "author": {"name": "Andre Iwers & Claude", "contact": {"email": "iwers11@gmail.com"}},
         "license": "GPL-3.0",              # the LICENSE file (GNU GPL v3); the PCM schema's name for it
-        "resources": {},
+        # the source and its issue tracker (KiCad's guidelines: "your website, github, documentation and other links")
+        "resources": {"homepage": REPO, "github": REPO, "issues": f"{REPO}/issues",
+                      "documentation": f"{REPO}/tree/main/docs/guide"},
         "tags": ["emi", "return-path", "pcb", "simulation", "power", "thermal"],   # lowercase, dashes
         "versions": [{"version": version, "status": args.status, "kicad_version": "10.0", "runtime": "ipc"}],
     }
-    assert len(DESCRIPTION) <= 150, len(DESCRIPTION)
+    assert len(DESCRIPTION) <= DESCRIPTION_MAX, len(DESCRIPTION)
+    assert len(DESCRIPTION_FULL) <= FIELD_MAX, len(DESCRIPTION_FULL)
     args.out.mkdir(parents=True, exist_ok=True)
     target = args.out / f"groundtruth-{version}-{tag}-pcm.zip"
     from make_icons import draw

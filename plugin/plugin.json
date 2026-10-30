@@ -1,6 +1,6 @@
 {
   "$schema": "https://go.kicad.org/api/schemas/v1",
-  "identifier": "io.github.iwers.groundtruth",
+  "identifier": "io.github.afkiwers.groundtruth",
   "name": "GroundTruth – return path / EMI analysis",
   "description": "Finds return-path problems (plane gaps, missing stitching vias, detours) on high-speed nets, solves the return current in the reference plane and estimates the radiated emission.",
   "runtime": {

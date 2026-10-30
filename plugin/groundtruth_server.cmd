@@ -12,7 +12,7 @@ echo %GTVER%
 echo Plugin folder: %HERE%
 echo.
 set "PY="
-rem KiCad names the environment after the plugin (io.github.iwers.groundtruth); any *groundtruth* one will do
+rem KiCad names the environment after the plugin (io.github.afkiwers.groundtruth); any *groundtruth* one will do
 for /d %%V in ("%LOCALAPPDATA%\KiCad\*") do (
     for /d %%E in ("%%V\python-environments\*groundtruth*") do (
         if exist "%%E\Scripts\python.exe" set "PY=%%E\Scripts\python.exe"

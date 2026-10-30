@@ -12,7 +12,9 @@ First, in KiCad, enable the API: **Preferences → Plugins → Enable KiCad API*
 
 Then close every KiCad window and start KiCad again. On the first start KiCad builds the plugin's Python environment in the background (several hundred MB from PyPI, a few minutes). In the PCB editor the button **Analyse return paths** appears at the right end of the top toolbar; if it's missing after the first start, the environment was not ready yet: **Tools → External Plugins → Refresh Plugins**, or restart KiCad. A second button, **Add selected net to GroundTruth**, adds the net of the selected track to the Signal paths tab (see "Finding the nets to analyse" in [the settings file](settings.md)). **Clear GT markers** is in the plugin menu and the window's top bar.
 
-**A copy for development:** `python tools/install_plugin.py` copies `plugin/` and the `groundtruth` package from the repository into `<Documents>/KiCad/<10.x+>/plugins/io.github.iwers.groundtruth` for every KiCad 10+ it finds (`--dest` sets the folder). Keep only one install: with both a package and a copy, every button shows twice (`python tools/install_plugin.py --uninstall` removes the copy).
+**Installed 0.1.43616 or earlier?** The plugin's identifier changed from `io.github.iwers.groundtruth` to `io.github.afkiwers.groundtruth` (KiCad's add-on guidelines: the namespace is the GitHub account that hosts it), so KiCad sees the new package as a different one. Uninstall the old **GroundTruth** in the manager's **Installed** tab first, or every button shows twice; your Preferences stay (they are in `%LOCALAPPDATA%\GroundTruth`). KiCad builds the new identifier's Python environment on the next start; the old one (`%LOCALAPPDATA%\KiCad\10.0\python-environments\io.github.iwers.groundtruth`) can be deleted, and a GPU or MKL install has to be repeated in the new one.
+
+**A copy for development:** `python tools/install_plugin.py` copies `plugin/` and the `groundtruth` package from the repository into `<Documents>/KiCad/<10.x+>/plugins/io.github.afkiwers.groundtruth` for every KiCad 10+ it finds (`--dest` sets the folder). Keep only one install: with both a package and a copy, every button shows twice (`python tools/install_plugin.py --uninstall` removes the copy).
 
 ## The command line
 
@@ -47,9 +49,9 @@ Checked on KiCad 10.0.5, Windows:
 | The button | PCB editor (open a board), top toolbar, right end, next to other plugin buttons such as Interactive HTML BOM. Its tooltip is "Analyse return paths". A small "GroundTruth – starting" window answers the click at once; then the window **&lt;board&gt; – GroundTruth** opens. It is not in the project manager or the schematic editor. |
 | Start-up log | `%LOCALAPPDATA%\GroundTruth\plugin.log` (`~/.cache/groundtruth/plugin.log` elsewhere): the time of each start-up step, for a slow start, and wxWidgets' own messages (which KiCad would otherwise pop up in a Messages dialog). |
 | Demo board | `demo\groundtruth_demo.kicad_pro` in the installed plugin folder (next row): a 4-layer board whose clock changes layers with no stitching via. Open it with **File → Open Project**, then follow `demo\README.txt`: Run checks, Simulate (the return fans out over both GND planes), Suggest fixes (the stitching via). Reinstalling the plugin resets it. |
-| The installed plugin | `<Documents>\KiCad\10.0\plugins\io.github.iwers.groundtruth` (with OneDrive: `C:\Users\<you>\OneDrive\Dokumente\KiCad\10.0\plugins\...`). **Tools → External Plugins → Open Plugin Directory** opens the `plugins` folder. |
-| Its Python environment | `%LOCALAPPDATA%\KiCad\10.0\python-environments\io.github.iwers.groundtruth`, which KiCad builds on first start. Delete this folder to make KiCad rebuild it. |
-| Name in KiCad | "GroundTruth – return path / EMI analysis", identifier `io.github.iwers.groundtruth` |
+| The installed plugin | `<Documents>\KiCad\10.0\plugins\io.github.afkiwers.groundtruth` (with OneDrive: `C:\Users\<you>\OneDrive\Dokumente\KiCad\10.0\plugins\...`). **Tools → External Plugins → Open Plugin Directory** opens the `plugins` folder. |
+| Its Python environment | `%LOCALAPPDATA%\KiCad\10.0\python-environments\io.github.afkiwers.groundtruth`, which KiCad builds on first start. Delete this folder to make KiCad rebuild it. |
+| Name in KiCad | "GroundTruth – return path / EMI analysis", identifier `io.github.afkiwers.groundtruth` |
 
 To open the same window on a file without KiCad (drawing on the board is disabled in this mode), run `groundtruth-gui board.kicad_pcb`.
 
@@ -106,7 +108,7 @@ the run says "solved on CPU (the … GPU computes … at 0.3x the CPU's speed he
 **How to install it**
 
 1. Install the plugin as above and start it once in KiCad: KiCad then builds the plugin's Python environment
-   (`%LOCALAPPDATA%\KiCad\10.0\python-environments\io.github.iwers.groundtruth`).
+   (`%LOCALAPPDATA%\KiCad\10.0\python-environments\io.github.afkiwers.groundtruth`).
 2. Close KiCad.
 3. In a console on the GPU machine, run the installer with any Python. KiCad's own works; it ships with KiCad:
 
@@ -115,7 +117,7 @@ the run says "solved on CPU (the … GPU computes … at 0.3x the CPU's speed he
    ```
 
    Run it in the repo folder (for a copied install), or in the plugin folder for a package install
-   (`<Documents>\KiCad\10.0\3rdparty\plugins\io_github_iwers_groundtruth`), which carries the script as
+   (`<Documents>\KiCad\10.0\3rdparty\plugins\io_github_afkiwers_groundtruth`), which carries the script as
    `tools\install_gpu.py`. It finds the plugin's environment, runs `pip install torch` there (an NVIDIA card:
    from PyTorch's CUDA 12.6 index; an AMD Radeon, when no NVIDIA driver is found: AMD's ROCm build for the card's
    chip, from AMD's index), and checks that PyTorch sees the GPU and computes in double precision on it. The last line reads
