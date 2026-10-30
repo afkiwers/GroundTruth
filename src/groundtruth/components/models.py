@@ -275,6 +275,19 @@ class ComponentModel:
 KELVIN_FORCE_RATIO = 1.5    # a 4-terminal shunt's force pads are at least this much larger than its sense pads
 
 
+def pad_area(p) -> float:
+    """A pad's copper area (mm²): its outline's when the board gives one (a custom pad: its anchor and its
+    primitives, whose `size` is only the small anchor), else its size's rectangle."""
+    if p.polygon is not None:
+        from shapely.geometry import Polygon as _Poly
+        outer, holes = p.polygon
+        try:
+            return float(_Poly(outer, holes).area)
+        except (ValueError, TypeError):
+            pass
+    return float(p.size[0] * p.size[1])
+
+
 def kelvin_force_pads(fp) -> Optional[list]:
     """The two force pads of a 4-terminal (Kelvin) resistor: a part with four or more connected pads on at least
     three nets whose two largest pads are on two different nets and each at least KELVIN_FORCE_RATIO times the area
@@ -282,10 +295,12 @@ def kelvin_force_pads(fp) -> Optional[list]:
     pads = [p for p in fp.pads if p.net]
     if len(pads) < 4 or len({p.net for p in pads}) < 3:
         return None
-    area = sorted(pads, key=lambda p: -(p.size[0] * p.size[1]))
+    # by copper area (pad_area: a custom pad's whole outline; a battery shunt's custom force pads can have an anchor
+    # smaller than its sense pads: by `size` the sense pads were taken as the force pads)
+    area = sorted(pads, key=lambda p: -pad_area(p))
     a, b, rest = area[0], area[1], area[2:]
-    small = max(p.size[0] * p.size[1] for p in rest)
-    if a.net == b.net or min(a.size[0] * a.size[1], b.size[0] * b.size[1]) < KELVIN_FORCE_RATIO * small:
+    small = max(pad_area(p) for p in rest)
+    if a.net == b.net or min(pad_area(a), pad_area(b)) < KELVIN_FORCE_RATIO * small:
         return None
     return [p for p in fp.pads if p.net in (a.net, b.net)]
 
@@ -317,6 +332,20 @@ def buffer_pins(fp, model: Optional[ComponentModel], net: Optional[str] = None) 
     return [(a, b) for a, b in pairs if net is None or net in (a.net, b.net)]
 
 
+def _gate_known(fp, gate: str) -> bool:
+    """Whether a transistor's gate net is told, not guessed: a pin named as a gate (G, GN, GATE) is on it, or it has
+    fewer pads than each power net (a power FET's single gate pad beside its many drain and source pads). Three nets
+    of one pad each (a SOT-23 without pin names) tell nothing: detect.fet_terms then picks by name order."""
+    from ..analysis.detect import GATE_FN
+    if any(p.net == gate and GATE_FN.match(p.pin_function or "") for p in fp.pads):
+        return True
+    count = {}
+    for p in fp.pads:
+        if p.net:
+            count[p.net] = count.get(p.net, 0) + 1
+    return all(count[gate] < c for n, c in count.items() if n != gate)
+
+
 def model_pads(fp, model: Optional[ComponentModel]) -> list:
     """The pads a part's model joins: the two named in `pins` (by pad number or pin name), else a 4-terminal
     resistor's force pads (kelvin_force_pads: its current never flows through its sense pads), else all of them."""
@@ -330,7 +359,7 @@ def model_pads(fp, model: Optional[ComponentModel]) -> list:
         from ..analysis.detect import fet_terms
         from .defaults import ref_prefix
         terms = fet_terms(fp) if ref_prefix(fp.reference) in ("Q", "T", "M") else None
-        if terms is not None:
+        if terms is not None and _gate_known(fp, terms[0]):
             return [p for p in fp.pads if p.net in terms[1]]
     if model is None or not model.pins:
         return list(fp.pads)
