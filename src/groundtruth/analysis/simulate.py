@@ -3694,10 +3694,19 @@ def _simulate(board: Board, config: Config, nets: Optional[list[str]], progress:
     specs = {s.name: s for s in config.nets}
     todo = [(k, r) for k, r in checks.routes.items() if not nets or k[0] in nets]
     conv = [c for c in config.converters if not nets or c.name in nets]
+    brid = [b for b in config.bridges if not nets or b.name in nets or any(b.leg_name(l) in nets for l in b.legs)]
+    dl = [d for d in getattr(config, "dc_loads", ()) if not nets or d.name in nets]
+    pl = [d for d in getattr(config, "pdn", ()) if not nets or d.label in nets]
     if ph is not None:      # building a model takes about what a solve or two does (6-layer board: 3-4 s)
         a = config.analysis
-        est = (len(todo) * (a.solve_points + a.max_solves) + len(conv) * (a.solve_points + a.max_solves + 10) * 1.5)
-        ph.start(1.5 * (len(todo) + 2 * len(conv)), rest=est, steps=len(todo) + (1 if conv else 0))
+        # every kind of item counts, a bridge's legs as power stages: a run of a motor bridge alone estimated
+        # nothing, and a phase of no cost with no rest after it takes the whole bar (Phases.start), so the bar
+        # stood at 100 % through all the bridge's solves (the user: "it sits at 100% for ages")
+        stages = len(conv) + sum(len(b.legs) for b in brid)
+        est = (len(todo) * (a.solve_points + a.max_solves) + stages * (a.solve_points + a.max_solves + 10) * 1.5
+               + (len(dl) + len(pl)) * a.solve_points)
+        ph.start(1.5 * (len(todo) + 2 * stages + len(dl) + len(pl)), rest=est,
+                 steps=len(todo) + sum(1 for x in (conv, brid, dl, pl) if x))
     def step(msg):
         """A progress step (a no-op context without progress)."""
         return ph.step(msg) if ph is not None else nullcontext()
@@ -3713,7 +3722,6 @@ def _simulate(board: Board, config: Config, nets: Optional[list[str]], progress:
     with step("power stages: building their models") if conv else nullcontext():
         csetups, result.converters, conv_issues = prepare_converters(model, conv)
     issues.extend(conv_issues)
-    brid = [b for b in config.bridges if not nets or b.name in nets or any(b.leg_name(l) in nets for l in b.legs)]
     bsetups = []
     if brid:
         from .bridge import prepare_bridges
@@ -3725,7 +3733,6 @@ def _simulate(board: Board, config: Config, nets: Optional[list[str]], progress:
         result.converters += leg_results
         issues.extend(b_issues)
     # DC rails with loads (analysis/dcload.py): one DC run each on the whole-board DC model
-    dl = [d for d in getattr(config, "dc_loads", ()) if not nets or d.name in nets]
     dsetups = []
     if dl:
         from .dcload import prepare_dc_loads
@@ -3733,7 +3740,6 @@ def _simulate(board: Board, config: Config, nets: Optional[list[str]], progress:
             dsetups, result.dc_loads, d_issues = prepare_dc_loads(model, dl)
         issues.extend(d_issues)
     # supply rails' PDN impedance (analysis/pdn.py): one whole-board model per rail, its ICs as ports
-    pl = [d for d in getattr(config, "pdn", ()) if not nets or d.label in nets]
     psetups = []
     if pl:
         from .pdn import prepare_pdn
