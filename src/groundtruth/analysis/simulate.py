@@ -3425,6 +3425,17 @@ def solve_cost(run: ModelRun) -> float:
     return max(run.exc.stack.nb / 1e5, 0.05)
 
 
+def solve_limit(s, r, max_solves: int) -> int:
+    """The most solves run r of setup s takes in solve_setups (the progress count "solve k of ≤ n"): its planned
+    frequencies; a spectrum run's refinement up to max_solves and the worst harmonic's WORST_EXTRA past it
+    (next_frequencies); an extra run's what its setup's own solve_limit says (a power stage's conducted band, a PDN
+    rail's ports)."""
+    if r is s.spectrum_run:
+        return max(len(r.planned), max_solves + WORST_EXTRA)
+    own = getattr(s, "solve_limit", None)
+    return max(len(r.planned), own(r)) if own is not None else len(r.planned)
+
+
 def run_kind(s, r) -> str:
     """What run r of setup s solves on, for the solver statistics (solver/stats.py): "board-wide", "conducted" (a
     power stage's input-path model when it has one of its own), "victims", "DC" (a stage's DC paths), else the
@@ -3464,7 +3475,8 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
     conducted band) and a `planned_solved()` hook called after the first round.
 
     progress: a callback or a Phases plan; this step's share is its planned solves (each weighted by its model's
-    size, solve_cost) against `rest`, the estimated work after it.
+    size, solve_cost) against `rest`, the estimated work after it; within it the bar moves by the solves counted
+    ("solve k of ≤ n").
 
     free_done: after each round, the factorisations of the models no run still refining uses are freed (Simulate:
     it frees them all after the solves anyway). Results don't change: a freed one is made again identically when
@@ -3536,16 +3548,27 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
     def extra(s, r) -> bool:
         """Whether run r is one of setup s's extra runs (refined by the setup itself)."""
         return any(r is x for x in getattr(s, "extra_runs", ()))
-    # progress against the solve budget (refinement may stop early), so the bar never moves backwards
+    # this step's share of the bar: the solve budget, each solve weighted by its model's size, against the rest
     budget = {id(r): max(len(r.planned), max_solves) if r is s.spectrum_run else len(r.planned) for s, r in runs}
     planned = sum(budget[id(r)] * solve_cost(r) for _, r in runs)
-    n_planned = sum(budget.values())
     ph = progress if isinstance(progress, Phases) or progress is None else Phases(progress)
     if ph is not None:
         ph.start(planned, rest=rest)
-    done = [0.0, 0]
+    # within it the bar moves by the solves counted, as the message says them: weighted by model size it stood at
+    # 82 % beside "solve 76 of ≤ 119" (the user: "the percentage still does not add up"). n is the most solves
+    # left possible: each run's limit (solve_limit; the budget alone was passed: "solve 14 of ≤ 14"), down to the
+    # solves it made once its refinement ends, so n only shrinks and the bar never goes back
+    limit = {id(r): solve_limit(s, r, max_solves) for s, r in runs}
+    made = {id(r): 0 for _, r in runs}
+    done = [0, 0]                       # the solves finished, started (parallel ones start together)
     busy = [0.0]                        # the round's solves' seconds summed (solver statistics)
     lock = threading.Lock()
+
+    def finished(rs):
+        """Runs `rs` solve no more: their limit becomes the solves they made."""
+        with lock:
+            for r in rs:
+                limit[id(r)] = made[id(r)]
 
     def run(task):
         """One solve (setup, run, frequency), with a progress report before it and the count after."""
@@ -3553,14 +3576,15 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
         if ph is not None:
             kind = "board-wide" if r is s.cavity else getattr(s, "model_label", "route")
             with lock:
-                frac, k = done[0] / max(planned, 1e-9), done[1] + 1
+                done[1] += 1
+                n, d, k = sum(limit.values()), done[0], done[1]
             ph.report(f"{s.spec.name}: {f / 1e6:.4g} MHz, {kind} model ({r.build.nodes} nodes), "
-                      f"solve {k} of ≤ {max(n_planned, k)}", frac)
+                      f"solve {k} of ≤ {max(n, k)}", d / max(n, 1))
         t0 = time.perf_counter()
         solve_at(s, r, f)
         with lock:
-            done[0] += solve_cost(r)
-            done[1] += 1
+            done[0] += 1
+            made[id(r)] += 1
             busy[0] += time.perf_counter() - t0
 
     rounds = [0]
@@ -3628,6 +3652,7 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
                 hooked.add(id(s))
                 hook()
         pending = [(s, r) for s, r in group if r is s.spectrum_run or extra(s, r)]
+        finished([r for s, r in group if not (r is s.spectrum_run or extra(s, r))])
         free(pending)
         while pending:
             # one frequency per route and round, exactly as one thread would choose them: the thread count must not
@@ -3639,6 +3664,8 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
             for s, r in pending:
                 fs = next_frequencies(s, r, max_solves, config, k) if r is s.spectrum_run else s.refine(r, config)
                 wanted += [(s, r, f) for f in fs]
+            going = {id(r) for _, r, _ in wanted}
+            finished([r for _, r in pending if id(r) not in going])
             if not wanted:
                 break
             next_round()
@@ -3646,6 +3673,7 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
             parallel(wanted, gi, "refine")
             pending = list({id(r): (s, r) for s, r, _ in wanted}.values())
             free(pending)
+        finished([r for _, r in group])
         if len(groups) > 1:
             free([])            # the next group's peak without this one's factorisations
     next_round()        # what comes after (finishing, the fix search) may borrow the last round's

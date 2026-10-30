@@ -100,7 +100,11 @@ by itself (a settings file from before the Bridges tab is searched for bridges o
 settings and clears the net highlight it set in KiCad, giving back your active layer.</p>
 <p><b>The status bar</b> shows what happened last; a long message wraps onto up to three lines (hover over it for
 all of it). While a job runs it shows what the job is doing, how far it is, the time spent and about how long is
-left, with a progress bar on the right; a job of 10 s or more says afterwards how long it took. Only one job runs at
+left, with a progress bar on the right; a job of 10 s or more says afterwards how long it took. During Simulate's
+solves the percent moves by the solves counted, "solve k of ≤ n": n is the most solves the run can still take (each
+model's planned frequencies and the most its refinement may add); when a model's refinement ends early, n drops and
+the bar jumps forward. Model building before the solves and finishing after them take their own part of the bar, so
+the percent is a few points off k / n. Only one job runs at
 a time: a button pressed meanwhile is refused with "still working". <b>Cancel</b> stops Run checks, Simulate,
 Thermal, Current capacity, Suggest fixes, Compare what-if and Export report at their next progress step; reading the
 board, detection, drawing and Sharper map cannot be cancelled. A settings file that cannot be written is reported
