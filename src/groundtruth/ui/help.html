@@ -462,6 +462,17 @@ automatically drops out unnoticed; <b>Reset to automatic</b> goes back (an empty
 <li><b><i>bridge</i>  sweep</b> (when a sweep is set): losses, RMS density, conducted and radiated margin against
   the phase current, one line per speed; a hollow marker where the current is not reached.</li>
 </ul>
+<p><a name="bridges-sweep"></a><b>The sweep</b> (the form's <b>Sweep currents</b> and <b>Sweep speeds</b>,
+optional) is <b>in addition to</b> the operating point set above it (<b>Phase current</b>, <b>Speed</b>), not instead
+of it. The operating point is what Simulate solves and checks: its hot loops, maps, RMS currents and issues. The
+sweep then takes every sweep current at every sweep speed (25, 50, 100 A × 0, 1000 rpm: six points; an empty list
+uses the operating point's value) and re-uses the operating point's solves for each, since the copper is linear: the
+drive again, the RMS currents re-weighted, the capacitors' ripple, the losses and the conducted reading. The hot
+loop's L·di/dt and radiated margin are scaled with the largest switched current. That takes seconds per point, no
+new solves. Its points raise no issues; they are shown in the bridge's <b>sweep</b> view on the Results tab, one line
+per speed against the phase current, with a hollow marker where the drive cannot reach the current (the bus
+voltage against the back-EMF at that speed). Use it to see how losses and margins move over the drive's range; set
+the operating point to the case you want checked.</p>
 <p><b>Why the hot loop does not reach the motor connector.</b> During a switching edge the motor's winding holds
 the phase current nearly constant: the current only moves from one switch to the other. What changes in nanoseconds
 flows around the bus capacitors, the high side, the phase node and the low side, and back to the capacitors. That
