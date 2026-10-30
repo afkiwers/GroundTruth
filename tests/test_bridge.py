@@ -530,7 +530,20 @@ def solved_shunts(tmp_path_factory):
     sc.add_detected_bridges([b], d.models)
     sc.save()
     cfg = SettingsFile.load(sc.path).config
-    return board, cfg, simulate(board, cfg)
+    said = []
+    r = simulate(board, cfg, progress=lambda msg, frac: said.append((msg, frac)))
+    r.said = said                              # the progress reports, for the bar's test
+    return board, cfg, r
+
+
+def test_a_bridge_alone_moves_the_bar_through_its_solves(solved_shunts):
+    """The user, of a motor bridge's Simulate on the server: "it sits at 100% for ages" (at a board-wide solve, 31 of
+    ≤ 45). A run with a bridge alone estimated its model building at no cost with no rest after it, which took the
+    whole bar; the bridge's legs count as power stages now, so the solves fill the bar."""
+    said = solved_shunts[2].said
+    solves = [frac for msg, frac in said if ", solve " in msg]
+    assert solves and solves[0] < 0.2 and solves[-1] < 0.9 and solves[-1] > solves[0]
+    assert said[-1][1] == pytest.approx(1.0)
 
 
 def test_a_leg_with_its_own_shunt_closes_its_hot_loop_through_it(solved, solved_shunts):
