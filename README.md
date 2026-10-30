@@ -26,6 +26,30 @@ and the same settings file, and give the same results.
 
 ## The plugin
 
+![GroundTruth's two buttons at the right end of the PCB editor's top toolbar](docs/images/plugin-toolbar.png)
+
+**Getting there.** Once installed, GroundTruth puts two buttons at the right end of the PCB editor's top toolbar (red
+box above). They are two separate actions, so each has its own button:
+
+- **Analyse return paths** (the right one, the ground symbol) opens the GroundTruth window for the board open in the
+  PCB editor. This is where everything happens: setup, Run checks, Simulate, results and issues.
+- **Add selected net to GroundTruth** (the left one, with the green plus) adds a net you pick on the board to the
+  window's **Signal paths** tab, so you don't need to find it in a list:
+  1. In the PCB editor, select a track, via or pad of the net (click it; a right-click selects it too).
+  2. Press the button. The net is added as a new signal path, and the GroundTruth window comes to the front. If no
+     window is open for the board, one opens and adds the net once it has read the board.
+  3. GroundTruth suggests the driver and receiver pins from the pin types. Check the row, which is orange until you
+     review it; set the frequency and rise time if the net's name matches no signal class.
+
+  To add a **whole path through several nets** (for example a current-sense amplifier → op-amp → microcontroller
+  ADC), Ctrl+click one bit of copper on each net, then press the button once. GroundTruth puts the nets in order
+  through the parts joining them and adds one signal path, with the series resistors as pass-through parts and the
+  op-amp modelled as an amplifier. Ground, supply and power-stage nets (switch node, inductor output) are refused
+  with the reason. KiCad 10 doesn't let plugins add entries to the right-click menu, hence the toolbar button.
+
+A third action, **Clear GT markers**, removes the markers, contours and arrows GroundTruth drew on the board. It has no
+toolbar button: find it under **Tools → External Plugins**, or in the window's top bar.
+
 ![The Signal paths tab](docs/images/plugin-setup.png)
 
 **Set up.** The coloured tabs are what a run analyses: signal paths, converters, motor bridges, DC loads, power
@@ -53,7 +77,8 @@ report…** writes the results as one HTML page. The plugin's own **Help** (F1) 
 `https://afkiwers.github.io/GroundTruth/repository.json`, select it and install **GroundTruth**; new releases show up
 as updates. Each [release](https://github.com/afkiwers/GroundTruth/releases) also has the package as a zip for
 **Install from File…**. On the first start KiCad builds the plugin's Python environment (a few minutes); the button
-**Analyse return paths** then appears in the PCB editor's top toolbar.
+**Analyse return paths** then appears in the PCB editor's top toolbar. The plugin has a fair few dependencies, so it can
+take a couple of KiCad restarts before the buttons show.
 
 **The command line.** Python 3.11 or newer; install a release's wheel (GroundTruth is not on PyPI):
 

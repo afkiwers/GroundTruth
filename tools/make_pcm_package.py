@@ -45,8 +45,8 @@ plane resonances and a radiated emission estimate per net.
 a thermal solve of copper and part temperatures with the current capacity.
 - Suggest fixes: stitching vias and capacitors where they fit, checked with the solver; what-if edits to compare.
 
-Needs the KiCad API (Preferences > Plugins > Enable KiCad API). On first start KiCad builds the plugin's Python \
-environment (several hundred MB, a few minutes). A demo project is in the plugin folder (demo/README.txt).
+Needs the KiCad API (Preferences > Plugins > Enable KiCad API). After installing, KiCad fetches the plugin's \
+many dependencies (several hundred MB): restart KiCad, a few times if the buttons are not there yet. Demo: demo/README.txt.
 
 GPU support (optional): tools/GPU_README.md."""
 # KiCad's add-on guidelines: every metadata field at most 1000 characters unless noted (description: 150)
