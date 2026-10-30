@@ -4,9 +4,11 @@ import pytest
 
 from boardgen import bridge_board, discrete_buck_board
 from conftest import make
+from groundtruth.adapters.file_source import loads_board
 from groundtruth.analysis.detect import (detect_bridges, detect_converters, detect_nets, pass_switches,
                                          series_sensors, suggest_net)
-from groundtruth.config.settings import (BridgeSpec, ConfigError, LegSpec, MotorSpec, SettingsFile, config_from_data,
+from groundtruth.config.settings import (BridgeSpec, Config, ConfigError, LegSpec, MotorSpec, SettingsFile,
+                                         config_from_data,
                                          implausible, simulation_blockers, validate)
 
 
@@ -456,6 +458,68 @@ def test_a_factorisation_out_of_memory_is_retried_alone(solved, monkeypatch):
     assert calls[0] > 2 and not r2.bridges[0].error
     assert r2.bridges[0].conducted_worst["margin_db"] == pytest.approx(r.bridges[0].conducted_worst["margin_db"],
                                                                         abs=0.01)
+
+
+@pytest.mark.parametrize("kw, returns", [
+    ({}, ["", "", ""]),
+    ({"phase_shunts": "ABC"}, ["PHA_GND", "PHB_GND", "PHC_GND"]),
+    ({"phase_shunts": "B"}, ["", "PHB_GND", ""]),                         # a bridge may mix both
+    ({"phase_shunts": "ABC", "shunt_net": "PH{}_S"}, ["PHA_S", "PHB_S", "PHC_S"]),   # a net not named ground
+])
+def test_legs_with_a_shunt_each_to_ground_are_one_bridge(kw, returns):
+    """The user, of a BLDC drive with a current-sense shunt per phase (three one-leg bridges were proposed): "It
+    should suggest only one and list the 3 legs", and "Some might not have shunts, so it should work both ways". A
+    low side on a net of its own that reaches ground through a shunt (≤ power.INPUT_PATH_MAX_OHMS) is on ground: the
+    legs group on the common ground, each with its own net and shunt as its return."""
+    board = loads_board(bridge_board(**kw).text())
+    (d,) = detect_bridges(board, Config())
+    assert d.spec.ground == "GND" and [leg.phase for leg in d.spec.legs] == ["A", "B", "C"]
+    assert [leg.ground_return for leg in d.spec.legs] == returns
+    assert [leg.shunt for leg in d.spec.legs] == [[f"R{51 + k}"] if r else [] for k, r in enumerate(returns)]
+    assert d.confidence == "high" and d.spec.input_connector == ["J2.1", "J2.2"]
+
+
+def test_a_resistor_above_the_shunt_threshold_does_not_join_the_legs():
+    """A 100 Ω resistor from a low side's net to ground is no shunt (above power.INPUT_PATH_MAX_OHMS, 10 Ω): those
+    legs stay on their own grounds, as before."""
+    board = loads_board(bridge_board(phase_shunts="ABC", shunt_r="100").text())
+    found = detect_bridges(board, Config())
+    assert sorted(d.spec.ground for d in found) == ["PHA_GND", "PHB_GND", "PHC_GND"]
+    assert all(not leg.ground_return for d in found for leg in d.spec.legs)
+
+
+@pytest.fixture(scope="module")
+def solved_shunts(tmp_path_factory):
+    """bridge_board with a 2 mΩ shunt from each low side's own net to GND, at the operating point of `solved`."""
+    tmp = tmp_path_factory.mktemp("brshunt")
+    board, sc, _ = make(tmp, bridge_board(phase_shunts="ABC"), "br", nets=(), max_nodes=20000)
+    (d,) = detect_bridges(board, sc.config)
+    b = d.spec
+    b.v_bus, b.f_pwm, b.i_phase, b.speed_rpm, b.c_oss = 48.0, 40e3, 30.0, 3000.0, 1e-9
+    b.motor = MotorSpec("star", 0.05, 50e-6, 5.0, 7)
+    sc.add_detected_bridges([b], d.models)
+    sc.save()
+    cfg = SettingsFile.load(sc.path).config
+    return board, cfg, simulate(board, cfg)
+
+
+def test_a_leg_with_its_own_shunt_closes_its_hot_loop_through_it(solved, solved_shunts):
+    """Each leg's low side on its own net: its hot loop runs through the shunt to the ground (a lumped branch
+    between the two solved nets), a little longer than the same board's loop straight on ground; the shunt's RMS
+    current is the low side's, and its loss in the bridge's losses is I_rms² · R [Ohm's law, Joule heating]."""
+    board, cfg, r = solved_shunts
+    assert [leg.ground_return for leg in cfg.bridges[0].legs] == ["PHA_GND", "PHB_GND", "PHC_GND"]   # read back
+    (br,) = r.bridges
+    assert not br.error and br.operating["reached"]
+    legs = {c.phase: c for c in r.converters if c.bridge}
+    plain = {c.phase: c for c in solved[2].converters if c.bridge}
+    for ph in "ABC":
+        assert not legs[ph].error and plain[ph].loop_nh < legs[ph].loop_nh < 2 * plain[ph].loop_nh
+    shunts = {p["name"]: p["rms_a"] for p in br.rms["parts"] if p["name"] in ("R51", "R52", "R53")}
+    assert len(shunts) == 3 and max(shunts.values()) == pytest.approx(min(shunts.values()), rel=0.01)
+    loss = {x["ref"]: x["power_w"] for x in br.losses}
+    for ref, i in shunts.items():
+        assert loss[ref] == pytest.approx(i ** 2 * 2e-3, rel=0.01)
 
 
 def test_a_locked_rotor_checks_only_the_switching_leg(solved):

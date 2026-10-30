@@ -174,6 +174,10 @@ class ConverterSpec:
     bridge: Optional[str] = None
     phase: str = ""
     phase_output: str = ""                # the motor connector pin of a leg ("J1.A")
+    # a leg's low side on a net of its own that reaches `ground` through series parts (per-phase current sensing):
+    # that net (the hot loop's low-side pads are on it) and the parts (the shunt, a lumped branch to ground)
+    low_return: str = ""
+    low_shunt: list[str] = field(default_factory=list)
     # the control loop (analysis/loop.py): overrides of what the board and the controller's symbol fields give:
     # {mode, vref, gm, ro, ea_gain, ea_gbw, vsense_max, ith_range, cs_gain, slope, ramp, r_sense} (values with units)
     loop: dict = field(default_factory=dict)
@@ -283,6 +287,10 @@ class LegSpec:
     driver: str = ""                      # gate driver IC (information, for highlighting)
     inputs: list[str] = field(default_factory=list)    # the driver's input nets (HIN, LIN): where the PWM comes from
     snubber: list[str] = field(default_factory=list)   # [C, R] from the node to the rail or ground
+    # the low side's own net when it reaches the bridge's ground through series parts (a per-phase current-sense
+    # shunt): that net ("" = the low side is on the bridge's ground) and those parts
+    ground_return: str = ""
+    shunt: list[str] = field(default_factory=list)
 
     @property
     def parts(self) -> list[str]:
@@ -359,7 +367,8 @@ class BridgeSpec:
             q_oss=self.q_oss, r_damp=self.r_damp, c_stray=self.c_stray, input_connector=list(self.input_connector),
             conducted=self.conducted, source=self.source, reviewed=self.reviewed, rds_on=self.rds_on,
             rds_on_low=self.rds_on_low, diode_vf=self.v_sd, bridge=self.name, phase=leg.phase,
-            snubber=list(leg.snubber), phase_output=leg.output) for leg in self.legs]
+            snubber=list(leg.snubber), phase_output=leg.output, low_return=leg.ground_return,
+            low_shunt=list(leg.shunt)) for leg in self.legs]
 
 
 @dataclass
@@ -802,7 +811,8 @@ def _bridge_from_data(b: dict, where: str, i: int) -> BridgeSpec:
         legs.append(LegSpec(phase=str(leg.get("phase") or k + 1), switch_node=str(leg.get("switch_node") or ""),
                             high_side=_refs(leg.get("high_side")), low_side=_refs(leg.get("low_side")),
                             output=str(leg.get("output") or ""), driver=str(leg.get("driver") or ""),
-                            inputs=_refs(leg.get("inputs")), snubber=_refs(leg.get("snubber"))))
+                            inputs=_refs(leg.get("inputs")), snubber=_refs(leg.get("snubber")),
+                            ground_return=str(leg.get("ground_return") or ""), shunt=_refs(leg.get("shunt"))))
     m = b.get("motor") or {}
     if not isinstance(m, dict):
         raise ConfigError([f"{where}.motor: must be a mapping"])
@@ -2227,10 +2237,10 @@ def _bridge_to_doc(b: BridgeSpec) -> CommentedMap:
         e: dict = {"phase": leg.phase, "switch_node": leg.switch_node,
                    "high_side": leg.high_side[0] if len(leg.high_side) == 1 else _flow_seq(leg.high_side),
                    "low_side": leg.low_side[0] if len(leg.low_side) == 1 else _flow_seq(leg.low_side)}
-        for key in ("output", "driver"):
+        for key in ("output", "driver", "ground_return"):
             if getattr(leg, key):
                 e[key] = getattr(leg, key)
-        for key in ("inputs", "snubber"):
+        for key in ("inputs", "snubber", "shunt"):
             if getattr(leg, key):
                 e[key] = _flow_seq(getattr(leg, key))
         legs.append(_flow(e))
