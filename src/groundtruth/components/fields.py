@@ -121,10 +121,10 @@ PARAMS = (
     Param("Bandwidth", "op-amp", "a gain block's closed-loop -3 dB bandwidth (wins over GBW); on an op-amp solved "
           "in its circuit: its stage's bandwidth limit", "Hz", 1e6, "MHz", 1e-1, 1e11, "1MHz",
           "signal paths: the gain block's roll-off, or the bandwidth_limit check"),
-    Param("Zout", "op-amp", "the amplifier model's open-loop output resistance R_O (the circuit divides it by its "
+    Param("Zout", "op-amp, buffer", "the amplifier model's open-loop output resistance R_O (the circuit divides it by its "
           "loop; a gain block: its output impedance)", "ohm", 1.0, "Ω", 0.0, 1e5, "2.3kohm",
           "signal paths: the output side's source impedance"),
-    Param("Cin", "op-amp", "the amplifier model's input capacitance (each input to ground)", "F", 1e-12, "pF", 1e-14,
+    Param("Cin", "op-amp, buffer", "the amplifier model's input capacitance (each input to ground)", "F", 1e-12, "pF", 1e-14,
           1e-9, "3pF", "signal paths: the input side's load"),
     Param("Rin", "op-amp", "the amplifier model's input resistance", "ohm", 1.0, "Ω", 1.0, 1e15, "1Gohm",
           "signal paths: the input side's load"),
@@ -139,6 +139,16 @@ PARAMS = (
     Param("PM", "op-amp", "the amplifier model's pm: its phase margin at unity gain, degrees (fp2 = "
           "GBW·sin(PM)·tan(PM))",
           "deg", 1.0, "°", 10.0, 90.0, "60", "signal paths: the op-amp's loop, its phase margin"),
+    # a logic buffer (Schmitt trigger) in a signal path (model `buffer`): its datasheet values at the supply it runs
+    # at (an HTTP lib's parameters, e.g. from InvenTree); Zout and Cin are the op-amps' rows above
+    Param("Rise Time", "buffer", "the buffer model's rise: its output's edge", "s", 1e-9, "ns", 1e-11, 1e-5, "2.5ns",
+          "signal paths: the stretch after the buffer is driven by this edge"),
+    Param("Threshold Rising", "buffer", "the buffer model's vt_pos: its positive-going input threshold V_T+", "V", 1.0,
+          "V", 0.1, 30.0, "2.5V", "victims: its hysteresis (with Threshold Falling) is the noise limit at its input"),
+    Param("Threshold Falling", "buffer", "the buffer model's vt_neg: its negative-going input threshold V_T−", "V",
+          1.0, "V", 0.0, 30.0, "1.6V", "victims: its hysteresis (with Threshold Rising)"),
+    Param("Hysteresis", "buffer", "the buffer model's hyst: V_T+ − V_T− (when the thresholds are not given)", "V",
+          1.0, "V", 0.01, 10.0, "0.8V", "victims: the noise limit at its input"),
 )
 BY_FIELD = {p.field.lower(): p for p in PARAMS}
 BIAS_CURVE = "Cbias Curve"      # a capacitor's DC-bias curve as text (bias_reading)
@@ -148,7 +158,9 @@ MODEL_FIELDS = {"cap": {"C": "Capacitance", "ESR": "ESR", "ESL": "ESL", "C_bias"
                 "resistor": {"R": "Resistance"},
                 "amplifier": {"gain": "Gain", "gbw": "GBW", "bandwidth": "Bandwidth", "z_out": "Zout", "c_in": "Cin",
                               "aol": "Aol", "fp2": "Fp2", "pm": "PM",
-                              "r_in": "Rin", "slew": "Slew Rate", "cmrr": "CMRR"}}
+                              "r_in": "Rin", "slew": "Slew Rate", "cmrr": "CMRR"},
+                "buffer": {"rise": "Rise Time", "z_out": "Zout", "c_in": "Cin", "vt_pos": "Threshold Rising",
+                           "vt_neg": "Threshold Falling", "hyst": "Hysteresis"}}
 
 
 @dataclass(frozen=True)

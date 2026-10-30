@@ -18,6 +18,11 @@ An op-amp stage in a signal path (part model `amplifier`, its gain from a Gain f
     GT = amp_in:3, amp_out:1     the stage's input and output pins (a dual op-amp: amp_in:5, amp_out:7);
                                  amp_inv:2 its inverting input where the pin names don't say (analysis/analog_net)
 
+A logic buffer in a signal path (part model `buffer`: a Schmitt trigger; its values from its Rise Time, Zout, Cin,
+Threshold Rising / Falling and Hysteresis fields):
+
+    GT = buf_in:1, buf_out:6     a channel's input and output pin, in pairs (a dual: buf_in:3, buf_out:4 after it)
+
 A converter's dead times (its dead_rise / dead_fall, components/fields.stage_values), on the controller IC (the one
 with the stage's SW pin):
 
@@ -52,6 +57,7 @@ CONNECTOR_ROLES = ("in", "out")                                          # share
 TAG = re.compile(r"^(conv|hb)([a-z0-9.+]*)_([a-z]+)(?:_([a-z0-9.+]+))?$", re.I)   # conv1_out or conv_out_1
 SIG = re.compile(r"^sig(?:_(drv|rx))?(?::(.+))?$", re.I)                         # sig, sig:9, sig_drv:PA3
 AMP = re.compile(r"^amp_(in|inv|out):(.+)$", re.I)                                # amp_in:3, amp_inv:2, amp_out:OUTA
+BUF = re.compile(r"^buf_(in|out):(.+)$", re.I)                                     # buf_in:1, buf_out:6 (a logic buffer)
 # a controller's dead time (the converter's dead_rise / dead_fall): dead:20ns (every stage it controls, both edges),
 # dead1:20ns (the stage on its SW1 pin), conv1_dead:20ns (the stage labelled conv1); _rise / _fall: one edge only
 DEAD = re.compile(r"^(?:conv([a-z0-9.+]*)_)?dead(\d*)(?:_(rise|fall))?\s*[:=]\s*(.+)$", re.I)
@@ -124,6 +130,8 @@ HELP = {
         "  amp_in:3, amp_out:1   an op-amp stage's input and output pins: the path runs through it (gain from a "
         "Gain field or the Parts tab)\n"
         "  amp_inv:2    its inverting input (where the pin names don't say): the circuit around it is solved\n"
+        "  buf_in:1, buf_out:6   a logic buffer's (Schmitt trigger's) input and output pin: the path runs through "
+        "it, the stretch after it driven by the buffer's own edge (a dual: buf_in:1, buf_out:6, buf_in:3, buf_out:4)\n"
         "Label the driving pin, each op-amp and the receiving pin; leave the resistors and capacitors between them "
         "unlabelled. Several labels are separated by commas. Then Update PCB from Schematic, Reload board and "
         "Detect…. A name with ADC, SENSE, MON or FB counts as a signal anyway. Help (F1) › Labelling a signal path "
@@ -187,10 +195,11 @@ class BoardTags:
     signals: list[Tag] = field(default_factory=list)               # sig labels: kind "sig", ident = the pin, role
                                                                    # "" | drv | rx (signal_marks)
     amps: list[Tag] = field(default_factory=list)                  # amp_in / amp_out labels (op-amp stages)
+    buffers: list[Tag] = field(default_factory=list)               # buf_in / buf_out labels (logic buffers)
 
     def __bool__(self) -> bool:
         """True when the board has any GT label (or a GT field that could not be read)."""
-        return bool(self.tagged or self.ignored or self.problems or self.signals or self.amps)
+        return bool(self.tagged or self.ignored or self.problems or self.signals or self.amps or self.buffers)
 
     def of(self, kind: str) -> list[StageTags]:
         """The stages of one kind: "conv" (converters) or "hb" (bridge legs)."""
@@ -258,6 +267,10 @@ def parse(text: str, ref: str = "") -> tuple[list[Tag], bool, list[str]]:
         am = AMP.match(word)
         if am:
             tags.append(Tag("amp", am.group(2), am.group(1).lower(), ref))
+            continue
+        bm = BUF.match(word)
+        if bm:                                  # a logic buffer's channel: buf_in / buf_out pairs, in order
+            tags.append(Tag("buf", bm.group(2), bm.group(1).lower(), ref))
             continue
         sm = SIG.match(word)
         if sm:
@@ -341,6 +354,15 @@ def amp_label_pins(fp: Footprint) -> Optional[tuple[str, str]]:
     return (pins["in"], pins["out"]) if "in" in pins and "out" in pins else None
 
 
+def buf_label_pins(fp: Footprint) -> list[tuple[str, str]]:
+    """(input pin, output pin) of each channel a part's GT buf_in / buf_out labels name, paired in the order they
+    are written (buf_in:1, buf_out:6, buf_in:3, buf_out:4: two channels); [] without a complete pair."""
+    tags, _, _ = parse(tag_text(fp), fp.reference)
+    ins = [t.ident for t in tags if t.kind == "buf" and t.role == "in"]
+    outs = [t.ident for t in tags if t.kind == "buf" and t.role == "out"]
+    return list(zip(ins, outs))
+
+
 def signal_marks(board: Board, reference_nets=()) -> tuple[dict[str, dict], list[str]]:
     """The nets the sig labels mark as signals: {net: {"drivers": [pins], "receivers": [pins]}}, and problems (a
     pin the part doesn't have, `sig` on a part with more than two nets). Reference nets are never signals."""
@@ -390,7 +412,7 @@ def _label_pad(fp: Footprint, ident: str):
 
 def _no_pin(t: Tag) -> str:
     """The problem text for a signal or op-amp label naming a pin its part doesn't have."""
-    label = f"sig{'_' + t.role if t.role else ''}:{t.ident}" if t.kind == "sig" else f"amp_{t.role}:{t.ident}"
+    label = f"sig{'_' + t.role if t.role else ''}:{t.ident}" if t.kind == "sig" else f"{t.kind}_{t.role}:{t.ident}"
     return f"{t.ref}: GT '{label}': no pin {t.ident!r} on {t.ref} (pad number or pin name)"
 
 
@@ -398,12 +420,17 @@ def _pin_problems(fp: Footprint, tags: list[Tag]) -> list[str]:
     """Signal and op-amp labels that can't work on this part, found when the labels are read so the tabs' label
     line shows them (otherwise the label is just skipped and its path silently missing): a pin the part doesn't
     have, or an op-amp with amp_in but no amp_out (or the other way round)."""
-    out = [_no_pin(t) for t in tags if t.kind in ("sig", "amp") and t.ident and _label_pad(fp, t.ident) is None]
+    out = [_no_pin(t) for t in tags if t.kind in ("sig", "amp", "buf") and t.ident and _label_pad(fp, t.ident) is None]
     roles = {t.role for t in tags if t.kind == "amp"} - {"inv"}
     if len(roles) == 1:
         have = roles.pop()
         out.append(f"{fp.reference}: GT amp_{have} needs amp_{'out' if have == 'in' else 'in'} too: "
                    "the op-amp stage's input and output pin")
+    n_in = sum(1 for t in tags if t.kind == "buf" and t.role == "in")
+    n_out = sum(1 for t in tags if t.kind == "buf" and t.role == "out")
+    if n_in != n_out:
+        out.append(f"{fp.reference}: GT has {n_in} buf_in and {n_out} buf_out: each buffer channel needs both, its "
+                   "input and its output pin")
     return out
 
 
@@ -440,8 +467,9 @@ def _read_tags(board: Board) -> BoardTags:
             continue
         out.signals += [t for t in tags if t.kind == "sig"]
         out.amps += [t for t in tags if t.kind == "amp"]
+        out.buffers += [t for t in tags if t.kind == "buf"]
         out.problems += _pin_problems(fp, tags)
-        tags = [t for t in tags if t.kind not in ("sig", "amp")]       # amp: read per part (amp_label_pins)
+        tags = [t for t in tags if t.kind not in ("sig", "amp", "buf")]     # amp, buf: read per part (*_label_pins)
         if tags:
             out.tagged[fp.reference] = tags
         for t in tags:

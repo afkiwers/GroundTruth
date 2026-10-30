@@ -84,14 +84,28 @@ the open-loop figures instead.
 | `Gain` | op-amp stage | V/V | `10`, `20dB` | the stage's gain (negative: inverting); makes the part a gain block | |
 | `GBW` | op-amp | MHz | `10MHz` | the gain-bandwidth: bandwidth = GBW / gain, the dominant pole | |
 | `Bandwidth` | op-amp | MHz | `1MHz` | a gain block's closed-loop −3 dB bandwidth (wins over GBW); on an op-amp in its circuit: the stage's bandwidth limit | |
-| `Zout` | op-amp | Ω | `2.3kohm` | the open-loop output resistance R_O | |
-| `Cin` | op-amp | pF | `3pF` | each input's capacitance to ground: the load on the input side | |
+| `Zout` | op-amp, logic buffer | Ω | `2.3kohm` | the open-loop output resistance R_O; a logic buffer's output resistance (default 25 Ω) | |
+| `Cin` | op-amp, logic buffer | pF | `3pF` | each input's capacitance to ground: the load on the input side (a logic buffer: default 5 pF) | victims: a buffer input's load |
 | `Rin` | op-amp | Ω | `1Gohm` | the input resistance | |
 | `Slew Rate` | op-amp | V/µs | `20V/us` | caps each output harmonic at SR / 2πf | |
 | `Aol` | op-amp | dB | `110dB` | the open-loop DC gain (the circuit model, with GBW) | |
 | `Fp2` | op-amp | MHz | `20MHz` | a second open-loop pole: the loop's phase margin | |
 | `PM` | op-amp | ° | `60` | the phase margin at unity gain, instead of Fp2 | |
 | `CMRR` | op-amp | dB | `90dB` | shown only (the path model is single-ended) | |
+
+### Logic buffers (Schmitt triggers)
+
+A Schmitt-trigger buffer in a path (an SN74LVC2G17 after a Hall sensor's RC filter): a part with `Threshold Rising`,
+`Threshold Falling` or `Hysteresis` and pins named in pairs (1A / 1Y, A / Y, IN / OUT) is a logic buffer by itself, no
+label needed. The path runs through it; the stretch after it is driven by its own edge. Give the values at the
+supply the part runs at; its `Zout` and `Cin` are the op-amp rows above.
+
+| Field | Parts | A bare number is in | Example | What it does | Also used in |
+|---|---|---|---|---|---|
+| `Rise Time` | logic buffer | ns | `2.5ns` | its output's edge: drives the stretch after it (default 2.5 ns) | |
+| `Threshold Rising` | logic buffer | V | `2.5V` | V_T+, the positive-going input threshold; makes the part a buffer | victims: the hysteresis with `Threshold Falling` |
+| `Threshold Falling` | logic buffer | V | `1.6V` | V_T−, the negative-going input threshold; makes the part a buffer | victims: the hysteresis with `Threshold Rising` |
+| `Hysteresis` | logic buffer | V | `0.8V` | V_T+ − V_T− (wins over the two thresholds); makes the part a buffer | victims: the noise limit at its input |
 
 ### Passive parts in a path
 

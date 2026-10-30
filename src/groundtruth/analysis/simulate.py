@@ -46,9 +46,9 @@ from ..config.settings import Config, NetSpec
 from ..core.board import Board, Pad
 from ..core.issues import Issue, dedupe, resolve_severity, sort_issues
 from ..emi.radiation import emission_arrays, emission_table, limit_range
-from ..emi.path import (PathAmp, PathLine, PathLoad, PathPart, PathShunt, PathSource, amplified_path,
+from ..emi.path import (PathAmp, PathBuffer, PathLine, PathLoad, PathPart, PathShunt, PathSource, amplified_path,
                         path_currents)
-from ..emi.spectrum import analysis_band, microstrip, offset_stripline, trapezoid_harmonics
+from ..emi.spectrum import analysis_band, microstrip, offset_stripline, trapezoid_at, trapezoid_harmonics
 from ..geometry.copper import CopperMap, reference_layers
 from ..geometry.shapes import arc_points
 from ..rules.checks import CheckResult, run_checks
@@ -1024,6 +1024,8 @@ class RouteSetup:
                                                # loop]: loop current / path mean current (band_moments)
     f_ref: float = 0.0                         # inductive reference frequency, max(f0, F_REF_MIN)
     network: Optional["NetworkPath"] = None    # the path's whole circuit for its currents (NetworkPath), or None
+    bode_end: str = ""                         # a path through a logic buffer: the first buffer's input pin, where
+                                               # its linear response (the Bode) ends; "" for the receiver
 
     # the fine model (kept as attributes for callers that only need one model)
     @property
@@ -1313,8 +1315,9 @@ def _shunt_loops(model: "BoardModel", setup: RouteSetup, shunts: list[dict], ele
 
 
 def _stage_routes(route: Route, config: Config) -> Optional[list[list]]:
-    """The route's steps cut at its op-amp stages: [(steps, the amp's ref and model ending the stage, or None, None
-    for the last, the series parts inside the stage)], or None without an amplifier on the route. Part segments
+    """The route's steps cut at its op-amp stages and logic buffers: [(steps, the amp's or buffer's ref and model
+    ending the stage, or None, None for the last, the series parts inside the stage)], or None without either on
+    the route. Part segments
     pair with route.parts in order; each stage gets its own parts (all of the route's but the op-amp, as before,
     paired the stage after an op-amp's R303 with the op-amp U301: a 4.7 kΩ resistor modelled as the op-amp)."""
     parts = iter(route.parts)
@@ -1324,7 +1327,7 @@ def _stage_routes(route: Route, config: Config) -> Optional[list[list]]:
             ref = next(parts, None)
             owner[i] = ref
             m = config.model_for(ref) if ref else None
-            if m is not None and m.kind == "amplifier":
+            if m is not None and m.kind in ("amplifier", "buffer"):
                 cuts.append((i, ref, m))
     if not cuts:
         return None
@@ -1510,7 +1513,7 @@ def _amp_circuit(model: "BoardModel", route: Route, main_ref: str, notes: list) 
     None when the route has no op-amp, or one whose input, output or ground pin can't be told (a note says so: the
     path is then one stage). The path is cut at each op-amp: the driver (or the op-amp before) drives the stage, its
     receivers' end is the next op-amp's input (loaded by its input impedance) or the receivers."""
-    from ..components.models import amplifier_pins
+    from ..components.models import amplifier_pins, buffer_pins
     board, config = model.board, model.config
     raw = _stage_routes(route, config)
     if raw is None:
@@ -1522,10 +1525,16 @@ def _amp_circuit(model: "BoardModel", route: Route, main_ref: str, notes: list) 
             rcv = route.receiver
         else:
             fp = board.footprint(ref)
-            pads = amplifier_pins(fp, m) if fp is not None else None
+            if m.kind == "buffer":          # the buffer's channel on this route: its input and output on its nets
+                chans = [c for c in buffer_pins(fp, m) if c[0].net in route.nets and c[1].net in route.nets] \
+                    if fp is not None else []
+                pads = chans[0] if chans else None
+            else:
+                pads = amplifier_pins(fp, m) if fp is not None else None
             ret = return_pad(board, config, pads[0], None) if pads else None
             if pads is None or ret is None:
-                notes.append(f"op-amp {ref}: its input, output or ground pin can't be told: the path is treated as "
+                what = "buffer" if m.kind == "buffer" else "op-amp"
+                notes.append(f"{what} {ref}: its input, output or ground pin can't be told: the path is treated as "
                              "one stage")
                 return None
             rcv = pads[0]
@@ -1534,7 +1543,10 @@ def _amp_circuit(model: "BoardModel", route: Route, main_ref: str, notes: list) 
         stages.append(sr)
         if ref is not None:
             grounds.append(ret)
-            pamps.append(PathAmp(ref, m.amp_gain, m.amp_z_in, m.amp_z_out_at, m.params.get("slew")))
+            if m.kind == "buffer":          # its own edge comes later (_buffer_sources): per volt until then
+                pamps.append(PathBuffer(ref, m.buf_z_in, m.buf_z_out()))
+            else:
+                pamps.append(PathAmp(ref, m.amp_gain, m.amp_z_in, m.amp_z_out_at, m.params.get("slew")))
             drv = pads[1]
     # the circuit of each stage, its shunts, its rows for the report
     els, shunt_sets = [], []
@@ -1545,16 +1557,28 @@ def _amp_circuit(model: "BoardModel", route: Route, main_ref: str, notes: list) 
         shunt_sets.append(sh)
         rows += r
         if k < len(pamps):
-            rows.append({"kind": "amp", "ref": pamps[k].name, "model": "amplifier", "length_mm": 0.0})
+            rows.append({"kind": "amp", "ref": pamps[k].name, "length_mm": 0.0,
+                         "model": "buffer" if isinstance(pamps[k], PathBuffer) else "amplifier"})
     return stages, pamps, grounds, els, shunt_sets, rows
+
+
+def _small_signal(pamps: list) -> list:
+    """The stages' amps without their slew limit and the buffers per volt of their own edge (v None): the path's
+    linear response, or each stage's per volt of the source that drives it."""
+    return [PathBuffer(a.name, a.z_in, a.z_out) if isinstance(a, PathBuffer) else PathAmp(a.name, a.gain, a.z_in,
+                                                                                          a.z_out) for a in pamps]
 
 
 def _amp_response(els: list, pamps: list, source, load) -> tuple[Callable, list]:
     """(response_fn, amp_gains) of an op-amp path's circuit: v_receiver / v_source at any frequencies (the amps
-    without their slew limit: a small-signal sweep), and each amp's own gain."""
-    linear = [PathAmp(a.name, a.gain, a.z_in, a.z_out) for a in pamps]
-    response = lambda fs: amplified_path(fs, np.ones(len(fs)), els, linear, source, load)[-1].v_end   # noqa: E731
-    gains = [(a.name, lambda fs, g=a.gain: np.array([complex(g(float(x))) for x in fs])) for a in pamps]
+    without their slew limit: a small-signal sweep), and each amp's own gain. A logic buffer is not linear: the
+    response then ends at the first buffer's input (the stretch the source drives), with the op-amps before it."""
+    linear = _small_signal(pamps)
+    first = next((k for k, a in enumerate(pamps) if isinstance(a, PathBuffer)), None)
+    end = -1 if first is None else first
+    response = lambda fs: amplified_path(fs, np.ones(len(fs)), els, linear, source, load)[end].v_end   # noqa: E731
+    gains = [(a.name, lambda fs, g=a.gain: np.array([complex(g(float(x))) for x in fs]))
+             for k, a in enumerate(pamps) if isinstance(a, PathAmp) and (first is None or k < first)]
     return response, gains
 
 
@@ -1572,14 +1596,26 @@ def _amplified_route(model: "BoardModel", setup: RouteSetup, freqs, amps, source
         return False
     stages, pamps, grounds, els, shunt_sets, rows = got
     returns = [setup.drv_ret, *grounds, setup.rcv_ret]
+    buffered = any(isinstance(a, PathBuffer) for a in pamps)
+    # each stage's own source spectrum S(f): the path's for the stages up to the first buffer, a buffer's edge for
+    # those after it (an op-amp passes its stage's source on). Without buffers there is one: the path's
+    spectra, src_of = _buffer_sources(model, setup.spec, pamps, res.notes) if buffered else ([], [])
+    for a in pamps:
+        if isinstance(a, PathBuffer):
+            a.v = spectra[src_of[pamps.index(a) + 1]]
     results = amplified_path(freqs, amps, els, pamps, source, load)
+    slews = any(isinstance(a, PathAmp) and a.slew for a in pamps)
     unclamped = amplified_path(freqs, amps, els, [PathAmp(a.name, a.gain, a.z_in, a.z_out) for a in pamps],
-                               source, load) if any(a.slew for a in pamps) else results
+                               source, load) if slews and not buffered else results
     clamp = np.where(np.abs(unclamped[-1].v_end) > 0,
                      np.abs(results[-1].v_end) / np.maximum(np.abs(unclamped[-1].v_end), 1e-300), 1.0)
+    if slews and buffered:
+        res.notes.append("a slew rate on an op-amp of a path through a logic buffer is not applied")
     # the stages' currents from the path's whole circuit where it can be made (NetworkPath: the op-amps' real
-    # closed loops, their feedback networks, every track a line), else the cascade's; the slew cap above stays
-    setup.network = network_path(model, setup.spec, setup.route, stages, shunt_sets, res.notes)
+    # closed loops, their feedback networks, every track a line), else the cascade's; the slew cap above stays.
+    # A logic buffer is no linear part of a circuit: such a path stays the cascade
+    setup.network = None if buffered else network_path(model, setup.spec, setup.route, stages, shunt_sets,
+                                                         res.notes)
     if setup.network is not None:
         results = setup.network.results(freqs, amps)
         res.notes.append("signal path currents from its whole circuit (every track a line, every part and op-amp "
@@ -1624,11 +1660,20 @@ def _amplified_route(model: "BoardModel", setup: RouteSetup, freqs, amps, source
         if setup.network is not None:
             qs = setup.network.results(fs, np.ones(len(fs)))
         else:
-            qs = amplified_path(fs, np.ones(len(fs)), els,
-                                [PathAmp(a.name, a.gain, a.z_in, a.z_out) for a in pamps], source, load)
+            qs = amplified_path(fs, np.ones(len(fs)), els, _small_signal(pamps), source, load)
+        # through a logic buffer: each stage per volt of its OWN source, times that source's share of
+        # setup.currents (the largest of the stages' spectra at each frequency, _buffer_harmonics): exact, and
+        # never a division by a null of one spectrum
+        if buffered:
+            fs_ = np.asarray(fs, float)
+            each = [sp(fs_) for sp in spectra]
+            top = np.maximum(np.max(each, axis=0), 1e-300)
+            share = [each[src_of[k]] / top for k in range(len(qs))]
         out = []
         for k, q in enumerate(qs):
             lc, carry = q.loop_currents(), 0
+            if buffered:
+                lc = [x * share[k] for x in lc]
             for j in range(len(shunt_sets[k])):
                 if j in keep_sets[k]:
                     out.append(lc[j] + carry)
@@ -1638,14 +1683,98 @@ def _amplified_route(model: "BoardModel", setup: RouteSetup, freqs, amps, source
             out.append(lc[-1] + carry)
         return out
     setup.loop_weights = weights
-    setup.currents = np.abs(np.asarray(amps, float)) * clamp
+    if buffered:                        # the largest of the stages' spectra (the weights carry each one's share)
+        f_ = np.asarray(freqs, float)
+        setup.currents = np.max([sp(f_) for sp in spectra], axis=0)
+    else:
+        setup.currents = np.abs(np.asarray(amps, float)) * clamp
     merged = _merge_results(results, pamps)
     setup.path = (rows, merged)
     setup.response_fn, setup.amp_gains = _amp_response(els, pamps, source, load)
-    res.notes.append(f"signal path through op-amp(s) {', '.join(a.name for a in pamps)}: {len(stages)} stages, "
-                     f"{len(loops)} current loop(s); the maps and loop inductance show the last stage's loop "
-                     "(the op-amp to the receivers)")
+    first = next((k for k, a in enumerate(pamps) if isinstance(a, PathBuffer)), None)
+    if first is not None:               # the Bode ends at the first buffer's input: it makes a new edge after it
+        setup.bode_end = stages[first].receiver.pin
+    names = ", ".join(a.name for a in pamps)
+    kinds = "logic buffer(s) and op-amp(s)" if buffered and len({type(a) for a in pamps}) > 1 else \
+        "logic buffer(s)" if buffered else "op-amp(s)"
+    res.notes.append(f"signal path through {kinds} {names}: {len(stages)} stages, {len(loops)} current loop(s); the "
+                     "maps and loop inductance show the last stage's loop (to the receivers)")
     return True
+
+
+def _buffer_swing(model: "BoardModel", ref: str) -> tuple[Optional[float], str]:
+    """(the output swing of logic buffer `ref`: its supply pin's net voltage, how it is known), or (None, why not).
+    The supply pin: a pin named VCC / VDD / V+ (analog_net.pin_role), else a power-input pin, not on ground."""
+    from .analog_net import pin_role
+    from .safety import is_ground, voltage_model
+    fp = model.board.footprint(ref)
+    if fp is None:
+        return None, f"{ref} not on the board"
+    pads = [p for p in fp.pads if p.net and not is_ground(p.net)
+            and ((pin_role(p.pin_function or "") or ("", ""))[0] == "supply" or p.pin_type == "power_in")]
+    if not pads:
+        return None, f"{ref}: no supply pin found (VCC, VDD or a power input)"
+    volts = model.__dict__.get("_gt_volts")
+    if volts is None:
+        volts = model.__dict__["_gt_volts"] = voltage_model(model.board, model.config)
+    v = max(volts.hi(p.net) for p in pads)
+    return (v, f"{ref}'s supply {pads[0].net}") if v > 0 else (None, f"{ref}: its supply {pads[0].net} has no "
+                                                               "known voltage")
+
+
+def _buffer_sources(model: "BoardModel", spec: NetSpec, pamps: list, notes: list) -> tuple[list, list]:
+    """The stages' source spectra of a path through logic buffers: (spectra, src_of). spectra[0](f) is the path's
+    trapezoid (trapezoid_at: the net's frequency, rise / fall, amplitude, duty); each buffer adds its own edge: the
+    same frequency and duty, the buffer's rise time and its supply's swing (_buffer_swing; else the net's amplitude,
+    with a note) [Paul 2006]. src_of[k]: the spectrum stage k is driven by (an op-amp passes its stage's on)."""
+    spectra = [lambda f, s=spec: trapezoid_at(f, s.freq, s.rise_time, s.amplitude_v, s.duty, s.fall_time)]
+    src_of = [0]
+    for a in pamps:
+        if isinstance(a, PathBuffer):
+            m = model.config.model_for(a.name)
+            v, why = _buffer_swing(model, a.name)
+            if v is None:
+                v = spec.amplitude_v
+                notes.append(f"logic buffer {why}: its output swing taken as the path's amplitude, {v:g} V")
+            rise = m.buf_rise() if m is not None else None
+            spectra.append(lambda f, s=spec, r=rise, sw=v: trapezoid_at(f, s.freq, r, sw, s.duty))
+            src_of.append(len(spectra) - 1)
+        else:
+            src_of.append(src_of[-1])
+    return spectra, src_of
+
+
+HARMONICS_MAX = 4000      # a path through a logic buffer evaluates at most this many harmonics (log-spaced above)
+
+
+def _route_buffers(config: Config, route: Route) -> list:
+    """The logic buffers (part model `buffer`) a route runs through, as their models."""
+    return [m for ref in route.parts if (m := config.model_for(ref)) is not None and m.kind == "buffer"]
+
+
+def _buffer_harmonics(config: Config, spec: NetSpec, buffers: list) -> tuple[np.ndarray, np.ndarray, dict]:
+    """A path through logic buffers: (harmonic frequencies, the path's own amplitudes there, the band record). The
+    band reaches the fastest edge of the path and its buffers (a buffer's 2.5 ns after a Hall sensor's
+    microseconds); the harmonics are n·f0, all of them up to HARMONICS_MAX, else HARMONICS_MAX log-spaced ones
+    (odd ones at 50 % duty, where the even ones are nulls): a slow signal with a fast buffer would have millions
+    [A76]. Harmonics where every stage's spectrum is null are left out."""
+    f0 = spec.freq
+    edge = min([spec.rise_time, spec.fall_time or spec.rise_time] + [m.buf_rise() for m in buffers])
+    top, band = band_top(config, analysis_band(f0, edge))
+    n_max = max(1, int(top // f0))
+    if n_max <= HARMONICS_MAX:
+        n = np.arange(1, n_max + 1)
+    else:
+        n = np.unique(np.round(np.geomspace(1, n_max, HARMONICS_MAX)).astype(np.int64))
+        if abs(spec.duty - 0.5) < 1e-9:
+            n = np.unique(n | 1)
+        n = n[n <= n_max]
+        band["thinned"] = int(len(n))
+    f = n * f0
+    own = trapezoid_at(f, f0, spec.rise_time, spec.amplitude_v, spec.duty, spec.fall_time)
+    edges = [trapezoid_at(f, f0, m.buf_rise(), 1.0, spec.duty) for m in buffers]
+    keep = (own > spec.amplitude_v * 1e-9) | np.any([e > 1e-9 for e in edges], axis=0)
+    return f[keep], own[keep], band
 
 
 def _merge_results(results: list, pamps: list):
@@ -1657,7 +1786,8 @@ def _merge_results(results: list, pamps: list):
         part_z.update(q.part_z)
         shunt_i.update(q.shunt_i)
     for a in pamps:
-        part_z[a.name] = np.abs(np.array([complex(a.gain(float(fk))) for fk in results[0].freqs]))
+        if isinstance(a, PathAmp):          # a logic buffer has no gain: it makes its own edge
+            part_z[a.name] = np.abs(np.array([complex(a.gain(float(fk))) for fk in results[0].freqs]))
     return SimpleNamespace(freqs=results[0].freqs, part_z=part_z, shunt_i=shunt_i, i_in=results[0].i_in,
                            i_mean=results[-1].i_mean, v_end=results[-1].v_end)
 
@@ -1918,9 +2048,13 @@ def path_responses(setup, net: str, model: Optional["BoardModel"] = None) -> lis
     gain too."""
     from .transfer import fitted_response
     f = sweep_range(setup.spec, setup.harmonics)
+    end = getattr(setup, "bode_end", "") or setup.res.receiver
+    if end != setup.res.receiver:       # through a logic buffer: the linear part, the driver to its input
+        setup.res.notes.append(f"Bode: to the logic buffer's input {end} (the buffer makes a new edge after it; the "
+                               "stretch after it has no response to the source)")
     if model is not None:
         try:
-            out, notes, findings = network_responses(model.board, model.config, setup.spec, setup.res.receiver, f,
+            out, notes, findings = network_responses(model.board, model.config, setup.spec, end, f,
                                                      line_cache(model))
             setup.res.notes += [f"Bode: {n}" for n in notes]
             for fd in findings:
@@ -2160,7 +2294,14 @@ def prepare_route(model: BoardModel, spec: NetSpec, route: Route) -> tuple[Optio
     res.dc_connected = exc.dc_connected
 
     f0 = spec.freq
-    freqs, amps, res.band = _signal_harmonics(config, spec)
+    buffers = _route_buffers(config, route) if spec.current_a is None else []
+    if buffers:                         # the band of the fastest edge on the way, thinned (_buffer_harmonics)
+        freqs, amps, res.band = _buffer_harmonics(config, spec, buffers)
+        if res.band.get("thinned"):
+            res.notes.append(f"through a logic buffer: {res.band['thinned']} of the harmonics up to "
+                             f"{res.band['f_max'] / 1e6:.4g} MHz evaluated, log-spaced")
+    else:
+        freqs, amps, res.band = _signal_harmonics(config, spec)
     setup = RouteSetup(spec, route, res, ModelRun(st, exc), cavity, drv_ret, rcv_ret, route_refs, main_ref, h_mm,
                        freqs, issues=issues, t_start=t_start)
     # Current on the line per harmonic: driver resistance (+ series parts), line Z0/εeff, receiver load

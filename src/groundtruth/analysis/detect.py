@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from ..components.defaults import ref_prefix, suggest_model
-from ..components.models import ComponentModel, amplifier_pins, model_nets
+from ..components.models import ComponentModel, amplifier_pins, buffer_pins, model_nets
 from ..config.settings import BridgeSpec, Config, ConverterSpec, LegSpec, NetSpec, _natural_key
 from ..core.board import Board, Footprint, Pad
 
@@ -124,10 +124,37 @@ def _model(config: Config, fp):
     return config.model_for(fp.reference) or suggest_model(fp)
 
 
+BUFFER_SERIES_MAX_OHMS = 1e5   # a resistor up to this in series into a logic buffer's input is its input filter [A74]
+
+
+def _buffer_inputs(board: Board, config: Config) -> set[str]:
+    """The nets a logic buffer's channel takes its input from (components.models.buffer_pins), cached per board
+    and settings."""
+    key = id(config)
+    cached = board.__dict__.get("_gt_buffer_inputs")
+    if cached is None or cached[0] != key:
+        nets = {a.net for fp in board.footprints if not fp.dnp
+                for a, _ in buffer_pins(fp, _model(config, fp))}
+        cached = board.__dict__["_gt_buffer_inputs"] = (key, nets)
+    return cached[1]
+
+
+def _into_buffer(board: Board, config: Config, fp, m) -> bool:
+    """A resistor above the series threshold (components.models.SERIES_PATH_MAX_OHMS) but at most
+    BUFFER_SERIES_MAX_OHMS between two nets, one of them a logic buffer's input: the input's RC filter (a Hall
+    input's 10 kΩ with its capacitor), part of the path into the buffer [A74]. A pull-up's other net is a supply,
+    which no path enters anyway."""
+    if m.kind != "resistor" or m.passes_signal() or m.get("R", math.inf) > BUFFER_SERIES_MAX_OHMS:
+        return False
+    nets = fp.nets()
+    return len(nets) == 2 and bool(nets & _buffer_inputs(board, config))
+
+
 def _group(board: Board, config: Config, net: str, by_net: dict, amps: bool = True) -> set[str]:
-    """The net plus nets reached through series parts (0R, termination R, beads) and, with `amps`, through op-amp
-    stages (a part modelled as an amplifier, components.models.amplifier_pins: its input's net and its output's are
-    one path, either way), never power nets."""
+    """The net plus nets reached through series parts (0R, termination R, beads, a resistor into a logic buffer's
+    input: _into_buffer) and, with `amps`, through op-amp stages (a part modelled as an amplifier,
+    components.models.amplifier_pins: its input's net and its output's are one path, either way) and logic buffers'
+    channels (buffer_pins: input net to output net), never power nets."""
     group, frontier = {net}, [net]
     while frontier:
         n = frontier.pop()
@@ -136,7 +163,9 @@ def _group(board: Board, config: Config, net: str, by_net: dict, amps: bool = Tr
             pins = amplifier_pins(fp, m) if amps and m.kind == "amplifier" else None
             if pins is not None:
                 nets = [p.net for p in pins] if n in (pins[0].net, pins[1].net) else []
-            elif m.passes_signal() and len(fp.nets()) == 2:
+            elif m.kind == "buffer":
+                nets = [p.net for pair in buffer_pins(fp, m, n) for p in pair] if amps else []
+            elif (m.passes_signal() or _into_buffer(board, config, fp, m)) and len(fp.nets()) == 2:
                 nets = list(fp.nets())
             else:
                 continue
@@ -148,16 +177,29 @@ def _group(board: Board, config: Config, net: str, by_net: dict, amps: bool = Tr
 
 
 def _amp_outputs(board: Board, config: Config, group: set[str], by_net: dict) -> set[str]:
-    """The nets of a group on an op-amp's output side: each amplifier's output net and what series parts reach from
-    it without crossing an op-amp again. A path's driver is not there (the signal comes into the stage)."""
+    """The nets of a group on an op-amp's or a logic buffer's output side: each one's output net and what series
+    parts reach from it without crossing an op-amp or buffer again. A path's driver is not there (the signal comes
+    into the stage)."""
     out: set[str] = set()
     for n in group:
         for fp in by_net.get(n, []):
             m = _model(config, fp)
             pins = amplifier_pins(fp, m) if m.kind == "amplifier" else None
-            if pins is not None and pins[1].net == n:
+            outs = [pins[1]] if pins is not None else [b for _, b in buffer_pins(fp, m, n)]
+            if any(p.net == n for p in outs):
                 out |= _group(board, config, n, by_net, amps=False)
     return out
+
+
+def _buffer_through(board: Board, config: Config, group: set[str], by_net: dict) -> list[str]:
+    """The resistors of a path's group above the series threshold that it crosses into a logic buffer's input
+    (_into_buffer): the path's `through`, so the route passes them as the detection did."""
+    out = set()
+    for n in group:
+        for fp in by_net.get(n, []):
+            if fp.nets() <= group and _into_buffer(board, config, fp, _model(config, fp)):
+                out.add(fp.reference)
+    return sorted(out, key=_natural_key)
 
 
 GENERIC = SignalClass("Signal", "", 10e6, 2e-9, 0, "no class from the net or pin names: set the frequency "
@@ -267,6 +309,15 @@ def _suggest(board: Board, config: Config, net: str, by_net: dict, fp_of: dict, 
                                    "(GT sig_drv:<pin>) and the op-amps on the way (amp_in / amp_out)")
         if through:
             reasons.append(f"through {', '.join(through)} (between labelled nets)")
+    into = [r for r in _buffer_through(board, config, group, by_net) if r not in through]
+    if into:                            # the input filter of a logic buffer on the path (R99 10 kΩ into U25)
+        through = list(through) + into
+        reasons.append(f"through {', '.join(into)} (in series into a logic buffer's input)")
+    bufs = sorted({fp.reference for n in group for fp in by_net.get(n, []) if _model(config, fp).kind == "buffer"
+                   and buffer_pins(fp, _model(config, fp), n)}, key=_natural_key)
+    if bufs:
+        reasons.append(f"through the logic buffer(s) {', '.join(bufs)}: the stretch after each is driven by its own "
+                       "edge")
     freq, rise = cls.freq, cls.rise_time
     if cls is GENERIC:                  # no class from the names: an op-amp on the path may say how fast it can be
         drv = next((p for p in pads if p.pin == driver_pin), None)
@@ -345,8 +396,13 @@ def _labelled_path(board: Board, config: Config, net: str, marks: dict, by_net: 
         n = frontier.pop()
         for fp in by_net.get(n, []):
             amp = amplifier_pins(fp, _model(config, fp))
+            chans = buffer_pins(fp, _model(config, fp), n)
             if amp is not None:
                 nets = [p.net for p in amp]                 # an op-amp: only its input and output nets
+            elif chans:
+                nets = [p.net for p in chans[0]]            # a logic buffer: its channel's input and output net
+            elif _model(config, fp).kind == "buffer":
+                continue
             else:
                 nets = [x for x in fp.nets() if x]
                 if len(nets) != 2:
@@ -372,7 +428,7 @@ def _labelled_path(board: Board, config: Config, net: str, marks: dict, by_net: 
     joined = set(edges)
     through = sorted({fp.reference for n in joined for other, fp in edges[n].items()
                       if other in joined and amplifier_pins(fp, _model(config, fp)) is None
-                      and not _model(config, fp).passes_signal()})
+                      and _model(config, fp).kind != "buffer" and not _model(config, fp).passes_signal()})
     return joined, through
 
 

@@ -1735,8 +1735,8 @@ class SettingsFile:
             # The symbol says the part is an op-amp stage (GT amp_in / amp_out labels, or a Gain field) while its
             # model is still the default 'open', from before it said so: it becomes that amplifier. (refboard's
             # U301 / U305 got their labels after the settings were made, then a new value: 'open' with "check model",
-            # and the ADC paths could not pass them.)
-            if entry.get("model") == "open" and suggestion.kind == "amplifier":
+            # and the ADC paths could not pass them.) A logic buffer the same (its buf labels or threshold fields).
+            if entry.get("model") == "open" and suggestion.kind in ("amplifier", "buffer"):
                 for k in [k for k in entry if k not in ("value", "footprint", "tht")]:
                     entry.pop(k, None)
                 for k, v in suggestion.to_dict().items():

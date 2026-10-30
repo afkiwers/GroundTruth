@@ -62,16 +62,37 @@ def _leaf(net: str) -> str:
     return net.split("/")[-1]
 
 
+def buffer_input(board: Board, config: Config, pad: Pad) -> Optional[tuple[str, Optional[float], float]]:
+    """(the part, its hysteresis in V or None, its input capacitance in F) when `pad` is a logic buffer's input
+    (part model `buffer`, components.models.buffer_pins: a Schmitt trigger), else None."""
+    from ..components.defaults import suggest_model
+    from ..components.models import BUF_C_IN, buffer_pins
+    fp = board.footprint(pad.footprint)
+    if fp is None:
+        return None
+    m = config.model_for(fp.reference) or suggest_model(fp)
+    if m is None or m.kind != "buffer" or not any(a.number == pad.number for a, _ in buffer_pins(fp, m)):
+        return None
+    return fp.reference, m.buf_hysteresis(), float(m.params.get("c_in") or BUF_C_IN)
+
+
 def auto_nets(board: Board, config: Config, skip: set) -> dict[str, str]:
     """{net: why} of the nets found as victims when the settings list none: routed nets whose name says reset,
-    crystal, Hall sensor, debug or PWM / gate input (NET_PATTERNS), not the reference nets and not those in `skip`
-    (the switching stages' own nets)."""
+    crystal, Hall sensor, debug or PWM / gate input (NET_PATTERNS), and those into a logic buffer's input with a
+    hysteresis (a Schmitt trigger: its noise margin is checked against it), not the reference nets and not those in
+    `skip` (the switching stages' own nets)."""
     routed = {t.net for t in board.tracks}
+    schmitt = {}
+    for fp in board.footprints:
+        for p in fp.pads:
+            got = buffer_input(board, config, p) if p.net and not fp.dnp else None
+            if got is not None and got[1] is not None:
+                schmitt.setdefault(p.net, f"Schmitt input of {got[0]}")
     out = {}
     for net in board.nets:
         if net in skip or net not in routed or net in config.reference_nets:
             continue
-        why = next((w for w, rx in NET_PATTERNS if re.search(rx, _leaf(net), re.I)), None)
+        why = next((w for w, rx in NET_PATTERNS if re.search(rx, _leaf(net), re.I)), None) or schmitt.get(net)
         if why:
             out[net] = why
     return out
@@ -168,15 +189,22 @@ def stage_rows(board: Board, copper, victims: VictimSet, run, probes: list, grou
     return rows
 
 
-def finish_rows(rows: list[dict], settings, reference_set: bool) -> list[dict]:
+def finish_rows(rows: list[dict], settings, reference_set: bool, board: Optional[Board] = None,
+                config: Optional[Config] = None) -> list[dict]:
     """The rows in report order (net noise, injected current, ground shift; the largest first), each with its
     warning limit and whether it is checked (a part's ground against a pin it takes no signal from is information,
-    unless that pin was chosen)."""
+    unless that pin was chosen). With the board and settings: noise at a Schmitt trigger's input (a logic buffer with
+    a hysteresis) is checked against that hysteresis instead of the flat limit [A75] (`limit_why` says so)."""
     order = {"net": 0, "injected": 1, "part": 2}
     rows = sorted(rows, key=lambda r: (order[r["kind"]], -r["peak"]))
     for r in rows:
         r["limit"] = victim_limit(r["kind"], settings)
         r["checked"] = r["kind"] != "part" or reference_set
+        if r["kind"] == "net" and board is not None and config is not None:
+            pad = board.find_pin(r["to"])
+            buf = buffer_input(board, config, pad) if pad is not None else None
+            if buf is not None and buf[1] is not None:
+                r["limit"], r["limit_why"] = buf[1], f"{buf[0]}'s hysteresis"
     return rows
 
 
@@ -204,8 +232,9 @@ def victim_text(r: dict) -> str:
                 + f"ground of {r['name']} ({r['why']}) moves {volts(r['peak'])} peak against {r['reference']} with "
                 f"{r['leg']}: {henry(r['l_nh'])} (step {r['step_v'] * 1e3:.0f} mV with the switched current)")
     if r["kind"] == "net":
+        against = f" (against {r['limit_why']}, {volts(r['limit'])})" if r.get("limit_why") else ""
         return (f"{volts(r['peak'])} peak noise at {r['to']} on {r['name']} ({r['why']}, driven from {r['from']}) "
-                f"with {r['leg']}: {henry(r['m_nh'])} of coupling to its hot loop")
+                f"with {r['leg']}: {henry(r['m_nh'])} of coupling to its hot loop{against}")
     return (f"{r['peak'] * 1e3:.1f} mA peak injected into {r['name']} ({r['why']}) by {r['leg']}: "
             f"{r['c_pf']:.2f} pF to its switch node")
 
@@ -316,7 +345,9 @@ def terminations(st, board: Board, config: Config, victims: VictimSet, ground: s
             if nr is None or gr is None:
                 notes.append(f"victims: {net}: its receiver {rx.pin} or the ground there is not in the model")
                 continue
-            c_in = config.victims.input_pf * 1e-12
+            # a logic buffer's input: its own input capacitance (its Cin field), else the victims' default
+            buf = buffer_input(board, config, rx)
+            c_in = buf[2] if buf is not None else config.victims.input_pf * 1e-12
             branches.append(Branch(nr, gr, lambda f, c=c_in: 1.0 / (2j * math.pi * f * c),
                                    f"{net} receiver {rx.pin}", "part"))
             probes.append(Probe(net, drv, rx, nr, gr))

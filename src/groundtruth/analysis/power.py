@@ -2893,7 +2893,7 @@ def _stage_victims(model: BoardModel, setup: ConverterSetup):
     sw_net, _ = switch_inductor(model.board, model.config, spec)
     rows = stage_rows(model.board, model.copper, vs, setup.victim_run, setup.probes, spec.ground, spec.name,
                       res.pulse_a, spec.rise_time, res.v_in or 0.0, sw_net)
-    res.victims = finish_rows(rows, model.config.victims, vs.reference_set)
+    res.victims = finish_rows(rows, model.config.victims, vs.reference_set, model.board, model.config)
     for r in res.victims:
         if r["checked"] and r["peak"] > r["limit"]:
             setup.issue(model.config.rules, "victim_coupling", f"{spec.name}: {victim_text(r)}", res.location,

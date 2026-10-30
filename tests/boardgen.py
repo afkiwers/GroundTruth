@@ -328,6 +328,58 @@ def opamp_path_board(r_after: Optional[str] = None, **fields: str) -> BoardGen:
     return g
 
 
+def buffer_path_board(labels: bool = False, pin_names: bool = True, dual: bool = False, **fields: str) -> BoardGen:
+    """A Hall-type input through a logic buffer (Schmitt trigger) over a GND plane: the connector J1.1 (HW) → R1
+    10 kΩ → HW_F (C1 10 pF to GND, R2 47 kΩ pull-up to +5V) → U5 channel 1 (1A pin 1 in, 1Y pin 6 out; VCC pin 5 on
+    +5V, GND pin 2) → HALL_W → R3 1 kΩ → HALL_WR (C2 10 nF to GND) → U2.1, the receiver. As the user's HW / HALL_W
+    path (an SN74LVC2G17). labels: GT = buf_in:1, buf_out:6 on U5 (else the pin names 1A / 1Y pair them, when
+    pin_names). fields: U5's symbol fields as the HTTP lib gives them ("Threshold Rising": "2.5V" ...). dual: the
+    second channel too, J3.1 (IN2) → U5 2A (pin 3) → 2Y (pin 4, OUT2) → U3.1, on a line of its own at y + 6."""
+    g = BoardGen(layers=2, size=(60.0, 26.0))
+    y = 10.0
+    g.footprint("J1", "Conn", "Connector:Fake_2pin", (4.0, y), [
+        {"number": 1, "at": (0.0, 0.0), "net": "HW", "size": (1.5, 1.5), "pintype": "passive"},
+        {"number": 2, "at": (0.0, 2.0), "net": "GND", "size": (1.5, 1.5), "pintype": "passive"}])
+    g.two_pin("R1", "10k", (10.0, y), "HW", "HW_F", kind="R")
+    g.two_pin("C1", "10p", (15.0, y + 2.0), "HW_F", "GND", kind="C", angle=270.0)     # pad 1 on top
+    g.two_pin("R2", "47k", (19.0, y - 2.0), "+5V", "HW_F", kind="R", angle=270.0)
+    name = (lambda s: s) if pin_names else (lambda s: "")
+    pads = [
+        {"number": 1, "at": (-1.5, 0.0), "net": "HW_F", "pintype": "input", "pinfunction": name("1A")},
+        {"number": 6, "at": (1.5, 0.0), "net": "HALL_W", "pintype": "output", "pinfunction": name("1Y")},
+        {"number": 5, "at": (1.5, -1.5), "net": "+5V", "pintype": "power_in", "pinfunction": "VCC"},
+        {"number": 2, "at": (-1.5, 1.5), "net": "GND", "pintype": "power_in", "pinfunction": "GND"}]
+    if dual:
+        pads += [{"number": 3, "at": (-1.5, 3.0), "net": "IN2", "pintype": "input", "pinfunction": name("2A")},
+                 {"number": 4, "at": (1.5, 3.0), "net": "OUT2", "pintype": "output", "pinfunction": name("2Y")}]
+    g.footprint("U5", "SN74LVC2G17", "Package_TO_SOT_SMD:SOT-363", (25.0, y), pads)
+    if labels:
+        g.fields("U5", GT="buf_in:1, buf_out:6" + (", buf_in:3, buf_out:4" if dual else ""))
+    if fields:
+        g.fields("U5", **fields)
+    g.two_pin("R3", "1k", (38.0, y), "HALL_W", "HALL_WR", kind="R")
+    g.two_pin("C2", "10n", (44.0, y + 2.0), "HALL_WR", "GND", kind="C", angle=270.0)
+    g.ic("U2", (52.0, y), "HALL_WR", gnd_offset=(0.0, 1.0), pintype="input", pinfunction="PA1")
+    for x0, x1, net in ((4.0, 9.5, "HW"), (10.5, 23.5, "HW_F"), (26.5, 37.5, "HALL_W"), (38.5, 52.0, "HALL_WR")):
+        g.track((x0, y), (x1, y), net)
+    g.track((15.0, y), (15.0, y + 1.5), "HW_F")
+    g.track((19.0, y), (19.0, y - 1.5), "HW_F")
+    g.track((44.0, y), (44.0, y + 1.5), "HALL_WR")
+    g.track((19.0, y - 2.5), (26.5, y - 2.5), "+5V")
+    g.track((26.5, y - 2.5), (26.5, y - 1.5), "+5V")
+    if dual:
+        g.footprint("J3", "Conn", "Connector:Fake_1pin", (4.0, y + 6.0), [
+            {"number": 1, "at": (0.0, 0.0), "net": "IN2", "size": (1.5, 1.5), "pintype": "passive"}])
+        g.ic("U3", (52.0, y + 6.0), "OUT2", gnd_offset=(0.0, 1.0), pintype="input", pinfunction="PA2")
+        g.polyline([(4.0, y + 6.0), (20.0, y + 6.0), (23.5, y + 3.0)], "IN2")
+        g.polyline([(26.5, y + 3.0), (30.0, y + 6.0), (52.0, y + 6.0)], "OUT2")
+    g.plane("GND", g.cu[-1])
+    for x, dy in ((4.0, 2.0), (15.0, 2.5), (44.0, 2.5), (52.0, 1.0), (23.5, 1.5)):
+        g.via((x, y + dy + 0.6), "GND", (g.cu[0], g.cu[-1]))
+        g.track((x, y + dy), (x, y + dy + 0.6), "GND")
+    return g
+
+
 HL_X0, HL_Y = 10.0, 12.0     # left end and centre line of the hot-loop boards' VIN strip
 
 

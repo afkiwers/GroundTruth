@@ -659,7 +659,7 @@ def _victims(model: BoardModel, bs: BridgeSetup, legs: list):
             key = (row["kind"], row["name"])
             if key not in worst or row["peak"] > worst[key]["peak"]:        # the worst leg per victim
                 worst[key] = row
-    rows = finish_rows(list(worst.values()), config.victims, vs.reference_set)
+    rows = finish_rows(list(worst.values()), config.victims, vs.reference_set, model.board, config)
     bs.res.victims = rows
     sev = resolve_severity("victim_coupling", config.rules.severity)
     for r in rows:

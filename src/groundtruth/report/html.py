@@ -852,7 +852,9 @@ def _net(board, rr, issues, warn, figs, view3d) -> str:
                             f"{'–' if z is None else _si2(z, 'Ω')}</td><td class='num'>{x['length_mm']:.1f}</td></tr>")
             elif x["kind"] == "amp":
                 g = x.get("gain")
-                rows.append(f"<tr><td>{e(x['ref'])}</td><td>op-amp stage{'' if g is None else f', gain {g:.3g}'}</td>"
+                what = ("logic buffer (drives the stretch after it with its own edge)" if x.get("model") == "buffer"
+                        else f"op-amp stage{'' if g is None else f', gain {g:.3g}'}")
+                rows.append(f"<tr><td>{e(x['ref'])}</td><td>{what}</td>"
                             "<td class='num'>–</td><td class='num'>–</td></tr>")
             elif x["kind"] == "shunt":
                 z = x.get("z_ohm")
