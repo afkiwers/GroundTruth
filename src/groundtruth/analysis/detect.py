@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from ..components.defaults import ref_prefix, suggest_model
-from ..components.models import ComponentModel, amplifier_pins
+from ..components.models import ComponentModel, amplifier_pins, model_nets
 from ..config.settings import BridgeSpec, Config, ConverterSpec, LegSpec, NetSpec, _natural_key
 from ..core.board import Board, Footprint, Pad
 
@@ -1019,9 +1019,9 @@ def _series_reach(board: Board, config: Config, start: str, stop: set[str], by_n
                 else:
                     m = _model(config, fp)
                     ok = m.kind in ("short", "ferrite") or (m.kind == "resistor" and m.get("R") <= INPUT_PATH_MAX_OHMS)
-                    if not ok or len(fp.nets()) != 2:
+                    joined = model_nets(fp, m)          # a 4-terminal shunt: its force pads' nets only
+                    if not ok or len(joined) != 2:
                         continue
-                    joined = fp.nets()
                 if n not in joined:
                     continue
                 for other in joined:

@@ -22,6 +22,7 @@ def main() -> int:
     from groundtruth.analysis import detect
     from groundtruth.analysis.power import INPUT_PATH_MAX_OHMS
     from groundtruth.analysis.tags import board_tags
+    from groundtruth.components.models import model_nets
     from groundtruth.config.settings import Config, SettingsFile
     board = load_board(args.board)
     config = SettingsFile.load(args.settings).config if args.settings else Config()
@@ -38,11 +39,13 @@ def main() -> int:
                 continue
             m = detect._model(config, fp)
             r = m.get("R") if m.kind == "resistor" else None
-            nets = sorted(n for n in fp.nets() if n != own)
+            joined = model_nets(fp, m)          # a 4-terminal shunt: its force pads' nets
+            nets = sorted(n for n in joined if n != own)
             ok = fp.reference in finder.sensors or m.kind in ("short", "ferrite") or (
                 m.kind == "resistor" and r is not None and r <= INPUT_PATH_MAX_OHMS)
-            why = ("passes" if ok and len(fp.nets()) == 2 else
-                   f"{len(fp.nets())} nets, not 2" if ok else
+            kelvin = " (4-terminal: force pads)" if len(joined) < len(fp.nets()) else ""
+            why = (f"passes{kelvin}" if ok and len(joined) == 2 else
+                   f"{len(joined)} nets, not 2" if ok else
                    f"model {m.kind!r}" + (f", R {r:g} ohm > {INPUT_PATH_MAX_OHMS:g}" if r is not None else ""))
             print(f"  {fp.reference:8s} {fp.value[:16]:16s} to {', '.join(nets)[:60]:60s} {why}"
                   + ("" if not nets else f"  (ground by name: {[detect._is_ground(config, n) for n in nets]})"))
