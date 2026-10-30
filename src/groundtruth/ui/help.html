@@ -472,6 +472,36 @@ missing, a leg has no <b>Output pin</b> (the run's notes say so). What does leav
 high frequency is common-mode current: the phase node's swing drives it through the cable's and the motor frame's
 capacitance to the chassis. It is estimated as a single figure from the bridge's <b>C stray (chassis)</b>, not
 mapped.</p>
+<p><b>Motor or generator.</b> For the same reason, the machine on the phase output is not part of the loop
+inductance: through an edge it is a constant current at the phase node. What it changes is the current that is
+switched (the overshoot grows with it) and which edge is the hard one: motoring, the current flows out of the phase
+node and the high side's turn-on is hard; generating (the bridge's <b>Mode</b>), it flows in and the low side's
+turn-on is. The loop and its inductance are the same in both.</p>
+<p><b>What the loop inductance covers.</b> It is the inductance of the leg's commutation loop on this board: the
+bus capacitors between the rail and the ground within 20 mm of the switches (or, when the nearest one is farther,
+those within 5 mm beyond it), the high- and low-side switches, the copper of the rail, phase node and ground nets
+with their vias and pours on every layer, and the capacitors' own ESL. A switch's current runs 0.25 mm above its
+pads, inside its package [A30]; what lies deeper in the die and the bond is not included. The model region reaches
+5 mm around the switches, the capacitors and the input path, and widens to 10 and 20 mm when the loop does not
+close within it. The loop is driven at the switches and its reactance solved at 30 and 100 MHz; a series LC through
+both, X = ωL − 1/(ωC), leaves out what is left of the capacitors' reactance. The battery and its leads are beyond
+the bus capacitors and play no part at these frequencies. The <code>hot_loop</code> issue names the two closest
+capacitors.</p>
+<p><b>Higher or lower loop inductance.</b> A tight layout with ceramic capacitors right at the switches and the
+return on the layer underneath reaches a few nH; a loop that closes through distant or electrolytic capacitors 10-20
+nH and more. A higher inductance means:</p>
+<ul>
+<li><b>more overshoot</b> on the phase node, L·di/dt: the <code>hot_loop</code> issue warns at 25 % of the bus
+  voltage and is an error at 50 % (<code>rules.overshoot_warning</code>, <code>overshoot_error</code>). It eats the
+  switches' voltage margin;</li>
+<li><b>more ringing energy</b>, ½·L·I² at every edge, lost in the switches, the snubber or the copper;</li>
+<li><b>a lower ring frequency</b>, 1/(2π·√(L·C<sub>oss</sub>)), with a peak in the conducted and radiated
+  spectrum there;</li>
+<li><b>more radiation</b>: a larger loop area is a larger magnetic moment.</li>
+</ul>
+<p>A lower inductance does the opposite: less overshoot and ringing energy, a higher ring frequency, a smaller
+loop. To lower it: the capacitors closer to the switches, the return on the next layer down through a thin
+dielectric, more vias in parallel, and more capacitors in parallel.</p>
 <p><b>Why 100 MHz.</b> The spectrum and the conducted emission are solved over their whole range; only the hot-loop
 map is drawn at one frequency. 100 MHz is chosen because:</p>
 <ul>
