@@ -452,10 +452,43 @@ you change something the victims are automatic: the reset, crystal, Hall, debug 
 each run, shown as <i>auto</i>. Your first Add or Remove keeps those and makes the list your own, so nothing found
 automatically drops out unnoticed; <b>Reset to automatic</b> goes back (an empty list is automatic too). OK writes
 <code>victims: nets:</code>; Undo takes it back.</p>
-<p>On the Results tab a bridge has four kinds of view: its drive (phase and bus currents, capacitor ripple,
-conducted spectrum, losses), each leg's hot loop, its <b>RMS currents</b> map, and its <b>sweep</b> (losses, RMS
-density, conducted and radiated margin against the phase current, one line per speed; a hollow marker where the
-current is not reached).</p>
+<p>On the Results tab (the view list at its top) a bridge has four kinds of view, in this order:</p>
+<ul>
+<li><b>the bridge by its name</b>: its drive (phase and bus currents, capacitor ripple, conducted spectrum,
+  losses);</li>
+<li><b>each leg's hot loop</b> (listed by its switches, <code>Q1+Q2→Q3+Q4</code>): the leg's commutation loop at
+  100 MHz;</li>
+<li><b><i>bridge</i>  RMS currents</b>: what heats the copper, from the battery to the motor connector;</li>
+<li><b><i>bridge</i>  sweep</b> (when a sweep is set): losses, RMS density, conducted and radiated margin against
+  the phase current, one line per speed; a hollow marker where the current is not reached.</li>
+</ul>
+<p><b>Why the hot loop does not reach the motor connector.</b> During a switching edge the motor's winding holds
+the phase current nearly constant: the current only moves from one switch to the other. What changes in nanoseconds
+flows around the bus capacitors, the high side, the phase node and the low side, and back to the capacitors. That
+is the hot loop, and its map stops at the phase node. The motoring current itself (battery, high side, phase node,
+motor pin and back through the low side) changes slowly. It is in the <b>RMS currents</b> map, which is made from
+DC solves plus the first three PWM harmonics, where current spreads by resistance, not inductance. If that view is
+missing, a leg has no <b>Output pin</b> (the run's notes say so). What does leave through the motor connector at
+high frequency is common-mode current: the phase node's swing drives it through the cable's and the motor frame's
+capacitance to the chassis. It is estimated as a single figure from the bridge's <b>C stray (chassis)</b>, not
+mapped.</p>
+<p><b>Why 100 MHz.</b> The spectrum and the conducted emission are solved over their whole range; only the hot-loop
+map is drawn at one frequency. 100 MHz is chosen because:</p>
+<ul>
+<li><b>the edges and the ringing are up there</b>: an edge of rise time t<sub>r</sub> has a flat spectrum up to
+  about 1/(π·t<sub>r</sub>), then it falls at 40 dB per decade (16 MHz for 20 ns, 64 MHz for 5 ns). The loop's
+  inductance rings with the switches' C<sub>oss</sub>, typically at 30-300 MHz: the overshoot on the phase node
+  and a peak in the spectrum;</li>
+<li><b>the limits go there</b>: conducted emission to 30 MHz (CISPR 25: 108 MHz), radiated from 30 MHz;</li>
+<li><b>the loop inductance is measured there</b>: every capacitor in the loop is far above its self-resonance, so
+  the loop's impedance is nearly pure inductance (fitted with a second solve at 30 MHz). That L sets the overshoot
+  (L·di/dt), the ringing and the radiated estimate;</li>
+<li><b>the picture holds for the whole band</b>: above about 10 MHz the current already takes the path of least
+  inductance (the return right under the forward path), so a map at 20 or 50 MHz looks the same. It changes at a
+  plane resonance, which an issue names with its frequency.</li>
+</ul>
+<p>Drives with deliberately slow edges (50-200 ns) put little energy at 100 MHz: there the map shows where the
+ringing current flows rather than where most of the emitted energy is.</p>
 
 <hr><a name="dcloads"></a><h3>DC loads tab</h3>
 <p>A <b>DC load</b> is a supply rail with the currents its loads draw: a power connector feeding several boards'
