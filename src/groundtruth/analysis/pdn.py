@@ -229,6 +229,11 @@ class PdnSetup:
                 best = (unc, math.sqrt(fs[g] * fs[g + 1]))
         return [float(best[1])] if best else []
 
+    def solve_limit(self, run) -> int:
+        """The most solves `run` takes with refine (the progress count, simulate.solve_limit): the ports' run up to
+        MAX_SOLVES, a regional model its LOCAL_F."""
+        return max(len(run.planned), MAX_SOLVES) if run is self.run else len(run.planned)
+
     def issue(self, rules, check, message, loc, severity=None, **kw):
         """Add an issue for this rail (unless its check is switched off)."""
         sev = resolve_severity(check, rules.severity, severity)

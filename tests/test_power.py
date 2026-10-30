@@ -85,6 +85,25 @@ def _analytic_transfer(sc, f):
     return abs(z_c / (z_c + z_lisn))
 
 
+def test_simulate_s_bar_counts_the_solves_up_to_a_true_limit(tmp_path):
+    """The bar moves by the solves counted, as "solve k of ≤ n" says them (the user, of 82 % beside "solve 76 of
+    ≤ 119": "the percentage still does not add up"); n is never passed (the conducted band refines past its
+    planned frequencies here) and only shrinks as runs finish refining, so the bar never goes back."""
+    import re
+    spec = ConverterSpec(**{**SPEC.__dict__, "input_connector": ["J1.1", "J1.2"]})
+    board, sc, _ = make_conv(tmp_path, hot_loop_board(20.0, caps=(("C1", "1u", "end", 0.0),), connector=True),
+                             "bar", [spec])
+    seen = []
+    simulate(board, sc.config, progress=lambda msg, frac: seen.append((msg, frac)))
+    solves = [(int(m[1]), int(m[2]), frac) for msg, frac in seen if (m := re.search(r"solve (\d+) of ≤ (\d+)", msg))]
+    ks, ns, fracs = zip(*solves)
+    assert all(k <= n for k, n, _ in solves) and list(ns) == sorted(ns, reverse=True), solves
+    assert list(fracs) == sorted(fracs) and sorted(ks) == list(range(1, len(ks) + 1))   # each start its number
+    # while n stays, the bar moves in whole solves: equal steps (several at once after parallel solves)
+    steps = np.diff(sorted({f for _, n, f in solves if n == ns[0]}))
+    assert len(steps) > 2 and np.allclose(steps / steps.min(), np.round(steps / steps.min()), atol=1e-6)
+
+
 def test_lisn_current_divider_matches_the_capacitor_and_lisn_impedances(tmp_path):
     """Below C1's self-resonance the loop current divides between C1 (1 µF) and the LISNs (2 × 50 µH ∥ 50 Ω).
     Both branches leave the strip at its left end, so the strip and the switch belong to neither: the divider is

@@ -266,6 +266,15 @@ class ConverterSetup:
         """The next frequency to solve for one of the extra runs: only the conducted band is refined."""
         return (next_conducted(self, config) or next_ce101(self)) if run is self.cond else []
 
+    def solve_limit(self, run: ModelRun) -> int:
+        """The most solves `run` takes with refine (the progress count, simulate.solve_limit): the conducted run
+        refines its band up to COND_MAX_SOLVES (next_conducted) and its CE101 points up to CE101_MAX_SOLVES."""
+        if run is not self.cond or self.lisn is None:
+            return len(run.planned)
+        ce = set(self.ce101_freqs)
+        return (max(len(set(run.planned) - ce), COND_MAX_SOLVES) +
+                max(len(ce), CE101_MAX_SOLVES if ce else 0))
+
     def planned_solved(self):
         """After the first round: the loop inductance is known, so the ringing can shape the spectrum the
         radiated refinement weighs."""
