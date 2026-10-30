@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-MODEL_KINDS = ("short", "open", "resistor", "cap", "inductor", "ferrite", "amplifier")
+MODEL_KINDS = ("short", "open", "resistor", "cap", "inductor", "ferrite", "amplifier", "buffer")
 
 # Parameters each kind uses (also the editable columns in the UI and the YAML keys)
 MODEL_PARAMS: dict[str, tuple[str, ...]] = {
@@ -28,14 +28,25 @@ MODEL_PARAMS: dict[str, tuple[str, ...]] = {
     # for the circuit model (analysis/analog_net, emi/mna.Circuit.opamp): aol (open-loop DC gain, dB), fp2 (a second
     # open-loop pole, Hz) or pm (the phase margin at unity gain, degrees: fp2 = gbw·sin(pm)·tan(pm))
     "amplifier": ("gain", "gbw", "bandwidth", "z_out", "c_in", "r_in", "slew", "cmrr", "aol", "fp2", "pm"),
+    # a logic buffer (a Schmitt trigger, SN74LVC2G17): not linear. Its input loads the path before it (c_in); its
+    # output drives the path after it with an edge of its own: rise (s), behind z_out (Ω), swinging its supply
+    # pin's voltage. vt_pos / vt_neg (V): its input thresholds; hyst (V): their difference, when only that is given
+    "buffer": ("rise", "z_out", "c_in", "vt_pos", "vt_neg", "hyst"),
 }
 # Parameters that may stay empty: C_bias, a ceramic capacitor's capacitance at its DC bias (from the maker's
 # DC-bias curve; an X7R 10 µF 100 V 1210 keeps ~30-60 % at 50 V), used instead of C where given
-OPTIONAL_PARAMS = {"C_bias", "gbw", "bandwidth", "z_out", "c_in", "r_in", "slew", "cmrr", "aol", "fp2", "pm"}
+OPTIONAL_PARAMS = {"C_bias", "gbw", "bandwidth", "z_out", "c_in", "r_in", "slew", "cmrr", "aol", "fp2", "pm",
+                   "rise", "vt_pos", "vt_neg", "hyst"}
 AMP_Z_OUT = 1.0         # Ω, an amplifier's output impedance when its z_out is not given
 AMP_C_IN = 2e-12        # F, its input capacitance when its c_in is not given
 AMP_IN = re.compile(r"^(\+IN|IN\+|INP|IN_P|\+|NONINV|VIN\+|\+VIN|IN)$", re.I)     # the input pin's name
 AMP_OUT = re.compile(r"^(OUT|VOUT|OUTPUT|VO|O)$", re.I)                              # the output pin's name
+# a logic buffer's values when its fields don't give them [A73]: CMOS logic of the LVC class at 5 V
+BUF_RISE = 2.5e-9       # s, its output's edge
+BUF_Z_OUT = 25.0        # Ω, its output resistance
+BUF_C_IN = 5e-12        # F, its input capacitance
+BUF_IN = re.compile(r"^(\d*)(A|IN)$", re.I)          # a buffer channel's input pin name (1A, A, IN)
+BUF_OUT = re.compile(r"^(\d*)(Y|OUT)$", re.I)        # its output pin name (1Y, Y, OUT)
 GROUND_NAME = re.compile(r"^(A|D|P|S)?GNDA?\w*$|^VSS\w*$|^0$", re.I)       # a net named as ground (its last part)
 
 SHORT_OHMS = 1e-3       # numerical stand-in for a dead short
@@ -180,6 +191,26 @@ class ComponentModel:
             return complex(zo)
         return complex(zo) * 1j * f / (1j * f + bw)
 
+    def buf_rise(self) -> float:
+        """A buffer's output edge (s): `rise`, else BUF_RISE [A73]."""
+        return float(self.params.get("rise") or BUF_RISE)
+
+    def buf_z_out(self) -> float:
+        """A buffer's output resistance (Ω): `z_out`, else BUF_Z_OUT [A73]."""
+        return float(self.params.get("z_out") or BUF_Z_OUT)
+
+    def buf_z_in(self, f) -> complex:
+        """The impedance a buffer's input puts on the path before it: its c_in (else BUF_C_IN [A73]) to ground."""
+        y = 1j * 2 * math.pi * f * (self.params.get("c_in") or BUF_C_IN)
+        return 1.0 / y if y != 0 else complex(1e12)
+
+    def buf_hysteresis(self) -> Optional[float]:
+        """A buffer's input hysteresis (V): `hyst`, else vt_pos − vt_neg when both are given, else None."""
+        if self.params.get("hyst"):
+            return float(self.params["hyst"])
+        hi, lo = self.params.get("vt_pos"), self.params.get("vt_neg")
+        return float(hi - lo) if hi is not None and lo is not None and hi > lo else None
+
     def passes_signal(self) -> bool:
         """True if a signal route may run through this part in series (termination R, 0R, bead...)."""
         if self.kind in ("short", "ferrite", "inductor"):
@@ -229,7 +260,10 @@ class ComponentModel:
         pins = d.get("pins") or []
         if isinstance(pins, str):
             pins = [p.strip() for p in pins.split(",") if p.strip()]
-        if pins and len(pins) != 2:
+        if kind == "buffer":
+            if len(pins) % 2:
+                raise ValueError("pins names a buffer's channels as input / output pairs, e.g. [1, 6, 3, 4]")
+        elif pins and len(pins) != 2:
             raise ValueError("pins names the two pins the model joins, e.g. [IP+, IP-]")
         linked = d.get("from_schematic") or []
         if isinstance(linked, str):
@@ -256,6 +290,33 @@ def kelvin_force_pads(fp) -> Optional[list]:
     return [p for p in fp.pads if p.net in (a.net, b.net)]
 
 
+def buffer_pins(fp, model: Optional[ComponentModel], net: Optional[str] = None) -> list:
+    """A logic buffer's channels as (input pad, output pad) pairs, both on a net: from the model's `pins` (input,
+    output, input, output ...: pad numbers or pin names), else the part's GT labels (buf_in / buf_out, in order),
+    else its pin names paired by their channel digit (1A with 1Y, A with Y, IN with OUT). With `net`: only the
+    channels with a pad on it. [] for a part that is no buffer, or whose channels can't be told."""
+    if model is None or model.kind != "buffer":
+        return []
+
+    def pad(name):
+        """The pad named `name`: by its number first, else by its schematic pin function."""
+        want = str(name).upper()
+        by_number = next((p for p in fp.pads if str(p.number).upper() == want), None)
+        return by_number or next((p for p in fp.pads if (p.pin_function or "").upper() == want), None)
+    names = list(model.pins) if len(model.pins) >= 2 else []
+    if not names:
+        from ..analysis.tags import buf_label_pins       # GT = buf_in:1, buf_out:6 on the symbol
+        names = [x for pair in buf_label_pins(fp) for x in pair]
+    if names:
+        pairs = [(pad(names[k]), pad(names[k + 1])) for k in range(0, len(names) - 1, 2)]
+    else:                       # the pin names: an input and an output of one channel (its digit, or none)
+        ins = {m.group(1): p for p in fp.pads if (m := BUF_IN.match((p.pin_function or "").strip()))}
+        outs = {m.group(1): p for p in fp.pads if (m := BUF_OUT.match((p.pin_function or "").strip()))}
+        pairs = [(ins[k], outs[k]) for k in sorted(ins) if k in outs]
+    pairs = [(a, b) for a, b in pairs if a is not None and b is not None and a.net and b.net and a.net != b.net]
+    return [(a, b) for a, b in pairs if net is None or net in (a.net, b.net)]
+
+
 def model_pads(fp, model: Optional[ComponentModel]) -> list:
     """The pads a part's model joins: the two named in `pins` (by pad number or pin name), else a 4-terminal
     resistor's force pads (kelvin_force_pads: its current never flows through its sense pads), else all of them."""
@@ -263,6 +324,14 @@ def model_pads(fp, model: Optional[ComponentModel]) -> list:
         force = kelvin_force_pads(fp)
         if force is not None:
             return force
+    if model is not None and not model.pins and model.kind in ("short", "resistor"):
+        # a transistor taken as closed (a surge stopper's or an ideal diode's FET: a short, or its R_DS(on)) joins its
+        # drain and source, never its gate: a short over all three pins put the gate net on the power path
+        from ..analysis.detect import fet_terms
+        from .defaults import ref_prefix
+        terms = fet_terms(fp) if ref_prefix(fp.reference) in ("Q", "T", "M") else None
+        if terms is not None:
+            return [p for p in fp.pads if p.net in terms[1]]
     if model is None or not model.pins:
         return list(fp.pads)
     want = {p.upper() for p in model.pins}

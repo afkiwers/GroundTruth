@@ -54,15 +54,14 @@ def main() -> int:
                 others = sorted(n for n in joined if n != net and not is_ground(n))
                 if net not in joined or not others or len(fp.nets()) > 6:
                     continue                    # not a series part from this net (a cap to ground, an IC)
-                ok = _passes(config, fp)
+                ok = _passes(config, fp)          # exactly power.input_path's rule: the model's nets, any number
                 what = "no model in the settings" if m is None else (
                     f"model {m.kind}" + (f" R {m.get('R'):g} ohm" if m.kind == "resistor" else ""))
-                kelvin = " (4-terminal: force pads)" if len(joined) < len(fp.nets()) else ""
-                verdict = "passes" if ok and len(joined) == 2 else (
-                    f"joins {len(joined)} nets, not 2" if ok else "stops here")
+                kelvin = " (joins only " + ", ".join(sorted(n.split("/")[-1] for n in joined)) + ")"                     if len(joined) < len(fp.nets()) else ""
+                verdict = "passes" if ok else "stops here"
                 print(f"  {'  ' * depth}{net.split('/')[-1]} -> {fp.reference:6s} {fp.value[:18]:18s} "
                       f"{what}{kelvin} -> {', '.join(o.split('/')[-1] for o in others)[:50]}: {verdict}")
-                if ok and len(joined) == 2:
+                if ok:
                     for o in others:
                         if o not in seen:
                             seen.add(o)
