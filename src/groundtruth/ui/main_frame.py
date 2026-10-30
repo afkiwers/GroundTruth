@@ -256,12 +256,13 @@ class Session:
         return n[:-len(".kicad_pcb")] if n.endswith(".kicad_pcb") else n
 
     @_kicad_call
-    def load(self):
+    def load(self, progress=None):
         """(the board model, the path it is saved at): read over KiCad's API (with unsaved edits) or from the
-        file. The path is None for a board KiCad has never saved."""
+        file. The path is None for a board KiCad has never saved. progress(text, fraction): while KiCad is busy (a
+        zone fill: minutes), how long the read has waited (kipy_source.when_ready); without it a few seconds only."""
         if self.live:
             from ..adapters.kipy_source import board_file_path, read_board
-            board = read_board(self.kb)
+            board = read_board(self.kb, progress)
             path = board_file_path(self.kb)
             return board, path
         from ..adapters.file_source import load_board
@@ -1201,7 +1202,7 @@ class MainFrame(ConfigActions, wx.Frame):
         def work(progress):
             """(worker) The board, its path, (settings, new, dirty) or the settings' errors, the board copy, the
             board's fingerprint."""
-            board, path = session.load()
+            board, path = session.load(progress)
             fp = board.fingerprint()        # ~0.1 s on refboard: what run() compares before analysing
             # modules the tabs' load() uses, imported here and not on the GUI thread (analysis.pdn took 59 ms there)
             from ..analysis import pdn, si, transfer  # noqa: F401
@@ -1221,7 +1222,7 @@ class MainFrame(ConfigActions, wx.Frame):
                 return board, path, opened, None, copy, fp, initial_state(opened[0])
             except ConfigError as e:
                 return board, path, None, e.messages, copy, fp, None
-        if not self._start("reading the board…", work, self._loaded, what="read the board", cancellable=False,
+        if not self._start("reading the board…", work, self._loaded, what="read the board", cancellable=True,
                            kicad=self.session.live, queue_runs=True):
             self._after_load = None
 

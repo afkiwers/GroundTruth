@@ -219,6 +219,35 @@ def test_a_refill_waits_until_kicad_has_filled(monkeypatch):
         kipy_sink.refill_zones(FillingBoard(busy=10 ** 6), wait=0.2)
 
 
+def test_a_board_read_with_progress_waits_through_a_long_kicad_operation(monkeypatch):
+    """The user, of Fill All Zones running in KiCad (the board read failed while it ran): "the plugin struggles to
+    recognise longer processes and throws an error prematurely". A read from the window (with a progress) keeps
+    retrying for minutes, saying how long it has waited, and stops when the progress raises (Cancel); a read
+    without one still gives up after a few seconds."""
+    from types import SimpleNamespace
+    from groundtruth.adapters import kipy_source
+    from groundtruth.adapters.kipy_source import KiCadBusyError, when_ready
+    now = [0.0]
+    monkeypatch.setattr(kipy_source, "time", SimpleNamespace(monotonic=lambda: now[0],
+                                                             sleep=lambda s: now.__setitem__(0, now[0] + s)))
+    said = []
+    board = BusyBoard(busy=90)                               # ~90 s of "busy" (a zone fill)
+    b = read_board(board, lambda text, frac: said.append((text, frac)))
+    assert b.tracks and board.busy == 0 and now[0] > 60
+    assert said and said[-1][0].startswith("KiCad is busy") and "waiting" in said[-1][0] and 0 < said[-1][1] < 1
+    now[0] = 0.0
+    with pytest.raises(KiCadBusyError, match="Fill All Zones"):
+        when_ready(BusyBoard(busy=90).get_tracks)            # no progress: BUSY_WAIT_S
+
+    class Cancelled(Exception):
+        pass
+
+    def cancel(text, frac):
+        raise Cancelled()
+    with pytest.raises(Cancelled):
+        read_board(BusyBoard(busy=10 ** 6), cancel)
+
+
 def test_other_api_errors_are_not_retried():
     from kipy.errors import ApiError
     from groundtruth.adapters.kipy_source import when_ready

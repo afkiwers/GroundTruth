@@ -17,6 +17,12 @@ from ..geometry.shapes import arc_points, polygonize_outline
 MIN_KICAD_MAJOR = 10
 NM = 1e-6  # nm -> mm
 BUSY_WAIT_S = 5.0   # how long to keep retrying while KiCad answers "busy"
+# a board read from the window, which says how long it has waited and can be cancelled: KiCad's own long operations
+# (Fill All Zones on a complex board: minutes) answer "busy" all along, so 5 s told the user to close a dialog while
+# the fill was still running (the user: "the plugin struggles to recognise longer processes and throws an error
+# prematurely")
+BUSY_WAIT_LONG_S = 600.0
+BUSY_SAY_S = 2.0    # how often the long wait says how long it has waited
 
 T = TypeVar("T")
 
@@ -37,13 +43,19 @@ class KiCadBusyError(RuntimeError):
     """KiCad refuses API requests while the editor shows a modal dialog or runs an interactive tool."""
 
 
-def when_ready(fn: Callable[..., T], *args, wait: float = BUSY_WAIT_S, **kwargs) -> T:
-    """Call fn, retrying while KiCad answers 'busy' (AS_BUSY). A modal dialog (e.g. Preferences) or an
-    interactive tool in the PCB editor makes every board request fail until it is closed. fn must be safe to
-    repeat: the sink's commits are dropped when a call inside them fails."""
+def when_ready(fn: Callable[..., T], *args, wait: Optional[float] = None, progress=None, **kwargs) -> T:
+    """Call fn, retrying while KiCad answers 'busy' (AS_BUSY). A modal dialog (e.g. Preferences), an interactive
+    tool in the PCB editor or one of KiCad's own long operations (Fill All Zones) makes every board request fail
+    until it is over. fn must be safe to repeat: the sink's commits are dropped when a call inside them fails.
+
+    wait: how long to retry (default BUSY_WAIT_S, or BUSY_WAIT_LONG_S with a progress). progress(text, fraction):
+    told every BUSY_SAY_S how long it has waited; it may raise to stop waiting (the window's Cancel)."""
     from kipy.errors import ApiError
     from kipy.proto.common import ApiStatusCode
-    deadline = time.monotonic() + wait
+    if wait is None:
+        wait = BUSY_WAIT_LONG_S if progress is not None else BUSY_WAIT_S
+    start = time.monotonic()
+    said = 0.0
     delay = 0.2
     while True:
         try:
@@ -51,10 +63,16 @@ def when_ready(fn: Callable[..., T], *args, wait: float = BUSY_WAIT_S, **kwargs)
         except ApiError as e:
             if e.code != ApiStatusCode.AS_BUSY:
                 raise
-            if time.monotonic() >= deadline:
-                raise KiCadBusyError("KiCad is busy and does not accept requests: close any open dialog in the "
-                                     "PCB editor (e.g. Preferences) and finish the current tool (Esc), then try "
+            spent = time.monotonic() - start
+            if spent >= wait:
+                raise KiCadBusyError("KiCad is busy and does not accept requests: wait for what it is doing to "
+                                     "finish (Fill All Zones, its status bar), close any open dialog in the PCB "
+                                     "editor (e.g. Preferences) and finish the current tool (Esc), then try "
                                      "again.") from e
+            if progress is not None and spent - said >= BUSY_SAY_S:
+                said = spent
+                progress(f"KiCad is busy (filling zones, a dialog open or a tool active): waiting {spent:.0f} s… "
+                         "Cancel stops waiting", min(spent / wait, 0.99))
             time.sleep(delay)
             delay = min(2 * delay, 1.0)
 
@@ -379,9 +397,10 @@ class _KipyReader:
         board.mask_shapes, board.mask_known = saved.mask_shapes, True
 
 
-def read_board(kicad_board: Any) -> Board:
-    """The open board in the model, retried while KiCad is busy (a dialog or tool open: see when_ready)."""
-    return when_ready(_read_board, kicad_board)
+def read_board(kicad_board: Any, progress=None) -> Board:
+    """The open board in the model, retried while KiCad is busy (a dialog or tool open, a zone fill: see when_ready;
+    with a progress, for minutes, saying so)."""
+    return when_ready(_read_board, kicad_board, progress=progress)
 
 
 def _read_board(kicad_board: Any) -> Board:
