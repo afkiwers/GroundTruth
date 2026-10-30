@@ -53,7 +53,8 @@ report…** writes the results as one HTML page. The plugin's own **Help** (F1) 
 `https://afkiwers.github.io/GroundTruth/repository.json`, select it and install **GroundTruth**; new releases show up
 as updates. Each [release](https://github.com/afkiwers/GroundTruth/releases) also has the package as a zip for
 **Install from File…**. On the first start KiCad builds the plugin's Python environment (a few minutes); the button
-**Analyse return paths** then appears in the PCB editor's top toolbar.
+**Analyse return paths** then appears in the PCB editor's top toolbar. The plugin has a fair few dependencies, so it can
+take a couple of KiCad restarts before the buttons show.
 
 **The command line.** Python 3.11 or newer; install a release's wheel (GroundTruth is not on PyPI):
 
