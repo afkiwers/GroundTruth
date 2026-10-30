@@ -293,10 +293,24 @@ class PathAmp:
     slew: Optional[float] = None      # V/s: each output harmonic is capped at slew / 2πf (amplified_path)
 
 
-def amplified_path(freqs, v_source, stages: list[list], amps: list[PathAmp], source: PathSource,
+@dataclass
+class PathBuffer:
+    """A logic buffer (a Schmitt trigger) between two stretches of a path. It is not linear: its input loads the
+    stretch before it (z_in(f): its input capacitance) and its output drives the stretch after it with an edge of its
+    own, v(f) (its trapezoid's harmonics: the path's frequency and duty, the buffer's swing and rise time) behind
+    z_out (Ω); the input's voltage does not pass. v: the open-circuit amplitude per frequency, or None for 1 V (a
+    response per volt of the buffer's own source)."""
+    name: str
+    z_in: Callable[[float], complex]
+    z_out: float
+    v: Optional[Callable[[np.ndarray], np.ndarray]] = None
+
+
+def amplified_path(freqs, v_source, stages: list[list], amps: list, source: PathSource,
                    load: PathLoad) -> list[PathResult]:
-    """A path through op-amp stages: stages[k] the elements between amps[k-1] and amps[k]. Stage 0 is driven by
-    the source and loaded by the first amp's input; stage k + 1 by gain_k(f) × the voltage at amp k's input, behind
+    """A path through op-amp stages and logic buffers: stages[k] the elements between amps[k-1] and amps[k]. Stage 0
+    is driven by the source and loaded by the first amp's input; stage k + 1 by gain_k(f) × the voltage at amp k's
+    input (a PathAmp), or by the buffer's own edge v(f) (a PathBuffer: the input's voltage does not pass), behind
     its z_out, and loaded by the next amp's input or, the last, by the receivers. One PathResult per stage (their
     loop_currents are each stage's loops). A slew rate caps the output's amplitude per harmonic at slew / 2πf (a
     crude large-signal limit: the harmonics are not redistributed)."""
@@ -309,7 +323,13 @@ def amplified_path(freqs, v_source, stages: list[list], amps: list[PathAmp], sou
         ld = load if k == len(amps) else PathLoad(0.0, z=amps[k].z_in)
         r = path_currents(f, v, elements, src, ld)
         out.append(r)
-        if k < len(amps):
+        if k < len(amps) and isinstance(amps[k], PathBuffer):
+            # a logic buffer regenerates the signal: the stage after it is driven by its own edge behind its output
+            # resistance [Desoer 1969] (a Thevenin source), whatever its input's waveform did on the way
+            b = amps[k]
+            v = np.asarray(b.v(f), complex) if b.v is not None else np.ones(len(f), complex)
+            src = PathSource(b.z_out)
+        elif k < len(amps):
             # the amplifier isolates the stages: its output is a new Thevenin source [Desoer 1969], gain x its input
             # voltage behind z_out (the stage after it does not load the stage before it)
             a = amps[k]

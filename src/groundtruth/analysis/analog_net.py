@@ -214,6 +214,7 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
     parts: dict[str, tuple] = {}            # ref -> (model, pad a, pad b)
     amps: dict[str, OpAmpChannel] = {}
     unmodelled: list[str] = []          # op-amps by their pins whose model is 'open': left out, said in a note
+    buffer_ins: dict[str, tuple] = {}   # a logic buffer's input on the nets: "U5.1" -> (pad, its model)
     while todo:
         net = todo.pop(0)
         if net in nets or net in ground:
@@ -231,6 +232,12 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
                 if (m is not None and not fp.dnp and fp.reference not in unmodelled
                         and opamp_pin_roles(fp) is not None):
                     unmodelled.append(fp.reference)
+                continue
+            if m.kind == "buffer":         # a logic buffer is not linear: only its input's C_in loads the circuit
+                from ..components.models import buffer_pins
+                for inp, _ in buffer_pins(fp, m, net):
+                    if inp is p:
+                        buffer_ins[p.pin] = (p, m)
                 continue
             if m.kind == "amplifier":
                 for ch in opamp_channels(fp, m):
@@ -379,6 +386,9 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
             vals["C"] = m.capacitance()
             vals.pop("C_bias", None)
         ckt.part(at(pa), at(pb), m.kind, vals, ref)
+    from ..components.models import BUF_C_IN
+    for p, m in buffer_ins.values():       # its c_in to ground, else the CMOS default [A73]
+        ckt.c(at(p), ckt.ground, m.params.get("c_in") or BUF_C_IN)
     opamps = []
     amp_out = {}
     for nm, ch in amps.items():

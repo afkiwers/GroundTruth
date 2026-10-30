@@ -136,7 +136,9 @@ not the noise a converter or a bridge puts on it. That interaction has its own a
   microcontroller, reset, crystal, Hall, debug and PWM / gate-input nets on the board by itself (or takes the ones
   listed under <code>victims:</code> in the settings, picked with <b>Victims…</b> on the Bridges tab), puts them into
   the stage's model and computes the noise each
-  one's receiver sees at the switching edges. This does not depend on the Signal paths tab. The results are in the
+  one's receiver sees at the switching edges. An input into a Schmitt trigger (a <a href="#buffers">logic
+  buffer</a> with a <b>Hysteresis</b>, or <b>Threshold Rising</b> and <b>Falling</b>) is a victim by itself too, and
+  its noise is checked against that hysteresis instead of the flat limit [A75]. This does not depend on the Signal paths tab. The results are in the
   bridge's drive view, in each stage's part of the report, and as <code>victim_coupling</code> issues.</li>
 </ul>
 <p><b>Where the results come together:</b></p>
@@ -687,7 +689,8 @@ or resistor model on the Parts tab (its drain and source, not its gate). A volta
 <p>Every part on the board with the electrical model the solver uses for it: <code>short</code>, <code>open</code>,
 <code>resistor</code> (R), <code>cap</code> (C, ESR, ESL, and optionally C at bias), <code>inductor</code> (L, R),
 <code>ferrite</code> (R, L), <code>amplifier</code> (an op-amp stage: gain, and optionally GBW, bandwidth, output
-impedance, input C and R, slew rate, CMRR). Models are suggested from the value and footprint, and from the
+impedance, input C and R, slew rate, CMRR), <code>buffer</code> (a logic buffer or Schmitt trigger: rise time,
+output and input impedance, thresholds; see <a href="#buffers">Logic buffers</a>). Models are suggested from the value and footprint, and from the
 symbol's fields where it has them (<a href="#fields">Part parameters from the schematic</a>); correct them where it
 matters:</p>
 <ul>
@@ -1263,6 +1266,31 @@ whose channels can't be told, an output pin of type passive), do one of these:</
   <b>Reload board</b>: see <a href="#labels">GT labels</a>;</li>
 <li>or, for an amplifier IC whose inside doesn't matter (an instrumentation amplifier), a <b>Gain</b> field.</li>
 </ul>
+<p><a name="buffers"></a><b>Logic buffers (Schmitt triggers).</b> A Hall sensor's or a switch's input often runs
+through an RC filter into a Schmitt-trigger buffer (an SN74LVC2G17) and on to the microcontroller. GroundTruth takes
+that as <b>one</b> path through the buffer (the part model <code>buffer</code>): the stretch before it ends at the
+buffer's input, loaded by its input capacitance; the stretch after it is driven by the buffer's <b>own</b> edge (the
+path's frequency and duty, the buffer's rise time, swinging its supply pin's voltage) behind its output resistance.
+The buffer does not pass the input's waveform: a slow, filtered edge in, a fast edge out. Each stretch is a current
+loop of its own; the emission adds them per harmonic, each with its own spectrum, so the fast edge after the buffer
+counts even where the slow input has none [A76].</p>
+<p>A part is a logic buffer when its symbol has the GT labels <code>buf_in</code> / <code>buf_out</code> (a pair per
+channel), or a <b>Threshold Rising</b>, <b>Threshold Falling</b> or <b>Hysteresis</b> field and pins whose names pair
+input and output (1A with 1Y, A with Y, IN with OUT); or set its model to <code>buffer</code> on the Parts tab (for a
+dual: its <code>pins</code> as input, output pairs, e.g. 1, 6, 3, 4). Its values come from its symbol's fields, which
+an HTTP library can fill in from a parts database (InvenTree parameters of the same names), at the supply it runs
+at:</p>
+<ul>
+<li><b>Rise Time</b>: its output's edge (default 2.5 ns);</li>
+<li><b>Zout</b>: its output resistance (default 25 Ω), <b>Cin</b>: its input capacitance (default 5 pF) [A73];</li>
+<li><b>Threshold Rising</b> and <b>Threshold Falling</b> (V<sub>T+</sub>, V<sub>T−</sub>), or <b>Hysteresis</b>
+  (their difference): the noise limit at its input.</li>
+</ul>
+<p>Detection crosses a resistor up to 100 kΩ in series into a buffer's input (the RC filter's 10 kΩ, above the
+series limit of 1 kΩ) and lists it under Pass through [A74]; a pull-up to a supply stays out. The Bode of such a path
+ends at the first buffer's input: the buffer's output has no linear response to the source. With a hysteresis, the
+buffer's input is a victim of the bridges and power stages by itself, its noise checked against the hysteresis
+[A75]. The path's description shows it as <code>U25 (buffer)</code>.</p>
 <p>Add <b>GBW</b>, <b>Aol</b>, <b>Zout</b> (and <b>Cin</b>, <b>PM</b>) fields to the symbol for its real model;
 without them the defaults above apply, with a note. A settings file made before the part was recognised keeps
 <code>open</code> until the parts are refreshed (Reload board, or <code>groundtruth init</code>), which then makes it
@@ -1495,6 +1523,9 @@ an example in <a href="#siglabels">Labelling a signal path</a>.</p>
   is replaced)</td></tr>
 <tr><td><code>amp_in:3, amp_out:1</code></td><td>an op-amp stage's input and output pin (pad number or pin name):
   the part becomes an <code>amplifier</code> the signal path runs through</td></tr>
+<tr><td><code>buf_in:1, buf_out:6</code></td><td>a logic buffer's (Schmitt trigger's) channel, input and output pin:
+  the part becomes a <code>buffer</code> the signal path runs through (a dual: <code>buf_in:1, buf_out:6, buf_in:3,
+  buf_out:4</code>); see <a href="#buffers">Logic buffers</a></td></tr>
 <tr><td colspan="2"><b>Through-hole pin values</b> (a connector, a big inductor's leads; per pin of the part; see
   <a href="#pins">Through-hole pins</a>):</td></tr>
 <tr><td><code>contact:0.5m</code></td><td>the mating contact's resistance per pin, Ω (0.5m = 0.5 mΩ, from the

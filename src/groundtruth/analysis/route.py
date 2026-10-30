@@ -109,6 +109,13 @@ def _amp_pads(config: Config, fp):
     return amplifier_pins(fp, config.model_for(fp.reference))
 
 
+def _buffer_pads(config: Config, fp, net: Optional[str] = None) -> list:
+    """The (input pad, output pad) channels of a part modelled as a logic buffer (on `net` when given), or []
+    (components.models.buffer_pins)."""
+    from ..components.models import buffer_pins
+    return buffer_pins(fp, config.model_for(fp.reference), net)
+
+
 def _blocking(board: Board, config: Config, nets: set[str], through) -> str:
     """The 2-net parts that lead out of the path's nets but don't pass a signal (a capacitor, a resistor > 1 kΩ, an
     open part), for the message when no path is found: the user may name them in the net's `through`."""
@@ -143,9 +150,11 @@ def signal_nets(board: Board, config: Config, net: str, through=()) -> set[str]:
         n = frontier.pop()
         for fp in by_net.get(n, []):
             amp = _amp_pads(config, fp)
-            if amp is not None:                       # an op-amp stage: from its input's net to its output's
-                if n in (amp[0].net, amp[1].net):
-                    for other in (amp[0].net, amp[1].net):
+            chans = _buffer_pads(config, fp, n)        # a logic buffer's channel on this net
+            if amp is not None or chans:               # an op-amp stage or a buffer: from its input's net to its output's
+                pair = amp if amp is not None else chans[0]
+                if n in (pair[0].net, pair[1].net):
+                    for other in (pair[0].net, pair[1].net):
                         if other not in group and other not in refs and other:
                             group.add(other)
                             frontier.append(other)
@@ -295,11 +304,12 @@ def find_route(board: Board, config: Config, net: str, driver_pin: str, receiver
     # Series parts that pass the signal (0R, termination R, ferrite): pad-to-pad edge.
     for fp in board.footprints:
         amp = _amp_pads(config, fp)
-        if amp is not None:                           # an op-amp stage: its input pin to its output pin
-            a, b = amp
-            if a.net in nets and b.net in nets:
-                g.edge(g.node(a.layers[0], a.position), g.node(b.layers[0], b.position),
-                       math.dist(a.position, b.position), ("part", fp, a.layers[0]))
+        chans = [c for c in _buffer_pads(config, fp) if c[0].net in nets and c[1].net in nets]
+        if amp is not None or chans:                  # an op-amp stage or a buffer's channel: input pin to output pin
+            for a, b in ([amp] if amp is not None else chans):
+                if a.net in nets and b.net in nets:
+                    g.edge(g.node(a.layers[0], a.position), g.node(b.layers[0], b.position),
+                           math.dist(a.position, b.position), ("part", fp, a.layers[0]))
             continue
         if not _passes(config, fp, through):
             continue
@@ -400,6 +410,8 @@ def _part_text(board: Board, config: Config, ref: str) -> str:
         g = m.params.get("gain")
         # a Gain field: a fixed gain block; without one the circuit around it sets its gain (analog_net)
         return f"{ref} (op-amp)" if g is None else f"{ref} ×{g:g}"
+    if m is not None and m.kind == "buffer":
+        return f"{ref} (buffer)"
     entry = config.components.get(ref)
     fp = board.footprint(ref)
     value = entry.value if entry is not None else (fp.value if fp is not None else "")

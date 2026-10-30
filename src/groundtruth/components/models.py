@@ -242,7 +242,8 @@ class ComponentModel:
     def from_dict(cls, d: dict) -> "ComponentModel":
         """A model from its settings-file entry (the reverse of to_dict). Parameters the kind does not use are
         ignored; `pins` and `from_schematic` may be lists or comma-separated text; a bad kind or a `pins` that
-        does not name exactly two pins raises ValueError (the settings report it with the part's reference)."""
+        does not name exactly two pins (a buffer: input, output pairs) raises ValueError (the settings report it with
+        the part's reference)."""
         kind = str(d.get("model", "open"))
         if kind not in MODEL_KINDS:
             raise ValueError(f"unknown model {kind!r}; choose one of {', '.join(MODEL_KINDS)}")

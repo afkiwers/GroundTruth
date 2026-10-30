@@ -65,6 +65,17 @@ def _suggest(fp: Footprint) -> ComponentModel:
     tie (short), then by reference prefix: resistors, capacitors (ESR/ESL by kind and package), ferrites, inductors, fuses.
     Anything else (ICs, connectors, transistors ...) is "open": its pins are only ports of the analysis."""
     prefix = ref_prefix(fp.reference)
+    if not fp.dnp:
+        # a logic buffer (Schmitt trigger): its GT buf labels, or its threshold fields (an HTTP lib's parameters)
+        # with input / output pins its pin names pair up (1A with 1Y); its values then come from its fields
+        from ..analysis.tags import buf_label_pins
+        if buf_label_pins(fp):
+            return ComponentModel("buffer", note="a logic buffer (its GT buf_in / buf_out labels)")
+        thresholds = {"threshold rising", "threshold falling", "hysteresis"}
+        if any(k.strip().lower() in thresholds and (v or "").strip() for k, v in fp.fields.items()):
+            from .models import buffer_pins
+            if buffer_pins(fp, ComponentModel("buffer")):
+                return ComponentModel("buffer", note="a logic buffer (its threshold fields and pin names)")
     if not fp.dnp and any(k.strip().lower() == "gain" and (v or "").strip() for k, v in fp.fields.items()):
         return ComponentModel("amplifier", note="an op-amp stage (its Gain field)")
     if not fp.dnp:

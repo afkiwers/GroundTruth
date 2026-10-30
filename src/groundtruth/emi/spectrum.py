@@ -34,6 +34,19 @@ def trapezoid_harmonics(f0: float, rise_time: float, amplitude: float, duty: flo
     return n[keep] * f0, a[keep]
 
 
+def trapezoid_at(f, f0: float, rise_time: float, amplitude: float, duty: float = 0.5,
+                 fall_time: Optional[float] = None) -> np.ndarray:
+    """trapezoid_harmonics' amplitudes at the frequencies f (each taken as the harmonic n = f / f0, which need not
+    be a whole number): the same c_n [Paul 2006], so at the harmonics it gives exactly what trapezoid_harmonics
+    does. A signal path through a logic buffer weighs each stretch's own trapezoid by this at any frequency."""
+    n = np.maximum(np.asarray(f, float) / f0, 1e-12)
+    if fall_time is None or fall_time == rise_time:
+        return 2 * amplitude * duty * np.abs(np.sinc(n * duty)) * np.abs(np.sinc(n * f0 * rise_time))
+    x = amplitude / (2j * np.pi * n) * (np.sinc(n * f0 * rise_time)
+                                       - np.exp(-2j * np.pi * n * duty) * np.sinc(n * f0 * fall_time))
+    return 2 * np.abs(x)
+
+
 def analysis_band(f0: float, rise_time: float) -> float:
     """Highest frequency worth evaluating: a decade above the second corner (1/π·tr), capped at 6 GHz [A6]."""
     return min(6e9, max(10 / (math.pi * rise_time), 3 * f0))
