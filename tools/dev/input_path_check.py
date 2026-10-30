@@ -52,6 +52,15 @@ def main() -> int:
                 m = config.model_for(fp.reference)
                 joined = model_nets(fp, m) if m is not None else set(fp.nets())
                 others = sorted(n for n in joined if n != net and not is_ground(n))
+                if net not in joined and m is not None and m.kind in ("short", "resistor", "inductor", "ferrite"):
+                    # a part whose model joins other pads than this net's (a 4-terminal shunt's force pads, a FET's
+                    # drain and source): which it joins, and its pads (number, net, size) to see why
+                    pads = ", ".join(f"{p.number}:{(p.net or '-').split('/')[-1]} {p.size[0]:.2f}x{p.size[1]:.2f}"
+                                     for p in fp.pads)
+                    print(f"  {'  ' * depth}{net.split('/')[-1]} -> {fp.reference:6s} {fp.value[:18]:18s} model "
+                          f"{m.kind} joins only {', '.join(sorted(n.split('/')[-1] for n in joined))}, not this net: "
+                          f"pads {pads[:200]}")
+                    continue
                 if net not in joined or not others or len(fp.nets()) > 6:
                     continue                    # not a series part from this net (a cap to ground, an IC)
                 ok = _passes(config, fp)          # exactly power.input_path's rule: the model's nets, any number
