@@ -79,6 +79,9 @@ def rms_runs(model, bs) -> tuple[list, list[str]]:
             nets |= set(path or [s.spec.switch_node])
             parts += path_parts(board, config, path or [])
         nets.add(s.spec.switch_node)
+        if s.spec.low_return:           # a low side on its own net: that net and its shunt to the ground
+            nets.add(s.spec.low_return)
+            parts += [fp for fp in (board.footprint(r) for r in s.spec.low_shunt) if fp is not None]
         own = [p for el in s.elements for p in el.a + el.b]
         pads += own + ([out] if out is not None else [])
         layers |= {_side(el.fp) for el in s.elements}

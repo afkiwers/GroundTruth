@@ -47,12 +47,19 @@ def split_problem(line: str) -> tuple[str, str]:
     return "", line
 
 
+SCREEN_SHARE = 0.75         # the problems scroll when the dialog would be taller than this share of the screen
+
+
 class MessageDialog(wx.Dialog):
-    """The laid-out message: icon and headline, the problems as blocks, a monospaced detail (a traceback), buttons."""
+    """The laid-out message: icon and headline, the problems as blocks (scrolling when there are many: 18 legs'
+    problems ran off the screen), a monospaced detail (a traceback), and a Copy button next to the answers that puts
+    the whole message on the clipboard as plain text (the user: "add a copy button so users can copy to clipboard if
+    needed")."""
 
     def __init__(self, parent, message: str, caption: str, style: int):
         """Lay out `message` (wx.MessageBox's text) under `caption` with the buttons and icon `style` asks for."""
         super().__init__(parent, title=caption or "GroundTruth", style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+        self.plain = f"{caption}\n\n{message}" if caption else message      # what Copy puts on the clipboard
         gap = self.FromDIP(10)
         text, _, detail = message.partition("\n\nTraceback")
         detail = ("Traceback" + detail) if detail else ""
@@ -69,15 +76,25 @@ class MessageDialog(wx.Dialog):
             h.SetFont(h.GetFont().Bold().Scaled(1.1))
             h.Wrap(width)
             col.Add(h, 0, wx.BOTTOM, gap)
+        # the problems on a page of their own, which scrolls when they are many (sized below, once laid out)
+        self.page = page = wx.ScrolledWindow(self, style=wx.VSCROLL)
+        page.SetScrollRate(0, self.FromDIP(12))
+        rows = wx.BoxSizer(wx.VERTICAL)
         for line in lines:
             where, what = split_problem(line)
             if where:
-                w = wx.StaticText(self, label=where)
+                w = wx.StaticText(page, label=where)
                 w.SetFont(w.GetFont().Bold())
-                col.Add(w, 0, wx.TOP, gap // 2)
-            t = wx.StaticText(self, label=what[:1].upper() + what[1:] if where else what)
+                rows.Add(w, 0, wx.TOP, gap // 2)
+            t = wx.StaticText(page, label=what[:1].upper() + what[1:] if where else what)
             t.Wrap(width)
-            col.Add(t, 0, wx.LEFT if where else 0, gap if where else 0)
+            rows.Add(t, 0, wx.LEFT if where else 0, gap if where else 0)
+        page.SetSizer(rows)
+        need = rows.GetMinSize()
+        screen = wx.Display(max(wx.Display.GetFromWindow(parent), 0) if parent else 0).GetClientArea().height
+        page.SetMinSize(wx.Size(need.width + wx.SystemSettings.GetMetric(wx.SYS_VSCROLL_X),
+                                min(need.height, max(int(screen * SCREEN_SHARE) - self.FromDIP(220), self.FromDIP(120)))))
+        col.Add(page, 1, wx.EXPAND)
         if detail:
             d = wx.TextCtrl(self, value=detail, style=wx.TE_MULTILINE | wx.TE_READONLY | wx.HSCROLL,
                             size=self.FromDIP(wx.Size(560, 180)))
@@ -87,7 +104,14 @@ class MessageDialog(wx.Dialog):
         buttons = (wx.YES_NO if style & wx.YES_NO else wx.OK) | (wx.CANCEL if style & wx.CANCEL else 0)
         box = wx.BoxSizer(wx.VERTICAL)
         box.Add(top, 1, wx.EXPAND | wx.ALL, 2 * gap)
-        box.Add(self.CreateStdDialogButtonSizer(buttons), 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 2 * gap)
+        row = wx.BoxSizer(wx.HORIZONTAL)
+        self.copy = wx.Button(self, label="Copy")
+        self.copy.SetToolTip("the whole message as plain text to the clipboard")
+        self.copy.Bind(wx.EVT_BUTTON, self.on_copy)      # handled here: it does not close the dialog
+        row.Add(self.copy, 0, wx.ALIGN_CENTER_VERTICAL)
+        row.AddStretchSpacer()
+        row.Add(self.CreateStdDialogButtonSizer(buttons), 0, wx.ALIGN_CENTER_VERTICAL)
+        box.Add(row, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 2 * gap)
         self.SetSizerAndFit(box)
         if style & wx.NO_DEFAULT:
             no = self.FindWindow(wx.ID_NO)
@@ -96,6 +120,19 @@ class MessageDialog(wx.Dialog):
         self.Bind(wx.EVT_BUTTON, lambda e: self.EndModal(e.GetId()))
         theme.style_tree(self)
         self.CentreOnParent()
+
+    def on_copy(self, _=None) -> bool:
+        """Put the message (caption, text and any traceback, as given) on the clipboard; the button says so. False
+        when the clipboard is busy."""
+        if not wx.TheClipboard.Open():
+            self.copy.SetLabel("Clipboard busy")
+            return False
+        try:
+            wx.TheClipboard.SetData(wx.TextDataObject(self.plain))
+        finally:
+            wx.TheClipboard.Close()
+        self.copy.SetLabel("Copied")
+        return True
 
 
 def box(message: str, caption: str = "GroundTruth", style: int = wx.OK | wx.CENTRE, parent=None, *a, **k) -> int:

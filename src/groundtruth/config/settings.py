@@ -2460,12 +2460,16 @@ def validate(config: Config, board: Board) -> list[str]:
                     errors.append(f"converter {c.name!r}: {key} pin {pin!r} not found (use REF.PAD)")
     used = {ref: f"converter {c.name!r}" for c in config.converters for ref in c.parts}
     for b in config.bridges:
-        for net in (b.rail, b.ground, *(leg.switch_node for leg in b.legs)):
+        for net in (b.rail, b.ground, *(n for leg in b.legs for n in (leg.switch_node, leg.ground_return))):
             if net and net not in board_nets:
                 errors.append(f"bridge {b.name!r}: net {net!r} does not exist on the board")
         for leg in b.legs:
+            for ref in leg.shunt:
+                if board.footprint(ref) is None:
+                    errors.append(f"bridge {b.name!r} leg {leg.phase}: shunt {ref!r} not found")
+            # a low side on the leg's own return net (a shunt per phase to the bridge's ground) has its pads there
             for refs, (na, nb), role in ((leg.high_side, (b.rail, leg.switch_node), "high side"),
-                                         (leg.low_side, (leg.switch_node, b.ground), "low side")):
+                                         (leg.low_side, (leg.switch_node, leg.ground_return or b.ground), "low side")):
                 for ref in refs:
                     fp = board.footprint(ref)
                     if fp is None:
