@@ -1,12 +1,12 @@
 """Install the groundtruth IPC plugin into every KiCad 10+ found for this user.
 
-    python tools/install_plugin.py            # copy into <KiCad documents>/<ver>/plugins/io.github.iwers.groundtruth
+    python tools/install_plugin.py            # copy into <KiCad documents>/<ver>/plugins/io.github.afkiwers.groundtruth
     python tools/install_plugin.py --dest DIR # explicit plugins directory
     python tools/install_plugin.py --dry-run
     python tools/install_plugin.py --uninstall  # remove the copy (to use the Plugin and Content Manager's package)
 
 Or as a package: tools/make_pcm_package.py builds a zip for Plugin and Content Manager > Install from File
-(installed to <ver>/3rdparty/plugins/io_github_iwers_groundtruth). Keep only one of the two installed.
+(installed to <ver>/3rdparty/plugins/io_github_afkiwers_groundtruth). Keep only one of the two installed.
 
 KiCad then creates the plugin's virtualenv from plugin/requirements.txt on first start.
 The KiCad API must be enabled: Preferences > Plugins > "Enable KiCad API".
@@ -22,7 +22,10 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PLUGIN_ID = "io.github.iwers.groundtruth"
+PLUGIN_ID = "io.github.afkiwers.groundtruth"
+# the identifier before 2026-10-31 (KiCad's add-on guidelines: the namespace is the GitHub account that hosts it); a
+# copy under it would show every button twice beside the new one
+OLD_IDS = ("io.github.iwers.groundtruth",)
 MIN_MAJOR = 10
 
 
@@ -117,8 +120,24 @@ def pcm_copy(dest_plugins: Path) -> Path:
     return dest_plugins.parent / "3rdparty" / "plugins" / PLUGIN_ID.replace(".", "_")
 
 
+def remove_old(dest_plugins: Path, dry_run: bool = False):
+    """Remove this tool's copies under an old identifier (OLD_IDS) from dest_plugins, and warn about the Plugin and
+    Content Manager's (the manager's Installed tab removes those)."""
+    for old in OLD_IDS:
+        stale = dest_plugins / old
+        if stale.exists():
+            print(f"removing the copy under the old identifier: {stale}")
+            if not dry_run:
+                shutil.rmtree(stale)
+        pcm_old = dest_plugins.parent / "3rdparty" / "plugins" / old.replace(".", "_")
+        if pcm_old.exists():
+            print(f"warning: the Plugin and Content Manager has GroundTruth under its old identifier ({pcm_old}): "
+                  "uninstall it in the manager's Installed tab, or KiCad shows every button twice.", file=sys.stderr)
+
+
 def uninstall(dest_plugins: Path, dry_run: bool = False):
-    """Remove the copied plugin from dest_plugins (its Python environment stays)."""
+    """Remove the copied plugin from dest_plugins (its Python environment stays), also under an old identifier."""
+    remove_old(dest_plugins, dry_run)
     target = dest_plugins / PLUGIN_ID
     if not target.exists():
         print(f"not installed in {dest_plugins}")
@@ -152,6 +171,7 @@ def main() -> int:
             print(f"warning: the Plugin and Content Manager installed GroundTruth too ({pcm_copy(d)}): KiCad will show "
                   "every button twice. Uninstall one of them (the manager's Installed tab, or --uninstall here).",
                   file=sys.stderr)
+        remove_old(d, args.dry_run)
         install(d, args.dry_run)
     print("done. Close every KiCad window and start KiCad again (KiCad 10 has no plugin reload), then check that "
           "Preferences > Plugins > Enable KiCad API is still ticked.")

@@ -16,7 +16,7 @@ same `torch.cuda` calls, so GroundTruth uses it like an NVIDIA card. With neithe
 sees the GPU and computes in double precision there.
 
 The KiCad plugin venv is the one KiCad made for the plugin (%LOCALAPPDATA%/KiCad/10.0/python-environments/
-io.github.iwers.groundtruth on Windows, KiCad 10's Python 3.11); restart KiCad afterwards.
+io.github.afkiwers.groundtruth on Windows, KiCad 10's Python 3.11); restart KiCad afterwards.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-PLUGIN_ID = "io.github.iwers.groundtruth"
+PLUGIN_ID = "io.github.afkiwers.groundtruth"
 INDEX = "https://download.pytorch.org/whl/{build}"
 AMD_INDEX = "https://repo.amd.com/rocm/whl-multi-arch/"
 # The newest AMD build with Windows wheels for Python 3.11 (KiCad 10's) for every chip below, checked on AMD's index

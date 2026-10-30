@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import make_pcm_repository as repo  # noqa: E402
 
 META = {"$schema": "https://go.kicad.org/pcm/schemas/v1", "name": "GroundTruth", "description": "d",
-        "description_full": "dd", "identifier": "io.github.iwers.groundtruth", "type": "plugin",
+        "description_full": "dd", "identifier": "io.github.afkiwers.groundtruth", "type": "plugin",
         "author": {"name": "afkiwers", "contact": {"email": "a@b.c"}}, "license": "GPL-3.0", "resources": {},
         "tags": ["emi"]}
 
@@ -62,7 +62,7 @@ def test_the_kicad_repository_lists_every_release_with_its_download(tmp_path):
         assert re.fullmatch(r"\d{1,4}(\.\d{1,4}(\.\d{1,6})?)?", x["version"]) and x["kicad_version"] == "10.0"
         assert re.fullmatch(r"[a-f0-9]{64}", x["download_sha256"])
     with zipfile.ZipFile(io.BytesIO(files["resources.zip"])) as z:
-        assert z.namelist() == ["io.github.iwers.groundtruth/icon.png"]
+        assert z.namelist() == ["io.github.afkiwers.groundtruth/icon.png"]
     r = json.loads(files["repository.json"])
     assert r["name"] == "GroundTruth" and "schema_version" not in r
     assert r["packages"]["url"] == "https://afkiwers.github.io/GroundTruth/packages.json"
