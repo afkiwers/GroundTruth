@@ -466,6 +466,7 @@ def test_a_factorisation_out_of_memory_is_retried_alone(solved, monkeypatch):
     ({"phase_shunts": "B"}, ["", "PHB_GND", ""]),                         # a bridge may mix both
     ({"phase_shunts": "ABC", "shunt_net": "PH{}_S"}, ["PHA_S", "PHB_S", "PHC_S"]),   # a net not named ground
     ({"phase_shunts": "ABC", "kelvin": True}, ["PHA_GND", "PHB_GND", "PHC_GND"]),   # 4-terminal shunts
+    ({"phase_shunts": "ABC", "kelvin": "custom"}, ["PHA_GND", "PHB_GND", "PHC_GND"]),   # their force pads custom
 ])
 def test_legs_with_a_shunt_each_to_ground_are_one_bridge(kw, returns):
     """The user, of a BLDC drive with a current-sense shunt per phase (three one-leg bridges were proposed): "It
@@ -507,6 +508,34 @@ def test_a_kelvin_shunt_joins_its_force_pads_only():
         p.size = (0.6, 1.0)
     assert kelvin_force_pads(r51) is None
     assert model_nets(r51, ComponentModel("resistor", {"R": 2e-3})) == {"PHA_GND", "GND", "PHA_SP", "PHA_SN"}
+
+
+def test_a_kelvin_shunts_custom_force_pads_count_by_their_copper():
+    """The user's battery shunt (300 µΩ): its force pads custom pads whose anchor (0.55 mm) is smaller than its sense
+    pads (0.5 x 1 mm), so by `size` the sense pads were taken as the force pads and the battery's path to the bus was
+    not found. The pads' copper (a custom pad's outline) decides [A72]."""
+    from groundtruth.components.models import ComponentModel, kelvin_force_pads, model_nets, pad_area
+    board = loads_board(bridge_board(phase_shunts="ABC", kelvin="custom").text())
+    r51 = board.footprint("R51")
+    force = {p.number for p in r51.pads if p.net in ("PHA_GND", "GND")}
+    assert all(p.size[0] * p.size[1] < min(q.size[0] * q.size[1] for q in r51.pads if q.number not in force)
+               for p in r51.pads if p.number in force)                      # by size the sense pads would win
+    assert {p.number for p in kelvin_force_pads(r51)} == force and pad_area(r51.pads[0]) == pytest.approx(0.6)
+    assert model_nets(r51, ComponentModel("resistor", {"R": 3e-4})) == {"PHA_GND", "GND"}
+
+
+def test_a_fet_taken_as_closed_joins_drain_and_source_only_when_its_gate_is_told():
+    """The user's ideal-diode FETs (a short model) joined their gate net too: the input path ran over ID_GATE. A
+    transistor's short or resistor model joins its two power nets when its gate is told (a pin named G / GN / GATE,
+    or fewer pads than each power net); a three-pin part of one pad per net without names tells nothing and keeps
+    all its pads (detect.fet_terms would guess by name order)."""
+    from groundtruth.components.models import ComponentModel, model_nets
+    board = loads_board(bridge_board().text())
+    q1 = board.footprint("Q1")                       # EPC pins GN / DN / SN: the gate is named
+    assert model_nets(q1, ComponentModel("short")) == {"VBUS", "PHA"}
+    for p in q1.pads:
+        p.pin_function = ""                          # one pad per net, no names: nothing tells the gate
+    assert model_nets(q1, ComponentModel("short")) == {"VBUS", "PHA", "G_HA"}
 
 
 def test_a_resistor_above_the_shunt_threshold_does_not_join_the_legs():

@@ -99,10 +99,17 @@ class BoardGen:
                 pin += f'\t\t\t(pinfunction {_q(p["pinfunction"] + "_" + str(p["number"]))})\n'
             if p.get("pintype"):
                 pin += f'\t\t\t(pintype {_q(p["pintype"])})\n'
+            # a custom pad: its anchor (`size`) and polygon primitives (`primitives`: point lists around the pad)
+            prims = ""
+            if p.get("primitives"):
+                polys = "".join("\t\t\t\t(gr_poly\n\t\t\t\t\t(pts " + " ".join(f"(xy {x} {y})" for x, y in pts)
+                                + ")\n\t\t\t\t\t(width 0)\n\t\t\t\t\t(fill yes)\n\t\t\t\t)\n" for pts in p["primitives"])
+                prims = (f'\t\t\t(options\n\t\t\t\t(clearance outline)\n\t\t\t\t(anchor rect)\n\t\t\t)\n'
+                         f'\t\t\t(primitives\n{polys}\t\t\t)\n')
             pad_txt.append(
                 f'\t\t(pad {_q(str(p["number"]))} {ptype} {p.get("shape", "rect")}\n\t\t\t(at {px} {py} {angle})\n'
                 f'\t\t\t(size {p.get("size", (0.6, 0.6))[0]} {p.get("size", (0.6, 0.6))[1]})\n{drill}'
-                f'\t\t\t(layers {" ".join(_q(l) for l in layers)})\n\t\t\t(net {_q(p["net"])})\n{pin}'
+                f'\t\t\t(layers {" ".join(_q(l) for l in layers)})\n\t\t\t(net {_q(p["net"])})\n{pin}{prims}'
                 f'\t\t\t(uuid {_q(_u())})\n\t\t)')
         self.items.append(
             f'\t(footprint {_q(lib_id)}\n\t\t(layer {_q(layer)})\n\t\t(uuid {_q(u)})\n\t\t(at {at[0]} {at[1]} {angle})\n'
@@ -626,7 +633,7 @@ BR_X = (18.0, 30.0, 42.0)    # the bridge board's leg centres (mirror symmetric 
 def bridge_board(legs: int = 3, pinfunctions: str = "EPC", sense_ic: bool = True, snubber: bool = True,
                  inductor_on_a: bool = False, load_switch: bool = False, caps_per_leg: int = 1,
                  esc: bool = False, header_gnd_pins: int = 0, unstitched: str = "", phase_shunts: str = "",
-                 shunt_net: str = "PH{}_GND", shunt_r: str = "2m", kelvin: bool = False) -> BoardGen:
+                 shunt_net: str = "PH{}_GND", shunt_r: str = "2m", kelvin: bool | str = False) -> BoardGen:
     """A motor bridge, 4 layers, 60 x 34 mm, GND plane on In1: a VBUS strip on F.Cu (x 10-50, y 4-9.6), and per
     leg k (centre x = BR_X[k], phase A / B / C) a high-side FET Q<2k+1> (drain in the strip at y 9, source on the
     PH<phase> pour at y 12), a low-side FET Q<2k+2> (drain on PH<k> at y 18.5, source on an F.Cu GND strip with vias at y 21.5), the PH<k>
@@ -649,7 +656,8 @@ def bridge_board(legs: int = 3, pinfunctions: str = "EPC", sense_ic: bool = True
     island x - 2 to x + 1.5 under the source pad, with a shunt R<51+k> (shunt_r) at (x + 2, 22.25) to GND and a GND via
     beside it; the strip is then an island per phase (the others on GND with their vias). kelvin: each shunt a
     4-terminal resistor (force pads 1 / 2 as the 2-pad one's, larger; sense pads 3 / 4, small, on PH<k>_SP / PH<k>_SN),
-    like a 2512 Kelvin shunt."""
+    like a 2512 Kelvin shunt; kelvin="custom": the force pads custom pads whose anchor (0.2 mm) is smaller than the
+    sense pads, their copper in a primitive (as a battery shunt's footprint)."""
     g = BoardGen(layers=4, size=(60.0, 34.0))
     g.plane("GND", "In1.Cu")
     g.zone("VBUS", "F.Cu", [(10.0, 4.0), (50.0, 4.0), (50.0, 9.6), (10.0, 9.6)])
@@ -667,7 +675,16 @@ def bridge_board(legs: int = 3, pinfunctions: str = "EPC", sense_ic: bool = True
             g.zone(low, "F.Cu", [(x - 2.0, 21.0), (x + (1.5 if low != "GND" else 2.0), 21.0),
                                  (x + (1.5 if low != "GND" else 2.0), 23.5), (x - 2.0, 23.5)])
         if low != "GND":                    # the phase's shunt to GND, and GND's via to the plane beside it
-            if kelvin:
+            if kelvin == "custom":          # force pads as custom pads: a small anchor, the copper in a primitive
+                big = [[(-0.3, -0.5), (0.3, -0.5), (0.3, 0.5), (-0.3, 0.5)]]
+                g.footprint(f"R{51 + k}", shunt_r, "Resistor_SMD:R_Shunt_Kelvin_Custom", (x + 2.0, 22.25), [
+                    {"number": 1, "at": (-0.5, 0.0), "net": low, "size": (0.2, 0.2), "shape": "custom",
+                     "primitives": big},
+                    {"number": 4, "at": (0.5, 0.0), "net": "GND", "size": (0.2, 0.2), "shape": "custom",
+                     "primitives": big},
+                    {"number": 2, "at": (-0.5, 0.9), "net": f"PH{ph}_SP", "size": (0.25, 0.4)},
+                    {"number": 3, "at": (0.5, 0.9), "net": f"PH{ph}_SN", "size": (0.25, 0.4)}])
+            elif kelvin:
                 g.footprint(f"R{51 + k}", shunt_r, "Resistor_SMD:R_Shunt_Kelvin", (x + 2.0, 22.25), [
                     {"number": 1, "at": (-0.5, 0.0), "net": low, "size": (0.6, 1.0)},
                     {"number": 2, "at": (0.5, 0.0), "net": "GND", "size": (0.6, 1.0)},
