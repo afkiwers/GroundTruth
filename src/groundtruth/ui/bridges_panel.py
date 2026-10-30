@@ -21,6 +21,7 @@ from .listsel import SelectableRows
 from .widgets import InfoBox, PickDialog, button_row, parse_field, set_lazy_items, source_status, with_mark
 
 STANDARD_CHOICES = ["(analysis default)"] + list(CONDUCTED_STANDARDS)
+SWEEP_HELP = "bridges-sweep"        # the help's anchor of the sweep paragraph (help.html), the info button's target
 
 FIELD_TIPS = {
     "Name": "A name for this bridge, used in the lists, the Results tab and the reports.",
@@ -49,9 +50,17 @@ FIELD_TIPS = {
              "the hot loop's ringing.",
     "Q_oss": "Output charge, all parallel switches together, e.g. 170n for two EPC2302: Q_oss·V is lost at every "
              "hard turn-on.",
-    "Sweep currents (A)": "Phase currents Simulate also evaluates, e.g. 50, 100, 200 (every one at every sweep "
-                          "speed), from the operating point's solves: no extra solves, a few seconds per point.",
-    "Sweep speeds (rpm)": "Speeds for the sweep, e.g. 0, 1000, 3000; empty: the operating point's speed.",
+    "Sweep": "Optional: more operating points (phase current × speed) on top of the one set above. The operating "
+             "point above is solved and checked (issues, maps); the sweep re-uses its solves to show how losses, RMS "
+             "density and the conducted and radiated margins change with current and speed (the bridge's sweep view "
+             "on the Results tab). Its points raise no issues.",
+    "Sweep currents (A)": "Optional, IN ADDITION to the Phase current above: more phase currents Simulate evaluates, "
+                          "e.g. 50, 100, 200 (each at every sweep speed). The operating point above stays the one "
+                          "that is solved and checked; the sweep re-uses its solves (no extra solves, a few seconds "
+                          "per point) and shows the results in the bridge's sweep view. Empty: the Phase current "
+                          "above.",
+    "Sweep speeds (rpm)": "Optional, IN ADDITION to the Speed above: the speeds of the sweep, e.g. 0, 1000, 3000 "
+                          "(each with every sweep current). Empty: the Speed above.",
     "C stray (chassis)": "Phase node, motor cable and frame to chassis (common mode); optional.",
     "Connection": "The motor's winding: star or delta. Given its terminal data it only changes the back-EMF shape "
                   "the terminals see (a delta has a circulating current inside).",
@@ -284,10 +293,36 @@ class BridgesPanel(SelectableRows, wx.Panel):
                                    "current-sense resistor per phase), e.g. /Phase A/PHASE_GND; empty when the low "
                                    "side is on the ground")
         self.leg_shunt.SetToolTip("the parts between that net and the ground, e.g. R12")
-        self._add_rows(("Sweep", ("Sweep currents (A)", self.sweep_i), ("Sweep speeds (rpm)", self.sweep_rpm),
+        self._add_rows((("Sweep", self._sweep_note()), ("Sweep currents (A)", self.sweep_i),
+                        ("Sweep speeds (rpm)", self.sweep_rpm),
                         "Selected leg", ("Phase", self.leg_phase), ("Switch node", self.leg_node),
                         ("High side", self.leg_high), ("Low side", self.leg_low),
                         ("Ground return", self.leg_return), ("Shunt", self.leg_shunt), ("Output pin", self.leg_out)))
+
+    def _sweep_note(self) -> wx.Window:
+        """Beside the Sweep heading: that the sweep is on top of the operating point above, and an info button that
+        opens the help at the sweep (the user: "make sure the user understands that this is done additionally to the
+        single speed/phase current settings at the top")."""
+        holder = wx.Panel(self.form_win)
+        hs = wx.BoxSizer(wx.HORIZONTAL)
+        note = wx.StaticText(holder, label="optional, in addition to the operating point above")
+        note.SetName("muted")
+        info = wx.BitmapButton(holder, bitmap=wx.ArtProvider.GetBitmap(wx.ART_INFORMATION, wx.ART_BUTTON,
+                                                                        self.FromDIP(wx.Size(16, 16))),
+                               style=wx.BORDER_NONE)
+        info.SetToolTip(FIELD_TIPS["Sweep"] + "\n(click: the help on the sweep)")
+        info.Bind(wx.EVT_BUTTON, lambda e: self.on_sweep_help())
+        self.sweep_info = info
+        hs.Add(note, 0, wx.ALIGN_CENTER_VERTICAL)
+        hs.Add(info, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, self.FromDIP(6))
+        holder.SetSizer(hs)
+        return holder
+
+    def on_sweep_help(self):
+        """The Sweep heading's info button: the help at its sweep paragraph (the window that holds the tab shows it)."""
+        top = self.GetTopLevelParent()
+        if hasattr(top, "show_help"):
+            top.show_help("bridges", SWEEP_HELP)
 
     def _form_layout(self):
         """The form laid out, and the tab with it."""

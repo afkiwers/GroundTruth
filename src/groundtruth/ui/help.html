@@ -452,10 +452,84 @@ you change something the victims are automatic: the reset, crystal, Hall, debug 
 each run, shown as <i>auto</i>. Your first Add or Remove keeps those and makes the list your own, so nothing found
 automatically drops out unnoticed; <b>Reset to automatic</b> goes back (an empty list is automatic too). OK writes
 <code>victims: nets:</code>; Undo takes it back.</p>
-<p>On the Results tab a bridge has four kinds of view: its drive (phase and bus currents, capacitor ripple,
-conducted spectrum, losses), each leg's hot loop, its <b>RMS currents</b> map, and its <b>sweep</b> (losses, RMS
-density, conducted and radiated margin against the phase current, one line per speed; a hollow marker where the
-current is not reached).</p>
+<p>On the Results tab (the view list at its top) a bridge has four kinds of view, in this order:</p>
+<ul>
+<li><b>the bridge by its name</b>: its drive (phase and bus currents, capacitor ripple, conducted spectrum,
+  losses);</li>
+<li><b>each leg's hot loop</b> (listed by its switches, <code>Q1+Q2→Q3+Q4</code>): the leg's commutation loop at
+  100 MHz;</li>
+<li><b><i>bridge</i>  RMS currents</b>: what heats the copper, from the battery to the motor connector;</li>
+<li><b><i>bridge</i>  sweep</b> (when a sweep is set): losses, RMS density, conducted and radiated margin against
+  the phase current, one line per speed; a hollow marker where the current is not reached.</li>
+</ul>
+<p><a name="bridges-sweep"></a><b>The sweep</b> (the form's <b>Sweep currents</b> and <b>Sweep speeds</b>,
+optional) is <b>in addition to</b> the operating point set above it (<b>Phase current</b>, <b>Speed</b>), not instead
+of it. The operating point is what Simulate solves and checks: its hot loops, maps, RMS currents and issues. The
+sweep then takes every sweep current at every sweep speed (25, 50, 100 A × 0, 1000 rpm: six points; an empty list
+uses the operating point's value) and re-uses the operating point's solves for each, since the copper is linear: the
+drive again, the RMS currents re-weighted, the capacitors' ripple, the losses and the conducted reading. The hot
+loop's L·di/dt and radiated margin are scaled with the largest switched current. That takes seconds per point, no
+new solves. Its points raise no issues; they are shown in the bridge's <b>sweep</b> view on the Results tab, one line
+per speed against the phase current, with a hollow marker where the drive cannot reach the current (the bus
+voltage against the back-EMF at that speed). Use it to see how losses and margins move over the drive's range; set
+the operating point to the case you want checked.</p>
+<p><b>Why the hot loop does not reach the motor connector.</b> During a switching edge the motor's winding holds
+the phase current nearly constant: the current only moves from one switch to the other. What changes in nanoseconds
+flows around the bus capacitors, the high side, the phase node and the low side, and back to the capacitors. That
+is the hot loop, and its map stops at the phase node. The motoring current itself (battery, high side, phase node,
+motor pin and back through the low side) changes slowly. It is in the <b>RMS currents</b> map, which is made from
+DC solves plus the first three PWM harmonics, where current spreads by resistance, not inductance. If that view is
+missing, a leg has no <b>Output pin</b> (the run's notes say so). What does leave through the motor connector at
+high frequency is common-mode current: the phase node's swing drives it through the cable's and the motor frame's
+capacitance to the chassis. It is estimated as a single figure from the bridge's <b>C stray (chassis)</b>, not
+mapped.</p>
+<p><b>Motor or generator.</b> For the same reason, the machine on the phase output is not part of the loop
+inductance: through an edge it is a constant current at the phase node. What it changes is the current that is
+switched (the overshoot grows with it) and which edge is the hard one: motoring, the current flows out of the phase
+node and the high side's turn-on is hard; generating (the bridge's <b>Mode</b>), it flows in and the low side's
+turn-on is. The loop and its inductance are the same in both.</p>
+<p><b>What the loop inductance covers.</b> It is the inductance of the leg's commutation loop on this board: the
+bus capacitors between the rail and the ground within 20 mm of the switches (or, when the nearest one is farther,
+those within 5 mm beyond it), the high- and low-side switches, the copper of the rail, phase node and ground nets
+with their vias and pours on every layer, and the capacitors' own ESL. A switch's current runs 0.25 mm above its
+pads, inside its package [A30]; what lies deeper in the die and the bond is not included. The model region reaches
+5 mm around the switches, the capacitors and the input path, and widens to 10 and 20 mm when the loop does not
+close within it. The loop is driven at the switches and its reactance solved at 30 and 100 MHz; a series LC through
+both, X = ωL − 1/(ωC), leaves out what is left of the capacitors' reactance. The battery and its leads are beyond
+the bus capacitors and play no part at these frequencies. The <code>hot_loop</code> issue names the two closest
+capacitors.</p>
+<p><b>Higher or lower loop inductance.</b> A tight layout with ceramic capacitors right at the switches and the
+return on the layer underneath reaches a few nH; a loop that closes through distant or electrolytic capacitors 10-20
+nH and more. A higher inductance means:</p>
+<ul>
+<li><b>more overshoot</b> on the phase node, L·di/dt: the <code>hot_loop</code> issue warns at 25 % of the bus
+  voltage and is an error at 50 % (<code>rules.overshoot_warning</code>, <code>overshoot_error</code>). It eats the
+  switches' voltage margin;</li>
+<li><b>more ringing energy</b>, ½·L·I² at every edge, lost in the switches, the snubber or the copper;</li>
+<li><b>a lower ring frequency</b>, 1/(2π·√(L·C<sub>oss</sub>)), with a peak in the conducted and radiated
+  spectrum there;</li>
+<li><b>more radiation</b>: a larger loop area is a larger magnetic moment.</li>
+</ul>
+<p>A lower inductance does the opposite: less overshoot and ringing energy, a higher ring frequency, a smaller
+loop. To lower it: the capacitors closer to the switches, the return on the next layer down through a thin
+dielectric, more vias in parallel, and more capacitors in parallel.</p>
+<p><b>Why 100 MHz.</b> The spectrum and the conducted emission are solved over their whole range; only the hot-loop
+map is drawn at one frequency. 100 MHz is chosen because:</p>
+<ul>
+<li><b>the edges and the ringing are up there</b>: an edge of rise time t<sub>r</sub> has a flat spectrum up to
+  about 1/(π·t<sub>r</sub>), then it falls at 40 dB per decade (16 MHz for 20 ns, 64 MHz for 5 ns). The loop's
+  inductance rings with the switches' C<sub>oss</sub>, typically at 30-300 MHz: the overshoot on the phase node
+  and a peak in the spectrum;</li>
+<li><b>the limits go there</b>: conducted emission to 30 MHz (CISPR 25: 108 MHz), radiated from 30 MHz;</li>
+<li><b>the loop inductance is measured there</b>: every capacitor in the loop is far above its self-resonance, so
+  the loop's impedance is nearly pure inductance (fitted with a second solve at 30 MHz). That L sets the overshoot
+  (L·di/dt), the ringing and the radiated estimate;</li>
+<li><b>the picture holds for the whole band</b>: above about 10 MHz the current already takes the path of least
+  inductance (the return right under the forward path), so a map at 20 or 50 MHz looks the same. It changes at a
+  plane resonance, which an issue names with its frequency.</li>
+</ul>
+<p>Drives with deliberately slow edges (50-200 ns) put little energy at 100 MHz: there the map shows where the
+ringing current flows rather than where most of the emitted energy is.</p>
 
 <hr><a name="dcloads"></a><h3>DC loads tab</h3>
 <p>A <b>DC load</b> is a supply rail with the currents its loads draw: a power connector feeding several boards'

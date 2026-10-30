@@ -1597,12 +1597,17 @@ class MainFrame(ConfigActions, wx.Frame):
         """The help at a REFERENCES.md entry (a Run check's basis link in Preferences): the References section scrolled
         to that row. The help window is enabled first: a modal dialog open meanwhile (Preferences) disabled the
         windows that existed when it opened, and a disabled help could neither scroll nor be read."""
-        from .help import HelpWindow, ref_anchor
-        anchor = ref_anchor(key)
+        from .help import ref_anchor
+        self.show_help("references", ref_anchor(key))
+
+    def show_help(self, topic: str, anchor: str = ""):
+        """The help at a section, or at an anchor within it (a References entry, a paragraph such as bridges-sweep:
+        a form's info button); one window, enabled (see show_reference) and raised."""
+        from .help import HelpWindow
         if self._help and self._help.IsShown():
-            self._help.show("references", anchor)
+            self._help.show(topic, anchor)
         else:
-            self._help = HelpWindow(self, "references", anchor)
+            self._help = HelpWindow(self, topic, anchor)
         self._help.Enable(True)
         self._help.Raise()
 

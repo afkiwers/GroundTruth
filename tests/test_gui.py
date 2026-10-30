@@ -3538,3 +3538,34 @@ def test_several_power_stages_are_edited_at_once_and_only_what_changed_applies(a
     run_steps(app, f, [lambda: None])
     assert p.f_sw.GetValue() == "750kHz" and p.name.IsEnabled() and p.name.GetValue() == "a"
     assert p.spread_mode.GetString(0) != "*" and p.spread_mode.GetStringSelection() == "random"
+
+
+def test_the_sweep_heading_says_it_adds_to_the_operating_point_and_opens_its_help(app):
+    """The user, of the Bridges tab's sweep fields: "Add some info symbol ... maybe link to the help ... make sure
+    the user understands that this is done additionally to the single speed/phase current settings at the top".
+    Beside the Sweep heading a note says so, and its info button opens the help at the sweep paragraph, an anchor
+    help.html has and the help window takes."""
+    from groundtruth.ui.bridges_panel import FIELD_TIPS, SWEEP_HELP, BridgesPanel
+    from groundtruth.ui.help import HelpWindow, page
+
+    class Top(wx.Frame):
+        """A window that records where the help was asked to open."""
+        asked = []
+
+        def show_help(self, topic, anchor=""):
+            """Records the request."""
+            self.asked.append((topic, anchor))
+    top = Top(None)
+    p = BridgesPanel(top, lambda *a: None)
+    top.Show()
+    try:
+        wait_for(app, lambda: hasattr(p, "sweep_info"), timeout=5)
+        notes = [w.GetLabel() for w in p.sweep_info.GetParent().GetChildren() if isinstance(w, wx.StaticText)]
+        assert any("in addition to the operating point above" in n for n in notes)
+        assert "IN ADDITION" in FIELD_TIPS["Sweep currents (A)"] and "IN ADDITION" in FIELD_TIPS["Sweep speeds (rpm)"]
+        p.on_sweep_help()
+        assert top.asked == [("bridges", SWEEP_HELP)]
+        assert f'<a name="{SWEEP_HELP}"></a>' in page()
+        assert HelpWindow._target("bridges", SWEEP_HELP) == SWEEP_HELP
+    finally:
+        top.Destroy()

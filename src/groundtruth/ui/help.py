@@ -235,7 +235,9 @@ def ref_anchor(key: str) -> str:
     return "ref-" + re.sub(r"[^A-Za-z0-9]+", "-", key.strip()).strip("-")
 
 
-ANCHOR = re.compile(r"ref-[A-Za-z0-9-]+")       # the anchors HelpWindow.show takes besides the TOPICS
+# the anchors HelpWindow.show takes besides the TOPICS: a References entry (ref_anchor), or a paragraph within a
+# section, named <section>-<what> (bridges-sweep: a form's info button opens the help there)
+ANCHOR = re.compile(r"ref-[A-Za-z0-9-]+|[a-z]+-[a-z0-9-]+")
 
 
 def markdown_html(text: str, anchors: bool = False) -> str:
@@ -497,7 +499,8 @@ class HelpWindow(wx.Frame):
 
     @staticmethod
     def _target(topic: str, anchor: str = "") -> str:
-        """Where to go: a References entry's anchor (ref_anchor) when given, else the section (unknown: the top)."""
+        """Where to go: the anchor when given (a References entry, ref_anchor, or a paragraph such as
+        bridges-sweep), else the section (unknown: the top)."""
         if anchor and ANCHOR.fullmatch(anchor):
             return anchor
         return topic if topic in TOPICS else "top"
