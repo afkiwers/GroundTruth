@@ -72,6 +72,29 @@ def test_the_kicad_repository_lists_every_release_with_its_download(tmp_path):
     assert r["packages"]["update_timestamp"] == int(now.timestamp())
 
 
+def test_kicads_official_repository_gets_the_package_with_every_release(tmp_path):
+    """kicad-metadata: packages/<identifier>/metadata.json with the PCM schema named, the newest metadata and every
+    version with its download fields; a release under another identifier (before the rename) is left out, as it is
+    from packages.json; icon.png is the package's own icon."""
+    old = _package(tmp_path / "a-pcm.zip", "0.1.42000")
+    new = _package(tmp_path / "b-pcm.zip", "0.1.42600")
+    renamed = repo.entry(old, "https://x/old.zip")
+    renamed["package"]["identifier"] = "io.github.iwers.groundtruth"
+    entries = [repo.entry(old, "https://x/a.zip"), repo.entry(new, "https://x/b.zip"), renamed]
+    entries[0]["version"]["version"] = "0.1.42100"
+    files = repo.kicad_metadata(entries, new)
+    folder = "packages/io.github.afkiwers.groundtruth"
+    assert sorted(files) == [f"{folder}/icon.png", f"{folder}/metadata.json"]
+    assert files[f"{folder}/icon.png"] == b"\x89PNG icon"
+    meta = json.loads(files[f"{folder}/metadata.json"])
+    assert meta["$schema"] == "https://go.kicad.org/pcm/schemas/v1" and meta["identifier"] in folder
+    assert [v["version"] for v in meta["versions"]] == ["0.1.42600", "0.1.42100"]
+    for v in meta["versions"]:
+        assert {"download_url", "download_sha256", "download_size", "install_size"} <= set(v)
+    site = json.loads(repo.site(entries, new, "https://p/", datetime.now(timezone.utc))["packages.json"])
+    assert [v["version"] for v in site["packages"][0]["versions"]] == ["0.1.42600", "0.1.42100"]
+
+
 def test_a_private_key_is_found_in_files_folders_and_zips(tmp_path):
     """check-no-key: a PEM private key in a file, in a folder or inside a zip is found (the workflow then stops
     before uploading); the public half (hex) and ordinary files are not."""

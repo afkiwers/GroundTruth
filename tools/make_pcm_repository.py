@@ -7,6 +7,9 @@ create a new release it should create those automatically"; .github/workflows/re
     .venv/Scripts/python tools/make_pcm_repository.py site ENTRIES_DIR ICON_ZIP BASE_URL OUT_DIR
         # repository.json, packages.json and resources.zip in OUT_DIR from every release's entry: the newest
         # release's metadata, every release's version (so KiCad offers updates and older versions)
+    .venv/Scripts/python tools/make_pcm_repository.py kicad-metadata ENTRIES_DIR ICON_ZIP OUT_DIR
+        # OUT_DIR/packages/<identifier>/metadata.json and icon.png for KiCad's official repository
+        # (gitlab.com/kicad/addons/metadata, a merge request there): the same versions as packages.json
     .venv/Scripts/python tools/make_pcm_repository.py check-no-key FILE_OR_DIR ...
         # fails when a private key (PEM) is inside: the built packages and the repository are checked before upload
 
@@ -58,10 +61,10 @@ def _resource(url: str, data: bytes, now: datetime) -> dict:
             "update_time_utc": now.strftime("%Y-%m-%d %H:%M:%S")}
 
 
-def site(entries: list[dict], icon_zip: Path, base_url: str, now: datetime) -> dict[str, bytes]:
-    """The repository's files {name: bytes}: packages.json (the newest entry's metadata with every entry's version,
-    newest first, one per version number), resources.zip (<identifier>/icon.png, the package icon KiCad lists) and
-    repository.json pointing at both."""
+def merged(entries: list[dict]) -> dict:
+    """The package as a repository lists it: the newest entry's metadata with the version of every entry that has
+    its identifier (releases from before the identifier changed are a different package to KiCad), newest first,
+    one per version number."""
     if not entries:
         raise ValueError("no release entries")
     entries = sorted(entries, key=lambda e: version_key(e["version"]["version"]), reverse=True)
@@ -69,10 +72,31 @@ def site(entries: list[dict], icon_zip: Path, base_url: str, now: datetime) -> d
     seen, versions = set(), []
     for e in entries:
         v = e["version"]
-        if v["version"] not in seen:
+        if e["package"]["identifier"] == package["identifier"] and v["version"] not in seen:
             seen.add(v["version"])
             versions.append(v)
     package["versions"] = versions
+    return package
+
+
+def kicad_metadata(entries: list[dict], icon_zip: Path) -> dict[str, bytes]:
+    """The files of a merge request to KiCad's official metadata repository {path: bytes}:
+    packages/<identifier>/metadata.json (the package with every release's version and its download fields, the
+    PCM schema named so the repository's validation and editors check it) and packages/<identifier>/icon.png (the
+    package's 64 px icon)."""
+    package = {"$schema": "https://go.kicad.org/pcm/schemas/v1", **merged(entries)}
+    folder = f"packages/{package['identifier']}"
+    with zipfile.ZipFile(icon_zip) as src:
+        icon = src.read("resources/icon.png")
+    return {f"{folder}/metadata.json": (json.dumps(package, indent=2, ensure_ascii=False) + "\n").encode("utf-8"),
+            f"{folder}/icon.png": icon}
+
+
+def site(entries: list[dict], icon_zip: Path, base_url: str, now: datetime) -> dict[str, bytes]:
+    """The repository's files {name: bytes}: packages.json (merged: the newest entry's metadata with every
+    entry's version), resources.zip (<identifier>/icon.png, the package icon KiCad lists) and repository.json
+    pointing at both."""
+    package = merged(entries)
     packages = (json.dumps({"packages": [package]}, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     res = io.BytesIO()
     with zipfile.ZipFile(icon_zip) as src, zipfile.ZipFile(res, "w", zipfile.ZIP_DEFLATED) as z:
@@ -117,6 +141,10 @@ def main() -> int:
     s.add_argument("icon_zip", type=Path)
     s.add_argument("base_url")
     s.add_argument("out", type=Path)
+    k = sub.add_parser("kicad-metadata")
+    k.add_argument("entries", type=Path)
+    k.add_argument("icon_zip", type=Path)
+    k.add_argument("out", type=Path)
     c = sub.add_parser("check-no-key")
     c.add_argument("paths", type=Path, nargs="+")
     args = ap.parse_args()
@@ -131,6 +159,12 @@ def main() -> int:
             (args.out / name).write_bytes(data)
         print(f"{args.out}: {len(entries)} release(s), newest "
               f"{json.loads(files['packages.json'])['packages'][0]['versions'][0]['version']}")
+    elif args.cmd == "kicad-metadata":
+        entries = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(args.entries.glob("*.pcm.json"))]
+        for name, data in kicad_metadata(entries, args.icon_zip).items():
+            (args.out / name).parent.mkdir(parents=True, exist_ok=True)
+            (args.out / name).write_bytes(data)
+            print(args.out / name)
     else:
         found = [f for p in args.paths for f in key_inside(p)]
         if found:

@@ -106,6 +106,9 @@ jobs:
               --skip-existing || true      # releases from before this workflow have none
           done
           python tools/make_pcm_repository.py site entries dist/groundtruth-*-pcm.zip "$PAGES_URL" site
+          # the same versions as files for KiCad's official repository (a merge request to
+          # gitlab.com/kicad/addons/metadata): <PAGES_URL>/kicad-metadata/packages/<identifier>/
+          python tools/make_pcm_repository.py kicad-metadata entries dist/groundtruth-*-pcm.zip site/kicad-metadata
 
       - uses: actions/upload-pages-artifact@v3
         with:
