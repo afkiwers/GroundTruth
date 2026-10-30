@@ -982,7 +982,7 @@ def test_plugin_start_never_blocks_its_window(app, tmp_path, monkeypatch, kicad)
         for w in wx.GetTopLevelWindows():
             if w.GetTitle() not in titles:
                 titles.append(w.GetTitle())
-            if w.GetTitle() == "fake – GroundTruth" and not w.busy() and messages:
+            if w.GetTitle() == "fake – GroundTruth dev" and not w.busy() and messages:
                 w.Close()
     closer = Ticker(watch)
     gc.collect()        # the suite's leftovers (GBs by now) would make a full GC pass a stall the plugin never sees,
@@ -1005,9 +1005,9 @@ def test_plugin_start_never_blocks_its_window(app, tmp_path, monkeypatch, kicad)
     log = (tmp_path / "plugin.log").read_text(encoding="utf-8")
     if kicad == "is not running":
         assert code == 2 and "cannot reach KiCad" in messages[0] and "no connection to KiCad" in log
-        assert "fake – GroundTruth" not in titles
+        assert "fake – GroundTruth dev" not in titles
     else:
-        assert code == 0 and "fake – GroundTruth" in titles
+        assert code == 0 and "fake – GroundTruth dev" in titles
         assert "analysis modules imported" in log and "main window shown" in log
     assert not wx.GetTopLevelWindows()
 
@@ -1037,7 +1037,7 @@ def test_a_new_board_gets_its_power_stages_detected(app, tmp_path, monkeypatch):
     f = main_frame.MainFrame(main_frame.Session(file_path=str(path)))
     f.Show()
     try:
-        assert f.GetTitle() == "buck – GroundTruth"
+        assert f.GetTitle() == "buck – GroundTruth dev"
         ticks = run_steps(app, f, [lambda: f.converters.on_detect(None)])
         convs = f.settings.config.converters
         assert len(convs) == 1 and convs[0].source == "auto" and not convs[0].reviewed

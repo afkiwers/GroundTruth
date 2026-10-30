@@ -465,6 +465,7 @@ def test_a_factorisation_out_of_memory_is_retried_alone(solved, monkeypatch):
     ({"phase_shunts": "ABC"}, ["PHA_GND", "PHB_GND", "PHC_GND"]),
     ({"phase_shunts": "B"}, ["", "PHB_GND", ""]),                         # a bridge may mix both
     ({"phase_shunts": "ABC", "shunt_net": "PH{}_S"}, ["PHA_S", "PHB_S", "PHC_S"]),   # a net not named ground
+    ({"phase_shunts": "ABC", "kelvin": True}, ["PHA_GND", "PHB_GND", "PHC_GND"]),   # 4-terminal shunts
 ])
 def test_legs_with_a_shunt_each_to_ground_are_one_bridge(kw, returns):
     """The user, of a BLDC drive with a current-sense shunt per phase (three one-leg bridges were proposed): "It
@@ -477,6 +478,35 @@ def test_legs_with_a_shunt_each_to_ground_are_one_bridge(kw, returns):
     assert [leg.ground_return for leg in d.spec.legs] == returns
     assert [leg.shunt for leg in d.spec.legs] == [[f"R{51 + k}"] if r else [] for k, r in enumerate(returns)]
     assert d.confidence == "high" and d.spec.input_connector == ["J2.1", "J2.2"]
+
+
+def test_a_leg_on_its_own_return_net_passes_the_board_check():
+    """The user's Simulate after the bridge was detected as one: "Q46 (low side) needs pads on PH_C and BLDC_GND"
+    for every low side, since the board check took the bridge's ground for every leg. A leg's low side is checked on
+    its ground return when it has one; a return net or shunt not on the board is named."""
+    from dataclasses import replace
+    board = loads_board(bridge_board(phase_shunts="ABC", kelvin=True).text())
+    (d,) = detect_bridges(board, Config())
+    assert validate(Config(bridges=[d.spec]), board) == []
+    leg = replace(d.spec.legs[0], ground_return="NOPE", shunt=["R999"])
+    errors = validate(Config(bridges=[replace(d.spec, legs=[leg] + d.spec.legs[1:])]), board)
+    assert any("'NOPE' does not exist" in e for e in errors) and any("shunt 'R999' not found" in e for e in errors)
+
+
+def test_a_kelvin_shunt_joins_its_force_pads_only():
+    """The user's drive: each phase's shunt a 4-terminal resistor (200 µΩ; force pads on PHASE_GND and the drive's
+    ground, two small sense pads), rejected as "4 nets, not 2" (tools/dev/bridge_ground_check.py). A resistor's model
+    joins its two largest pads when they are clearly larger than the others and on two nets [A72]; equal pads tell
+    nothing (all pads, as before)."""
+    from groundtruth.components.models import ComponentModel, kelvin_force_pads, model_nets
+    board = loads_board(bridge_board(phase_shunts="ABC", kelvin=True).text())
+    r51 = board.footprint("R51")
+    assert model_nets(r51, ComponentModel("resistor", {"R": 2e-3})) == {"PHA_GND", "GND"}
+    assert [p.number for p in kelvin_force_pads(r51)] == ["1", "2"]
+    for p in r51.pads:                           # four equal pads: no telling force from sense
+        p.size = (0.6, 1.0)
+    assert kelvin_force_pads(r51) is None
+    assert model_nets(r51, ComponentModel("resistor", {"R": 2e-3})) == {"PHA_GND", "GND", "PHA_SP", "PHA_SN"}
 
 
 def test_a_resistor_above_the_shunt_threshold_does_not_join_the_legs():

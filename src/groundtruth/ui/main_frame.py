@@ -500,7 +500,9 @@ class MainFrame(ConfigActions, wx.Frame):
         """The window with its top bar and status bar; the tabs are built afterwards, one per event-loop step
         (_build_pages), and then the board is read as a job."""
         name = session.name
-        super().__init__(None, title=f"{name} – GroundTruth" if name else "GroundTruth", size=window_size())
+        from .. import short_version
+        app = f"GroundTruth {short_version()}"
+        super().__init__(None, title=f"{name} – {app}" if name else app, size=window_size())
         self._normal_size = tuple(self.GetSize())
         self._maximized = False
         self.Bind(wx.EVT_SIZE, self._track_size)

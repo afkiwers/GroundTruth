@@ -238,8 +238,31 @@ class ComponentModel:
                    [str(p) for p in linked if str(p) in MODEL_PARAMS[kind]], bias)
 
 
+KELVIN_FORCE_RATIO = 1.5    # a 4-terminal shunt's force pads are at least this much larger than its sense pads
+
+
+def kelvin_force_pads(fp) -> Optional[list]:
+    """The two force pads of a 4-terminal (Kelvin) resistor: a part with four or more connected pads on at least
+    three nets whose two largest pads are on two different nets and each at least KELVIN_FORCE_RATIO times the area
+    of every other pad (the sense pads are small) [A72]. None when the pads don't tell (equal sizes, two nets)."""
+    pads = [p for p in fp.pads if p.net]
+    if len(pads) < 4 or len({p.net for p in pads}) < 3:
+        return None
+    area = sorted(pads, key=lambda p: -(p.size[0] * p.size[1]))
+    a, b, rest = area[0], area[1], area[2:]
+    small = max(p.size[0] * p.size[1] for p in rest)
+    if a.net == b.net or min(a.size[0] * a.size[1], b.size[0] * b.size[1]) < KELVIN_FORCE_RATIO * small:
+        return None
+    return [p for p in fp.pads if p.net in (a.net, b.net)]
+
+
 def model_pads(fp, model: Optional[ComponentModel]) -> list:
-    """The pads a part's model joins: the two named in `pins` (by pad number or pin name), else all of them."""
+    """The pads a part's model joins: the two named in `pins` (by pad number or pin name), else a 4-terminal
+    resistor's force pads (kelvin_force_pads: its current never flows through its sense pads), else all of them."""
+    if model is not None and not model.pins and model.kind == "resistor":
+        force = kelvin_force_pads(fp)
+        if force is not None:
+            return force
     if model is None or not model.pins:
         return list(fp.pads)
     want = {p.upper() for p in model.pins}

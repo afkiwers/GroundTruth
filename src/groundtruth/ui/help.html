@@ -418,7 +418,7 @@ hot loop and switch node; the leg as stored, so after <b>Update selected</b> for
 ticked.</p>
 <p><b>Per-phase current sensing.</b> A leg's low side may sit straight on the ground, or on a net of its own that
 reaches the ground through a current-sense shunt (one per phase, e.g. <code>/Phase A/PHASE_GND</code>). Detection
-takes such a net as ground when the parts between it and a ground net pass current: 0 Ω links, ferrites,
+takes such a net as ground when the parts between it and a ground net pass current: 0 Ω links, ferrites, 4-terminal (Kelvin) shunts (through their two large force pads; the small sense pads carry no current),
 current-sense ICs and resistors up to 10 Ω, at most two in series (a larger resistor is a load, not a shunt). The legs
 are then one bridge on the common ground, each with its own net and shunt as its <b>Return</b> (the leg list's
 column; <b>Ground return</b> and <b>Shunt</b> in the Selected leg fields); legs with and without shunts mix. Simulate

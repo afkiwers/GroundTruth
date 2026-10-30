@@ -42,3 +42,12 @@ def build_version() -> str:
         return (Path(__file__).resolve().parents[1] / "version.txt").read_text(encoding="utf-8").strip()
     except OSError:
         return "development (source tree)" if __version__ == "dev" else f"GroundTruth {__version__}"
+
+
+def short_version() -> str:
+    """The installed build's version alone (0.1.43492, from build_version), "dev" in the source tree: the window's
+    title shows it (the user: "add the version number after GroundTruth")."""
+    text = build_version()
+    if text.startswith("GroundTruth "):
+        return text.split()[1]
+    return "dev" if text.startswith("development") else text.split()[0]
