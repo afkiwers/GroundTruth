@@ -511,3 +511,45 @@ def test_weak_current_beside_strong_is_never_left_without_arrows():
     below = np.where(g.node, np.where(ys > 5, 30.0, 0.01), 0.0)                         # A at 1/3000 of the peak
     assert not [a for a in arrow_field(g, below, below, np.zeros_like(below), spacing_mm=0.8, ref=30.0,
                                        floor=30.0 * 1e-3) if a[1] < 4.5]
+
+
+def test_the_return_current_s_arrows_have_their_own_colour(tmp_path):
+    """The user, of a map where the current and its return were both white: "its hard to destinguush when
+    everything is in the same colour". A signal route's return (the plane under it, off its own net) is drawn in the
+    return colour (the default cyan, or the Preferences' choice), its own trace's arrows white; a rule that finds
+    no return leaves every arrow white. The rule works without settings too (a map outside the plugin)."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.colors import to_hex
+    from matplotlib.figure import Figure
+    from matplotlib.quiver import Quiver
+    from boardgen import microstrip_board
+    from groundtruth.analysis.simulate import simulate
+    from groundtruth.report.plots import draw_heatmap
+    from groundtruth.results.vectors import RETURN_ARROW_COLOUR, return_rule
+    board, sc, _ = make(tmp_path, microstrip_board(), "ret", solve_points=1)
+    rr = simulate(board, sc.config).routes[0]
+
+    def colours(**kw):
+        """The arrows' colours on every map of the figure (a set of #rrggbb)."""
+        fig = Figure(figsize=(8, 5))
+        FigureCanvasAgg(fig)
+        draw_heatmap(fig, board, rr, **kw)
+        return {to_hex(c.get_facecolor()[0]) for ax in fig.axes for c in ax.collections if isinstance(c, Quiver)}
+    assert RETURN_ARROW_COLOUR in colours()                                      # the plane: return current
+    assert "#ff00ff" in colours(return_colour="#ff00ff", returns=return_rule(rr, sc.config, board))
+    assert colours(returns=lambda net: False) == {"#ffffff"}
+    rule = return_rule(rr, None, board)
+    assert rule("GND") and not rule(rr.net)
+    assert "return current's in their own colour" in " ".join(
+        (lambda f: (FigureCanvasAgg(f), draw_heatmap(f, board, rr), f._gt_note.get_text())[2])(
+            Figure(figsize=(8, 5))).split())
+
+
+def test_the_return_arrow_colour_preference_takes_only_a_colour():
+    """Preferences' Return current arrows: a #rrggbb colour as given (lower case), anything else the default."""
+    from groundtruth.results.vectors import RETURN_ARROW_COLOUR
+    from groundtruth.ui.prefs_dialog import defaults, return_colour
+    assert return_colour({"return_arrow_colour": "#FF8800"}) == "#ff8800"
+    for bad in ("red", "#ff88", "", None, 12):
+        assert return_colour({"return_arrow_colour": bad}) == RETURN_ARROW_COLOUR
+    assert defaults({})["return_arrow_colour"] == RETURN_ARROW_COLOUR

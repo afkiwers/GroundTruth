@@ -955,7 +955,11 @@ Preferences (<b>Vias shown</b>).</p>
   shows how much flows (they crowd where it concentrates, idle copper has none). Weak current is never left
   without them: wherever the log scale colours the copper (down to a thousandth of the peak) at least every tenth
   spot has an arrow, and every connected piece of copper carrying current at least one. For an AC current (a return, a
-  hot loop) they show the direction when the current is strongest.</li>
+  hot loop) they show the direction when the current is strongest. The current's own arrows are white, the return
+  current's <b>cyan</b> (another colour: <b>Return current arrows</b> in Preferences): on a power stage's, a DC
+  path's or a load's map the arrows on the ground nets (the stages' ground, the loads' return pins' nets, nets named
+  GND, VSS, 0V, ...RTN), on a signal path's every arrow off the signal's own copper, as <b>Draw arrows on board</b>
+  splits them onto two layers.</li>
 <li><b>Maps</b>: the current on each copper layer (a net's return current, a hot loop, a DC path's or a bridge's
   RMS current density), or the temperature. Arrows show which way the current flows, and their density how much.
   Green markers show the vias and parts that carry the current between layers, with their share.
@@ -1426,6 +1430,8 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   markers.</td></tr>
 <tr><td valign="top"><b>Terminal current</b></td><td>the maps with the current in the parts' terminal metal added to
   the copper's (parts with a Terminal Sheet Resistance); the figures stay the copper's.</td></tr>
+<tr><td valign="top"><b>Return current arrows</b></td><td>the colour of the return current's arrows on the maps
+  (cyan by default; the current's own stay white), in the plugin and in the exported report.</td></tr>
 <tr><td valign="top"><b>Contour line</b>, <b>Index contour line</b></td><td>the line widths of <b>Draw contours on
   board</b>: the ordinary contour lines (0.04 mm by default) and the thicker index lines, every decade or every
   fifth isotherm (0.1 mm by default).</td></tr>
