@@ -448,6 +448,8 @@ class ResultsPanel(wx.Panel):
         p = defaults(theme.prefs())         # the Preferences dialog sets them (set_display)
         self.vias_limit = p["max_vias"]     # via markers on or off, outlines and names: self.marks
         self.terminals = p["terminals"]                 # maps with the parts' terminal current (results/terminals.py)
+        self.return_colour = p["return_arrow_colour"]   # the return current's arrows on the maps
+        self.config = None                              # the settings: which nets carry the return (set_rules)
         b = theme.Button(self, "Draw contours on board")
         b.Bind(wx.EVT_BUTTON, lambda e: on_draw_contours(self.current(), self.selected_layer()))
         top.Add(b, 0, wx.RIGHT | wx.BOTTOM, 4)
@@ -565,9 +567,10 @@ class ResultsPanel(wx.Panel):
         self.page.Bind(wx.EVT_SIZE, self._page_resized)
         self.Bind(wx.EVT_SIZE, lambda e: (e.Skip(), self.Refresh()))   # drawn buttons repaint after a re-wrap
 
-    def set_rules(self, rules):
-        """The settings' rules, which judge the tiles' figures (ok / warn / error)."""
-        self.rules = rules
+    def set_rules(self, rules, config=None):
+        """The settings' rules, which judge the tiles' figures (ok / warn / error), and the settings themselves (the
+        maps' return current: its stages' and loads' ground nets, results.vectors.return_rule)."""
+        self.rules, self.config = rules, config
 
     def on_copy_tf(self, _=None):
         """Copy H(s): the shown Bode view's transfer functions to the clipboard (plots.transfer_clipboard)."""
@@ -961,6 +964,8 @@ class ResultsPanel(wx.Panel):
         scale = "log" if self.log_scale.GetValue() else "linear"
         view, max_vias, outlines, names = self._view, self.max_vias(), self.outlines, self.names
         terminals, marks = self.terminals, self.marks_shown()
+        from ..results.vectors import return_rule
+        returns, return_colour = return_rule(rr, self.config, board), self.return_colour
         if not maps_only:
             self._show_tiles(rr)
             text = self._summary(rr)
@@ -999,7 +1004,8 @@ class ResultsPanel(wx.Panel):
             # here in the render thread); the tiles and issues keep the copper's own
             from ..results.terminals import with_terminals
             draw_heatmap(fig, board, with_terminals(rr) if terminals else rr, issues, layer=layer, vectors=vectors,
-                         scale=scale, view=view, max_vias=max_vias, outlines=outlines, names=names, marks=marks)
+                         scale=scale, view=view, max_vias=max_vias, outlines=outlines, names=names, marks=marks,
+                         returns=returns, return_colour=return_colour)
         views = [(self.canvas, heat)]
         if not maps_only:
             if self.canvas3.IsShown() and rr.kind == "bode":     # a Bode view's step responses
@@ -1137,10 +1143,11 @@ class ResultsPanel(wx.Panel):
         return self.vias_limit if self.via_markers else 0
 
     def set_display(self, via_markers: bool, vias_limit: Optional[int], outlines: bool, names: bool = False,
-                    terminals: bool = False):
+                    terminals: bool = False, return_colour: Optional[str] = None):
         """The Preferences' heatmap settings; the view shown is drawn again with them."""
         self.marks.update(vias=bool(via_markers), outlines=bool(outlines), names=bool(names))
         self.vias_limit, self.terminals = vias_limit, terminals
+        self.return_colour = return_colour or self.return_colour
         self._sync_marks_box()
         if self.current() is not None:
             self.redraw()

@@ -13,6 +13,8 @@ N_ACROSS = 45          # candidate spots across the wider side of a map (plots)
 ARROW = 0.7            # arrow length, fraction of the spot spacing
 JITTER = 0.25          # random offset of a spot, fraction of the spacing (breaks up the lattice look)
 REF_PERCENTILE = 95    # full fill at this percentile of the copper's density (not at one hot pad corner)
+RETURN_ARROW_COLOUR = "#00e5ff"   # the heatmaps' return-current arrows unless the Preferences choose another (cyan:
+                                  # it stands out on the inferno scale and is not the via markers' green)
 FLOOR = 1e-3           # no arrows below this fraction of the reference: the heatmap's log floor (three decades)
 MIN_FILL = 0.1         # a spot above the floor gets at least this fill: weak current shows sparse arrows, never none
 
@@ -174,12 +176,13 @@ def return_rule(rr, config, board=None):
     """Which nets carry a view's return current, as a test of a net name (split_return): a signal route's return is
     every net but its own (RouteResult.signal_nets: the plane under it, whatever its net); a power stage's, a DC
     path's and a DC load's is the ground: the stages' `ground` nets, the loads' return pins' nets (from `board`) and
-    every net named like a ground (analysis.safety.is_ground: GND, VSS, 0V, ...RTN)."""
+    every net named like a ground (analysis.safety.is_ground: GND, VSS, 0V, ...RTN). Without a `config` (a map drawn
+    outside the plugin): the names alone."""
     from ..analysis.safety import is_ground
     if getattr(rr, "kind", "") == "route":
         own = set(getattr(rr, "signal_nets", None) or [rr.net])
         return lambda net: bool(net) and net not in own
-    grounds = {s.ground for s in config.stages() if s.ground}
+    grounds = {s.ground for s in config.stages() if s.ground} if config is not None else set()
     for spec in getattr(config, "dc_loads", None) or []:
         for pin in [spec.source_return, *(ld.ret for ld in spec.loads)]:
             pad = board.find_pin(pin) if board is not None and pin else None

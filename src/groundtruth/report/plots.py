@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import io
 import math
-from typing import Collection, Optional
+from typing import Callable, Collection, Optional
 
 import numpy as np
 from matplotlib import patheffects
@@ -19,6 +19,7 @@ from matplotlib.transforms import ScaledTranslation, blended_transform_factory
 from ..analysis.simulate import RouteResult
 from ..core.board import Board
 from ..core.issues import Issue
+from ..results.vectors import RETURN_ARROW_COLOUR      # the return current's arrows (default)
 
 LAYER_COLOURS = ["#c83434", "#c8a034", "#34a0c8", "#8434c8", "#34c87a", "#c834a0", "#7a7a7a", "#3448c8"]
 SEV_COLOURS = {"error": "#d62728", "warning": "#ff9f1c", "info": "#1f77b4"}
@@ -406,12 +407,15 @@ def heatmap_layers(rr: RouteResult, layer: Optional[str] = None, max_layers: int
 
 
 def _arrows(ax, rr, lname: str, n_across: int, ref: float, view: Optional[tuple] = None,
-            floor: Optional[float] = None) -> int:
+            floor: Optional[float] = None, returns: Optional[Callable[[str], bool]] = None,
+            return_colour: str = RETURN_ARROW_COLOUR) -> int:
     """Current-direction arrows on one heatmap panel (none when the result has no vector field). With a `view`
     (x0, x1, y0, y1, a zoomed-in part of the map) they are laid out over that part only, n_across over its
-    width: zooming in shows the flow in more detail, not the same arrows larger."""
+    width: zooming in shows the flow in more detail, not the same arrows larger. `returns`: which nets carry the
+    return current (results.vectors.return_rule); those arrows are drawn in `return_colour`, the rest white (the
+    user: "its hard to destinguush when everything is in the same colour")."""
     from types import SimpleNamespace
-    from ..results.vectors import arrow_field
+    from ..results.vectors import arrow_field, split_return
     vec = (getattr(rr, "sheet_vectors", None) or {}).get(lname)
     if vec is None:
         return 0
@@ -430,14 +434,19 @@ def _arrows(ax, rr, lname: str, n_across: int, ref: float, view: Optional[tuple]
     arrows = arrow_field(g, K, Kx, Ky, n_across=n_across, ref=ref, floor=floor)
     if not arrows:
         return 0
-    x, y, dx, dy = (np.array(c) for c in zip(*arrows))
+    # the return current's arrows apart, by the net of the copper at each arrow's foot (on the whole layer's grid:
+    # a zoomed view's crop has no net labels), as Draw arrows on board puts them on a layer of their own
+    ahead, back = split_return(arrows, rr.layer_grids[lname], returns) if returns is not None else (arrows, [])
     # all arrows are equally long: the shaft is a sixth of that (quiver's width is a fraction of the axes width),
     # the head about half of the arrow
-    length = float(np.hypot(dx[0], dy[0]))
+    length = float(np.hypot(arrows[0][2], arrows[0][3]))
     x0, x1 = (view[0], view[1]) if view is not None else rr.layer_grids[lname].extent[:2]
-    ax.quiver(x, y, dx, dy, angles="xy", scale_units="xy", scale=1, color="white", edgecolor="black",
-              linewidth=0.25, width=length / 6 / max(abs(x1 - x0), 1e-9), headwidth=3, headlength=3,
-              headaxislength=2.7, zorder=3)
+    for group, colour in ((ahead, "white"), (back, return_colour)):
+        if group:
+            x, y, dx, dy = (np.array(c) for c in zip(*group))
+            ax.quiver(x, y, dx, dy, angles="xy", scale_units="xy", scale=1, color=colour, edgecolor="black",
+                      linewidth=0.25, width=length / 6 / max(abs(x1 - x0), 1e-9), headwidth=3, headlength=3,
+                      headaxislength=2.7, zorder=3)
     return len(arrows)
 
 
@@ -614,7 +623,7 @@ def _heatmap_layout(rr, layers: list[str], w_in: float, h_in: float, vectors: bo
         parts.append("red / orange ○ issue")
     note = ", ".join(parts)
     if vectors and getattr(rr, "sheet_vectors", None):
-        note += "; arrows: current direction, more arrows = more current"
+        note += "; arrows: current direction (white; the return current's in their own colour), more arrows = more current"
     if scale == "linear":
         note += "; linear colour scale"
     if getattr(rr, "terminals_shown", False):       # the Preferences' Terminal current (results/terminals.py)
@@ -697,7 +706,8 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
                  layer: Optional[str] = None, vmin_frac: float = 1e-3, vectors: bool = True,
                  scale: str = "log", view: Optional[tuple] = None, max_vias: Optional[int] = None,
                  outlines: bool = False, names: bool = False, labels: bool = True,
-                 marks: Optional[Collection[str]] = None) -> None:
+                 marks: Optional[Collection[str]] = None, returns: Optional[Callable[[str], bool]] = None,
+                 return_colour: str = RETURN_ARROW_COLOUR) -> None:
     """Return-current density on one plane layer, or side by side on the layers that carry it. With `vectors`,
     arrows show which way the current flows (at its dominant phase) and where it concentrates.
 
@@ -718,6 +728,10 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
 
     marks: which of MARKS the maps show (None: all of them; the Results tab's Markers menu). The arrows are
     `vectors`; outlines and names need both their argument and their mark.
+
+    returns: which nets carry the return current (results.vectors.return_rule with the settings; None: the rule
+    without them, ground names and a signal path's other nets); its arrows are drawn in return_colour (the
+    Preferences' Return current arrows), the rest white.
 
     A motor bridge's view (kind "bridge") has no map: its drive's currents are drawn instead (draw_bridge)."""
     if rr.kind == "bridge":
@@ -777,7 +791,11 @@ def draw_heatmap(fig: Figure, board: Board, rr: RouteResult, issues: Optional[li
                   alpha=0.35, interpolation="nearest")
         if vectors:
             # arrows wherever the log scale colours the copper: down to its floor, peak / 1000
-            _arrows(ax, rr, lname, 45 if len(layers) == 1 else 30, ref, view, floor=peak * vmin_frac)
+            if returns is None:
+                from ..results.vectors import return_rule
+                returns = return_rule(rr, None, board)
+            _arrows(ax, rr, lname, 45 if len(layers) == 1 else 30, ref, view, floor=peak * vmin_frac,
+                    returns=returns, return_colour=return_colour)
         if "route" in on:
             _route(ax, board, rr)
         if outlines or names:

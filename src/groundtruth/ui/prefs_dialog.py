@@ -117,6 +117,15 @@ def resolution_label(factor: int, cell_mm: Optional[float] = None) -> str:
 ARROW_MIN_MM, ARROW_MAX_MM = 0.01, 0.3      # line widths of the arrows drawn on the board (the user's defaults)
 
 
+def return_colour(prefs: dict) -> str:
+    """The heatmaps' return-current arrow colour: the preference when it is a #rrggbb colour, else the default
+    (results.vectors.RETURN_ARROW_COLOUR)."""
+    import re
+    from ..results.vectors import RETURN_ARROW_COLOUR
+    v = str(prefs.get("return_arrow_colour") or "")
+    return v.lower() if re.fullmatch(r"#[0-9a-fA-F]{6}", v) else RETURN_ARROW_COLOUR
+
+
 def _arrow_range(prefs: dict) -> dict:
     """The board arrows' thinnest and thickest line (mm), each from 0.001 to 2 mm (else its default), the thickest
     at least the thinnest."""
@@ -197,6 +206,7 @@ def defaults(prefs: dict) -> dict:
             # the references came with the outlines before they had a switch of their own
             "names": bool(prefs.get("names", prefs.get("outlines", False))),
             "terminals": bool(prefs.get("terminals", False)),
+            "return_arrow_colour": return_colour(prefs),
             "author": str(prefs.get("author", "") or ""),
             "company": str(prefs.get("company", "") or ""),
             "history": bool(prefs.get("history", True)),
@@ -603,6 +613,10 @@ class PreferencesDialog(wx.Dialog):
             "current in its own metal; the maps show the copper only, which reads low under it with a sharp edge. "
             "Ticked, they show what flows there, copper and terminal together, in the copper's units. The figures, "
             "issues and Thermal stay the copper's.")
+        self.return_colour = wx.ColourPickerCtrl(self, colour=wx.Colour(p["return_arrow_colour"]))
+        row(maps, "Return current arrows", self.return_colour,
+            "the colour of the arrows on the return current's copper (the ground of a power stage, a DC path or a "
+            "load; the planes under a signal path); the current itself stays white. Also the report's maps")
 
         board = group("Drawing on the board", "right")
         why = ("Draw arrows on board: each arrow's line width follows the current density there, on the heatmap's "
@@ -778,6 +792,8 @@ class PreferencesDialog(wx.Dialog):
                 "outlines": self.outlines.GetValue(),
                 "names": self.names.GetValue(),
                 "terminals": self.terminals.GetValue(),
+                "return_arrow_colour": return_colour(
+                    {"return_arrow_colour": self.return_colour.GetColour().GetAsString(wx.C2S_HTML_SYNTAX)}),
                 "compute": "server" if self.compute.GetSelection() == 1 else "local",
                 "server": self.server.GetValue().strip(),
                 "server_key": self.server_key.GetValue().strip(),

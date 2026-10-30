@@ -928,7 +928,7 @@ class MainFrame(ConfigActions, wx.Frame):
         theme.save_prefs(**values)
         self._show_server_tab()
         self.results_panel.set_display(values["via_markers"], values["max_vias"], values["outlines"], values["names"],
-                                       values["terminals"])
+                                       values["terminals"], values["return_arrow_colour"])
         note = (f"; the {values['theme']} theme applies the next time GroundTruth opens"
                 if values["theme"] != old else "")
         self.SetStatusText(f"preferences saved: resolution {values['resolution']}×, threads {values['threads']}, "
@@ -1453,6 +1453,7 @@ class MainFrame(ConfigActions, wx.Frame):
             solver=self._solver, config=cfg, max_vias=self.results_panel.max_vias(),
             outlines=self.results_panel.outlines, names=self.results_panel.names, dc_combined=combined,
             marks=self.results_panel.marks_shown(),     # the report's maps show the markers the tab shows
+            return_colour=self.results_panel.return_colour,     # and the return current's arrows in its colour
             # views sharpened with "Sharper map": the report draws their finer maps (the user: "export the highest
             # resolution images available")
             sharper=[v for v in views if getattr(v, "sharper", None)],
@@ -1841,7 +1842,8 @@ class MainFrame(ConfigActions, wx.Frame):
                            + (" — with what-if edits" if what_if else "") + solver_note(solver) + self._kept(kept))
         if routes:
             self.notebook.SetSelection(self.notebook.FindPage(self.results_panel))
-            self.results_panel.set_rules(self.settings.config.rules if self.settings else None)
+            self.results_panel.set_rules(self.settings.config.rules if self.settings else None,
+                                         self.settings.config if self.settings else None)
             self.results_panel.show(board, routes, issues)
             self._note_cells(routes)
             self.fixes.show_design([r for r in routes if r.kind == "converter" and not getattr(r, "bridge", None)
@@ -2123,7 +2125,7 @@ class MainFrame(ConfigActions, wx.Frame):
         """Put thermal views in the Results list (the views `keep` says to keep, then the new ones) and show the
         first new one."""
         self.routes = [r for r in self.routes if keep(r)] + new
-        self.results_panel.set_rules(cfg.rules)
+        self.results_panel.set_rules(cfg.rules, cfg)
         self.results_panel.show(board, self.routes, self.issues)
         self.results_panel.choice.SetSelection(len(self.routes) - len(new))
         self.results_panel._route_changed()
@@ -2208,7 +2210,7 @@ class MainFrame(ConfigActions, wx.Frame):
                 return
             swept = {v.owner for v in views}
             self.routes = [r for r in self.routes if not (r.kind == "bode" and r.net in swept)] + views
-            self.results_panel.set_rules(cfg.rules)
+            self.results_panel.set_rules(cfg.rules, cfg)
             self.results_panel.show(board, self.routes, self.issues)
             self.results_panel.choice.SetSelection(len(self.routes) - len(views))
             self.results_panel._route_changed()
@@ -2476,7 +2478,8 @@ class MainFrame(ConfigActions, wx.Frame):
             self._views_from = (board, self._sim_config())
             self._views_src = src
             self.results_panel.set_stale("")
-            self.results_panel.set_rules(self.settings.config.rules if self.settings else None)
+            self.results_panel.set_rules(self.settings.config.rules if self.settings else None,
+                                         self.settings.config if self.settings else None)
             self.results_panel.show(board, self.routes, self.issues)
         self.SetStatusText(f"{len(res.suggestions)} suggestion(s), {len(res.selected)} selected"
                            + solver_note(res.solver))
