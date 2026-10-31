@@ -14,7 +14,10 @@ Click an issue in the **Issues** tab and KiCad shows the copper it is about: the
 | Layer change without a stitch or decap | The signal via. The nearest stitching via or bridging capacitor is in the zoom when it is close, and only selected when it is far. |
 | Missing route | Both pins and the copper already on the net. |
 | Simulation issues | The whole route and its pins. For a detour, also the via or part carrying most of the return. For a split plane, both return pins. |
-| Power stages | The switches, the capacitors closing the hot loop and the switch-node copper (only the switch node is highlighted, never the rail or ground). For conducted emission, the input connector instead of the capacitors and switch node. For a current-density hotspot, the copper at the hotspot. |
+| Power stages | The switches, the capacitors closing the hot loop and the switch-node copper (only the switch node is highlighted, never the rail or ground). For conducted emission, the input connector instead of the capacitors and switch node. For a current-density hotspot, the copper at the hotspot. An interleaved group (named after its controller): every phase's switches and capacitors. |
+| DC paths (also the combined view *all power stages*) | A current-density hotspot: the copper at that spot. An overloaded via: that via. |
+| Parts (capacitor voltage, ESD, temperature, ...) | The parts' footprints (an ESD issue: also the bare pins). |
+| Voltage spacing | The two nets' copper at the gap. |
 
 Only the issue's own signal net (for power stages, the switch node) is highlighted. Stitching vias, return pins and planes are selected without lighting up their ground.
 
@@ -22,6 +25,7 @@ Only the issue's own signal net (for power stages, the switch node) is highlight
 - The status bar says what was shown, or that the copper is no longer on the board (re-run the checks after editing).
 - **Zoom to it** and **Highlight its net** turn those steps off.
 - **Show in KiCad**, a double-click or Enter shows the selected issue again after you moved the view in KiCad.
+- **Show checks** beside the list hides the checks you untick (not waived; Draw markers leaves them out too); a column header click sorts the list (again: the other way). The issues keep their numbers, so a row still matches its marker. Both are kept on this computer.
 
 **What gets restored.**
 - A net highlight you set yourself in KiCad stays until an issue brings its own. A highlight GroundTruth set is cleared by the next issue that has none, by `~` in KiCad, and when the GroundTruth window closes.

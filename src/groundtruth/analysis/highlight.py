@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Iterable, Optional, Sequence
 
 import numpy as np
@@ -96,10 +96,14 @@ def issue_highlight(issue: Issue, board: Board, config: Config, routes: Sequence
         h = _layer_change(issue, board, config)
     elif issue.check == "route_missing":
         h = _missing_route(issue, board, config)
+    elif _SPOT.search(issue.key or ""):         # a DC path's density hotspot or overloaded via: the copper there
+        h = _spot(issue, board)
     elif any(b.name == issue.net for b in config.bridges):      # a motor bridge's issue: all its legs
         return stages_highlight([issue.net], board, config, routes)
     elif any(c.name == issue.net for c in config.stages()):
         h = _power_stage(issue, board, config, routes)
+    elif issue.net and any(c.interleave == issue.net for c in config.stages()):
+        h = _interleaved(issue, board, config, routes)
     elif issue.check in ROUTE_CHECKS:
         h = _route_issue(issue, board, config, routes)
     else:
@@ -476,11 +480,6 @@ def _power_stage(issue: Issue, board: Board, config: Config, routes: Sequence) -
     res = next((r for r in routes if r.kind == "converter" and r.net == spec.name
                 and not getattr(r, "view_of", None)), None)
     caps = [c["name"] for c in (res.caps if res is not None else []) if not c.get("lisn")][:2]
-    if ":dc:" in issue.key:              # current density: the copper at the hotspot
-        hot = _copper_at(board, issue.layer, issue.location)
-        return Highlight(focus=hot["small"] or hot["zones"], context=hot["zones"] if hot["small"] else [],
-                         text=f"the copper at the current-density hotspot of {spec.name} "
-                              f"({issue.key.split(':dc:', 1)[1]}) on {issue.layer}", layer=issue.layer)
     if issue.key.endswith(":conducted"):
         conn = {p.split(".")[0] for p in spec.input_connector}
         focus += [board.footprint(r).uuid for r in sorted(conn) if board.footprint(r) is not None]
@@ -499,16 +498,53 @@ def _power_stage(issue: Issue, board: Board, config: Config, routes: Sequence) -
     return Highlight(focus=focus, nets=bool(spec.switch_node), text=text)
 
 
+_SPOT = re.compile(r":(dc|via):")     # a DC path's issue at one spot (power.py, dcload.py: key …:dc:<path>, …:via:)
+
+
+def _spot(issue: Issue, board: Board) -> Highlight:
+    """A DC path's issue at one spot, of any stage, DC load or bridge, also the combined view "all power stages"
+    (whose name is no stage's: the user, "clearance_voltage, cap_voltage conducted_emissions and others seem not
+    zoom in?"; tools/dev/issue_zoom_check.py found these and the interleaved groups' issues with nothing to zoom
+    to). A current-density hotspot: the copper there on its layer (_copper_at). An overloaded via: the via at the
+    issue's location (its x, y are the via's), else the nearest one within a millimetre."""
+    if ":via:" in issue.key:
+        near = sorted((math.dist(v.position, issue.location), v.uuid) for v in board.vias)
+        hit = [u for d, u in near[:1] if d <= 1.0]
+        return Highlight(focus=hit, text="the via at " + f"{issue.location[0]:.2f}, {issue.location[1]:.2f}"
+                         if hit else "no via at the issue's spot (Reload board?)")
+    hot = _copper_at(board, issue.layer, issue.location)
+    return Highlight(focus=hot["small"] or hot["zones"], context=hot["zones"] if hot["small"] else [],
+                     layer=issue.layer, text=f"the copper at the current-density hotspot on {issue.layer}")
+
+
+def _interleaved(issue: Issue, board: Board, config: Config, routes: Sequence) -> Highlight:
+    """An interleaved group's issue (analysis/interleave.py: the phases of one controller added as phasors; the
+    issue's net is the group's name, e.g. the controller U303): every phase's switches and hot-loop capacitors,
+    as each stage's own issue shows them (_power_stage), and for conducted emission the input connector."""
+    members = [c.name for c in config.stages() if c.interleave == issue.net]
+    focus, context, nets = [], [], False
+    for name in members:
+        h = _power_stage(replace(issue, net=name), board, config, routes)
+        focus += h.focus
+        context += h.context
+        nets = nets or h.nets
+    return Highlight(focus=list(dict.fromkeys(focus)), context=context, nets=nets,
+                     text=f"interleaved group {issue.net}: {', '.join(members)}")
+
+
 # ------------------------------------------------------------------------------------------------ helpers
 def _lit_nets(issue: Issue, board: Board, config: Config) -> set[str]:
     """The nets an issue is about: a signal route's nets, a power stage's switch node, or the nets of the copper at
-    a current-density hotspot."""
-    spec = next((c for c in config.stages() if c.name == issue.net), None)
-    if spec is None:
-        return _route_nets(board, config, issue.net)
-    if ":dc:" in issue.key:
+    a current-density hotspot or an overloaded via, an interleaved group's switch nodes."""
+    if ":via:" in (issue.key or ""):
+        near = min(board.vias, key=lambda v: math.dist(v.position, issue.location), default=None)
+        return {near.net} if near is not None and math.dist(near.position, issue.location) <= 1.0 else set()
+    if ":dc:" in (issue.key or ""):
         return {n for n in (_net_at(board, issue.layer, issue.location),) if n}
-    return {spec.switch_node} if spec.switch_node else set()
+    specs = [c for c in config.stages() if c.name == issue.net or (issue.net and c.interleave == issue.net)]
+    if not specs:
+        return _route_nets(board, config, issue.net)
+    return {c.switch_node for c in specs if c.switch_node}
 
 
 def _net_at(board: Board, layer: str, at) -> str:

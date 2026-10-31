@@ -121,6 +121,33 @@ def test_conducted_emission_shows_the_input_connector_without_a_net_highlight(bu
     assert board.footprint("J1").uuid in h.focus and not h.nets   # footprints only: KiCad would take the mouse's net
 
 
+def test_an_interleaved_group_and_the_combined_dc_view_have_copper_to_zoom_to(buck):
+    """Issues named after no stage (tools/dev/issue_zoom_check.py found them selecting nothing, so KiCad did not
+    zoom): an interleaved group's (the controller's name: its phases' switches and capacitors, the input connector
+    for conducted emission), and the combined DC view's ("all power stages": the via at an overloaded via's spot,
+    the copper at a density hotspot)."""
+    from dataclasses import replace
+    board, config, spec, res = buck
+    config.converters[0] = replace(spec, interleave="U9")
+    conducted = Issue("conducted_emission", "warning", "U9", "conducted", (18.0, 15.0),
+                      key="power:U9:interleave:conducted")
+    h = issue_highlight(conducted, board, config, [res])
+    assert {board.footprint(r).uuid for r in (*spec.parts, "J1")} <= set(h.focus) and "U9" in h.text
+    emi = issue_highlight(Issue("emi_margin", "warning", "U9", "emi", (18.0, 15.0), key="power:U9:interleave:emi"),
+                          board, config, [res])
+    assert board.footprint("C1").uuid in emi.focus and emi.nets      # its switch node lit
+    via = board.vias[0]
+    over = Issue("via_overload", "warning", "all power stages", "via", tuple(via.position),
+                 key="power:all power stages:via:currents together")
+    vh = issue_highlight(over, board, config, [res])
+    assert vh.focus == [via.uuid] and vh.area is not None
+    track = next(t for t in board.tracks if t.net == spec.switch_node)
+    hot = Issue("current_density", "warning", "all power stages", "hot", tuple(track.start), layer=track.layer,
+                key="power:all power stages:dc:currents together")
+    dh = issue_highlight(hot, board, config, [res])
+    assert dh.focus and dh.area is not None and dh.layer == track.layer
+
+
 def test_ids_that_are_not_on_the_board_are_dropped_and_planes_leave_the_zoom(tmp_path):
     board, sc, _ = make(tmp_path, microstrip_board())
     gnd = next(z for z in board.zones if z.net == "GND")

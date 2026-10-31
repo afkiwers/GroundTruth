@@ -3465,6 +3465,30 @@ def test_the_issues_tab_hides_the_checks_not_chosen_and_keeps_every_number(app, 
         assert again.hidden == {"clearance_voltage"}
         p.set_hidden(set())
         assert p.list.GetItemCount() == 4
+        # the filter on the tab itself: one tick per check with its count, a tick hides or shows it
+        assert [p.checks.GetString(k) for k in range(p.checks.GetCount())] == \
+            ["clearance_voltage (2)", "emi_margin (1)", "via_overload (1)"]
+        assert all(p.checks.IsChecked(k) for k in range(3))
+        p.checks.Check(0, False)
+        p.checks.ProcessEvent(wx.CommandEvent(wx.EVT_CHECKLISTBOX.typeId, p.checks.GetId()))
+        assert [k for k, _ in p.rows] == [2, 4] and p.hidden == {"clearance_voltage"}
+        p.set_hidden(set(p.check_names))                                        # None
+        assert p.list.GetItemCount() == 0 and not any(p.checks.IsChecked(k) for k in range(3))
+        p.set_hidden(set())                                                     # All
+        # a header click sorts, again the other way; the numbers stay the issues'
+        p.sort_by(1)                                                            # Severity: info before warning
+        assert [k for k, _ in p.rows] == [1, 2, 3, 4] and p.list.GetColumn(1).GetText() == "Severity ▲"
+        p.sort_by(1)                                                            # the warning first, ties in order
+        assert [k for k, _ in p.rows] == [4, 1, 2, 3] and p.list.GetItemText(0, 0) == "4"
+        p.sort_by(2)                                                            # Check, by name
+        assert [k for k, _ in p.rows] == [1, 3, 2, 4] and p.list.GetColumn(1).GetText() == "Severity"
+        assert theme.prefs()["issues_sort"] == [2, False]
+        assert IssuesPanel(f, lambda i: None, lambda: None, lambda i, r: None).sort_col == 2   # remembered
+        p.sort_by(4)
+        p.sort_by(4)                                                            # Location, descending
+        assert [k for k, _ in p.rows] == [4, 3, 2, 1]
+        p.sort_by(0)
+        assert [k for k, _ in p.rows] == [1, 2, 3, 4]
     finally:
         f.Destroy()
         wx.Yield()
