@@ -42,6 +42,8 @@ class FixesPanel(wx.Panel):
             b.Bind(wx.EVT_BUTTON, fn)
             btns.Add(b, 0, wx.RIGHT | wx.BOTTOM, 6)
             self.buttons.append(b)
+        for b in self.buttons[1:4]:             # Draw / Place / Add ticked: nothing ticked before a fix search
+            b.block("Please run Suggest fixes first")
         self.list = wx.ListCtrl(self, style=wx.LC_REPORT)
         self.list.EnableCheckBoxes()
         for i, (c, w) in enumerate([("#", 50), ("Kind", 50), ("Net", 150), ("Location", 110), ("Predicted", 210),
@@ -128,6 +130,8 @@ class FixesPanel(wx.Panel):
         """Show a Suggest result: one row per suggestion (ticked: chosen by the search), coloured by kind, and the
         verification of the selected set below."""
         self.result = result
+        for b in self.buttons[1:4]:
+            b.block("" if result.suggestions else "Suggest fixes found nothing to draw, place or add")
         self.list.DeleteAllItems()
         for k, sug in enumerate(result.suggestions):
             row = self.list.InsertItem(k, sug.id)

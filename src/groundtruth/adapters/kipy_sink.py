@@ -304,6 +304,24 @@ def draw_contours(board: Any, cmap, layer_name: str = "User.7", label: str = "",
     return len(cmap.lines), len(cmap.labels)
 
 
+@_when_ready
+def draw_hot_loop(board: Any, drawings: list, layer_name: str = "User.1") -> int:
+    """Power stages' hot loops (results.hotloop.HotLoopDrawing: lines and texts in mm) on the drawing layer, as
+    graphic segments and left-aligned text, in one group and one undo step, replacing the hot loops drawn before.
+    Returns the number of items drawn."""
+    layer = _drawing_layer(board, layer_name)
+    clear(board, f"{GROUP_PREFIX}-hotloop")
+    items = []
+    for d in drawings:
+        for pts, width, closed in d.lines:
+            pts = list(pts) + ([pts[0]] if closed else [])
+            items += [_segment(tuple(a), tuple(b), layer, width) for a, b in zip(pts[:-1], pts[1:])]
+        items += [_text((x, y), text, layer, size) for x, y, text, size in d.texts]
+    _commit_group(board, items, f"{GROUP_PREFIX}-hotloop",
+                  f"groundtruth: hot loop {', '.join(d.stage for d in drawings)}")
+    return len(items)
+
+
 HEAD_FRAC = 0.3          # arrow head length, fraction of the arrow
 HEAD_ANGLE = math.radians(25)
 

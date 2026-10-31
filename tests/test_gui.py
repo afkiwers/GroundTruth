@@ -1507,6 +1507,32 @@ def test_clicking_power_stages_shows_them_and_several_are_removed_at_once(app, t
         close_window(f)
 
 
+def test_draw_hot_loop_puts_the_stages_hot_loop_on_its_layer(app, tmp_path, monkeypatch):
+    """Results tab, "Draw hot loop on board" in KiCad, after a Simulate of a buck: blocked before it, then every
+    power stage's hot loop (results/hotloop.py) goes to kipy_sink.draw_hot_loop on drawing.hotloop_layer (User.1)
+    in a KiCad job, and the status line names the stage, its outline and its capacitors' share."""
+    from groundtruth.adapters import kipy_sink
+    from groundtruth.ui.results_panels import NEEDS_SIMULATE
+    live = LiveSlotBoard(app, tmp_path, monkeypatch, delay=0.0, gen=discrete_buck_board(), converters=True)
+    f = live.frame
+    drawn = []
+    monkeypatch.setattr(kipy_sink, "draw_hot_loop",
+                        lambda kb, drawings, layer, wait=None: drawn.append((drawings, layer)) or 7)
+    try:
+        b = f.results_panel.hotloop_button
+        assert b.blocked() == NEEDS_SIMULATE
+        run_steps(app, f, [lambda: f.run(True) and None])
+        assert not b.blocked(), b.blocked()
+        name = f.settings.config.converters[0].name
+        run_steps(app, f, [lambda: b.click()])
+        ((drawings, layer),) = drawn
+        assert layer == "User.1" and [d.stage for d in drawings] == [name]
+        assert drawings[0].lines and drawings[0].area_mm2 > 0
+        assert f"drew the hot loop of {name}: outline" in live.status() and "on User.1 (7 items)" in live.status()
+    finally:
+        close_window(f)
+
+
 def test_a_long_status_message_wraps_instead_of_being_cut_off(app, frame):
     """The status bar grows to show a long message (a refused net's reason) on up to three lines, the whole text
     in its tooltip, and shrinks back for a short one; the gauge keeps its place on the right."""
@@ -2282,17 +2308,69 @@ def test_a_supply_looking_net_picked_in_kicad_can_be_added_anyway(app, frame, mo
     assert any(n.name == "SIG" and not n.reviewed for n in f.settings.config.nets)
 
 
-def test_the_draw_buttons_before_any_simulate_say_so(app, frame):
-    """The Results tab's Draw contours / Draw arrows buttons are enabled once the board is read, before any
-    Simulate: with no view they used to fail on None (rr.kind before the None check)."""
+def test_the_actions_needing_a_run_are_blocked_until_there_is_one(app, frame):
+    """The user: "add a 'Draw hot loop' button which is disabled until the first simulation. when disabled, add a
+    hoverover text that says Please run the simulation first. The same behaviour yields for any other button/feature
+    that needs a sim run beforehand". Before any run: the Results tab's actions, Thermal, Export report, the Issues
+    tab's Draw markers and the Fixes tab's ticked actions are greyed out, a click does nothing, hovering says what to
+    run first; after a Simulate on a board without a power stage the Results actions work, Draw hot loop says why
+    not. (A click on Draw contours before a Simulate once failed on None.)"""
+    from groundtruth.ui.results_panels import NEEDS_SIMULATE
     f = frame
     run_steps(app, f, [])
-    assert f.results_panel.current() is None
-    for b in (f.results_panel.draw_button, f.results_panel.arrow_button):
+    r = f.results_panel
+    assert r.current() is None
+    views = (r.draw_button, r.arrow_button, r.window_button, r.view3d_button, r.sharper_button, r.capacity_button,
+             r.hotloop_button, f.t_thermal)
+    for b in views:
+        assert b.blocked() == NEEDS_SIMULATE and not b.usable() and b.GetToolTipText() == NEEDS_SIMULATE, b.GetLabel()
         f.SetStatusText("")
         b.click()
-        assert "run Simulate first" in f.status_text()
-        assert not f.busy()
+        assert f.status_text() == "" and not f.busy()
+    assert f.t_export.blocked() == "Please run the checks or the simulation first"
+    assert f.issues_panel.draw_button.blocked().startswith("Please run")
+    assert [b.blocked() for b in f.fixes.buttons[1:4]] == ["Please run Suggest fixes first"] * 3
+    assert f.fixes.buttons[0].usable()                              # Suggest fixes simulates by itself
+    run_steps(app, f, [lambda: f.run(True) and None])
+    assert r.current() is not None
+    for b in views[:6] + (f.t_thermal, f.t_export):
+        assert not b.blocked(), b.GetLabel()
+    assert r.draw_button.GetToolTipText() != NEEDS_SIMULATE
+    assert "no power stage" in r.hotloop_button.blocked()           # a signal route only
+    assert r.hotloop_button.GetToolTipText() == r.hotloop_button.blocked()
+
+
+def test_every_button_waits_for_the_board_to_be_read(app, frame):
+    """The user: "while the plugin reads the board, also disable all the buttons with a hoverover text saying
+    please wait for the board to be loaded": from the window's opening until the board is read, and during every
+    Reload board, each button of the window and its tabs is held (greyed, deaf to clicks, the text on hover);
+    Preferences, Help and Cancel stay; the hold ends with the load, block()'s reasons showing again."""
+    from groundtruth.ui import theme
+    from groundtruth.ui.main_frame import LOADING
+    f = frame
+    assert f.t_sim.blocked() == LOADING and f.t_check.blocked() == LOADING and not f.t_sim.usable()
+    assert f.t_prefs.usable() and f.t_help.usable()
+    run_steps(app, f, [])
+    assert not f.t_sim.blocked() and f.t_sim.usable()
+    seen = {}
+
+    def during():
+        """Look at the buttons while the reload's job runs."""
+        def walk(w):
+            for c in w.GetChildren():
+                if isinstance(c, theme.Button):
+                    yield c
+                yield from walk(c)
+        seen["held"] = [b.GetLabel() for b in walk(f) if b.blocked() == LOADING]
+        seen["tip"] = f.t_sim.GetToolTipText()
+        seen["free"] = [b.blocked() for b in (f.t_prefs, f.t_help, f.t_cancel)]
+    run_steps(app, f, [lambda: (f.on_reload(), during()) and 0.0])
+    assert {"Simulate", "Run checks", "Reload board", "Draw contours on board", "Suggest fixes",
+            "Draw hot loop on board"} <= set(seen["held"])
+    assert seen["tip"] == LOADING and seen["free"] == ["", "", ""]
+    assert not f.t_sim.blocked()
+    from groundtruth.ui.results_panels import NEEDS_SIMULATE
+    assert f.results_panel.draw_button.blocked() == NEEDS_SIMULATE        # the run-first block is back
 
 
 def test_every_button_works_before_and_after_a_simulate(app, frame, monkeypatch):

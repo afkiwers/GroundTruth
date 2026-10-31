@@ -44,6 +44,7 @@ class IssuesPanel(wx.Panel):
         b.Bind(wx.EVT_BUTTON, lambda e: on_draw())
         btns.Add(b, 0, wx.RIGHT, 6)
         self.draw_button = b
+        b.block("Please run the checks or the simulation first")
         w = theme.Button(self, "Waive selected…")
         w.Bind(wx.EVT_BUTTON, lambda e: self._waive(on_waive))
         btns.Add(w, 0, wx.RIGHT, 6)
@@ -82,6 +83,7 @@ class IssuesPanel(wx.Panel):
     def show(self, issues):
         """List these issues (in the order the markers are numbered), the hidden checks left out."""
         self.issues = issues
+        self.draw_button.block("" if issues else "no issues to draw: Run checks or Simulate found none")
         self._fill()
 
     def _fill(self):
@@ -363,6 +365,12 @@ class HeatmapWindow(wx.Frame):
 CURVE_KINDS = ("pdn", "bode")       # views drawn as curves, not maps (no layers, arrows or board drawing)
 
 
+# the tooltip of an action that needs a Simulate first, greyed out until there is one (theme.Button.block; the user:
+# "disabled until the first simulation. when disabled, add a hoverover text that says Please run the simulation
+# first. The same behaviour yields for any other button/feature that needs a sim run beforehand")
+NEEDS_SIMULATE = "Please run the simulation first"
+
+
 class ResultsPanel(wx.Panel):
     """The Results tab: the views of the last run (a signal route, a power stage, its DC paths, a bridge, a thermal
     solve) chosen in the Route list, with the view's KPI tiles and a summary line, and below them on a scrolling
@@ -370,7 +378,7 @@ class ResultsPanel(wx.Panel):
     background thread (redraw) and swapped into the canvases when ready, so the window never waits for them."""
 
     def __init__(self, parent, on_draw_contours, on_draw_arrows=None, on_sharper=None, on_capacity=None,
-                 in_steps: bool = False, on_mark=None):
+                 in_steps: bool = False, on_mark=None, on_draw_hot_loop=None):
         """in_steps: the plots' page is built later, in two `build_steps` (MainFrame._build_pages runs them one per
         event-loop step: the three matplotlib canvases in one step blocked the window ~110 ms); otherwise here.
         on_mark(kind, what, text, layer): a marker on a map was clicked (plots.mark_ref_at; layer: the map's)."""
@@ -459,11 +467,22 @@ class ResultsPanel(wx.Panel):
         b2.Bind(wx.EVT_BUTTON, lambda e: on_draw_arrows and on_draw_arrows(self.current(), self.arrow_layers()))
         top.Add(b2, 0, wx.RIGHT | wx.BOTTOM, 4)
         self.arrow_button = b2
+        b7 = theme.Button(self, "Draw hot loop on board")
+        self.hotloop_tip = ("every power stage's hot loop of the last Simulate, on the hot-loop drawing layer "
+                            "(User.1; settings: drawing.hotloop_layer): an outline around the switches, vias and "
+                            "capacitors carrying at least 5 % of the loop current, one line per capacitor through "
+                            "the switches with its share, and the loop inductance; replaces the hot loops drawn "
+                            "before")
+        b7.SetToolTip(self.hotloop_tip)
+        b7.Bind(wx.EVT_BUTTON, lambda e: on_draw_hot_loop and on_draw_hot_loop(self.routes))
+        top.Add(b7, 0, wx.RIGHT | wx.BOTTOM, 4)
+        self.hotloop_button = b7
         b3 = theme.Button(self, "Open in window")
         b3.SetToolTip("the heatmap in a window of its own that you can enlarge or maximise; it follows the route, "
                       "layer and arrows chosen here. The toolbar zooms and pans (all layers together).")
         b3.Bind(wx.EVT_BUTTON, lambda e: self.open_window())
         top.Add(b3, 0, wx.RIGHT | wx.BOTTOM, 4)
+        self.window_button = b3
         b6 = theme.Button(self, "Open 3D view")
         b6.SetToolTip("the layers stacked in 3D in your web browser: the current maps, the signal, the vias and parts "
                       "carrying the current between layers, and with plane capacitance the board-wide model's "
@@ -496,6 +515,7 @@ class ResultsPanel(wx.Panel):
         self.stale = ""             # why the views shown are out of date (MainFrame._stale_reason), or ""
         self.metrics.SetName("muted")
         self._top = top
+        self._block_run_actions(None)              # no Simulate yet
         self.build_steps = [self._build_maps, self._build_plots]
         while self.build_steps and not in_steps:
             self.build_steps.pop(0)()
@@ -857,6 +877,7 @@ class ResultsPanel(wx.Panel):
         """Drawing on the board needs KiCad and no job running."""
         self.draw_button.Enable(on)
         self.arrow_button.Enable(on)
+        self.hotloop_button.Enable(on)
 
     def show(self, board, routes, issues):
         """A run's views (routes: every view the run made) and its issues (circled on the maps); the first view is
@@ -916,8 +937,24 @@ class ResultsPanel(wx.Panel):
             b.Enable(not curves)
         from ..report.view3d import has_view
         self.view3d_button.Enable(rr is not None and has_view(rr))
+        self._block_run_actions(rr)
         self._view = None                           # another view: its whole map
         self.redraw()
+
+    def _block_run_actions(self, rr):
+        """The actions on a view are blocked until a Simulate made one (rr None: NEEDS_SIMULATE on hover); Draw hot
+        loop also until a run has a power stage's hot loop to draw (results.hotloop.can_draw says why not)."""
+        why = NEEDS_SIMULATE if rr is None else ""
+        for b in (self.draw_button, self.arrow_button, self.window_button, self.view3d_button,
+                  self.sharper_button, self.capacity_button):
+            b.block(why)
+        from ..results.hotloop import can_draw
+        stages = [r for r in self.routes if r.kind == "converter" and not getattr(r, "view_of", None)]
+        reasons = [can_draw(r) for r in stages]
+        self.hotloop_button.block(NEEDS_SIMULATE if rr is None else
+                                  "" if "" in reasons else
+                                  reasons[0] if reasons else
+                                  "this run has no power stage (Converters tab): no hot loop to draw")
 
     def current(self):
         """The view chosen in the Route list (None before a run)."""

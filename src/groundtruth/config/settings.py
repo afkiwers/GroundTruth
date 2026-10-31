@@ -485,6 +485,7 @@ class DrawingSettings:
     suggest_layer: str = "User.8"
     current_layer: str = "User.7"
     return_layer: str = "User.6"
+    hotloop_layer: str = "User.1"      # power stages' hot loops (results/hotloop.py; the user asked for User.1)
 
 
 @dataclass
@@ -1317,7 +1318,8 @@ def config_from_data(data: Any) -> Config:
     cfg.report = ReportSettings(**{k: str(r.get(k) or "") for k in ("title", "company", "author", "document")})
     d = data.get("drawing") or {}
     cfg.drawing = DrawingSettings(str(d.get("issues_layer", "User.9")), str(d.get("suggest_layer", "User.8")),
-                                  str(d.get("current_layer", "User.7")), str(d.get("return_layer", "User.6")))
+                                  str(d.get("current_layer", "User.7")), str(d.get("return_layer", "User.6")),
+                                  str(d.get("hotloop_layer", "User.1")))
     cfg.safety = _safety_from_data(data.get("safety") or {}, errors)
     cfg.si = _si_from_data(data.get("si") or {}, errors)
 

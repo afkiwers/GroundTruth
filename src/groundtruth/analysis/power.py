@@ -4,8 +4,9 @@ emission.
 The switches commutate the load current within the edge time tr. The current that changes that fast flows around
 the hot loop, rail capacitors -> high-side switch -> switch node -> low-side switch -> ground -> rail capacitors,
 as a trapezoidal pulse train (amplitude I, duty D, edges tr). The inductor current is continuous and stays out of
-it. A buck's hot loop sits on its input, a boost's on its output [Erickson 2001]; its spectrum is the trapezoid's
-[Paul 2006]. Source keys in square brackets: docs/REFERENCES.md.
+it: only the hot loop carries a fully switched current, so it holds the most AC and EMI energy [Kueck 2018]. A
+buck's hot loop sits on its input, a boost's on its output [Erickson 2001; Kueck 2018]; its spectrum is the
+trapezoid's [Paul 2006]. Source keys in square brackets: docs/REFERENCES.md.
 
 Model (one per converter, over the converter's region of the board):
 * every net the loop touches is solved copper, pours and tracks alike: the rail, the switch node, ground and the

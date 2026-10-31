@@ -52,6 +52,7 @@ MAX_BOARD_ARROWS = 3000        # three graphic segments each; the spacing grows 
 MAX_BOARD_ARROWS_LAYERS = 6000  # several copper layers drawn together ("main / all layers"): shared among them
 FOLLOW_MS = 500                # the Parts tab looks at KiCad's selection this often (only while it shows)
 STATUS_LINES = 3               # a long status message wraps onto up to this many lines (the bar grows)
+LOADING = "Please wait for the board to be loaded"     # every button's tooltip while the board is read
 
 # errors whose message is enough for the user (others also get the traceback: they are bugs)
 EXPECTED_ERRORS = {"KiCadBusyError", "KiCadConnectionError", "ApiError", "ConnectionError", "BoardLoadError",
@@ -326,6 +327,13 @@ class Session:
         return draw_arrows(self.kb, arrows, layer, label, group=group, legend=legend)
 
     @_kicad_call
+    def draw_hot_loop(self, drawings, layer):
+        """Power stages' hot loops (results.hotloop.HotLoopDrawing) on `layer`, replacing the earlier ones; the
+        number of items drawn."""
+        from ..adapters.kipy_sink import draw_hot_loop
+        return draw_hot_loop(self.kb, drawings, layer)
+
+    @_kicad_call
     def draw_suggestions(self, suggestions, layer):
         """The suggested fixes (crosses and labels) on `layer`; the number of items drawn."""
         from ..adapters.kipy_sink import draw_suggestions
@@ -559,14 +567,17 @@ class MainFrame(ConfigActions, wx.Frame):
         self._config_buttons(button)            # Configuration ▾, Undo, Redo (ui/config_menu.py)
         self.t_clear = button("Clear GT markers", self.on_clear) if session.live else None
         bar.AddStretchSpacer()
-        button("Preferences…", lambda e: self.on_preferences(),
+        self.t_prefs = button("Preferences…", lambda e: self.on_preferences(),
                tip="your settings on this computer, for every board: Simulate's resolution, the heatmaps' via "
                    "markers and part outlines, the theme")
-        button("Help", lambda e: self.on_help(), tip="what each tab does and how the analyses fit together (F1)")
+        self.t_help = button("Help", lambda e: self.on_help(),
+                             tip="what each tab does and how the analyses fit together (F1)")
         frame_top = wx.BoxSizer(wx.VERTICAL)
         frame_top.Add(bar, 1, wx.EXPAND | wx.ALL, 8)
         top.SetSizer(frame_top)
         self.t_cancel.Enable(False)
+        self._block_run_actions()               # Thermal and Export report: nothing to work from yet
+        self._hold_for_load(True)               # until the board is read (the tabs are built first)
         self._help = None
         self._solver = None
         self._cell_mm = None        # the last Simulate's coarsest cell at 1× (Preferences shows each level's)
@@ -609,7 +620,8 @@ class MainFrame(ConfigActions, wx.Frame):
             # Results before Issues (the user: "I want it to be Results, Issues, Fixes")
             ("results_panel", "Results", lambda nb: ResultsPanel(nb, self.on_draw_contours, self.on_draw_arrows,
                                                            self.on_sharper, self.on_capacity, in_steps=True,
-                                                           on_mark=self.on_map_mark)),
+                                                           on_mark=self.on_map_mark,
+                                                           on_draw_hot_loop=self.on_draw_hot_loop)),
             ("issues_panel", "Issues", lambda nb: IssuesPanel(nb, self.on_issue_selected, self.on_draw_issues,
                                                              self.on_waive, live=session.live)),
             ("fixes", "Fixes", lambda nb: FixesPanel(nb, self.on_suggest, self.on_draw_suggestions,
@@ -1117,7 +1129,9 @@ class MainFrame(ConfigActions, wx.Frame):
         self.gauge.SetValue(1000)
         if done is not None:
             done(result)
-        if took >= 10:                                   # how long it took, for the next time
+            if self:
+                self._block_run_actions()        # done() may have brought the first results
+        if took >= 10:                                  # how long it took, for the next time
             self.SetStatusText(self.GetStatusBar().GetStatusText(0) + f" · took {clock(took)}")
         enabled = self.session.enabled_layers()           # a list pop, no KiCad call
         if enabled:                      # a board-setup change outside the drawings: say so
@@ -1132,11 +1146,43 @@ class MainFrame(ConfigActions, wx.Frame):
             if b is not None:
                 b.Enable(on or (keep_runs and b in runs))
         self.t_cancel.Enable(not on and cancellable)
+        if keep_runs:                   # a board load: every action held, hovering says why (the user)
+            self._hold_for_load(True)
+        elif on:
+            self._hold_for_load(False)
         self.whatif.Enable(on)
         self.fixes.enable(on)
         self.issues_panel.enable_drawing(on)
         self.results_panel.enable_drawing(on)
         self._config_enable(on)
+        self._block_run_actions()
+
+    def _hold_for_load(self, on: bool):
+        """While the board is read, every button of the window (its tabs too) greyed out, hovering saying "Please
+        wait for the board to be loaded" (the user: "while the plugin reads the board, also disable all the
+        buttons with a hoverover text"); Preferences, Help and Cancel stay. A click on Run checks or Simulate no
+        longer waits in a queue for the load: it can't be made."""
+        free = {self.t_prefs, self.t_help, self.t_cancel}
+        why = LOADING if on else ""
+
+        def walk(w):
+            """Every theme.Button under w."""
+            for c in w.GetChildren():
+                if isinstance(c, theme.Button):
+                    yield c
+                yield from walk(c)
+        for b in walk(self):
+            if b not in free:
+                b.hold(why)
+
+    def _block_run_actions(self):
+        """The top bar's actions that work from a run's results greyed out, with the reason on hover, until there
+        are results (theme.Button.block): Thermal until a Simulate, Export report until Run checks or a Simulate.
+        Called after every job (_enable)."""
+        from .results_panels import NEEDS_SIMULATE
+        self.t_thermal.block("" if self._views_from is not None else NEEDS_SIMULATE)
+        self.t_export.block("" if self.routes or self.issues else
+                            "Please run the checks or the simulation first")
 
     def _progress(self, msg, frac):
         """(GUI thread) A job's progress report: the status line and the gauge."""
@@ -2342,6 +2388,45 @@ class MainFrame(ConfigActions, wx.Frame):
 
         self._start(f"drawing the {what} contours…", work, done, what="draw the contours", cancellable=False,
                     kicad=True)
+
+    def on_draw_hot_loop(self, routes):
+        """Results tab, "Draw hot loop on board": every power stage's hot loop of the last Simulate (a half bridge
+        with rail capacitors) on the hot-loop layer (drawing.hotloop_layer, User.1; results/hotloop.py), from the
+        Simulate's result on the board it was simulated with, as a job; the stages that can't be drawn are named."""
+        from ..results.hotloop import can_draw
+        stages = [r for r in routes if r.kind == "converter" and not getattr(r, "view_of", None)]
+        drawable = [r for r in stages if not can_draw(r)]
+        board = (self._views_from or (self.board, None))[0]
+        if not drawable or board is None:
+            self.SetStatusText("no power stage of the last Simulate has a hot loop to draw: run Simulate with a "
+                               "converter")
+            return
+        if self._refuse_if_busy() or not self._need_live():
+            return
+        layer = self.settings.config.drawing.hotloop_layer
+
+        def work(progress):
+            """(worker) Each stage's drawing (a stage whose switches are no half bridge is skipped, said why), then
+            all of them on the board in one undo step."""
+            from ..results.hotloop import hot_loop_drawing
+            drawings, skipped = [], []
+            for r in drawable:
+                try:
+                    drawings.append(hot_loop_drawing(board, r, k=len(drawings)))
+                except ValueError as e:
+                    skipped.append(str(e))
+            n = self.session.draw_hot_loop(drawings, layer) if drawings else 0
+            return n, drawings, skipped
+
+        def done(got):
+            """Say what was drawn: per stage its loop inductance, outline area and its capacitors' share."""
+            n, drawings, skipped = got
+            parts = [f"{d.stage}: outline {d.area_mm2:.0f} mm², capacitors ≥ 5 % carry {d.share * 100:.0f} %"
+                     for d in drawings]
+            self.SetStatusText((f"drew the hot loop of {', '.join(parts)} on {layer} ({n} items)" if drawings
+                                else "no hot loop drawn") + (f" · {'; '.join(skipped)}" if skipped else ""))
+
+        self._start("drawing the hot loops…", work, done, what="draw the hot loops", cancellable=False, kicad=True)
 
     def on_draw_arrows(self, rr, plane_layer):
         """Results tab, "Draw arrows on board": the shown layer's current arrows, as a job (their number capped: each

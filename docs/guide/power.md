@@ -4,12 +4,23 @@ DC-DC converters, motor bridges, what they do to the rest of the board, their co
 
 ## Switching power stages (DC-DC converters)
 
-A converter is not a signal net. Its switches move the load current between the high-side and the low-side switch within the edge time. That fast current flows around the **hot loop**: input capacitors, high-side switch, switch node, low-side switch, ground and back to the capacitors. groundtruth models the loop as copper, not as lines:
+A converter is not a signal net. Its switches move the load current between the high-side and the low-side switch within the edge time. That fast current flows around the **hot loop**: input capacitors, high-side switch, switch node, low-side switch, ground and back to the capacitors. groundtruth models the loop as copper, not as lines (what the hot loop is and how to keep it small: below):
 
 - **Copper:** every net the loop touches is solved, pours and tracks alike. That covers the rail, the switch-node pour, ground, the input path up to the connector, and every plane in the region. A route that runs through its own net's pour is solved through the pour too, so the current spreads over the pour's width and stitching vias.
 - **Capacitors:** they are branches with their C, ESR and ESL. The solver gives each one's share of the loop current, at the switching frequency (ripple) and at 100 MHz (the edges).
 - **Switches:** they are known currents through each package, injected into the copper at every pad.
 - **Conducted emission:** with an input connector, a LISN per line closes the input. The solver then gives the share of the pulsed current that reaches the input lines.
+
+### What the hot loop is, and how to keep it small
+
+The explanation follows Analog Devices' article [Layout for Power Designs #1: Hot Loops](https://www.analog.com/en/resources/technical-articles/layout-for-power-designs-1-hot-loops.html) (C. Kueck, 2018; `[Kueck 2018]` in [REFERENCES.md](../REFERENCES.md)).
+
+- **Which loop.** In a buck, the current in the on-time loop (input capacitor, high-side switch, inductor, output capacitor) and in the off-time loop (low-side switch, inductor, output capacitor) are both trapezoids: the inductor current never stops. The difference between the two is the loop input capacitor → high-side switch → low-side switch → ground → input capacitor. That loop is the only one carrying a *fully switched* current, from zero to the peak and back within each edge, so it holds the most high-frequency energy: the hot loop. The supply and load wires should carry no AC; the input capacitor sources it and the output capacitor ends it.
+- **Other topologies.** A boost is a buck run backwards: its hot loop is on the output (output capacitor, rectifier, low-side switch). A 4-switch buck-boost has two hot loops, one per side, which often share a ground current-sense resistor (splitting it in two in parallel keeps both loops small). SEPIC and inverting converters have one; a flyback has one on each winding.
+- **Why it matters.** The loop radiates as a magnetic dipole whose field goes with the current switched times the area the loop covers. Its inductance also stores energy at every edge that rings with the switches' C_oss (the overshoot, and the radiated peak at the ringing frequency).
+- **Layout rules.** Make the loop as small as possible, using the smallest copper spacing the design rules allow. Let the shortest, flattest ceramic capacitor close the loop first, right at the switches. Several capacitors in parallel are fine; stack them so the smallest package is closest to the loop and the larger ones sit right behind it. Put a solid ground plane on the layer directly under the loop, so the return runs under the forward path.
+
+**On the board.** **Draw hot loop on board** (Results tab, after a Simulate) draws what the solve found on User.1: which capacitors carry the loop current at the hot-loop frequency (100 MHz) and in what share, and an outline around everything carrying 5 % or more. A large share through capacitors far from the switches, or through another stage's capacitors, means the loop closes the long way round: put the small capacitors right next to the switches. The **loop inductance** and **ringing** of the stage's Results view are the numbers to compare before and after a change.
 
 ```yaml
 converters:
