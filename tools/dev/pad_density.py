@@ -52,7 +52,9 @@ def main() -> int:
         s.res.dc, s.res.dc_maps, s.res.dc_grids, _ = dc_analysis(model, s)
     combo, _, _ = combine_dc([s.res for s in setups], cfg.rules, cfg.analysis.via_plating_um)
     view = combo if combo is not None else setups[0].res
-    path = view.dc[0]
+    # the path that carries the part (one stage alone has no combined view: its first path is the switch node's,
+    # and a surge stopper such as refboard's Q601 is on its input path), else the first
+    path = next((p for p in view.dc if any(q["name"] == args.part for q in p.get("parts", []))), view.dc[0])
     out = {"code": args.src or "this tree", "resolution": args.resolution, "seconds": round(time.perf_counter() - t0, 1),
            "sustained_a_mm2": path.get("sustained_a_mm2"), "peak_a_mm2": path.get("peak_a_mm2"),
            "hotspot": path.get("sustained_at") or path.get("peak_at"), "part": {}}

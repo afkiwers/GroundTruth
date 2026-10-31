@@ -1611,6 +1611,15 @@ an example in <a href="#siglabels">Labelling a signal path</a>.</p>
   hands over to the part where the copper brings it to the pad, within a few tenths of a millimetre of the edge it
   arrives at; a thicker joint spreads that handover further across the pad. A transistor modelled as a resistor
   with a drain tab spreads its on-resistance over the tab (<code>entry:tab</code>: one soldered metal instead)</td></tr>
+<tr><td><code>D=4x3.5</code></td><td>where the part's element joins a terminal's metal: per terminal, a rectangle
+  W x H in mm in the footprint's own frame (turned with the part), named by its schematic pin name or pad number,
+  centred on that terminal's pads (on its largest pad when that is a tab), <code>@dx/dy</code> to move it (mm). A
+  vertical FET's die (<code>D=4x3.5</code> on its drain tab), a source clip's contact (<code>S=1x2</code>), several
+  at once: <code>GT = S=1x2, D=5x0.5 G=0.3x0.3</code> (in the Pins cell: <code>metal:D=4x3.5 S=1x2</code>). Not
+  given: the whole terminal. It counts where the terminal is a resistive sheet (its <b>Terminal Sheet
+  Resistance</b>): the current enters and leaves the sheet inside the rectangle only, and spreads in the sheet and
+  the copper under it to the rest of the pad, so it crowds more under a die smaller than its tab. Without that field
+  the terminal is a perfect plate, and where the current enters it makes no difference</td></tr>
 <tr><td colspan="2"><b>A power stage's switch</b> (a FET, a catch diode, an integrated stage):</td></tr>
 <tr><td><code>entry:tab</code></td><td>how the stage's current enters the copper at its pads: <code>tab</code>, each
   side's metal soldered over its pads (a silicon FET's drain tab: the current hands over at the edge it arrives at);
@@ -2086,7 +2095,10 @@ smaller but dense, which a regular grid lets it apply with FFTs.</p>
     spread evenly over each pin's copper, which its die does (the pin value <code>entry</code> overrides). Both
     tabs read the Terminal Sheet Resistance too: a FET's drain tab is then that sheet under its die, and a switch's tab
     (a diode's cathode, an IC's exposed pad in a stage) takes the stage's current in evenly over the sheet; without
-    it they are perfect plates, dark with a sharp rim like any other part.</li>
+    it they are perfect plates, dark with a sharp rim like any other part. The part's element covers its whole
+    terminal unless the pin value <code>metal</code> (a GT field's <code>D=4x3.5</code>, see
+    <a href="#labels">Detection labels</a>) gives it a smaller rectangle: a FET's die then stands only on that part
+    of its tab's sheet, and a terminal's current enters its sheet only there.</li>
   </ul>
   The integrals use Gauss–Legendre quadrature near by, filaments far away, and numerical integration for the self
   term.</li>
