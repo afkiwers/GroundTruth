@@ -444,3 +444,54 @@ def test_schematic_labels_fall_back_when_kicad_cannot_take_them():
         client = Client()
     with pytest.raises(SchematicApiUnavailable):
         write_symbol_labels(Board(), {"U301": "amp_in:1, amp_out:4"})
+
+
+def test_commits_name_their_document_for_kicad_with_several_editors_open():
+    """KiCad's newer API refuses a commit that names no document while more than one editor is open ("BeginCommit
+    without a document specified is not allowed when multiple editors are open", the user, 2026-11-01); kicad-python
+    0.8.0's messages have no field for it. kipy_sink.begin_commit / end_commit add it as KiCad defines it (BeginCommit
+    `header = 1`, EndCommit `header = 4`, an ItemHeader with the document) in wire bytes: read back here as that
+    field, the length a varint (a long project path needs two bytes)."""
+    from types import SimpleNamespace
+    from google.protobuf.internal.decoder import _DecodeVarint
+    from kipy.proto.common.commands.editor_commands_pb2 import (BeginCommitResponse, CommitAction, EndCommit,
+                                                                EndCommitResponse)
+    from kipy.proto.common.types import DocumentSpecifier, ItemHeader
+    from groundtruth.adapters.kipy_sink import begin_commit, end_commit
+
+    def field(raw: bytes, number: int) -> ItemHeader:
+        """The ItemHeader in field `number` of a serialized message (the only length-delimited field there)."""
+        tag = bytes([(number << 3) | 2])
+        k = raw.index(tag) + 1
+        size, k = _DecodeVarint(raw, k)
+        return ItemHeader.FromString(raw[k:k + size])
+
+    sent = []
+    doc = DocumentSpecifier()
+    doc.board_filename = "x" * 200 + ".kicad_pcb"            # a header over 127 bytes: a two-byte length
+
+    def send(command, kind):
+        """Record the command; answer as KiCad does."""
+        sent.append(command)
+        if kind is BeginCommitResponse:
+            r = BeginCommitResponse()
+            r.id.value = "c1"
+            return r
+        return EndCommitResponse()
+    editor = SimpleNamespace(_kicad=SimpleNamespace(send=send), document=doc)
+    commit = begin_commit(editor)
+    assert commit.id.value == "c1"
+    assert field(sent[0].SerializeToString(), 1).document.board_filename == doc.board_filename
+    end_commit(editor, commit, "groundtruth: arrows")
+    pushed = EndCommit.FromString(sent[1].SerializeToString())
+    assert pushed.action == CommitAction.CMA_COMMIT and pushed.message == "groundtruth: arrows"
+    assert field(sent[1].SerializeToString(), 4).document.board_filename == doc.board_filename
+    end_commit(editor, commit, drop=True)
+    assert EndCommit.FromString(sent[2].SerializeToString()).action == CommitAction.CMA_DROP
+    calls = []
+    plain = SimpleNamespace(begin_commit=lambda: "c", push_commit=lambda c, m: calls.append(("push", m)),
+                            drop_commit=lambda c: calls.append(("drop",)))
+    assert begin_commit(plain) == "c"                        # a stand-in without kipy's connection: its own
+    end_commit(plain, "c", "m")
+    end_commit(plain, "c", drop=True)
+    assert calls == [("push", "m"), ("drop",)]
