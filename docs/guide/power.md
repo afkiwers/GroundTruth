@@ -271,7 +271,7 @@ Simulate.
 
 ## Temperatures (thermal solve)
 
-**Thermal** (top bar), or `groundtruth simulate --thermal`, solves the copper and part temperatures of the power
+**Thermal** (Results tab, next to **Current capacity**), or `groundtruth simulate --thermal`, solves the copper and part temperatures of the power
 stages after Simulate, with the solver of PCB Thermal (validated against analytic cases; `groundtruth.thermal`).
 Motor bridges heat the board with their RMS currents and their parts' losses (see "Motor bridges").
 

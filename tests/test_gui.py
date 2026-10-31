@@ -806,9 +806,9 @@ def test_run_buttons_stay_usable_while_the_board_is_read_and_a_click_waits(app, 
     assert not f._queue_timer.IsRunning()
     assert not f._queue_if_loading("Simulate", lambda: None)    # loaded: a click runs at once
     f._enable(False, keep_runs=True)                             # what a load job does
-    assert f.t_check.IsEnabled() and f.t_sim.IsEnabled() and f.t_thermal.IsEnabled() and not f.t_reload.IsEnabled()
+    assert f.t_check.IsEnabled() and f.t_sim.IsEnabled() and not f.t_reload.IsEnabled()
     f._enable(False)                                             # any other job
-    assert not (f.t_check.IsEnabled() or f.t_sim.IsEnabled() or f.t_thermal.IsEnabled())
+    assert not (f.t_check.IsEnabled() or f.t_sim.IsEnabled())
     f._enable(True)
 
 
@@ -2320,8 +2320,8 @@ def test_the_actions_needing_a_run_are_blocked_until_there_is_one(app, frame):
     run_steps(app, f, [])
     r = f.results_panel
     assert r.current() is None
-    views = (r.draw_button, r.arrow_button, r.window_button, r.view3d_button, r.sharper_button, r.capacity_button,
-             r.hotloop_button, f.t_thermal)
+    views = (r.draw_button, r.arrow_button, r.view3d_button, r.sharper_button, r.thermal_button,
+             r.capacity_button, r.hotloop_button)
     for b in views:
         assert b.blocked() == NEEDS_SIMULATE and not b.usable() and b.GetToolTipText() == NEEDS_SIMULATE, b.GetLabel()
         f.SetStatusText("")
@@ -2333,7 +2333,7 @@ def test_the_actions_needing_a_run_are_blocked_until_there_is_one(app, frame):
     assert f.fixes.buttons[0].usable()                              # Suggest fixes simulates by itself
     run_steps(app, f, [lambda: f.run(True) and None])
     assert r.current() is not None
-    for b in views[:6] + (f.t_thermal, f.t_export):
+    for b in views[:6] + (f.t_export,):
         assert not b.blocked(), b.GetLabel()
     assert r.draw_button.GetToolTipText() != NEEDS_SIMULATE
     assert "no power stage" in r.hotloop_button.blocked()           # a signal route only
