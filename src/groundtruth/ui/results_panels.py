@@ -371,6 +371,98 @@ CURVE_KINDS = ("pdn", "bode")       # views drawn as curves, not maps (no layers
 NEEDS_SIMULATE = "Please run the simulation first"
 
 
+class MenuAction:
+    """One entry of a DropDown, with the part of theme.Button's interface the window uses: Enable / IsEnabled (a
+    job runs, a view without maps), block / blocked (why it can't run yet: shown in the menu and on the drop-down's
+    hover), usable, click, GetLabel, SetToolTip / GetToolTipText. Its drop-down follows every change (sync)."""
+
+    def __init__(self, label: str, run, tip: str = ""):
+        """An entry `label` that calls run() when chosen; `tip`: what it does (the menu's help string)."""
+        self.label, self.run, self.tip = label, run, tip
+        self._on, self._why = True, ""
+        self.menu: Optional["DropDown"] = None      # set by the DropDown it is in
+
+    def _changed(self):
+        """Tell the drop-down (its own look and tooltip follow its entries)."""
+        if self.menu:
+            self.menu.sync()
+
+    def Enable(self, on: bool = True) -> bool:
+        """Enable or grey it out (a job runs, nothing to work on in this view)."""
+        self._on = bool(on)
+        self._changed()
+        return True
+
+    def IsEnabled(self) -> bool:
+        """Not greyed out by Enable."""
+        return self._on
+
+    def block(self, why: str = ""):
+        """Can't run yet, and why (theme.Button.block); "" lifts it."""
+        self._why = why
+        self._changed()
+
+    def blocked(self) -> str:
+        """Why it can't run, or ""."""
+        return self._why
+
+    def usable(self) -> bool:
+        """Enabled and not blocked: choosing it does something."""
+        return self._on and not self._why
+
+    def click(self):
+        """Run it, as choosing it in the menu does (not while greyed out)."""
+        if self.usable():
+            self.run()
+
+    def GetLabel(self) -> str:
+        """Its text in the menu."""
+        return self.label
+
+    def SetToolTip(self, tip: str):
+        """What it does."""
+        self.tip = tip
+
+    def GetToolTipText(self) -> str:
+        """Why it can't run, else what it does."""
+        return self._why or self.tip
+
+
+class DropDown(theme.Button):
+    """A "label ▾" button whose click opens a menu of MenuActions: an entry that can't run is greyed with its
+    reason after it. The button itself is greyed out while none of its entries is enabled, and blocked with their
+    shared reason while all are blocked for the same one ("Please run the simulation first")."""
+
+    def __init__(self, parent, label: str, actions: list):
+        """The button and its entries, in menu order."""
+        super().__init__(parent, f"{label} ▾")
+        self.actions = actions
+        for a in actions:
+            a.menu = self
+        self.Bind(wx.EVT_BUTTON, lambda e: self.popup())
+        self.sync()
+
+    def sync(self):
+        """The button's state from its entries'; its tooltip lists them."""
+        whys = {a.blocked() for a in self.actions}
+        self.block(whys.pop() if len(whys) == 1 else "")
+        theme.Button.Enable(self, any(a.IsEnabled() for a in self.actions))
+        self.SetToolTip("\n".join(f"{a.label}: {a.GetToolTipText()}" for a in self.actions))
+
+    def popup(self):
+        """The menu under the button; the entry chosen runs."""
+        menu = wx.Menu()
+        ids = {}
+        for a in self.actions:
+            why = a.blocked() if a.IsEnabled() else ""
+            item = menu.Append(wx.ID_ANY, a.label + (f"   ({why})" if why else ""), a.tip)
+            item.Enable(a.usable())
+            ids[item.GetId()] = a
+        menu.Bind(wx.EVT_MENU, lambda e: ids[e.GetId()].click() if e.GetId() in ids else None)
+        self.PopupMenu(menu, wx.Point(0, self.GetSize().height))
+        menu.Destroy()
+
+
 class ResultsPanel(wx.Panel):
     """The Results tab: the views of the last run (a signal route, a power stage, its DC paths, a bridge, a thermal
     solve) chosen in the Route list, with the view's KPI tiles and a summary line, and below them on a scrolling
@@ -458,25 +550,26 @@ class ResultsPanel(wx.Panel):
         self.terminals = p["terminals"]                 # maps with the parts' terminal current (results/terminals.py)
         self.return_colour = p["return_arrow_colour"]   # the return current's arrows on the maps
         self.config = None                              # the settings: which nets carry the return (set_rules)
-        b = theme.Button(self, "Draw contours on board")
-        b.Bind(wx.EVT_BUTTON, lambda e: on_draw_contours(self.current(), self.selected_layer()))
-        top.Add(b, 0, wx.RIGHT | wx.BOTTOM, 4)
-        self.draw_button = b
-        b2 = theme.Button(self, "Draw arrows on board")
-        b2.SetToolTip("the current arrows of the selected layer, on the current-drawing User layer")
-        b2.Bind(wx.EVT_BUTTON, lambda e: on_draw_arrows and on_draw_arrows(self.current(), self.arrow_layers()))
-        top.Add(b2, 0, wx.RIGHT | wx.BOTTOM, 4)
-        self.arrow_button = b2
-        b7 = theme.Button(self, "Draw hot loop on board")
+        # two drop-down menus instead of six buttons (the user: "make two dropdown menus. one for drawing including
+        # contours, arrows and hot loop; and one for sharper map, thermal and current capacity"); each entry is a
+        # MenuAction with the buttons' interface (Enable, block, click), so the rest of the window is unchanged
+        self.draw_button = MenuAction(
+            "Contours", lambda: on_draw_contours(self.current(), self.selected_layer()),
+            "a contour map of the selected layer's current density (or a temperature map's isotherms) on the "
+            "current-drawing User layer, like a map's height lines with their values")
+        self.arrow_button = MenuAction(
+            "Arrows", lambda: on_draw_arrows and on_draw_arrows(self.current(), self.arrow_layers()),
+            "the current arrows of the selected layer, on the current-drawing User layer (the return current's on "
+            "their own layer)")
         self.hotloop_tip = ("every power stage's hot loop of the last Simulate, on the hot-loop drawing layer "
                             "(User.1; settings: drawing.hotloop_layer): an outline around the switches, vias and "
                             "capacitors carrying at least 5 % of the loop current, one line per capacitor through "
                             "the switches with its share, and the loop inductance; replaces the hot loops drawn "
                             "before")
-        b7.SetToolTip(self.hotloop_tip)
-        b7.Bind(wx.EVT_BUTTON, lambda e: on_draw_hot_loop and on_draw_hot_loop(self.routes))
-        top.Add(b7, 0, wx.RIGHT | wx.BOTTOM, 4)
-        self.hotloop_button = b7
+        self.hotloop_button = MenuAction("Hot loop", lambda: on_draw_hot_loop and on_draw_hot_loop(self.routes),
+                                         self.hotloop_tip)
+        self.draw_menu = DropDown(self, "Draw on board", [self.draw_button, self.arrow_button, self.hotloop_button])
+        top.Add(self.draw_menu, 0, wx.RIGHT | wx.BOTTOM, 4)
         # no "Open in window" button any more (the user, 2026-11-01: "remove the open in window button"): each map's
         # own ⤢ button opens that layer in a window (_layer_buttons)
         b6 = theme.Button(self, "Open 3D view")
@@ -488,29 +581,25 @@ class ResultsPanel(wx.Panel):
         top.Add(b6, 0, wx.RIGHT | wx.BOTTOM, 4)
         self.view3d_button = b6
         self._view3d = LatestOnly("groundtruth-3d")
-        b4 = theme.Button(self, "Sharper map")
-        b4.SetToolTip("solve the shown view again on a grid with 4x the nodes (about half the cell size), in the "
-                      "background: about 20 s for a route, up to a minute for a power stage. The numbers above stay "
-                      "as analysed (the default grid is converged for them); only the map gets sharper.")
-        b4.Bind(wx.EVT_BUTTON, lambda e: on_sharper and on_sharper(self.choice.GetSelection()))
-        top.Add(b4, 0, wx.RIGHT | wx.BOTTOM, 4)
-        self.sharper_button = b4
-        # Thermal and Current capacity side by side: both work from the last Simulate's results and add views here
-        # (the user: "Given that both depend on previous results, where should they be? also they should be together";
-        # Thermal was on the top bar)
-        b8 = theme.Button(self, "Thermal")
-        b8.SetToolTip("copper and part temperatures of the power stages, DC loads and bridges of the last Simulate "
-                      "(their DC paths and losses heat the board; settings: thermal); a temperature view here")
-        b8.Bind(wx.EVT_BUTTON, lambda e: on_thermal and on_thermal())
-        top.Add(b8, 0, wx.RIGHT | wx.BOTTOM, 4)
-        self.thermal_button = b8
-        b5 = theme.Button(self, "Current capacity")
-        b5.SetToolTip("per power stage of the last Simulate: the load current that brings the hottest copper or "
-                      "part junction to thermal.capacity_c (default max_c), the other stages at their operating "
-                      "points. A few thermal solves in the background; one view per stage at its capacity.")
-        b5.Bind(wx.EVT_BUTTON, lambda e: on_capacity and on_capacity())
-        top.Add(b5, 0, wx.BOTTOM, 4)
-        self.capacity_button = b5
+        # Sharper map, Thermal and Current capacity: solves of their own from the last Simulate's results, adding or
+        # replacing views here (Thermal was on the top bar)
+        self.sharper_button = MenuAction(
+            "Sharper map", lambda: on_sharper and on_sharper(self.choice.GetSelection()),
+            "solve the shown view again on a grid with 4x the nodes (about half the cell size), in the background: "
+            "about 20 s for a route, up to a minute for a power stage. The numbers above stay as analysed (the "
+            "default grid is converged for them); only the map gets sharper.")
+        self.thermal_button = MenuAction(
+            "Thermal", lambda: on_thermal and on_thermal(),
+            "copper and part temperatures of the power stages, DC loads and bridges of the last Simulate (their DC "
+            "paths and losses heat the board; settings: thermal); a temperature view here")
+        self.capacity_button = MenuAction(
+            "Current capacity", lambda: on_capacity and on_capacity(),
+            "per power stage of the last Simulate: the load current that brings the hottest copper or part junction "
+            "to thermal.capacity_c (default max_c), the other stages at their operating points. A few thermal solves "
+            "in the background; one view per stage at its capacity.")
+        self.solve_menu = DropDown(self, "Further analysis",
+                                   [self.sharper_button, self.thermal_button, self.capacity_button])
+        top.Add(self.solve_menu, 0, wx.BOTTOM, 4)
         self.window: Optional[HeatmapWindow] = None
         self.layer_windows: dict[str, HeatmapWindow] = {}     # one copper layer each, opened by its layer button
         self.rules = None                      # the settings' rules: the tiles' colours (set_rules)
@@ -888,9 +977,12 @@ class ResultsPanel(wx.Panel):
         """A run's views (routes: every view the run made) and its issues (circled on the maps); the first view is
         shown."""
         self.board, self.routes, self.issues = board, routes, issues
+        # a power stage's (or bridge leg's) main view says what it is beside its DC and Bode views (the user: "should
+        # Q301->Q302 have some comment behind it like (EMI results)?"): the hot loop's current and its emission
         _set_items(self.choice, [r.label() if r.kind in ("thermal", "bridge", "pdn", "bode")
                                  else f"{r.net}  RMS currents" if getattr(r, "rms_of", None)
                                  else f"{r.net}  DC {r.view_of}" if getattr(r, "view_of", None)
+                                 else f"{r.net}  hot loop {r.driver}→{r.receiver} (EMI)" if r.kind == "converter"
                                  else f"{r.net}  {r.driver}→{r.receiver}" for r in routes])
         if routes:
             self.choice.SetSelection(0)

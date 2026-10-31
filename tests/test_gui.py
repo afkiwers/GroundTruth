@@ -1524,6 +1524,10 @@ def test_draw_hot_loop_puts_the_stages_hot_loop_on_its_layer(app, tmp_path, monk
         run_steps(app, f, [lambda: f.run(True) and None])
         assert not b.blocked(), b.blocked()
         name = f.settings.config.converters[0].name
+        spec = f.settings.config.converters[0]
+        # the stage's main view says what it is (the user: "should Q301->Q302 have some comment behind it like (EMI
+        # results)?")
+        assert f.results_panel.choice.GetString(0) == f"{name}  hot loop {spec.high_side[0]}→{spec.low_side[0]} (EMI)"
         run_steps(app, f, [lambda: b.click()])
         ((drawings, layer),) = drawn
         assert layer == "User.1" and [d.stage for d in drawings] == [name]
@@ -2327,6 +2331,8 @@ def test_the_actions_needing_a_run_are_blocked_until_there_is_one(app, frame):
         f.SetStatusText("")
         b.click()
         assert f.status_text() == "" and not f.busy()
+    for menu in (r.draw_menu, r.solve_menu):                       # the drop-downs: their entries' shared reason
+        assert menu.blocked() == NEEDS_SIMULATE and menu.GetToolTipText() == NEEDS_SIMULATE
     assert f.t_export.blocked() == "Please run the checks or the simulation first"
     assert f.issues_panel.draw_button.blocked().startswith("Please run")
     assert [b.blocked() for b in f.fixes.buttons[1:4]] == ["Please run Suggest fixes first"] * 3
@@ -2338,6 +2344,16 @@ def test_the_actions_needing_a_run_are_blocked_until_there_is_one(app, frame):
     assert r.draw_button.GetToolTipText() != NEEDS_SIMULATE
     assert "no power stage" in r.hotloop_button.blocked()           # a signal route only
     assert r.hotloop_button.GetToolTipText() == r.hotloop_button.blocked()
+    # the two drop-downs (the user: "make two dropdown menus"): blocked with the shared reason before the Simulate,
+    # usable after it; the drawing menu greyed out while a job runs; their tooltips list the entries
+    assert [a.GetLabel() for a in r.draw_menu.actions] == ["Contours", "Arrows", "Hot loop"]
+    assert [a.GetLabel() for a in r.solve_menu.actions] == ["Sharper map", "Thermal", "Current capacity"]
+    assert r.draw_menu.usable() and r.solve_menu.usable() and r.draw_menu.GetLabel() == "Draw on board ▾"
+    assert "Hot loop: " + r.hotloop_button.blocked() in r.draw_menu.GetToolTipText()
+    r.enable_drawing(False)
+    assert not r.draw_menu.IsEnabled() and r.solve_menu.IsEnabled()
+    r.enable_drawing(True)
+    assert r.draw_menu.usable()
 
 
 def test_every_button_waits_for_the_board_to_be_read(app, frame):
@@ -2365,8 +2381,8 @@ def test_every_button_waits_for_the_board_to_be_read(app, frame):
         seen["tip"] = f.t_sim.GetToolTipText()
         seen["free"] = [b.blocked() for b in (f.t_prefs, f.t_help, f.t_cancel)]
     run_steps(app, f, [lambda: (f.on_reload(), during()) and 0.0])
-    assert {"Simulate", "Run checks", "Reload board", "Draw contours on board", "Suggest fixes",
-            "Draw hot loop on board"} <= set(seen["held"])
+    assert {"Simulate", "Run checks", "Reload board", "Draw on board ▾", "Further analysis ▾",
+            "Suggest fixes"} <= set(seen["held"])
     assert seen["tip"] == LOADING and seen["free"] == ["", "", ""]
     assert not f.t_sim.blocked()
     from groundtruth.ui.results_panels import NEEDS_SIMULATE
@@ -2381,6 +2397,7 @@ def test_every_button_works_before_and_after_a_simulate(app, frame, monkeypatch)
     change (the Parts tab's Apply) then failed on it (settings._replace); wx's complaints about the Preferences
     dialog's rows (their parent) are checked too."""
     from groundtruth.ui import theme
+    from groundtruth.ui.results_panels import DropDown
     f = frame
     errors, logged = [], []
     monkeypatch.setattr(sys, "excepthook", lambda t, e, tb: errors.append(f"{t.__name__}: {e}"))
@@ -2405,9 +2422,12 @@ def test_every_button_works_before_and_after_a_simulate(app, frame, monkeypatch)
         clicked = []
 
         def buttons(w):
-            """Every drawn button in the window, depth first."""
+            """Every drawn button in the window, depth first; a Results drop-down (Draw on board ▾, Further
+            analysis ▾) by its entries instead: its own click pops a menu up and waits for the mouse."""
             for c in w.GetChildren():
-                if isinstance(c, theme.Button):
+                if isinstance(c, DropDown):
+                    yield from c.actions
+                elif isinstance(c, theme.Button):
                     yield c
                 yield from buttons(c)
 
