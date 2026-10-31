@@ -1,6 +1,8 @@
 """Parts tab: every footprint with its value and the electrical model used for it."""
 from __future__ import annotations
 
+import re
+
 import wx
 from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 import wx.grid as gridlib
@@ -42,6 +44,19 @@ NOTE_COL = COLS.index("Note")
 STRETCH = {"Value": 1.0, "Footprint": 2.0, "Schematic": 1.0, "Note": 3.0}
 NOTE_MAX = 360
 _DIFFERS = {True: "#4a3a1f", False: "#ffdcc8"}   # a parameter set here that differs from the schematic (dark, light)
+_LEADING = re.compile(r"^-?\d[\d.,]*\s*[a-zA-Zµ]?\d*")     # a cell's leading value: "22u0", "103nF at ≤ 55 V", "15.9m"
+
+
+def sort_key(text: str) -> tuple:
+    """A cell's place when its column is sorted (the user: "when clicking on one of the headers it should sort
+    them"): a value in SI notation by its number (100n before 1µ before 22u0), everything else in natural order
+    (C9 before C10), the numbers before the words."""
+    t = text.strip()
+    m = _LEADING.match(t)
+    v = parse_value(m.group(0)) if m else None
+    if v is not None:
+        return (0, v, t.lower())
+    return (1, 0.0, [(0, int(p), "") if p.isdigit() else (1, 0, p) for p in re.split(r"(\d+)", t.lower()) if p])
 
 
 class PartsPanel(wx.Panel):
@@ -91,7 +106,16 @@ class PartsPanel(wx.Panel):
         self.grid.SetRowLabelSize(0)
         self.grid.Bind(gridlib.EVT_GRID_CELL_CHANGED, self.on_cell)
         self.grid.Bind(wx.EVT_SIZE, self._grid_resized)
+        # a click on a column's header sorts by it (again: the other way), a dragged column border keeps its width,
+        # a double click on it fits the column to its contents (the user: "the user should be able to drag it to
+        # the width it wants or double click on the corner to auto size it")
+        self.grid.Bind(gridlib.EVT_GRID_LABEL_LEFT_CLICK, self.on_label_click)
+        self.grid.Bind(gridlib.EVT_GRID_COL_SIZE, self.on_col_dragged)
+        self.grid.Bind(gridlib.EVT_GRID_COL_AUTO_SIZE, self.on_col_auto_size)
+        self.grid.EnableDragColSize(True)
         self._natural: list[int] = []           # the columns' widths for their contents (refresh)
+        self._widths: dict[int, int] = {}       # the columns the user sized (dragged or double-clicked): their width
+        self._sort: Optional[tuple[int, bool]] = None    # (column, ascending) the rows are sorted by, else as listed
 
         hint = wx.StaticText(self, label="Values accept SI notation (33R, 4k7, 100n, 0.4n). 'open' parts are only "
                                          "ports; 'short' is a dead short. C at bias: a ceramic's DC-bias curve "
@@ -184,6 +208,43 @@ class PartsPanel(wx.Panel):
                     or q == ref_prefix(r).lower()]
         return refs
 
+    def _sorted(self, refs: list[str]) -> list[str]:
+        """The rows in the order of the sorted column (sort_key on its text), empty cells last either way."""
+        if self._sort is None:
+            return refs
+        col, up = self._sort
+        texts = {r: self._texts(r)[0][col].strip() for r in refs}
+        full = sorted((r for r in refs if texts[r]), key=lambda r: sort_key(texts[r]), reverse=not up)
+        return full + [r for r in refs if not texts[r]]
+
+    def on_label_click(self, evt):
+        """A click on a column's header: sort the rows by it, ascending; the same column again: descending. The
+        header shows the arrow. A click on the corner, or anywhere else, does what the grid does."""
+        col = evt.GetCol()
+        if evt.GetRow() != -1 or col < 0:
+            evt.Skip()
+            return
+        up = not (self._sort is not None and self._sort[0] == col and self._sort[1])
+        self._sort = (col, up)
+        self.grid.SetSortingColumn(col, up)
+        self.refresh()
+
+    def on_col_dragged(self, evt):
+        """The user dragged a column's border: that width stays (refresh and the tab's resizing keep it), the
+        spare width goes to the other text columns."""
+        col = evt.GetRowOrCol()
+        self._widths[col] = self.grid.GetColSize(col)
+        evt.Skip()
+        wx.CallAfter(lambda: self and self._fit_columns())
+
+    def on_col_auto_size(self, evt):
+        """A double click on a column's border: the column as wide as its widest cell or header (the Note column
+        too, past NOTE_MAX), kept as if dragged there."""
+        col = evt.GetRowOrCol()
+        self.grid.AutoSizeColumn(col, setAsMin=False)
+        self._widths[col] = self.grid.GetColSize(col)
+        self._fit_columns()
+
     def refresh(self):
         """Rebuild the table (in one batch: one redraw), size the columns to their contents (the Note column at
         most NOTE_MAX) and spread the spare width (_fit_columns)."""
@@ -195,7 +256,7 @@ class PartsPanel(wx.Panel):
         g.BeginBatch()
         if g.GetNumberRows():
             g.DeleteRows(0, g.GetNumberRows())
-        self.rows = self._visible()
+        self.rows = self._sorted(self._visible())
         g.AppendRows(len(self.rows))
         for row, ref in enumerate(self.rows):
             self._fill_row(row, ref)
@@ -213,6 +274,16 @@ class PartsPanel(wx.Panel):
         g = self.grid
         e = self.settings.config.components[ref]
         m = e.model
+        vals, differs, fp = self._texts(ref)
+        for col, v in enumerate(vals):
+            g.SetCellValue(row, col, v)
+        self._style_row(row, ref, e, m, differs, fp, new)
+
+    def _texts(self, ref: str) -> tuple[list[str], dict, object]:
+        """(a part's cells' texts by column, {parameter: Reading} set here and different from the schematic, its
+        footprint or None)."""
+        e = self.settings.config.components[ref]
+        m = e.model
         linked, differs = self._schematic(ref, m)
         marks = (["◆ " + ", ".join(linked)] if linked else []) + \
             [f"! {p}: schematic {show_value(r.value)}" for p, r in differs.items()]
@@ -228,8 +299,11 @@ class PartsPanel(wx.Panel):
             if v is not None:
                 vals[col] = show_value(v)       # a capacitor's C at bias: its DC-bias curve's text
         vals[CIRCUIT_COL] = self._circuit_text(ref, m)
-        for col, v in enumerate(vals):
-            g.SetCellValue(row, col, str(v))
+        return [str(v) for v in vals], differs, fp
+
+    def _style_row(self, row: int, ref: str, e, m: ComponentModel, differs: dict, fp, new: bool):
+        """A row's editors, read-only cells and colours (_fill_row)."""
+        g = self.grid
         if new:
             for col in (0, 1, 2, SCHEMATIC_COL, CIRCUIT_COL):
                 g.SetReadOnly(row, col)
@@ -283,18 +357,20 @@ class PartsPanel(wx.Panel):
         wx.CallAfter(lambda: self and self._fit_columns())     # once the grid has its new client size
 
     def _fit_columns(self):
-        """The columns' natural widths, the spare width of the tab spread over the text columns (STRETCH). Narrower
-        than the columns need: natural widths, and the table scrolls sideways."""
+        """The columns' natural widths (those the user sized: their width), the spare width of the tab spread over
+        the text columns the user has not sized (STRETCH). Narrower than the columns need: those widths, and the
+        table scrolls sideways."""
         g = self.grid
         if len(self._natural) != g.GetNumberCols():
             return
-        sizes = list(self._natural)
+        sizes = [self._widths.get(i, w) for i, w in enumerate(self._natural)]
         spare = g.GetClientSize().width - g.GetRowLabelSize() - sum(sizes)
-        if spare > 0:
-            total = sum(STRETCH.values())
-            for name, share in STRETCH.items():
-                sizes[COLS.index(name)] += int(spare * share / total)
-            sizes[COLS.index("Note")] += spare - sum(int(spare * s / total) for s in STRETCH.values())
+        stretch = {COLS.index(n): share for n, share in STRETCH.items() if COLS.index(n) not in self._widths}
+        if spare > 0 and stretch:
+            total = sum(stretch.values())
+            for i, share in stretch.items():
+                sizes[i] += int(spare * share / total)
+            sizes[max(stretch)] += spare - sum(int(spare * s / total) for s in stretch.values())
         if sizes != [g.GetColSize(i) for i in range(len(sizes))]:
             g.BeginBatch()
             for i, w in enumerate(sizes):

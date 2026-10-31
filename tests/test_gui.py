@@ -1748,6 +1748,51 @@ def test_parts_table_fills_the_tab_and_an_edit_updates_its_row_in_place(app, fra
     g.DisableCellEditControl()
 
 
+def test_parts_table_sorts_by_a_header_click_and_keeps_a_dragged_width(app, frame):
+    """The user: "when clicking on one of the headers it should sort them, also one cannot change the width; the
+    user should be able to drag it ... or double click on the corner to auto size it". A header click sorts
+    ascending (values by number, references naturally, empty cells last), again descending; a dragged column keeps
+    its width through a rebuild and the tab's resizing; a double click on its border fits it to its contents."""
+    import wx.grid as gridlib
+    from groundtruth.ui.parts_panel import COLS, sort_key
+    assert sorted(["22u0", "100n", "1u0", "4k7", "C at"], key=sort_key) == ["100n", "1u0", "22u0", "4k7", "C at"]
+    assert sorted(["C10", "C9", "R1", "C100"], key=sort_key) == ["C9", "C10", "C100", "R1"]
+    f = frame
+    run_steps(app, f, [])
+    f.notebook.SetSelection(f.notebook.FindPage(f.parts))
+    p, g = f.parts, f.parts.grid
+    ref, value = COLS.index("Ref"), COLS.index("Value")
+
+    def click(col):
+        """A left click on column col's header."""
+        g.GetEventHandler().ProcessEvent(gridlib.GridEvent(g.GetId(), gridlib.wxEVT_GRID_LABEL_LEFT_CLICK, g, -1,
+                                                           col))
+    click(ref)
+    assert p.rows == sorted(p.rows, key=sort_key) and g.GetSortingColumn() == ref and g.IsSortOrderAscending()
+    assert [g.GetCellValue(i, ref) for i in range(g.GetNumberRows())] == p.rows       # the cells follow
+    click(ref)
+    assert p.rows == sorted(p.rows, key=sort_key, reverse=True) and not g.IsSortOrderAscending()
+    click(value)
+    texts = [g.GetCellValue(i, value) for i in range(g.GetNumberRows())]
+    full = [t for t in texts if t.strip()]
+    assert full == sorted(full, key=sort_key) and texts[:len(full)] == full           # empty values last
+    # drag the Footprint column to 300 px: it stays through a rebuild (the filter) and a resize of the tab
+    fp = COLS.index("Footprint")
+    g.SetColSize(fp, 300)
+    g.GetEventHandler().ProcessEvent(gridlib.GridSizeEvent(g.GetId(), gridlib.wxEVT_GRID_COL_SIZE, g, fp))
+    p.filter.SetValue("U")
+    p.filter.SetValue("")
+    f.SetSize(f.GetSize() + wx.Size(-60, 0))
+    wait_for(app, lambda: g.GetColSize(fp) == 300)
+    for _ in range(5):
+        app.Yield()
+    assert g.GetColSize(fp) == 300
+    # a double click on the Note column's border: as wide as its widest note
+    note = COLS.index("Note")
+    g.GetEventHandler().ProcessEvent(gridlib.GridSizeEvent(g.GetId(), gridlib.wxEVT_GRID_COL_AUTO_SIZE, g, note))
+    assert p._widths[note] == g.GetColSize(note) > 0
+
+
 def test_the_parts_tab_follows_the_footprints_selected_in_kicad(app, tmp_path, monkeypatch):
     """Click a part in KiCad: while the Parts tab shows, its row gets selected (a filter hiding it is cleared) with
     the cursor on its Model cell; KiCad is only asked while that tab shows, never while a KiCad job holds the
