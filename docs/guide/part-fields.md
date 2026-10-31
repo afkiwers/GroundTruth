@@ -38,9 +38,10 @@ the [README](../../README.md); how the fields are read in detail: [the settings 
 | `Terminal Sheet Resistance` | inductor, capacitor, resistor, ferrite, FET, diode | Ω per square | `0.77mΩ` | the part's terminal metal over its pads: how a pad's current is shared between the board copper and the terminal (without it, or `0`: a perfect conductor, the pad dark with a sharp rim) | DC loads, Thermal |
 | `Terminal Metal` | inductor, capacitor, resistor, ferrite, FET, diode | thickness and material | `0.15mm bronze` | the same terminal as thickness and material (copper, brass, bronze, becu, tellurium); `Terminal Sheet Resistance` wins when both are given | DC loads, Thermal |
 
-Where on its terminal a part's element sits (a FET's die smaller than its drain tab) is not a field of its own but a
-pin value in the `GT` field, one rectangle per terminal in mm: `GT = D=4x3.5, S=1x2` (the terminal by its pin name or
-pad number; see [settings](settings.md), Through-hole pins).
+| `Terminal Contact` | any part with a model (FET, diode, inductor, capacitor, resistor) | mm, per terminal | `D=4.09x3.86 S=4.5x0.9` | where the part's element joins each terminal's metal (a FET's die on its drain tab): one rectangle W x H per terminal, named by the symbol's pin name or the pad number, W along the footprint's x axis, `@dx/dy` to move it off the pads' centre; a terminal not listed keeps its whole pads. Counts only with `Terminal Sheet Resistance` or `Terminal Metal` | DC loads, Thermal |
+
+The same rectangles can go into the `GT` field as words of their own (`GT = conv1_hs, D=4x3.5`), which wins over
+`Terminal Contact`; see [settings](settings.md), Through-hole pins.
 
 ### The control loop (a controller's fields)
 
