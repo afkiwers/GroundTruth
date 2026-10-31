@@ -25,6 +25,7 @@ next one).</p>
   compute server)</li>
 <li><a href="#safety">Voltage-aware safety checks</a></li>
 <li><a href="#fields">Part parameters from the schematic (HTTP lib fields)</a></li>
+<li><a href="#hotloop">The hot loop</a></li>
 <li><a href="#thermal">Thermal and Current capacity</a></li>
 <li><a href="#analog">Op-amp circuits and the transfer function</a></li>
 <li><a href="#prefs">Preferences</a></li>
@@ -66,9 +67,12 @@ vias or draw on the board.</p>
 (<a href="#configs">Configurations and Undo</a>); <b>Clear GT markers</b> removes what GroundTruth drew. On the right, <b>Preferences…</b> and
 <b>Help</b>. Refill zones and Clear GT markers are there only when GroundTruth was started from KiCad's toolbar
 (<b>Analyse return paths</b>); opened on a board file, it can analyse but not show or draw anything in KiCad.
-While a job runs the buttons are greyed, except while the board is read (at start, after Reload or Refill, and
-while new boards' nets are detected): then <b>Run checks</b>, <b>Simulate</b> and <b>Thermal</b> stay usable, and a
-click waits for the board (the status line ends with "then Simulate") and starts by itself.
+While a job runs the buttons are greyed. While the board is read (at start, after Reload or Refill, and while new
+boards' nets are detected) every button but Preferences, Help and Cancel is greyed, and hovering over one says
+"Please wait for the board to be loaded". A button whose action needs an earlier run is greyed until there is one,
+and hovering says which: <b>Thermal</b>, the Results tab's actions (Draw contours, Draw arrows, Draw hot loop, Open
+in window, Open 3D view, Sharper map, Current capacity) "Please run the simulation first", <b>Export report…</b> and
+the Issues tab's Draw markers the checks or the simulation, the Fixes tab's Draw / Place / Add ticked Suggest fixes.
 Hover over <b>Thermal</b>, <b>Export report…</b>, <b>with what-if edits</b>, <b>Preferences…</b> or <b>Help</b> for
 what it does.</p>
 <p>The results shown are always of the board and settings they were computed on. When the board was read again and
@@ -274,6 +278,31 @@ in the schematic: see <a href="#siglabels">Labelling a signal path</a>.</p>
 <li><b>How nets are found</b> at the bottom, <b>Show</b> / <b>Hide</b>: the net and pin names detection looks
   for (the text can be selected and copied).</li>
 </ul>
+
+<hr><a name="hotloop"></a><h3>The hot loop</h3>
+<p>In a buck, the on-time loop (input capacitor, high-side switch, inductor, output capacitor) and the off-time loop
+(low-side switch, inductor, output capacitor) both carry trapezoidal currents: the inductor current never stops.
+The difference between them is the loop <b>input capacitor → high-side switch → switch node → low-side switch →
+ground → input capacitor</b>. It is the only loop with a <i>fully switched</i> current, from zero to the peak and
+back within each edge, so it holds the most high-frequency energy: the <b>hot loop</b>. A boost is a buck run
+backwards, its hot loop on the output; a 4-switch buck-boost has two, a flyback one on each winding.</p>
+<p>It matters for two reasons. The loop radiates as a magnetic dipole whose field goes with the current switched
+times the area the loop covers. And its inductance stores energy at every edge that rings with the switches'
+C_oss: the overshoot, and the radiated peak at the ringing frequency.</p>
+<p>How to keep it small:</p>
+<ul>
+<li>the loop as small as possible, with the smallest copper spacing the design rules allow;</li>
+<li>the shortest, flattest ceramic capacitor closes the loop first, right at the switches;</li>
+<li>several capacitors in parallel are fine: the smallest package closest to the loop, the larger ones right
+  behind it;</li>
+<li>a solid ground plane on the layer directly under the loop, so the return runs under the forward path.</li>
+</ul>
+<p>In GroundTruth: the <b>loop inductance</b>, <b>ringing</b> and <b>overshoot</b> of a stage's Results view are the
+numbers to compare before and after a change, and <b>Draw hot loop on board</b> draws on User.1 which capacitors
+actually carry the loop current at 100 MHz and in what share, with an outline around everything carrying 5 % or
+more. A large share through capacitors far from the switches (or through another stage's) means the loop closes the
+long way round: move the small capacitors next to the switches. Source: Analog Devices,
+<a href="https://www.analog.com/en/resources/technical-articles/layout-for-power-designs-1-hot-loops.html">Layout for Power Designs #1: Hot Loops</a> (C. Kueck, 2018).</p>
 
 <hr><a name="converters"></a><h3>Converters tab</h3>
 <p>The switching power stages (DC-DC converters): name, topology, rail, switch node, ground, the switches (high
@@ -1053,7 +1082,17 @@ Preferences (<b>Vias shown</b>).</p>
   in KiCad's Appearance panel: on a power stage's or a DC view, the arrows on the ground nets (the stages' ground,
   the loads' return pins' nets, nets named GND, VSS, 0V, ...RTN); on a signal route, every arrow off the signal's
   own copper. The rest stay on the current-drawing layer. Each arrow stands on one net's copper, the net carrying
-  most of the current at that spot, so a narrow strip between two quiet pours keeps its own arrows. KiCad cannot be told the layers' names, so each layer
+  most of the current at that spot, so a narrow strip between two quiet pours keeps its own arrows.
+  <b>Draw hot loop on board</b> draws every power stage's hot loop of the last Simulate on User.1 (settings:
+  <code>drawing.hotloop_layer</code>), replacing the ones drawn before: an outline around the switches, vias and
+  rail capacitors that carry at least 5 % of the loop current at the hot-loop frequency (what the solve found, not
+  the parts' placement), one thin line per such capacitor from its rail pad through the high-side switch, the switch
+  node and the low-side switch to its ground pad, with its share written below it ("conv1 16%"), and a title with
+  the loop inductance, the ringing, the drawn capacitors' share and the outline's area. Capacitors far from the
+  switches that still carry a large share make the loop big: put the small ones next to the switches. The outline
+  is the plan view the loop current spans, not its magnetic area (the return runs on the plane under it).
+  Integrated stages (the switches inside one IC) have their loop inside and are left out, the status line says so.
+  What the hot loop is and how to keep it small: <a href="#hotloop">The hot loop</a>. KiCad cannot be told the layers' names, so each layer
   says what it holds in a block of text beside the board's top right corner ("Current, supply side" or "Return
   current", 2 mm high), with the view, the copper layer and its share of the current, the nets under the arrows,
   their peak density and where, how to read the arrows, the busiest via and the version and date; Clear GT markers
@@ -1510,7 +1549,8 @@ document number come from the settings file (company and author otherwise from <
 
 <hr><a name="drawing"></a><h3>Drawing on the board</h3>
 <p>Markers, suggestions, contours and arrows go onto user layers of the board (by default User.9, User.8, User.7
-and User.6: issues, suggestions, currents, the return current's arrows; settings: <code>drawing</code>), each in one
+and User.6: issues, suggestions, currents, the return current's arrows; the hot loops on User.1; settings:
+<code>drawing</code>), each in one
 undo step and in a group of
 its own. Drawing needs GroundTruth started from KiCad's toolbar. When a drawing layer was not enabled on the board,
 GroundTruth enables it and the status line names it (Board Setup › Board Editor Layers). <b>Clear GT markers</b>

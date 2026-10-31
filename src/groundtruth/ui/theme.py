@@ -174,6 +174,11 @@ class Button(wx.Control):
         super().__init__(parent, id, size=size, style=wx.BORDER_NONE | wx.WANTS_CHARS | wx.FULL_REPAINT_ON_RESIZE)
         self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
         self._label, self.kind = label, kind
+        # blocked: greyed and deaf to clicks like a disabled button, but still enabled for wx, so that hovering
+        # shows why (a disabled window gets no mouse events on Windows: its tooltip never shows). The user: "disabled
+        # until the first simulation. when disabled, add a hoverover text that says Please run the simulation first"
+        self._why, self._tip = "", ""
+        self._hold = ""         # a second, temporary block above `_why`: the board is being read (MainFrame)
         self.Bind(wx.EVT_SIZE, lambda e: (e.Skip(), self.Refresh()))       # a resized button draws itself anew
         self._hover = self._down = False
         self.SetCursor(wx.Cursor(wx.CURSOR_HAND))
@@ -208,9 +213,50 @@ class Button(wx.Control):
         self.Refresh()
         return changed
 
+    def SetToolTip(self, tip):
+        """The button's own tooltip (shown while it is not blocked)."""
+        self._tip = tip
+        if not self._why and not self._hold:
+            super().SetToolTip(tip)
+
+    def block(self, why: str = ""):
+        """Grey the button out and ignore clicks, hovering shows `why` ("Please run the simulation first"); "" lifts
+        it (its own tooltip again). Independent of Enable (a job running greys every action out as well)."""
+        if why == self._why:
+            return
+        self._why = why
+        self._show_block()
+
+    def hold(self, why: str = ""):
+        """A block for a while ("Please wait for the board to be loaded"), on top of block()'s and lifted apart
+        from it: while held, hovering shows `why`; "" lifts the hold (block()'s reason, if any, shows again)."""
+        if why == self._hold:
+            return
+        self._hold = why
+        self._show_block()
+
+    def _show_block(self):
+        """The tooltip (the hold's reason, else the block's, else the button's own), cursor and look."""
+        why = self._hold or self._why
+        tip = why or self._tip
+        if tip:
+            super().SetToolTip(tip)
+        else:
+            self.UnsetToolTip()
+        self.SetCursor(wx.Cursor(wx.CURSOR_ARROW if why else wx.CURSOR_HAND))    # no hand: nothing to click
+        self.Refresh()
+
+    def blocked(self) -> str:
+        """Why the button is blocked or held, or ""."""
+        return self._hold or self._why
+
+    def usable(self) -> bool:
+        """Enabled and neither blocked nor held: a click does something."""
+        return self.IsEnabled() and not self._why and not self._hold
+
     def AcceptsFocusFromKeyboard(self) -> bool:
-        """Tab reaches the button only while it is enabled (as with wx.Button)."""
-        return self.IsEnabled()
+        """Tab reaches the button only while it is usable (as with wx.Button)."""
+        return self.usable()
 
     def DoGetBestSize(self):
         """The label's size plus padding, at least 30 px tall."""
@@ -220,8 +266,8 @@ class Button(wx.Control):
         return wx.Size(w + 28, max(h + 14, 30))
 
     def click(self):
-        """Send the button event, as a mouse click does."""
-        if not self.IsEnabled():
+        """Send the button event, as a mouse click does (not while disabled or blocked)."""
+        if not self.usable():
             return
         evt = wx.CommandEvent(wx.wxEVT_BUTTON, self.GetId())
         evt.SetEventObject(self)
@@ -237,7 +283,7 @@ class Button(wx.Control):
 
     def _left_down(self, evt):
         """Pressed: draw it pressed and capture the mouse, so the release is seen even outside the button."""
-        if self.IsEnabled():
+        if self.usable():
             self._set(down=True)
             self.SetFocus()
             if not self.HasCapture():
@@ -263,7 +309,7 @@ class Button(wx.Control):
     def _colours(self):
         """(gradient top, gradient bottom, border, text) for the button's kind and state (disabled, pressed,
         hover, normal)."""
-        p, on = _current, self.IsEnabled()
+        p, on = _current, self.usable()
         if self.kind == "primary":
             if not on:
                 return ("#2a3a45", "#2a3a45", "#2a3a45", "#6b7a86") if p.dark else \
