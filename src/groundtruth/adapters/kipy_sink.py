@@ -139,6 +139,53 @@ def _polygon(rings: list[list[tuple[float, float]]], layer, filled: bool = False
     return poly
 
 
+def _doc_field(editor: Any, number: int) -> bytes:
+    """The editor's document as an `ItemHeader` field number `number`, protobuf wire bytes (tag, length, message).
+    kicad-python 0.8.0's BeginCommit and EndCommit have no such field; KiCad's newer API gives them one (BeginCommit
+    `header = 1`, EndCommit `header = 4`) and refuses a commit without it while more than one editor is open
+    ("BeginCommit without a document specified is not allowed when multiple editors are open", the user,
+    2026-11-01). Merged into the message as wire bytes, protobuf keeps it as an unknown field when the message is
+    sent; a KiCad that does not know the field ignores it."""
+    from kipy.proto.common.types import ItemHeader
+    header = ItemHeader()
+    header.document.CopyFrom(editor.document)
+    body = header.SerializeToString()
+    size, length = len(body), b""
+    while True:                         # the length as a protobuf varint (7 bits a byte, low first)
+        byte = size & 0x7F
+        size >>= 7
+        length += bytes([byte | (0x80 if size else 0)])
+        if not size:
+            break
+    return bytes([(number << 3) | 2]) + length + body
+
+
+def begin_commit(editor: Any) -> Any:
+    """editor.begin_commit() (a board or a schematic), naming the editor's document (see _doc_field). An editor
+    without kipy's connection (a stand-in for KiCad's board in the tests) uses its own."""
+    if not hasattr(editor, "_kicad"):
+        return editor.begin_commit()
+    from kipy.common_types import Commit
+    from kipy.proto.common.commands.editor_commands_pb2 import BeginCommit, BeginCommitResponse
+    command = BeginCommit()
+    command.MergeFromString(_doc_field(editor, 1))
+    return Commit(editor._kicad.send(command, BeginCommitResponse).id)
+
+
+def end_commit(editor: Any, commit: Any, message: str = "", drop: bool = False) -> None:
+    """editor.push_commit(commit, message), or drop_commit(commit) with `drop`, naming the document (_doc_field)."""
+    if not hasattr(editor, "_kicad"):
+        return editor.drop_commit(commit) if drop else editor.push_commit(commit, message)
+    from kipy.proto.common.commands.editor_commands_pb2 import CommitAction, EndCommit, EndCommitResponse
+    command = EndCommit()
+    command.id.CopyFrom(commit.id)
+    command.action = CommitAction.CMA_DROP if drop else CommitAction.CMA_COMMIT
+    if not drop:
+        command.message = message
+    command.MergeFromString(_doc_field(editor, 4))
+    editor._kicad.send(command, EndCommitResponse)
+
+
 def _commit_group(board: Any, items: list, name: str, message: str) -> int:
     """Create the items, then group them under `name` so 'Clear GT markers' finds them.
 
@@ -149,12 +196,12 @@ def _commit_group(board: Any, items: list, name: str, message: str) -> int:
     if not items:
         return 0
     from kipy.board_types import Group
-    commit = board.begin_commit()
+    commit = begin_commit(board)
     try:
         created = board.create_items(items)
-        board.push_commit(commit, message)
+        end_commit(board, commit, message)
     except Exception:
-        board.drop_commit(commit)
+        end_commit(board, commit, drop=True)
         raise
 
     def group_them():
@@ -162,12 +209,12 @@ def _commit_group(board: Any, items: list, name: str, message: str) -> int:
         group = Group()
         group.proto.name = name
         group.items = created
-        c = board.begin_commit()
+        c = begin_commit(board)
         try:
             board.create_items(group)
-            board.push_commit(c, f"{message} (group)")
+            end_commit(board, c, f"{message} (group)")
         except Exception:
-            board.drop_commit(c)
+            end_commit(board, c, drop=True)
             raise
     when_ready(group_them)
     if not any(g.name == name for g in board.get_groups()):
@@ -221,14 +268,14 @@ def clear(board: Any, prefix: str = GROUP_PREFIX) -> int:
     if not groups:
         return 0
     ids = [i for g in groups for i in g.proto.items]
-    commit = board.begin_commit()
+    commit = begin_commit(board)
     try:
         if ids:
             board.remove_items_by_id(ids)
         board.remove_items(groups)
-        board.push_commit(commit, "groundtruth: clear drawings")
+        end_commit(board, commit, "groundtruth: clear drawings")
     except Exception:
-        board.drop_commit(commit)
+        end_commit(board, commit, drop=True)
         raise
     return len(ids)
 
@@ -424,12 +471,12 @@ def place_vias(board: Any, mods) -> int:
         items.append(Via(proto=raw))
     if not items:
         return 0
-    commit = board.begin_commit()
+    commit = begin_commit(board)
     try:
         created = board.create_items(items)
-        board.push_commit(commit, f"groundtruth: add {len(items)} stitching via(s)")
+        end_commit(board, commit, f"groundtruth: add {len(items)} stitching via(s)")
     except Exception:
-        board.drop_commit(commit)
+        end_commit(board, commit, drop=True)
         raise
     return len(created)
 
@@ -563,9 +610,9 @@ def write_symbol_labels(kicad_board: Any, labels: dict[str, str]) -> list[str]:
             changed.append(sym)
             done.add(ref)
         if changed:
-            commit = sch.begin_commit()
+            commit = begin_commit(sch)
             sch.update_items(changed)
-            sch.push_commit(commit, "GroundTruth: GT labels for a signal path")
+            end_commit(sch, commit, "GroundTruth: GT labels for a signal path")
     except ApiError as e:                       # "no handler": KiCad 10 serves no schematic requests
         raise SchematicApiUnavailable(f"KiCad did not accept the schematic request ({e})") from e
     return sorted(done)
