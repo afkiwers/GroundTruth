@@ -1190,7 +1190,11 @@ Simulate, it says so and asks for a Simulate instead of heating the design as it
 </ul>
 <p><b>Current capacity</b> (Results tab) finds, per converter, the load current, and per bridge, the phase
 current, at which the hottest copper or part junction reaches the limit (<code>thermal.capacity_c</code>, by default
-<code>max_c</code>), the others at their operating points. The thermal settings: ambient temperature,
+<code>max_c</code>; <a href="#prefs">Preferences</a>, Capacity limit, sets one for this computer), the others at their
+operating points. When the other stages at their operating points already put a spot over the limit with this one
+at no load, its capacity reads <b>blocked</b> and names the stage whose part is too hot (for example "buck conv1 at
+its operating point already puts copper at Q301 at 143.7 °C"): fix that stage's heat first; its own capacity view
+shows it below its operating point. The thermal settings: ambient temperature,
 orientation, natural or forced convection (air speed), the warning and maximum temperatures, and the parts'
 junction-to-board resistances (<code>theta_jb</code>). The thermal mesh is the settings' <code>thermal.quality</code>
 (draft, normal, fine) unless <a href="#prefs">Preferences</a> sets one for this computer. Both run in the
@@ -1425,6 +1429,9 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   how many rounds at most (1 to 10) and the change at which it counts as settled (0.5, 1, 2 or 5 %). <i>From the
   settings file</i> keeps <code>thermal.electrothermal</code>, <code>electrothermal_rounds</code> (3) and
   <code>electrothermal_tolerance</code> (1 %).</td></tr>
+<tr><td valign="top"><b>Thermal: Capacity limit</b></td><td>the temperature Current capacity searches for (85,
+  100, 105, 110, 125 or 150 °C): the hottest copper or part junction. <i>From the settings file</i> keeps
+  <code>thermal.capacity_c</code>, else <code>thermal.max_c</code> (105 °C).</td></tr>
 <tr><td valign="top"><b>Via markers</b>, <b>Vias shown</b></td><td>whether the maps mark the vias carrying the
   current, and how many at most (All, 5, 10, 20, 50, the busiest first; greyed while Via markers is unticked; see
   <a href="#results">Results</a>).</td></tr>

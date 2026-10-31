@@ -25,6 +25,9 @@ QUALITY = (FROM_FILE, "draft", "normal", "fine")
 ELECTROTHERMAL = (FROM_FILE, "off", "on")
 ET_ROUNDS = (FROM_FILE,) + tuple(str(n) for n in range(1, 11))
 ET_TOLERANCE = (FROM_FILE, "0.5 %", "1 %", "2 %", "5 %")
+# Current capacity's temperature limit (thermal.capacity_c, by default thermal.max_c) for this computer (the user:
+# "expose the thermal capacity limit as setting under preferences")
+CAPACITY_LIMIT = (FROM_FILE, "85 °C", "100 °C", "105 °C", "110 °C", "125 °C", "150 °C")
 # Run checks' checks the user can switch off (the user: "expose the settings ... under Preferences. Make sure the user
 # can enable/disable each of the settings as needed; default enabled"): (ui.json key, label, the check ids it covers
 # (core/issues.CHECKS), tooltip). Off: their issues are left out of Run checks and Simulate (Config.checks_off).
@@ -186,6 +189,22 @@ def with_checks(cfg, prefs: dict):
     return replace(cfg, checks_off=off, safety=replace(cfg.safety, esd_mm=esd, solder_mask=mask))
 
 
+def thermal_overrides(p: dict) -> dict:
+    """The thermal settings Preferences set for this computer (`p`: defaults()), as Config.thermal fields: the
+    electro-thermal coupling, its rounds and tolerance, Current capacity's limit; those "From the settings file"
+    are left out."""
+    out = {}
+    if p["electrothermal"] != FROM_FILE:
+        out["electrothermal"] = p["electrothermal"] == "on"
+    if p["et_rounds"] != FROM_FILE:
+        out["electrothermal_rounds"] = int(p["et_rounds"])
+    if p["et_tolerance"] != FROM_FILE:
+        out["electrothermal_tolerance"] = float(p["et_tolerance"].rstrip(" %")) / 100.0
+    if p["capacity_limit"] != FROM_FILE:
+        out["capacity_c"] = float(p["capacity_limit"].split()[0])        # "125 °C"
+    return out
+
+
 def defaults(prefs: dict) -> dict:
     """The preferences with their defaults filled in."""
     from ..analysis.simulate import RESOLUTIONS
@@ -200,6 +219,8 @@ def defaults(prefs: dict) -> dict:
             else FROM_FILE,
             "et_rounds": prefs.get("et_rounds") if prefs.get("et_rounds") in ET_ROUNDS else FROM_FILE,
             "et_tolerance": prefs.get("et_tolerance") if prefs.get("et_tolerance") in ET_TOLERANCE else FROM_FILE,
+            "capacity_limit": prefs.get("capacity_limit") if prefs.get("capacity_limit") in CAPACITY_LIMIT
+            else FROM_FILE,
             "via_markers": bool(prefs.get("via_markers", True)),
             "max_vias": vias if isinstance(vias, int) and vias > 0 else None,
             "outlines": bool(prefs.get("outlines", False)),
@@ -586,6 +607,11 @@ class PreferencesDialog(wx.Dialog):
         row(therm, "Settled within", self.et_tolerance,
             "settled when no path's loss and no via's current (of its path's) moved more than this in a round. From "
             "the settings file: its thermal.electrothermal_tolerance (1 %).")
+        self.capacity_limit = wx.Choice(self, choices=list(CAPACITY_LIMIT))
+        self.capacity_limit.SetStringSelection(p["capacity_limit"])
+        row(therm, "Capacity limit", self.capacity_limit,
+            "Current capacity: the load current at which the hottest copper or part junction reaches this "
+            "temperature. From the settings file: its thermal.capacity_c, else its thermal.max_c (105 °C).")
 
         maps = group("Heatmaps", "right")
         self.via_markers = wx.CheckBox(self, label="Mark the vias carrying the current (▲)")
@@ -775,6 +801,7 @@ class PreferencesDialog(wx.Dialog):
                 "electrothermal": self.electrothermal.GetStringSelection(),
                 "et_rounds": self.et_rounds.GetStringSelection(),
                 "et_tolerance": self.et_tolerance.GetStringSelection(),
+                "capacity_limit": self.capacity_limit.GetStringSelection(),
                 "author": self.author.GetValue().strip(),
                 "company": self.company.GetValue().strip(),
                 "history": self.history.GetValue(),

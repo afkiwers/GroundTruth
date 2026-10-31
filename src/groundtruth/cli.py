@@ -685,7 +685,7 @@ def _thermal_text(th) -> str:
 def _capacity_text(views) -> str:
     """The current-capacity results for the text report: per stage the current at the temperature limit, as a
     share of its operating point, and what limits it."""
-    from .analysis.thermal import capacity_text
+    from .analysis.thermal import capacity_text, zero_text
     c0 = views[0].capacity
     lines = [f"current capacity (the hottest copper or part junction at {c0['limit_c']:g} °C, "
              f"{views[0].ambient_c:g} °C ambient; one stage scaled, the others at their operating points, or all "
@@ -695,10 +695,10 @@ def _capacity_text(views) -> str:
         on = c["scale"] > 0 and c.get("bound") != "zero"
         if c.get("currents") is not None:
             share = ("of every operating point: " + ", ".join(f"{n} {i:.3g} A" for n, i in c["currents"].items())
-                     if on else "over the limit even without load")
+                     if on else zero_text(c))
         else:
             share = (f"operating point {c['i_nominal']:g} A = {100 / c['scale']:.0f} % of it" if on
-                     else "over the limit even without load")
+                     else zero_text(c))
         lines.append(f"  {c['stage']:24s} {capacity_text(c):>9s}   {share}; limited by {c['limited_by']}")
         lines += [f"    note: {n}" for n in v.notes if n.startswith("the search")]
     notes = [n for n in views[0].notes if not n.startswith("the search")]

@@ -1403,7 +1403,7 @@ def _bridge(board, b, legs, issues, warn, figs) -> str:
 # --------------------------------------------------------------------------------------------- thermal
 def _thermal(board, thermal, capacity, issues, figs) -> str:
     """The thermal part: the copper temperature maps, the hottest parts, and each stage's current capacity."""
-    from ..analysis.thermal import capacity_text
+    from ..analysis.thermal import capacity_text, zero_text
     body = []
     if thermal is not None:
         t = thermal
@@ -1435,8 +1435,9 @@ def _thermal(board, thermal, capacity, issues, figs) -> str:
         rows = []
         for c in capacity:
             cap = c.capacity
+            why = zero_text(cap) if cap.get("blocked_by") else cap.get("limited_by", "")   # blocked: by which stage
             rows.append(f"<tr><td>{e(cap.get('stage', ''))}</td><td class='num'>{e(capacity_text(cap))}</td>"
-                        f"{_num(cap.get('i_nominal'), '{:g} A')}<td>{e(cap.get('limited_by', ''))}</td>"
+                        f"{_num(cap.get('i_nominal'), '{:g} A')}<td>{e(why)}</td>"
                         f"{_num(cap.get('t_hottest'), '{:.1f} °C')}</tr>")
         body.append("<h4>Current capacity</h4>" + _table(
             ["Stage", "#Capacity", "#Operating point", "Limited by", "#Hottest"], rows))

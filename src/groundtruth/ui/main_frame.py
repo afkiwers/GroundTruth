@@ -2101,7 +2101,7 @@ class MainFrame(ConfigActions, wx.Frame):
                           f"then {what}.", "GroundTruth", wx.ICON_INFORMATION)
             return None
         from dataclasses import replace
-        from .prefs_dialog import FROM_FILE, defaults
+        from .prefs_dialog import FROM_FILE, defaults, thermal_overrides
         # the thermal section as the settings have it now (ambient, convection, limits: edited after the Simulate,
         # they were ignored), the DC paths and losses as simulated (unchanged: _stale_reason above)
         if self.settings is not None:
@@ -2109,14 +2109,9 @@ class MainFrame(ConfigActions, wx.Frame):
         p = defaults(theme.prefs())
         if p["thermal_quality"] != FROM_FILE:
             cfg = replace(cfg, thermal=replace(cfg.thermal, quality=p["thermal_quality"]))
-        # the electro-thermal coupling as Preferences set it for this computer, else as the settings file has it
-        et = {}
-        if p["electrothermal"] != FROM_FILE:
-            et["electrothermal"] = p["electrothermal"] == "on"
-        if p["et_rounds"] != FROM_FILE:
-            et["electrothermal_rounds"] = int(p["et_rounds"])
-        if p["et_tolerance"] != FROM_FILE:
-            et["electrothermal_tolerance"] = float(p["et_tolerance"].rstrip(" %")) / 100.0
+        # the electro-thermal coupling and the capacity limit as Preferences set them for this computer, else as the
+        # settings file has them
+        et = thermal_overrides(p)
         if et:
             cfg = replace(cfg, thermal=replace(cfg.thermal, **et))
         return stages, board, cfg
