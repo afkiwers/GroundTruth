@@ -32,6 +32,17 @@ Six values per part, each one falling back on its own (`params_for`), from the m
              chip-scale GaN FET, whose die spreads it over its bars). Built in: "tab" for a side with a pad at least
              simulate.TAB_MM wide, else "even" (simulate.switch_lids). Added 2026-10-25 (the user: "I won't always
              use GANs").
+    metal    any lumped part: where its element (a FET's die, a winding, a resistive film) joins its terminal metal,
+             per terminal a rectangle W x H mm in the footprint's own frame (turned with it), centred on the
+             terminal's pads (on its largest pad when that holds at least half of their area: a tab), optionally
+             moved by @dx/dy mm. In a GT field as words of their own, D=5x4, S=1x2@0.3/0 (the terminal by its
+             schematic pin name or its pad number); in the settings as one value, metal: D=5x4 S=1x2. Built in: the
+             whole terminal (the even entry of [A70], a FET's die over its whole tab [A68]). It matters where the
+             terminal is a resistive sheet (its Terminal Sheet Resistance [A70]): the current then enters and leaves
+             the sheet inside the rectangle only, and spreads in the sheet and the copper under it to the rest [A78].
+             Without a sheet the terminal is a perfect plate: where the current enters it makes no difference, and a
+             FET's die smaller than its tab stands on that plate. Added 2026-11-01 (the user: "Have a GT field for
+             the dimensions of the pads, like S=1x2, D=5x0.5 G=0.3x0.3 or so").
 
 A plated hole's inner layers are always joined to its plating (made with the board): solder only joins the pin to
 the plating. So a partly filled hole does not cut a layer off: it takes the pin's thick conductor out of part of the
@@ -54,7 +65,7 @@ import numpy as np
 from ..solver.kernel import filament_mutual
 from ..solver.peec import SIGMA_CU, VIA_PLATING
 
-KEYS = ("pin", "pin_d", "pin_r", "fill", "joint", "contact", "bond", "entry")
+KEYS = ("pin", "pin_d", "pin_r", "fill", "joint", "contact", "bond", "entry", "metal")
 # resistivity at 20 °C, Ω·m: copper 100 % IACS [IEC 60028]; brass C26000 ~28 %; phosphor bronze C51000 ~15 %;
 # beryllium copper C17200 ~22 %; tellurium copper C14500 ~93 % (the alloys' conductivities [CDA])
 MATERIALS = {"copper": 1.72e-8, "brass": 6.2e-8, "bronze": 1.15e-7, "becu": 7.8e-8, "tellurium": 1.85e-8}
@@ -64,7 +75,13 @@ SOLDER_RHO = 1.3e-7             # SAC305 (~13 % IACS), Ω·m: the solder between
 PIN_CLEARANCE_MM = 0.25         # a lead's diameter is the hole's less this (a usual lead-to-hole clearance [A18])
 NOTE_A = 3.0                    # a connector pin carrying this much without a contact value gets a note
 SOURCES = ("GT field", "part setting", "board default", "built in")
-WORD = re.compile(r"^(pin_d|pin_r|pin|fill|joint|contact|bond|entry)\s*[:=]\s*(.+)$", re.I)
+WORD = re.compile(r"^(pin_d|pin_r|pin|fill|joint|contact|bond|entry|metal)\s*[:=]\s*(.+)$", re.I)
+# a terminal's metal rectangle: NAME=WxH (mm) with an optional @dx/dy offset (mm); NAME a pin name or a pad number.
+# Several may follow each other in one word (a GT field's words lose their spaces: "D=5x4G=0.3x0.3")
+_NUM = r"\d*\.?\d+"
+METAL = re.compile(rf"([A-Za-z_][\w+\-]*?|\d+)\s*=\s*({_NUM})\s*[x×*]\s*({_NUM})\s*(?:mm)?"
+                   rf"(?:\s*@\s*(-?{_NUM})\s*/\s*(-?{_NUM}))?")
+METAL_WORDS = re.compile(rf"^(?:\s*(?:{METAL.pattern})\s*)+$")
 ENTRIES = ("tab", "even")        # a power-stage switch's pads: soldered to one metal per side, or fed evenly [A65]
 
 
@@ -102,6 +119,8 @@ def parse_value(key: str, text) -> tuple[Optional[object], str]:
     if key == "entry":
         e = s.lower()
         return (e, "") if e in ENTRIES else (None, f"entry: {s!r} is not tab or even")
+    if key == "metal":
+        return parse_metal(s)
     if key == "bond":
         try:
             t = float(re.sub(r"(?i)\s*(µm|um)$", "", s))
@@ -116,11 +135,39 @@ def parse_value(key: str, text) -> tuple[Optional[object], str]:
     return value, ""
 
 
+def parse_metal(text: str) -> tuple[Optional[tuple], str]:
+    """A `metal` value: its rectangles as ((name, w, h, dx, dy), ...) sorted by name (mm), or (None, why not)."""
+    t = str(text).strip()
+    if not t or not all(METAL_WORDS.match(w) for w in re.split(r"[\s,]+", t) if w):
+        return None, f"metal: {t!r} is not W x H per terminal in mm, e.g. D=5x4 S=1x2 (@dx/dy to move one)"
+    out = {}
+    for m in METAL.finditer(t):
+        name, w, h = m.group(1), float(m.group(2)), float(m.group(3))
+        if w <= 0 or h <= 0:
+            return None, f"metal: {name}={m.group(2)}x{m.group(3)} must be larger than 0"
+        out[name] = (name, w, h, float(m.group(4) or 0.0), float(m.group(5) or 0.0))
+    return tuple(out[k] for k in sorted(out)), ""
+
+
+def format_metal(rects) -> str:
+    """A `metal` value as written (read back by parse_metal): "D=5x4 S=1x2@0.3/0"."""
+    return " ".join(f"{n}={w:g}x{h:g}" + (f"@{dx:g}/{dy:g}" if dx or dy else "") for n, w, h, dx, dy in rects)
+
+
 def parse_words(text: str) -> tuple[dict, list[str]]:
     """The pin values in a GT field's (or a settings line's) text, e.g. "conv_in, contact:0.5m, fill:75": ({key:
-    value}, problems). Words that are not pin values (the field's labels) are left alone."""
+    value}, problems). Words that are not pin values (the field's labels) are left alone. A terminal's metal is a
+    word of its own (D=5x4) or several (S=1x2, D=5x4): they add up to one `metal` value."""
     values, problems = {}, []
+    metal = {}
     for raw in re.split(r"[,;]", text or ""):
+        if METAL_WORDS.match(raw.strip()):
+            rects, why = parse_metal(raw)
+            if rects is None:
+                problems.append(why)
+            else:
+                metal.update({r[0]: r for r in rects})
+            continue
         m = WORD.match(raw.strip())
         if not m:
             continue
@@ -128,14 +175,18 @@ def parse_words(text: str) -> tuple[dict, list[str]]:
         value, why = parse_value(key, m.group(2))
         if value is None:
             problems.append(why)
+        elif key == "metal":
+            metal.update({r[0]: r for r in value})
         else:
             values[key] = value
+    if metal:
+        values["metal"] = tuple(metal[k] for k in sorted(metal))
     return values, problems
 
 
 def is_pin_word(word: str) -> bool:
-    """Whether a GT field's word is a pin value (contact:0.5m), not a label."""
-    return bool(WORD.match(word.strip()))
+    """Whether a GT field's word is a pin value (contact:0.5m, D=5x4), not a label."""
+    return bool(WORD.match(word.strip()) or METAL_WORDS.match(word.strip()))
 
 
 def values_from_data(data, where: str) -> tuple[dict, list[str]]:
@@ -168,6 +219,8 @@ def format_value(key: str, value) -> str:
     from ..components.values import format_si
     if key in ("pin", "entry"):
         return str(value)
+    if key == "metal":
+        return format_metal(value)
     if key == "fill":
         return f"{value * 100:g}"
     if key in ("pin_d", "bond"):
@@ -197,6 +250,8 @@ class PinParams:
     bond: Optional[float] = None        # µm of solder between any lumped part's pads and its metal (None: built in)
     entry: Optional[str] = None         # a stage switch's pads: "tab" (one soldered metal per side), "even" (spread
                                         # evenly over its pins, a chip-scale die), None: by the pads' size (TAB_MM)
+    metal: tuple = ()                   # ((terminal, w mm, h mm, dx mm, dy mm), ...): where the part's element joins
+                                        # each terminal's metal (simulate.terminal_rect [A78]); (): the whole terminal
     source: dict = field(default_factory=dict, compare=False, hash=False)   # key -> one of SOURCES
 
     @property
@@ -221,8 +276,11 @@ class PinParams:
             v = getattr(self, k)
             if v is None or not self.given(k):
                 continue
-            text = {"fill": f"{v * 100:g} %", "pin_d": f"{v:g} mm", "pin": str(v),
-                    "bond": f"{v:g} µm of solder", "entry": f"{v} pads"}.get(k, f"{v * 1e3:g} mΩ")
+            if k == "metal":
+                text = format_metal(v) + " mm"
+            else:
+                text = {"fill": f"{v * 100:g} %", "pin_d": f"{v:g} mm", "pin": str(v),
+                        "bond": f"{v:g} µm of solder", "entry": f"{v} pads"}.get(k, f"{v * 1e3:g} mΩ")
             out.append(f"{k} {text} ({self.source[k]})")
         return ", ".join(out) or "built in (copper filling the hole, a perfect joint, no contact resistance)"
 
@@ -232,6 +290,23 @@ def gt_values(fp) -> tuple[dict, list[str]]:
     from .tags import tag_text
     values, problems = parse_words(tag_text(fp))
     return values, [f"{fp.reference}: GT {p}" for p in problems]
+
+
+def terminal_pads(fp, name: str) -> list:
+    """A part's pads that a `metal` rectangle's terminal name means: those numbered `name`, or whose schematic pin
+    name is `name` (case ignored: D, S, G on a FET whose pins are named so)."""
+    n = name.strip().lower()
+    return [p for p in fp.pads if str(p.number).lower() == n or (p.pin_function or "").strip().lower() == n]
+
+
+def metal_problems(fp, metal) -> list[str]:
+    """The `metal` rectangles of a part that name none of its pads (by number or pin name)."""
+    out = []
+    for name, *_ in metal or ():
+        if not terminal_pads(fp, name):
+            pins = sorted({f"{p.number} {p.pin_function}".strip() for p in fp.pads})
+            out.append(f"{fp.reference}: GT {name}=…: no pad numbered or named {name} (its pads: {', '.join(pins)})")
+    return out
 
 
 def params_for(board, config, ref: str) -> PinParams:

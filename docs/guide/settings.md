@@ -151,6 +151,14 @@ the current enters the board where the solder ends), `pin` (`hole`, `copper`, `b
 to a DC load's drop and I²·R of heat in Thermal at the fed pins (DC loads, converters' connectors); a connector pin
 carrying 3 A or more without a contact value gets a note.
 
+Two more values apply to any part with a model, SMD too: `bond` (µm of solder between its pads and its metal) and
+`metal`, where the part's element (a FET's die, a winding, a resistive film) joins each terminal's metal: per
+terminal a rectangle W x H in mm in the footprint's own frame, named by its pin name or pad number, centred on that
+terminal's pads (on its largest pad when that is a tab), `@dx/dy` to move it: `tht: {metal: D=4x3.5 S=1x2}`, or in
+the GT field as words of their own, `GT = S=1x2, D=4x3.5`. Without it, the whole terminal. It changes the result
+only where the terminal is a resistive sheet (its `Terminal Sheet Resistance` field): the current then enters and
+leaves the sheet inside the rectangle, so it crowds under a die smaller than its tab.
+
 ## Checks and severities
 
 Every issue has one of these checks. The default severity is the one listed; where two are given, the threshold

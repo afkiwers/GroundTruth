@@ -38,6 +38,10 @@ the [README](../../README.md); how the fields are read in detail: [the settings 
 | `Terminal Sheet Resistance` | inductor, capacitor, resistor, ferrite, FET, diode | Ω per square | `0.77mΩ` | the part's terminal metal over its pads: how a pad's current is shared between the board copper and the terminal (without it, or `0`: a perfect conductor, the pad dark with a sharp rim) | DC loads, Thermal |
 | `Terminal Metal` | inductor, capacitor, resistor, ferrite, FET, diode | thickness and material | `0.15mm bronze` | the same terminal as thickness and material (copper, brass, bronze, becu, tellurium); `Terminal Sheet Resistance` wins when both are given | DC loads, Thermal |
 
+Where on its terminal a part's element sits (a FET's die smaller than its drain tab) is not a field of its own but a
+pin value in the `GT` field, one rectangle per terminal in mm: `GT = D=4x3.5, S=1x2` (the terminal by its pin name or
+pad number; see [settings](settings.md), Through-hole pins).
+
 ### The control loop (a controller's fields)
 
 On the switching controller's symbol; the Results tab's loop view of a buck or boost stage reads them.

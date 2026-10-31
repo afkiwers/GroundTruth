@@ -414,3 +414,102 @@ def test_the_terminal_current_shown_with_the_copper_is_the_whole_lateral_current
     assert vx[i, j] == pytest.approx(2 * rr.sheet_vectors["F.Cu"][0][i, j], rel=0.05)    # the arrows too
     assert shown.terminals_shown and rr.sheet_current is maps                            # the copper's own untouched
     assert with_terminals(SimpleNamespace(sheet_current=maps, terminal_vectors={})).sheet_current is maps
+
+
+def _die_profile(tmp_path, name, metal, gt):
+    """boardgen.fet_tab_board's Q1 (a 6.5 mΩ FET, its drain tab x 14-24 mm, 2.1 mm wide) with its Terminal Sheet
+    Resistance `metal` and GT field `gt`, soldered perfectly: the copper's density along the tab (y 8) over the
+    strip's before it (x 9) with 1 A from U1 to U2, as a function of u (mm from the tab's left edge); and the model."""
+    from boardgen import fet_tab_board
+    from conftest import make
+    from groundtruth.analysis import simulate
+    from groundtruth.analysis.power import _area_shares, dc_path
+    from groundtruth.components.models import ComponentModel
+    g = fet_tab_board(metal)
+    if gt:
+        g.fields("Q1", GT=gt)
+    board, sc, _ = make(tmp_path, g, name, nets=())
+    sc.set_component("Q1", ComponentModel("resistor", {"R": 6.5e-3}))
+    sc.set_component_pins("Q1", {"bond": 0.0})
+    st = simulate.BoardModel(board, sc.config).build((2.0, 4.0, 32.0, 12.0), ["F.Cu"], {"PWR", "OUT"}, 0.1, False)
+    inj = _area_shares(st, [board.find_pin("U1.1")], "F.Cu", 1.0) + \
+        _area_shares(st, [board.find_pin("U2.1")], "F.Cu", -1.0)
+    maps = dc_path(st, inj, 1.0, "fet")[1]["F.Cu"]
+    grid = st.grids[0]
+    at = lambda x: float(maps[int(round((x - grid.x0) / grid.d)), int(round((8.0 - grid.y0) / grid.d))])   # noqa: E731
+    return (lambda u: at(14.0 + u) / at(9.0)), st
+
+
+def test_a_die_smaller_than_its_tab_takes_the_current_only_under_it(tmp_path):
+    """The part's `metal` pin value [A78] (GT 1=5x2.1@2.5/0: the die over the far half of Q1's 10 mm drain tab, pad 1),
+    the tab a sheet equal to the copper, soldered perfectly. Over the first half nothing leaves: the copper and the
+    tab share the lateral current as two equal sheets, the copper carries half. Over the die, Berger's
+    transmission-line contact [Berger 1972] of length L/2 with r_c = R·A_die and the sheet R_cu ∥ R_tab:
+    I_cu(u) = ½·sinh((L−u)/λ')/sinh((L/2)/λ'), λ' = √(r_c / (R_cu/2)). The die's branches stand on the nodes
+    inside it only; without a sheet the tab is a perfect plate and takes it all at the edge the copper reaches."""
+    r_cu, r_fet, L, w = _r_sheet_cu(), 6.5e-3, 10.0, 2.1
+    cu, st = _die_profile(tmp_path, "half", f"{r_cu}ohm", "1=5x2.1@2.5/0")
+    die = [b for b in st.branches if b.name == "Q1" and b.kind == "part"]
+    xs = [st.xy(b.a)[0] for b in die]
+    assert min(xs) >= 19.0 - 1e-6 and max(xs) <= 24.0 and 900 < len(die) < 1200       # 5 × 2.1 mm at 0.1 mm
+    for u in (1.05, 2.55, 4.05):
+        assert cu(u) == pytest.approx(0.5, abs=0.02), u
+    lam = math.sqrt(r_fet * (L / 2) * w * 1e-6 / (r_cu / 2)) * 1e3                    # mm
+    for u in (6.05, 7.55, 9.05):
+        expect = 0.5 * math.sinh((L - u) / lam) / math.sinh((L / 2) / lam)
+        assert cu(u) == pytest.approx(expect, abs=0.025), u
+    plate, pst = _die_profile(tmp_path, "plate", None, "1=5x2.1@2.5/0")
+    assert len([b for b in pst.branches if b.name == "Q1" and b.kind == "part"]) == 1   # the die on the plate
+    assert plate(2.55) < 0.05
+
+
+def test_a_fed_tab_takes_its_current_inside_its_metal_rectangle(tmp_path):
+    """switch_lids / part_lid's `fed` with a `metal` rectangle [A78]: the stage's current enters the tab's sheet only
+    at the terminal nodes inside it (st.side_spread), the lid among them; the whole tab is still soldered and a
+    sheet. A rectangle smaller than a cell takes the node nearest its centre."""
+    from groundtruth.analysis.simulate import part_lid, terminal_rect
+    board, st = _buck(tmp_path, "rect", fields={"Terminal Sheet Resistance": "0.1mOhm"})
+    every = st.side_spread[("Q1", "VIN")]
+    fp = board.footprint("Q1")
+    drain = [p for p in fp.pads if p.net == "VIN"]
+    name = drain[0].number
+    rect = terminal_rect(fp, drain, ((name, 0.6, 0.6, 0.0, 0.0),))
+    assert rect is not None and rect.area == pytest.approx(0.36)
+    assert terminal_rect(fp, drain, (("X", 1.0, 1.0, 0.0, 0.0),)) is None             # names no pad of this side
+    lid, bonds = part_lid(st, drain, "Q1", 0.3, None, 1e-4, fed=True, rect=rect)
+    inside = st.side_spread[("Q1", "VIN")]
+    assert 9 <= len(inside) <= 64 and len(inside) < len(every) and lid in inside
+    tiny = terminal_rect(fp, drain, ((name, 0.01, 0.01, 0.0, 0.0),))
+    part_lid(st, drain, "Q1", 0.3, None, 1e-4, fed=True, rect=tiny)
+    assert len(st.side_spread[("Q1", "VIN")]) == 1
+
+
+def test_a_metal_rectangle_turns_with_its_footprint_and_reads_from_the_gt_field():
+    """terminal_rect: W x H in the footprint's own frame, turned with it (a part at 90°: H along x), its @dx/dy
+    turned too; the GT field's words (the user's own S=1x2, D=5x0.5 G=0.3x0.3) are pin values, not labels, and
+    a name that is no pad of the part is a problem."""
+    from types import SimpleNamespace as N
+    from groundtruth.analysis.pins import format_values, metal_problems, parse_words, values_from_data
+    from groundtruth.analysis.simulate import terminal_rect
+    from groundtruth.analysis.tags import parse
+    pad = N(number="3", pin_function="D", position=(10.0, 20.0), size=(6.0, 6.0), angle=0.0, shape="rect",
+            polygon=None, roundrect_ratio=0.0)
+    for angle, span in ((0.0, (4.0, 2.0)), (90.0, (2.0, 4.0))):
+        fp = N(angle=angle, pads=[pad])
+        r = terminal_rect(fp, [pad], (("D", 4.0, 2.0, 1.0, 0.0),))
+        x0, y0, x1, y1 = r.bounds
+        assert (x1 - x0, y1 - y0) == pytest.approx(span)
+        assert r.centroid.x == pytest.approx(11.0 if angle == 0 else 10.0)
+        assert r.centroid.y == pytest.approx(20.0 if angle == 0 else 19.0)               # KiCad: +90° turns x to -y
+    values, problems = parse_words("conv1_hs, S=1x2, D=5x0.5 G=0.3x0.3, contact:0.5m")
+    assert not problems and values["metal"] == (("D", 5.0, 0.5, 0.0, 0.0), ("G", 0.3, 0.3, 0.0, 0.0),
+                                                ("S", 1.0, 2.0, 0.0, 0.0))
+    tags, _, tag_problems = parse("conv1_hs, S=1x2, D=5x0.5 G=0.3x0.3", "Q1")
+    assert [t.role for t in tags] == ["hs"] and not tag_problems
+    line = format_values(values)
+    assert parse_words(line)[0] == values and "metal:D=5x0.5 G=0.3x0.3 S=1x2" in line
+    assert values_from_data({"metal": "D=5x4@0.3/-0.2"}, "Q1")[0]["metal"] == (("D", 5.0, 4.0, 0.3, -0.2),)
+    assert parse_words("D=0x4")[1] and values_from_data({"metal": "five"}, "Q1")[1]
+    fp = N(reference="Q1", pads=[pad])
+    assert metal_problems(fp, (("D", 1, 1, 0, 0), ("3", 1, 1, 0, 0))) == []
+    assert "no pad numbered or named S" in metal_problems(fp, (("S", 1, 1, 0, 0),))[0]

@@ -458,6 +458,8 @@ def _read_tags(board: Board) -> BoardTags:
             continue
         tags, ignore, problems = parse(text, fp.reference)
         out.problems += problems
+        from .pins import gt_values, metal_problems
+        out.problems += metal_problems(fp, gt_values(fp)[0].get("metal", ()))
         if fp.dnp and (tags or ignore):
             continue
         if ignore:
