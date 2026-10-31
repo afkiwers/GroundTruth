@@ -924,10 +924,17 @@ soldered pin is not checked as a via: the pin carries the current between the la
   net highlight. The status line says what was shown, or that its copper is no longer on the board (then Reload
   board and run the checks again).</li>
 <li><b>Waive selected…</b> asks for the reason; an empty reason waives nothing.</li>
-<li><b>Checks…</b> chooses which checks the list shows (with how many issues each has); the others are hidden, not
-  waived, and <b>Draw markers on board</b> leaves them out too. Every issue keeps its number, so a row and its marker
-  on the board still match. The choice is kept on this computer; the line beside the button says how many are
-  hidden.</li>
+<li><b>Show checks</b>, beside the list, has one tick per check in it (with how many issues each has): untick a
+  check to hide its issues, <b>All</b> and <b>None</b> tick or untick them all. Hidden issues are not waived, and
+  <b>Draw markers on board</b> leaves them out too. Every issue keeps its number, so a row and its marker on the
+  board still match. The choice is kept on this computer; the line above the list says how many are hidden.</li>
+<li>Click a column's header to sort by it (▲), again for the other way (▼): <b>Severity</b> puts errors first,
+  <b>Location</b> sorts by x then y, the text columns in natural order (N9 before N10). The numbers stay the issues'
+  own; the order is kept on this computer.</li>
+<li>Every issue zooms to its copper or parts: a voltage spacing to the two nets' copper at the gap, a capacitor's
+  voltage to the part, a power stage's emission to its switches and capacitors (conducted: also the input
+  connector), an interleaved group's (named after its controller) to every phase's, and a DC path's density hotspot
+  or overloaded via, also of the combined view <i>all power stages</i>, to the copper or the via at that spot.</li>
 <li>Opened on a board file, clicking an issue tells in the status line what it is about and where.</li>
 </ul>
 

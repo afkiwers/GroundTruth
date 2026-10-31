@@ -18,13 +18,15 @@ from .background import LatestOnly
 
 # RGB tuples, not wx.Colour: modules are imported in the start-up worker thread (wx objects belong to the GUI thread)
 SEV_STATUS = {"error": "error", "warning": "warn", "info": "accent"}     # theme palette entries
+ISSUE_COLS = ("#", "Severity", "Check", "Net", "Location", "Layer", "Message")   # the Issues tab's columns
 
 
 class IssuesPanel(wx.Panel):
     """The Issues tab: the last run's issues, numbered as their markers on the board, coloured by severity (waived
-    ones muted). Clicking one shows it (in KiCad, live); the buttons draw the markers and waive an issue. "Checks…"
-    hides the checks the user does not want to see (the list and the markers drawn), remembered on this computer
-    (ui.json `issues_hidden`); every issue keeps its number, so the rows shown and the markers still match."""
+    ones muted). Clicking one shows it (in KiCad, live); the buttons draw the markers and waive an issue. The
+    "Show checks" list beside it hides the checks the user does not want to see (the list and the markers drawn),
+    a header click sorts by that column; both remembered on this computer (ui.json `issues_hidden`,
+    `issues_sort`). Every issue keeps its number, so the rows shown and the markers still match."""
 
     def __init__(self, parent, on_show, on_draw, on_waive, live: bool = False):
         """on_show(issue): show the clicked issue on the board (live: in KiCad); live adds the KiCad options."""
@@ -34,9 +36,37 @@ class IssuesPanel(wx.Panel):
         self.hidden: set[str] = set(theme.prefs().get("issues_hidden") or [])
         self.on_show = on_show
         self.list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
-        for i, (c, w) in enumerate([("#", 36), ("Severity", 70), ("Check", 140), ("Net", 150), ("Location", 110),
-                                    ("Layer", 70), ("Message", 600)]):
+        for i, (c, w) in enumerate(zip(ISSUE_COLS, (36, 70, 140, 150, 110, 70, 600))):
             self.list.InsertColumn(i, c, width=w)
+        # a header click sorts by that column, again the other way (the user: "add sorting when clicking on Check,
+        # severity etc."); the rows keep their issue's number, so a row and its marker still match
+        sort = theme.prefs().get("issues_sort") or [0, False]
+        self.sort_col, self.sort_desc = (int(sort[0]), bool(sort[1])) if len(sort) == 2 else (0, False)
+        if not 0 <= self.sort_col < len(ISSUE_COLS):
+            self.sort_col, self.sort_desc = 0, False
+        self.list.Bind(wx.EVT_LIST_COL_CLICK, lambda e: self.sort_by(e.GetColumn()))
+        # the checks to show, ticked on the tab itself (the user: "add a filter where the user can select one or
+        # more of the issues to be displayed. Non selected ones should not be listed"; the Checks… dialog before
+        # was not found): one entry per check in the list, with its count
+        self.check_names: list[str] = []
+        self.checks = wx.CheckListBox(self, size=(self.FromDIP(220), -1))
+        self.checks.SetToolTip("Tick the checks to list (and to draw with Draw markers on board); the others are "
+                               "hidden, not waived. Kept on this computer.")
+        self.checks.Bind(wx.EVT_CHECKLISTBOX, lambda e: self.set_hidden(
+            {c for k, c in enumerate(self.check_names) if not self.checks.IsChecked(k)} |
+            {c for c in self.hidden if c not in self.check_names}))
+        every, none = (theme.Button(self, "All"), theme.Button(self, "None"))
+        every.SetToolTip("List every check")
+        none.SetToolTip("Hide every check (then tick the ones to see)")
+        every.Bind(wx.EVT_BUTTON, lambda e: self.set_hidden(self.hidden - set(self.check_names)))
+        none.Bind(wx.EVT_BUTTON, lambda e: self.set_hidden(self.hidden | set(self.check_names)))
+        side = wx.BoxSizer(wx.VERTICAL)
+        side.Add(wx.StaticText(self, label="Show checks"), 0, wx.BOTTOM, 3)
+        side.Add(self.checks, 1, wx.EXPAND)
+        pick = wx.BoxSizer(wx.HORIZONTAL)
+        pick.Add(every, 0, wx.RIGHT, 4)
+        pick.Add(none, 0)
+        side.Add(pick, 0, wx.TOP, 4)
         self.list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_select)
         self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda e: self.show_selected())   # double-click, Enter
         btns = wx.BoxSizer(wx.HORIZONTAL)
@@ -48,11 +78,6 @@ class IssuesPanel(wx.Panel):
         w = theme.Button(self, "Waive selected…")
         w.Bind(wx.EVT_BUTTON, lambda e: self._waive(on_waive))
         btns.Add(w, 0, wx.RIGHT, 6)
-        f = theme.Button(self, "Checks…")
-        f.SetToolTip("Choose which checks the list shows (and Draw markers on board draws); the others are hidden, "
-                     "not waived, and the choice is kept on this computer")
-        f.Bind(wx.EVT_BUTTON, lambda e: self.choose_checks())
-        btns.Add(f, 0, wx.RIGHT, 6)
         self.shown_label = wx.StaticText(self, label="")
         btns.Add(self.shown_label, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 18)
         show = theme.Button(self, "Show in KiCad")
@@ -76,9 +101,13 @@ class IssuesPanel(wx.Panel):
                          "issues on the board.)"))
         s = wx.BoxSizer(wx.VERTICAL)
         s.Add(btns, 0, wx.ALL, 6)
-        s.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 6)
+        body = wx.BoxSizer(wx.HORIZONTAL)
+        body.Add(side, 0, wx.EXPAND | wx.RIGHT, 6)
+        body.Add(self.list, 1, wx.EXPAND)
+        s.Add(body, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 6)
         s.Add(self.detail, 0, wx.ALL, 6)
         self.SetSizer(s)
+        self._headers()
 
     def show(self, issues):
         """List these issues (in the order the markers are numbered), the hidden checks left out."""
@@ -86,10 +115,53 @@ class IssuesPanel(wx.Panel):
         self.draw_button.block("" if issues else "no issues to draw: Run checks or Simulate found none")
         self._fill()
 
+    def sort_by(self, col: int):
+        """Sort the list by column `col` (a header click); the same column again turns the order round. Kept on
+        this computer (ui.json `issues_sort`)."""
+        self.sort_desc = not self.sort_desc if col == self.sort_col else False
+        self.sort_col = col
+        theme.save_prefs(issues_sort=[self.sort_col, self.sort_desc])
+        self._headers()
+        self._fill()
+
+    def _headers(self):
+        """The column titles, the sorted one with ▲ (ascending) or ▼."""
+        for k, name in enumerate(ISSUE_COLS):
+            item = self.list.GetColumn(k)
+            item.SetText(name + ((" ▼" if self.sort_desc else " ▲") if k == self.sort_col else ""))
+            self.list.SetColumn(k, item)
+
+    def _sort_key(self, row: tuple[int, object]):
+        """A row's place in the sorted column: # by number, Severity by rank (errors first, the first click; waived
+        after the others of their severity), Location by x then y, the text columns in natural order (N9 before
+        N10). Equal rows keep marker order either way (the sort is stable, also reversed)."""
+        from ..core.issues import SEVERITY_RANK
+        from .parts_panel import sort_key
+        k, i = row
+        col = self.sort_col
+        if col == 0:
+            return k
+        if col == 1:
+            return -SEVERITY_RANK.get(i.severity, 0), i.waived
+        if col == 4:
+            return tuple(i.location)
+        return sort_key(str((None, None, i.check, i.net, None, i.layer, i.message)[col] or ""))
+
     def _fill(self):
         """The rows: every issue whose check is not hidden, under its own number (its place in the whole list, as
-        its marker on the board is numbered), and the count of what is shown."""
-        self.rows = [(k, i) for k, i in enumerate(self.issues, 1) if i.check not in self.hidden]
+        its marker on the board is numbered), in the order of the sorted column; the checks' tick list; the count
+        of what is shown."""
+        rows = [(k, i) for k, i in enumerate(self.issues, 1) if i.check not in self.hidden]
+        self.rows = sorted(rows, key=self._sort_key, reverse=self.sort_desc)
+        present = self.checks_present()
+        labels = [f"{c} ({n})" for c, n in present]
+        self.check_names = [c for c, _ in present]
+        # the entries are set again only when they changed: a tick is handled inside the list's own event
+        if [self.checks.GetString(k) for k in range(self.checks.GetCount())] != labels:
+            self.checks.Set(labels)
+        for k, c in enumerate(self.check_names):
+            if self.checks.IsChecked(k) != (c not in self.hidden):
+                self.checks.Check(k, c not in self.hidden)
         self.list.Freeze()
         try:
             self.list.DeleteAllItems()
@@ -119,22 +191,6 @@ class IssuesPanel(wx.Panel):
         self.hidden = set(hidden)
         theme.save_prefs(issues_hidden=sorted(self.hidden))
         self._fill()
-
-    def choose_checks(self):
-        """"Checks…": tick the checks to show. Checks not in this list keep their state (hidden stays hidden)."""
-        present = self.checks_present()
-        if not present:
-            return
-        from ..core.issues import CHECKS
-        names = [f"{c} ({n})  {CHECKS.get(c, ('', ''))[1]}" for c, n in present]
-        with wx.MultiChoiceDialog(self, "Show the issues of these checks (the others are hidden, not waived):",
-                                  "Issues: checks", names) as dlg:
-            dlg.SetSelections([k for k, (c, _) in enumerate(present) if c not in self.hidden])
-            if dlg.ShowModal() != wx.ID_OK:
-                return
-            shown = {present[k][0] for k in dlg.GetSelections()}
-        others = {c for c in self.hidden if c not in dict(present)}
-        self.set_hidden(others | {c for c, _ in present if c not in shown})
 
     def enable_drawing(self, on: bool):
         """Drawing markers needs KiCad and no job running."""
