@@ -552,9 +552,6 @@ class MainFrame(ConfigActions, wx.Frame):
         bar.AddSpacer(12)
         self.t_check = button("Run checks", lambda e: self.run(False))
         self.t_sim = button("Simulate", lambda e: self.run(True), "primary")
-        self.t_thermal = button("Thermal", lambda e: self.on_thermal(),
-                                tip="copper and part temperatures of the power stages from the last Simulate run "
-                                    "(their DC paths and losses heat the board; settings: thermal)")
         self.t_export = button("Export report…", lambda e: self.on_export(),
                                tip="the results shown as one HTML page to share or print: summary, issues, every "
                                    "net, power stage and bridge with its figures, temperatures, fixes")
@@ -621,7 +618,8 @@ class MainFrame(ConfigActions, wx.Frame):
             ("results_panel", "Results", lambda nb: ResultsPanel(nb, self.on_draw_contours, self.on_draw_arrows,
                                                            self.on_sharper, self.on_capacity, in_steps=True,
                                                            on_mark=self.on_map_mark,
-                                                           on_draw_hot_loop=self.on_draw_hot_loop)),
+                                                           on_draw_hot_loop=self.on_draw_hot_loop,
+                                                           on_thermal=self.on_thermal)),
             ("issues_panel", "Issues", lambda nb: IssuesPanel(nb, self.on_issue_selected, self.on_draw_issues,
                                                              self.on_waive, live=session.live)),
             ("fixes", "Fixes", lambda nb: FixesPanel(nb, self.on_suggest, self.on_draw_suggestions,
@@ -1141,7 +1139,7 @@ class MainFrame(ConfigActions, wx.Frame):
     def _enable(self, on: bool, cancellable: bool = False, keep_runs: bool = False):
         """Enable the actions (no job running) or disable them (a job runs; Cancel only if it can be cancelled).
         keep_runs: a board load runs; Run checks, Simulate and Thermal stay enabled (a click waits for it)."""
-        runs = (self.t_check, self.t_sim, self.t_thermal)
+        runs = (self.t_check, self.t_sim)
         for b in (self.t_reload, self.t_refill, *runs, self.t_clear):
             if b is not None:
                 b.Enable(on or (keep_runs and b in runs))
@@ -1176,11 +1174,9 @@ class MainFrame(ConfigActions, wx.Frame):
                 b.hold(why)
 
     def _block_run_actions(self):
-        """The top bar's actions that work from a run's results greyed out, with the reason on hover, until there
-        are results (theme.Button.block): Thermal until a Simulate, Export report until Run checks or a Simulate.
-        Called after every job (_enable)."""
-        from .results_panels import NEEDS_SIMULATE
-        self.t_thermal.block("" if self._views_from is not None else NEEDS_SIMULATE)
+        """The top bar's action that works from a run's results greyed out, with the reason on hover, until there
+        are results (theme.Button.block): Export report until Run checks or a Simulate (Thermal and Current capacity
+        are on the Results tab, blocked there). Called after every job (_enable)."""
         self.t_export.block("" if self.routes or self.issues else
                             "Please run the checks or the simulation first")
 

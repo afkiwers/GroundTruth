@@ -61,8 +61,8 @@ set up can be kept as a <b>configuration</b> and loaded again later to run the s
 <a href="#configs">Configurations and Undo</a>). The board itself is never changed, except when you place suggested
 vias or draw on the board.</p>
 <p><b>The top bar</b>, left to right: <b>Reload board</b> reads the board again (after you changed it in KiCad);
-<b>Refill zones</b> has KiCad refill every zone, waits until it has finished (on a complex board minutes: the status line counts them; KiCad answers nothing meanwhile) and then reloads; <b>Run checks</b>, <b>Simulate</b>,
-<b>Thermal</b> and <b>Export report…</b> (below); <b>with what-if edits</b>; <b>Cancel</b> stops the running job;
+<b>Refill zones</b> has KiCad refill every zone, waits until it has finished (on a complex board minutes: the status line counts them; KiCad answers nothing meanwhile) and then reloads; <b>Run checks</b>, <b>Simulate</b>
+and <b>Export report…</b> (below); <b>with what-if edits</b>; <b>Cancel</b> stops the running job;
 <b>Configuration ▾</b> (save and load configurations, Back to last settings), <b>Undo</b> and <b>Redo</b>
 (<a href="#configs">Configurations and Undo</a>); <b>Clear GT markers</b> removes what GroundTruth drew. On the right, <b>Preferences…</b> and
 <b>Help</b>. Refill zones and Clear GT markers are there only when GroundTruth was started from KiCad's toolbar
@@ -70,10 +70,10 @@ vias or draw on the board.</p>
 While a job runs the buttons are greyed. While the board is read (at start, after Reload or Refill, and while new
 boards' nets are detected) every button but Preferences, Help and Cancel is greyed, and hovering over one says
 "Please wait for the board to be loaded". A button whose action needs an earlier run is greyed until there is one,
-and hovering says which: <b>Thermal</b>, the Results tab's actions (Draw contours, Draw arrows, Draw hot loop, Open
-in window, Open 3D view, Sharper map, Current capacity) "Please run the simulation first", <b>Export report…</b> and
+and hovering says which: the Results tab's actions (Draw contours, Draw arrows, Draw hot loop, Open 3D view,
+Sharper map, Thermal, Current capacity) "Please run the simulation first", <b>Export report…</b> and
 the Issues tab's Draw markers the checks or the simulation, the Fixes tab's Draw / Place / Add ticked Suggest fixes.
-Hover over <b>Thermal</b>, <b>Export report…</b>, <b>with what-if edits</b>, <b>Preferences…</b> or <b>Help</b> for
+Hover over <b>Export report…</b>, <b>with what-if edits</b>, <b>Preferences…</b> or <b>Help</b> for
 what it does.</p>
 <p>The results shown are always of the board and settings they were computed on. When the board was read again and
 differs (Reload board, or a Simulate that found it changed in KiCad), or a setting the results depend on was
@@ -1057,9 +1057,7 @@ Preferences (<b>Vias shown</b>).</p>
 <li><b>Spectrum</b>: the emission against the limit, harmonic by harmonic (or a simulated receiver's reading for
   a bridge).</li>
 <li><b>Ctrl + mouse wheel</b> over a map zooms it; double-click shows the whole map; the wheel alone scrolls the
-  page down to the cross-section and the spectrum. <b>Open in window</b> shows the maps in a large window that
-  you can enlarge or maximise; it follows the route, layer and arrows chosen on the tab, and its toolbar zooms and
-  pans all layers together. Next to the maps' toolbar is a button per map shown (<b>⤢ F.Cu</b>, <b>⤢ In2.Cu</b>,
+  page down to the cross-section and the spectrum. Next to the maps' toolbar is a button per map shown (<b>⤢ F.Cu</b>, <b>⤢ In2.Cu</b>,
   …): it opens that layer alone in a maximised window of its own, one window per layer. It follows the view,
   arrows, scale and markers chosen on the tab and keeps its layer; the wheel zooms it (with the other maps), its
   toolbar zooms, pans and saves it. <b>Open 3D view</b> shows the layers stacked in your browser (the current maps, the
@@ -1220,7 +1218,7 @@ folder, a report, a board copy, or the whole folder): the tab says what is gone 
 the fix search are not kept.</p>
 
 <hr><a name="thermal"></a><h3>Thermal and Current capacity</h3>
-<p><b>Thermal</b> (top bar, after Simulate) solves the copper and part temperatures with the heat of every
+<p><b>Thermal</b> (Results tab, next to Current capacity, after Simulate) solves the copper and part temperatures with the heat of every
 converter, every motor bridge and every <a href="#dcloads">DC load</a> from the last Simulate (a DC load's current
 capacity scales all its loads together). It reads the board first: if the board or the settings changed since that
 Simulate, it says so and asks for a Simulate instead of heating the design as it was:</p>

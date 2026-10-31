@@ -378,7 +378,7 @@ class ResultsPanel(wx.Panel):
     background thread (redraw) and swapped into the canvases when ready, so the window never waits for them."""
 
     def __init__(self, parent, on_draw_contours, on_draw_arrows=None, on_sharper=None, on_capacity=None,
-                 in_steps: bool = False, on_mark=None, on_draw_hot_loop=None):
+                 in_steps: bool = False, on_mark=None, on_draw_hot_loop=None, on_thermal=None):
         """in_steps: the plots' page is built later, in two `build_steps` (MainFrame._build_pages runs them one per
         event-loop step: the three matplotlib canvases in one step blocked the window ~110 ms); otherwise here.
         on_mark(kind, what, text, layer): a marker on a map was clicked (plots.mark_ref_at; layer: the map's)."""
@@ -477,12 +477,8 @@ class ResultsPanel(wx.Panel):
         b7.Bind(wx.EVT_BUTTON, lambda e: on_draw_hot_loop and on_draw_hot_loop(self.routes))
         top.Add(b7, 0, wx.RIGHT | wx.BOTTOM, 4)
         self.hotloop_button = b7
-        b3 = theme.Button(self, "Open in window")
-        b3.SetToolTip("the heatmap in a window of its own that you can enlarge or maximise; it follows the route, "
-                      "layer and arrows chosen here. The toolbar zooms and pans (all layers together).")
-        b3.Bind(wx.EVT_BUTTON, lambda e: self.open_window())
-        top.Add(b3, 0, wx.RIGHT | wx.BOTTOM, 4)
-        self.window_button = b3
+        # no "Open in window" button any more (the user, 2026-11-01: "remove the open in window button"): each map's
+        # own ⤢ button opens that layer in a window (_layer_buttons)
         b6 = theme.Button(self, "Open 3D view")
         b6.SetToolTip("the layers stacked in 3D in your web browser: the current maps, the signal, the vias and parts "
                       "carrying the current between layers, and with plane capacitance the board-wide model's "
@@ -499,6 +495,15 @@ class ResultsPanel(wx.Panel):
         b4.Bind(wx.EVT_BUTTON, lambda e: on_sharper and on_sharper(self.choice.GetSelection()))
         top.Add(b4, 0, wx.RIGHT | wx.BOTTOM, 4)
         self.sharper_button = b4
+        # Thermal and Current capacity side by side: both work from the last Simulate's results and add views here
+        # (the user: "Given that both depend on previous results, where should they be? also they should be together";
+        # Thermal was on the top bar)
+        b8 = theme.Button(self, "Thermal")
+        b8.SetToolTip("copper and part temperatures of the power stages, DC loads and bridges of the last Simulate "
+                      "(their DC paths and losses heat the board; settings: thermal); a temperature view here")
+        b8.Bind(wx.EVT_BUTTON, lambda e: on_thermal and on_thermal())
+        top.Add(b8, 0, wx.RIGHT | wx.BOTTOM, 4)
+        self.thermal_button = b8
         b5 = theme.Button(self, "Current capacity")
         b5.SetToolTip("per power stage of the last Simulate: the load current that brings the hottest copper or "
                       "part junction to thermal.capacity_c (default max_c), the other stages at their operating "
@@ -945,8 +950,8 @@ class ResultsPanel(wx.Panel):
         """The actions on a view are blocked until a Simulate made one (rr None: NEEDS_SIMULATE on hover); Draw hot
         loop also until a run has a power stage's hot loop to draw (results.hotloop.can_draw says why not)."""
         why = NEEDS_SIMULATE if rr is None else ""
-        for b in (self.draw_button, self.arrow_button, self.window_button, self.view3d_button,
-                  self.sharper_button, self.capacity_button):
+        for b in (self.draw_button, self.arrow_button, self.view3d_button,
+                  self.sharper_button, self.thermal_button, self.capacity_button):
             b.block(why)
         from ..results.hotloop import can_draw
         stages = [r for r in self.routes if r.kind == "converter" and not getattr(r, "view_of", None)]
