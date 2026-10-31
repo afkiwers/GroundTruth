@@ -20,7 +20,7 @@ The explanation follows Analog Devices' article [Layout for Power Designs #1: Ho
 - **Why it matters.** The loop radiates as a magnetic dipole whose field goes with the current switched times the area the loop covers. Its inductance also stores energy at every edge that rings with the switches' C_oss (the overshoot, and the radiated peak at the ringing frequency).
 - **Layout rules.** Make the loop as small as possible, using the smallest copper spacing the design rules allow. Let the shortest, flattest ceramic capacitor close the loop first, right at the switches. Several capacitors in parallel are fine; stack them so the smallest package is closest to the loop and the larger ones sit right behind it. Put a solid ground plane on the layer directly under the loop, so the return runs under the forward path.
 
-**On the board.** **Draw hot loop on board** (Results tab, after a Simulate) draws what the solve found on User.1: which capacitors carry the loop current at the hot-loop frequency (100 MHz) and in what share, and an outline around everything carrying 5 % or more. A large share through capacitors far from the switches, or through another stage's capacitors, means the loop closes the long way round: put the small capacitors right next to the switches. The **loop inductance** and **ringing** of the stage's Results view are the numbers to compare before and after a change.
+**On the board.** **Draw on board ▾ › Hot loop** (Results tab, after a Simulate) draws what the solve found on User.1: which capacitors carry the loop current at the hot-loop frequency (100 MHz) and in what share, and an outline around everything carrying 5 % or more. A large share through capacitors far from the switches, or through another stage's capacitors, means the loop closes the long way round: put the small capacitors right next to the switches. The **loop inductance** and **ringing** of the stage's Results view are the numbers to compare before and after a change.
 
 ```yaml
 converters:
@@ -271,7 +271,7 @@ Simulate.
 
 ## Temperatures (thermal solve)
 
-**Thermal** (Results tab, next to **Current capacity**), or `groundtruth simulate --thermal`, solves the copper and part temperatures of the power
+**Thermal** (Results tab, **Further analysis ▾**, with **Current capacity**), or `groundtruth simulate --thermal`, solves the copper and part temperatures of the power
 stages after Simulate, with the solver of PCB Thermal (validated against analytic cases; `groundtruth.thermal`).
 Motor bridges heat the board with their RMS currents and their parts' losses (see "Motor bridges").
 
@@ -327,12 +327,12 @@ Motor bridges heat the board with their RMS currents and their parts' losses (se
 - **Results:** a "Thermal: copper temperature" view in the Results tab (one map per copper layer, × the hot
   spot, tiles: hottest copper, total loss, hottest part), the hottest parts as bars against the limits, issues
   `thermal_hotspot` and `part_temperature` (parts without losses of their own are listed together, past
-  `max_c`). **Draw contours on board** draws isotherms for this view.
+  `max_c`). **Draw on board ▾ › Contours** draws isotherms for this view.
 - The board model is the one GroundTruth read (live from KiCad too), adapted to PCB Thermal's. Not in it:
   non-plated holes, copper graphics, solder-mask openings (all faces count as masked).
 - Heat leaves only through the board's faces: part bodies, heatsinks, an enclosure and mounting are not modelled
   yet, so large parts come out on the hot (conservative) side.
-- **Current capacity** (Results tab, **Current capacity**; `groundtruth simulate --capacity`): per power stage, the
+- **Current capacity** (Results tab, **Further analysis ▾ › Current capacity**; `groundtruth simulate --capacity`): per power stage, the
   load current at which the hottest copper or part junction (where `theta_jb` is given) reaches
   `thermal.capacity_c` (default `max_c`; or Capacity limit in **Preferences…**, for this computer), with the other stages at their operating points; with several stages
   also **all power stages** scaled together by one factor ("the board reaches 105 °C at 62 % of every load").

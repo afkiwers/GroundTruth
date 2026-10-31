@@ -645,7 +645,7 @@ class PreferencesDialog(wx.Dialog):
             "load; the planes under a signal path); the current itself stays white. Also the report's maps")
 
         board = group("Drawing on the board", "right")
-        why = ("Draw arrows on board: each arrow's line width follows the current density there, on the heatmap's "
+        why = ("Draw on board › Arrows: each arrow's line width follows the current density there, on the heatmap's "
                "log scale: the thickest at the result's peak, the thinnest three decades below it and lower")
         self.arrow_min = wx.SpinCtrlDouble(self, min=0.001, max=2.0, inc=0.01, initial=p["arrow_min_mm"])
         self.arrow_max = wx.SpinCtrlDouble(self, min=0.001, max=2.0, inc=0.01, initial=p["arrow_max_mm"])
@@ -658,9 +658,9 @@ class PreferencesDialog(wx.Dialog):
         for ctrl in (self.contour_line, self.contour_index):
             ctrl.SetDigits(3)
         row(board, "Contour line (mm)", self.contour_line,
-            "Draw contours on board: the width of the contour lines (2, 5, 20, 50 ...)")
+            "Draw on board › Contours: the width of the contour lines (2, 5, 20, 50 ...)")
         row(board, "Index contour line (mm)", self.contour_index,
-            "Draw contours on board: the width of the index lines, every decade (1, 10, 100 ...) or every fifth "
+            "Draw on board › Contours: the width of the index lines, every decade (1, 10, 100 ...) or every fifth "
             "isotherm, drawn thicker like a map's index contours")
         self.kicad_zoom = wx.SpinCtrl(self, min=0, max=KICAD_ZOOM_MAX, initial=p["kicad_zoom_steps"])
         row(board, "Zoom out in KiCad (steps)", self.kicad_zoom,

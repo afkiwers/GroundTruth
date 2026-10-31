@@ -298,7 +298,7 @@ C_oss: the overshoot, and the radiated peak at the ringing frequency.</p>
 <li>a solid ground plane on the layer directly under the loop, so the return runs under the forward path.</li>
 </ul>
 <p>In GroundTruth: the <b>loop inductance</b>, <b>ringing</b> and <b>overshoot</b> of a stage's Results view are the
-numbers to compare before and after a change, and <b>Draw hot loop on board</b> draws on User.1 which capacitors
+numbers to compare before and after a change, and <b>Draw on board ▾ › Hot loop</b> draws on User.1 which capacitors
 actually carry the loop current at 100 MHz and in what share, with an outline around everything carrying 5 % or
 more. A large share through capacitors far from the switches (or through another stage's) means the loop closes the
 long way round: move the small capacitors next to the switches. Source: Analog Devices,
@@ -995,7 +995,7 @@ Preferences (<b>Vias shown</b>).</p>
   hot loop) they show the direction when the current is strongest. The current's own arrows are white, the return
   current's <b>cyan</b> (another colour: <b>Return current arrows</b> in Preferences): on a power stage's, a DC
   path's or a load's map the arrows on the ground nets (the stages' ground, the loads' return pins' nets, nets named
-  GND, VSS, 0V, ...RTN), on a signal path's every arrow off the signal's own copper, as <b>Draw arrows on board</b>
+  GND, VSS, 0V, ...RTN), on a signal path's every arrow off the signal's own copper, as <b>Draw on board ▾ › Arrows</b>
   splits them onto two layers.</li>
 <li><b>Maps</b>: the current on each copper layer (a net's return current, a hot loop, a DC path's or a bridge's
   RMS current density), or the temperature. Arrows show which way the current flows, and their density how much.
@@ -1064,11 +1064,12 @@ Preferences (<b>Vias shown</b>).</p>
   signal, the vias and parts carrying the current between layers, and the displacement current between the planes
   where the model has plane capacitance; drag to turn it: the edge you grab follows the mouse). Its page is written to
   <code>%LOCALAPPDATA%\GroundTruth\views</code>, overwritten for the same view, and holds the board's maps and net
-  names. <b>Sharper map</b> solves the view again on a grid with 4× the nodes of the one simulated, about half the
+  names. <b>Sharper map</b> (under <b>Further analysis ▾</b>, with Thermal and Current capacity) solves the view again on a grid with 4× the nodes of the one simulated, about half the
   cell size, in the background (about 20 s for a route, up to a minute for a power stage; the picture, not the
   numbers, gets sharper; not for a bridge's drive view or a temperature map: for a finer temperature map choose
   Thermal <b>Quality</b> fine in Preferences and run Thermal again).</li>
-<li><b>Draw contours on board</b> and <b>Draw arrows on board</b> put the current's contours and arrows of the
+<li><b>Draw on board ▾</b> holds what goes into KiCad: <b>Contours</b>, <b>Arrows</b> and <b>Hot loop</b>; <b>Further analysis ▾</b> the solves made from the last Simulate: <b>Sharper map</b>, <b>Thermal</b> and <b>Current capacity</b>. An entry that can't run yet is greyed in the menu with its reason, and the menu's button is greyed (hover: why) while none can. The main view of a power stage reads "hot loop Q1→Q2 (EMI)": the hot loop's current and emission, beside its DC and Bode views.</li>
+<li><b>Draw on board ▾ › Contours</b> and <b>Draw on board ▾ › Arrows</b> put the current's contours and arrows of the
   shown layer onto a drawing layer in KiCad (the current-drawing User layer); with <b>main layers</b> or <b>all
   layers</b> chosen in Layer, Draw arrows draws every layer the maps show, overlaid on the same User layers (the
   legend names them and where the peak is), Draw contours the busiest one. On a temperature map the contours are
@@ -1081,7 +1082,7 @@ Preferences (<b>Vias shown</b>).</p>
   the loads' return pins' nets, nets named GND, VSS, 0V, ...RTN); on a signal route, every arrow off the signal's
   own copper. The rest stay on the current-drawing layer. Each arrow stands on one net's copper, the net carrying
   most of the current at that spot, so a narrow strip between two quiet pours keeps its own arrows.
-  <b>Draw hot loop on board</b> draws every power stage's hot loop of the last Simulate on User.1 (settings:
+  <b>Draw on board ▾ › Hot loop</b> draws every power stage's hot loop of the last Simulate on User.1 (settings:
   <code>drawing.hotloop_layer</code>), replacing the ones drawn before: an outline around the switches, vias and
   rail capacitors that carry at least 5 % of the loop current at the hot-loop frequency (what the solve found, not
   the parts' placement), one thin line per such capacitor from its rail pad through the high-side switch, the switch
@@ -1218,7 +1219,7 @@ folder, a report, a board copy, or the whole folder): the tab says what is gone 
 the fix search are not kept.</p>
 
 <hr><a name="thermal"></a><h3>Thermal and Current capacity</h3>
-<p><b>Thermal</b> (Results tab, next to Current capacity, after Simulate) solves the copper and part temperatures with the heat of every
+<p><b>Thermal</b> (Results tab, <b>Further analysis ▾</b>, after Simulate) solves the copper and part temperatures with the heat of every
 converter, every motor bridge and every <a href="#dcloads">DC load</a> from the last Simulate (a DC load's current
 capacity scales all its loads together). It reads the board first: if the board or the settings changed since that
 Simulate, it says so and asks for a Simulate instead of heating the design as it was:</p>
@@ -1229,7 +1230,7 @@ Simulate, it says so and asks for a Simulate instead of heating the design as it
   rectifier's reverse conduction in the dead times and its recovery charge, an inductor's DCR, series parts; for a
   bridge, the losses from its drive waveform).</li>
 </ul>
-<p><b>Current capacity</b> (Results tab) finds, per converter, the load current, and per bridge, the phase
+<p><b>Current capacity</b> (Results tab, <b>Further analysis ▾</b>) finds, per converter, the load current, and per bridge, the phase
 current, at which the hottest copper or part junction reaches the limit (<code>thermal.capacity_c</code>, by default
 <code>max_c</code>; <a href="#prefs">Preferences</a>, Capacity limit, sets one for this computer), the others at their
 operating points. When the other stages at their operating points already put a spot over the limit with this one
@@ -1487,7 +1488,7 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
 <tr><td valign="top"><b>Contour line</b>, <b>Index contour line</b></td><td>the line widths of <b>Draw contours on
   board</b>: the ordinary contour lines (0.04 mm by default) and the thicker index lines, every decade or every
   fifth isotherm (0.1 mm by default).</td></tr>
-<tr><td valign="top"><b>Thinnest / Thickest arrow line</b></td><td>the line widths of <b>Draw arrows on board</b>: each arrow is as thick as the current density at it, from the thinnest (three decades below the peak and lower) to the thickest (at the peak); 0.01 and 0.3 mm by default.</td></tr>
+<tr><td valign="top"><b>Thinnest / Thickest arrow line</b></td><td>the line widths of <b>Draw on board ▾ › Arrows</b>: each arrow is as thick as the current density at it, from the thinnest (three decades below the peak and lower) to the thickest (at the peak); 0.01 and 0.3 mm by default.</td></tr>
 <tr><td valign="top"><b>Zoom out in KiCad</b></td><td>how far KiCad zooms out around an item it shows (an issue
   with <b>Zoom to it</b>, a map's marker, a cross-section's via bar): KiCad fits the item to the view, then zooms
   out this many of its own steps (each about 1.6&times;), 0 to 6. At 0 (the default) you see the fit alone; an item
@@ -2271,7 +2272,7 @@ the ones the plugin's <code>requirements.txt</code> names.</p>
   <td>sourceforge.net/projects/ruamel-yaml</td></tr>
 <tr><td>Matplotlib</td><td>every map, plot and spectrum (the Results tab, the report)</td><td>Matplotlib License
   (PSF-based, BSD-compatible)</td><td>matplotlib.org</td></tr>
-<tr><td>contourpy</td><td>the contour lines (Draw contours on board)</td><td>BSD-3-Clause</td>
+<tr><td>contourpy</td><td>the contour lines (Draw on board ▾ › Contours)</td><td>BSD-3-Clause</td>
   <td>github.com/contourpy/contourpy</td></tr>
 <tr><td>SymPy</td><td>an op-amp circuit's transfer function in its part names (the Bode view, the report)</td>
   <td>BSD-3-Clause</td><td>sympy.org</td></tr>
