@@ -7,6 +7,7 @@ resistance", then: "implement all of them but allow default values for each when
 Six values per part, each one falling back on its own (`params_for`), from the most specific to the most general:
 
     1. the part's GT field             GT = contact:0.5m, fill:75      (with its labels: GT = conv_in, contact:0.5m)
+       its Terminal Contact field      Terminal Contact = D=4x3.5 S=1x2   (`metal` only: a parts database's value)
     2. the part's entry in the settings components: {J1: {..., tht: {contact: 0.5m}}}   (the Parts tab's Pins column)
     3. the board's defaults             tht: {contact: 0.5m, pin: brass}                (the Parts tab's Pin defaults…)
     4. built in                         the model as before: copper filling the hole, a perfect joint, no contact
@@ -74,7 +75,10 @@ ALIASES = {"cu": "copper", "phosphor-bronze": "bronze", "phosphorbronze": "bronz
 SOLDER_RHO = 1.3e-7             # SAC305 (~13 % IACS), Ω·m: the solder between the pin and the hole's wall [A18]
 PIN_CLEARANCE_MM = 0.25         # a lead's diameter is the hole's less this (a usual lead-to-hole clearance [A18])
 NOTE_A = 3.0                    # a connector pin carrying this much without a contact value gets a note
-SOURCES = ("GT field", "part setting", "board default", "built in")
+SOURCES = ("GT field", "Terminal Contact field", "part setting", "board default", "built in")
+# the part field a parts database (an HTTP lib) gives the `metal` value in, matched without case: the GT field
+# holds a board's own labels (conv1_hs), so a library value has a field of its own [A78]
+CONTACT_FIELDS = ("TERMINAL CONTACT",)
 WORD = re.compile(r"^(pin_d|pin_r|pin|fill|joint|contact|bond|entry|metal)\s*[:=]\s*(.+)$", re.I)
 # a terminal's metal rectangle: NAME=WxH (mm) with an optional @dx/dy offset (mm); NAME a pin name or a pad number.
 # Several may follow each other in one word (a GT field's words lose their spaces: "D=5x4G=0.3x0.3")
@@ -292,6 +296,26 @@ def gt_values(fp) -> tuple[dict, list[str]]:
     return values, [f"{fp.reference}: GT {p}" for p in problems]
 
 
+def contact_field(fp) -> str:
+    """The text of a footprint's Terminal Contact field ("" without one): its `metal` value from a parts database."""
+    for name, value in (getattr(fp, "fields", None) or {}).items():
+        if name.strip().upper() in CONTACT_FIELDS:
+            return value or ""
+    return ""
+
+
+def field_metal(fp) -> tuple[Optional[tuple], list[str]]:
+    """The `metal` value in a footprint's Terminal Contact field (None without one), and problems with it: the same
+    text as the GT field's words, D=4x3.5 S=1x2, for any part, its terminals by pin name or pad number."""
+    text = contact_field(fp)
+    if not text.strip():
+        return None, []
+    rects, why = parse_metal(text)
+    if rects is None:
+        return None, [f"{fp.reference}: Terminal Contact {why}"]
+    return rects, metal_problems(fp, rects, "Terminal Contact")
+
+
 def terminal_pads(fp, name: str) -> list:
     """A part's pads that a `metal` rectangle's terminal name means: those numbered `name`, or whose schematic pin
     name is `name` (case ignored: D, S, G on a FET whose pins are named so)."""
@@ -299,24 +323,27 @@ def terminal_pads(fp, name: str) -> list:
     return [p for p in fp.pads if str(p.number).lower() == n or (p.pin_function or "").strip().lower() == n]
 
 
-def metal_problems(fp, metal) -> list[str]:
-    """The `metal` rectangles of a part that name none of its pads (by number or pin name)."""
+def metal_problems(fp, metal, where: str = "GT") -> list[str]:
+    """The `metal` rectangles of a part that name none of its pads (by number or pin name); `where`: the field."""
     out = []
     for name, *_ in metal or ():
         if not terminal_pads(fp, name):
             pins = sorted({f"{p.number} {p.pin_function}".strip() for p in fp.pads})
-            out.append(f"{fp.reference}: GT {name}=…: no pad numbered or named {name} (its pads: {', '.join(pins)})")
+            out.append(f"{fp.reference}: {where} {name}=…: no pad numbered or named {name} (its pads: "
+                       f"{', '.join(pins)})")
     return out
 
 
 def params_for(board, config, ref: str) -> PinParams:
-    """A part's pin values: each from its GT field, else its settings entry, else the board's defaults, else built
-    in (see the module)."""
+    """A part's pin values: each from its GT field, else (`metal`) its Terminal Contact field, else its settings
+    entry, else the board's defaults, else built in (see the module)."""
     fp = board.footprint(ref) if board is not None else None
     layers = [(gt_values(fp)[0] if fp is not None else {}, SOURCES[0])]
+    contact = field_metal(fp)[0] if fp is not None else None
+    layers.append(({"metal": contact} if contact else {}, SOURCES[1]))
     entry = config.components.get(ref) if config is not None else None
-    layers.append((dict(getattr(entry, "tht", None) or {}), SOURCES[1]))
-    layers.append((dict(getattr(config, "tht", None) or {}), SOURCES[2]))
+    layers.append((dict(getattr(entry, "tht", None) or {}), SOURCES[2]))
+    layers.append((dict(getattr(config, "tht", None) or {}), SOURCES[3]))
     values, source = {}, {}
     for key in KEYS:
         for vals, where in layers:

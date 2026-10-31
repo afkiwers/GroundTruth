@@ -452,13 +452,15 @@ def _read_tags(board: Board) -> BoardTags:
     there is none), and note stages that miss a role (a converter needs hs and ls, or sw; a leg hs and ls)."""
     out = BoardTags()
     switch_tags: list[tuple[Tag, Footprint]] = []
+    from .pins import field_metal, gt_values, metal_problems
     for fp in board.footprints:
+        # a Terminal Contact field (a parts database's `metal` value, analysis/pins.py) that names no pad of the part
+        out.problems += field_metal(fp)[1]
         text = tag_text(fp)
         if not text:
             continue
         tags, ignore, problems = parse(text, fp.reference)
         out.problems += problems
-        from .pins import gt_values, metal_problems
         out.problems += metal_problems(fp, gt_values(fp)[0].get("metal", ()))
         if fp.dnp and (tags or ignore):
             continue

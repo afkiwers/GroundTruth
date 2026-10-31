@@ -1612,14 +1612,31 @@ an example in <a href="#siglabels">Labelling a signal path</a>.</p>
   arrives at; a thicker joint spreads that handover further across the pad. A transistor modelled as a resistor
   with a drain tab spreads its on-resistance over the tab (<code>entry:tab</code>: one soldered metal instead)</td></tr>
 <tr><td><code>D=4x3.5</code></td><td>where the part's element joins a terminal's metal: per terminal, a rectangle
-  W x H in mm in the footprint's own frame (turned with the part), named by its schematic pin name or pad number,
-  centred on that terminal's pads (on its largest pad when that is a tab), <code>@dx/dy</code> to move it (mm). A
-  vertical FET's die (<code>D=4x3.5</code> on its drain tab), a source clip's contact (<code>S=1x2</code>), several
-  at once: <code>GT = S=1x2, D=5x0.5 G=0.3x0.3</code> (in the Pins cell: <code>metal:D=4x3.5 S=1x2</code>). Not
-  given: the whole terminal. It counts where the terminal is a resistive sheet (its <b>Terminal Sheet
-  Resistance</b>): the current enters and leaves the sheet inside the rectangle only, and spreads in the sheet and
-  the copper under it to the rest of the pad, so it crowds more under a die smaller than its tab. Without that field
-  the terminal is a perfect plate, and where the current enters it makes no difference</td></tr>
+  W x H in mm, a vertical FET's die on its drain tab (<code>D=4x3.5</code>) or a source clip's contact
+  (<code>S=1x2</code>), for any part with a model. Its terminals in one value, one rectangle each, separated by
+  spaces or commas: <code>GT = D=4.09x3.86 S=4.5x0.9</code>, or from a parts database (an HTTP lib parameter) in a
+  field of its own, <b>Terminal Contact</b> = <code>D=4.09x3.86 S=4.5x0.9</code> (the GT field holds the board's
+  own labels, so a library value goes there); in the Pins cell: <code>metal:D=4.09x3.86 S=4.5x0.9</code>. The GT
+  field wins, then the Terminal Contact field, then the Pins cell.
+  <ul>
+  <li><b>Which terminal:</b> the name before <code>=</code> is a pad number or a schematic pin name (case ignored), so
+    <code>D</code> / <code>S</code> / <code>G</code> on a FET whose pins are named so, <code>Drain</code> /
+    <code>Source</code> on one named that way, or the pad numbers (<code>3</code>, <code>2</code>; an inductor's or
+    capacitor's <code>1=2x5 2=2x5</code>). The names are the symbol's, so a library value fits every board using
+    that symbol. A name that is no pad of the part is listed with the label problems (<code>groundtruth
+    detect</code>, the Converters and Bridges tabs' status line), naming the pads it has.</li>
+  <li><b>Size and place:</b> W along the footprint's own x axis, H along its y, turned with the part on the board.
+    A datasheet draws the package its own way round: compare its exposed pad's sizes with the footprint's pad to see
+    which is x. The rectangle sits on the centre of that terminal's pads (on its largest pad when that holds at least
+    half of their area: a tab, not the leads beside it); <code>@dx/dy</code> after it moves it, in mm in the same
+    frame (<code>D=4x3.5@0/0.6</code>).</li>
+  <li><b>A terminal not listed</b> keeps the whole of its pads, as without the value.</li>
+  <li><b>When it counts:</b> only where the part's terminal metal is a resistive sheet (its <b>Terminal Sheet
+    Resistance</b> or <b>Terminal Metal</b> field, one value for all of the part's terminals): the current enters and
+    leaves the sheet inside the rectangle, and spreads in the sheet and the copper under it to the rest of the pad,
+    so it crowds more under a die smaller than its tab. Without that field the terminal is a perfect plate, and where
+    the current enters it makes no difference.</li>
+  </ul></td></tr>
 <tr><td colspan="2"><b>A power stage's switch</b> (a FET, a catch diode, an integrated stage):</td></tr>
 <tr><td><code>entry:tab</code></td><td>how the stage's current enters the copper at its pads: <code>tab</code>, each
   side's metal soldered over its pads (a silicon FET's drain tab: the current hands over at the edge it arrives at);

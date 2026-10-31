@@ -513,3 +513,34 @@ def test_a_metal_rectangle_turns_with_its_footprint_and_reads_from_the_gt_field(
     fp = N(reference="Q1", pads=[pad])
     assert metal_problems(fp, (("D", 1, 1, 0, 0), ("3", 1, 1, 0, 0))) == []
     assert "no pad numbered or named S" in metal_problems(fp, (("S", 1, 1, 0, 0),))[0]
+
+
+def test_the_terminal_contact_field_gives_any_parts_metal_by_its_pin_names():
+    """The Terminal Contact field (a parts database's value for `metal` [A78], since the GT field holds the board's
+    own labels): read for any part, its terminals by schematic pin name or pad number, after the GT field (which
+    wins) and before the part's Pins cell; a name that is no pad of the part is a label problem naming the field."""
+    from types import SimpleNamespace as N
+    from groundtruth.analysis.pins import field_metal, params_for
+    from groundtruth.analysis.tags import _read_tags
+
+    def part(ref, fields, pads):
+        """A footprint with these fields and (number, pin name) pads."""
+        return N(reference=ref, fields=fields, dnp=False, pads=[N(number=n, pin_function=f) for n, f in pads])
+
+    fet = part("Q1", {"Terminal Contact": "D=4.09x3.86 S=4.5x0.9"}, [("1", "G"), ("2", "S"), ("3", "D")])
+    ind = part("L1", {"terminal contact": "1=2x5, 2=2x5"}, [("1", ""), ("2", "")])
+    both = part("Q2", {"Terminal Contact": "D=4x4", "GT": "D=3x3"}, [("3", "D")])
+    bad = part("Q3", {"Terminal Contact": "Drain=4x4"}, [("3", "D")])
+    board = N(footprint=lambda r: {p.reference: p for p in (fet, ind, both, bad)}.get(r),
+              footprints=[fet, ind, both, bad])
+    p = params_for(board, None, "Q1")
+    assert p.metal == (("D", 4.09, 3.86, 0.0, 0.0), ("S", 4.5, 0.9, 0.0, 0.0))
+    assert p.source["metal"] == "Terminal Contact field"
+    assert params_for(board, None, "L1").metal == (("1", 2.0, 5.0, 0.0, 0.0), ("2", 2.0, 5.0, 0.0, 0.0))
+    assert params_for(board, None, "Q2").metal == (("D", 3.0, 3.0, 0.0, 0.0),)                 # the GT field wins
+    cfg = N(components={"Q1": N(tht={"metal": (("D", 1.0, 1.0, 0.0, 0.0),)})}, tht={})
+    assert params_for(board, cfg, "Q1").metal[0][1] == 4.09                                     # before the Pins cell
+    assert field_metal(fet) == (p.metal, [])
+    assert any("Q3: Terminal Contact Drain=…: no pad numbered or named Drain" in m
+               for m in _read_tags(board).problems)
+    assert field_metal(part("Q4", {"Terminal Contact": "four"}, []))[1]                         # unreadable: said
