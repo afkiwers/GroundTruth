@@ -323,12 +323,14 @@ Motor bridges heat the board with their RMS currents and their parts' losses (se
   yet, so large parts come out on the hot (conservative) side.
 - **Current capacity** (Results tab, **Current capacity**; `groundtruth simulate --capacity`): per power stage, the
   load current at which the hottest copper or part junction (where `theta_jb` is given) reaches
-  `thermal.capacity_c` (default `max_c`), with the other stages at their operating points; with several stages
+  `thermal.capacity_c` (default `max_c`; or Capacity limit in **Preferences…**, for this computer), with the other stages at their operating points; with several stages
   also **all power stages** scaled together by one factor ("the board reaches 105 °C at 62 % of every load").
   Each result is a heatmap view at that current (tiles: the capacity, what limits it, the loss). The model is built
   twice, not per trial: a draft model finds where each capacity lies, then a model at `thermal.quality`, its mesh
   planned for the heat at those currents, settles it to 0.25 K. A stage whose neighbour alone already passes the
-  limit shows 0 A: read the "all power stages" row then.
+  limit at its operating point shows **blocked**, naming that stage and the spot ("buck conv1 at its operating
+  point already puts copper at Q301 (F.Cu) at 143.7 °C, over the 105 °C limit"): fix that stage's heat first, or
+  read the "all power stages" row.
 - The plugin solves in a process of its own and stops it (with a message) when it uses more than 60 % of the
   computer's memory, or when less than 5 % (0.5 GB) is left free: use `thermal.quality: draft` (or Thermal quality
   *draft* in **Preferences…**) then.

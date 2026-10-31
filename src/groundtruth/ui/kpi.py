@@ -368,19 +368,19 @@ def _capacity(t) -> list[Kpi]:
     """A thermal capacity search: the current (or load factor) at which the hottest copper or part reaches the
     limit, what limits it, and the losses there. Below 1× (the operating point already too hot) is an error,
     under 1.2× a warning."""
-    from ..analysis.thermal import capacity_text
+    from ..analysis.thermal import capacity_text, zero_text
     c = t.capacity
     s = c["scale"] if c.get("bound") != "zero" else 0.0
     status = "ok" if c.get("bound") == "above" else "error" if s < 1 else "warn" if s < 1.2 else "ok"
     if c.get("currents") is not None:
         head = ("load capacity", capacity_text(c), ", ".join(f"{n} {i:.3g} A" for n, i in c["currents"].items())
-                if s > 0 else "over the limit even without load", status,
+                if s > 0 else zero_text(c), status,
                 f"every power stage's load scaled by one factor: where the hottest copper or part junction reaches "
                 f"{c['limit_c']:g} °C (thermal.capacity_c)")
     else:
         head = ("current capacity", capacity_text(c), f"{c['stage']}; operating point {c['i_nominal']:g} A "
                 f"({100 / s:.0f} % of it)" if s > 0 else
-                f"{c['stage']}: over the limit even without load", status,
+                zero_text(c), status,
                 f"the load current at which the hottest copper or part junction reaches {c['limit_c']:g} °C, the "
                 f"other power stages at their operating points (thermal.capacity_c)")
     return [head,

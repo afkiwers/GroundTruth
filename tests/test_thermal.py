@@ -321,6 +321,25 @@ def test_capacity_of_a_real_stage_is_confirmed_by_a_fresh_solve(tmp_path):
     assert p["t_junction"] == pytest.approx(limit, abs=0.3)
 
 
+def test_a_zero_capacity_names_the_stage_already_over_the_limit():
+    """Over the limit with a stage at no load (the user's conv2 at "0 A", why?: conv1's Q301 at 143.7 °C): the
+    stages whose own loss heats the part at the hottest spot, i.e. grows with their load, are named; a part whose
+    loss is a constant of every stage, or a spot at no part, names none; the all-stages group never."""
+    from groundtruth.analysis.thermal import _Capacity
+    k = object.__new__(_Capacity)
+    k.inputs = {"stages": {"conv1": {"i_out": 5.0}, "conv2": {"i_out": 5.0},
+                           "all power stages": {"i_out": None, "members": {"conv1": 5.0, "conv2": 5.0}}},
+                "loss_terms": {"conv1": {"Q301": (1.5, 0.9, 0.2), "Q303": (0.0, 0.0, 2.0), "R1": (0.0, 0.0, 0.3)},
+                               "conv2": {"Q301": (0.0, 0.0, 2.4), "Q303": (1.4, 0.8, 0.0), "R1": (0.0, 0.0, 0.3)},
+                               "all power stages": {"Q301": (1.5, 0.9, 0.0), "Q303": (1.4, 0.8, 0.0)}}}
+    assert k.blocked_by("conv2", "copper at Q301 (F.Cu)") == ["conv1"]
+    assert k.blocked_by("conv2", "Q301's junction") == ["conv1"]
+    assert k.blocked_by("conv1", "copper at Q303 (In1.Cu)") == ["conv2"]
+    assert k.blocked_by("conv2", "copper at Q303 (F.Cu)") == []       # its own part: its no-load heat
+    assert k.blocked_by("conv2", "copper at R1 (F.Cu)") == []         # a constant of every stage
+    assert k.blocked_by("conv2", "copper (inside the board)") == []
+
+
 def test_capacity_bounds_zero_and_above(tmp_path):
     """A limit below the no-load temperature gives 0 A; one that ten times the current cannot reach gives
     "≥ 10x" (the search stops there)."""
@@ -339,6 +358,7 @@ def test_capacity_bounds_zero_and_above(tmp_path):
     views = run_capacity(board, hot, [_strip_stage(), _strip_stage(net="other")])
     strip = next(v for v in views if v.capacity["stage"] == "strip")
     assert strip.capacity["bound"] == "zero" and capacity_text(strip.capacity) == "0 A"
+    assert strip.capacity["blocked_by"] == []          # the spot is copper at no part: no stage to name
     # all stages together: both currents scaled by one factor; together they carry 2x the strip's current, so a
     # quarter of the heat at the load factor 1/2 gives the single stage's rise: half of it under 0.5·rise ≈ 0.35
     both = next(v for v in views if v.capacity["stage"] == "all power stages")

@@ -31,6 +31,7 @@ limit, with the other stages at their operating points. The model is built once;
 from __future__ import annotations
 
 import math
+import re
 import time
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -101,16 +102,34 @@ class ThermalResult(RouteResult):
             return "Thermal: copper temperature"
         if c.get("currents") is not None:
             return f"Thermal: all power stages at their capacity ({capacity_text(c)} load)"
+        if c.get("blocked_by"):
+            return f"Thermal: {c['stage']} blocked by {', '.join(c['blocked_by'])}"
         return f"Thermal: {c['stage']} at its capacity ({capacity_text(c)})"
 
 
 def capacity_text(c: dict) -> str:
-    """"14.2 A" (or "≥ 50 A", "0 A"; for all stages together "62 %" of their operating points)."""
+    """"14.2 A" (or "≥ 50 A", "0 A"; "blocked" when other stages alone are over the limit; for all stages
+    together "62 %" of their operating points)."""
     together = c.get("currents") is not None
     if c.get("bound") == "zero":
-        return "0 %" if together else "0 A"
+        return "0 %" if together else "blocked" if c.get("blocked_by") else "0 A"
     value = f"{c['scale'] * 100:.0f} %" if together else f"{c['i_capacity']:.3g} A"
     return ("≥ " if c.get("bound") == "above" else "") + value
+
+
+def zero_text(c: dict) -> str:
+    """Why a capacity is zero: the other stages at their operating points already put the hottest spot over the
+    limit with this stage at no load ("buck conv1 at its operating point already puts copper at Q301 (F.Cu) at
+    143.7 °C, over the 105 °C limit: no headroom left for buck conv2"), or this stage's own no-load heat does."""
+    hot = f"{c['limited_by']} at {c['t_hottest']:.1f} °C, over the {c['limit_c']:g} °C limit"
+    if c.get("blocked_by"):
+        who = ", ".join(c["blocked_by"])
+        verb = "puts" if len(c["blocked_by"]) == 1 else "put"
+        return (f"{who} at {'its' if len(c['blocked_by']) == 1 else 'their'} operating point already {verb} {hot}: "
+                f"no headroom left for {c['stage']}")
+    if c.get("currents") is not None:
+        return f"over the limit even without load: {hot}"
+    return f"{c['stage']}: over the limit even without load ({hot}, the other stages at their operating points)"
 
 
 def _empty(config: Config, error: str = "") -> ThermalResult:
@@ -898,6 +917,8 @@ def _result(board: Board, config: Config, m: _Model, sol: _Solution, losses: lis
     res.map_frequency = 0.0
     lead = (f"{capacity['stage']} at {capacity_text(capacity)}, its capacity to {capacity['limit_c']:g} °C (other "
             f"stages at their operating points); " if capacity else "")
+    if capacity and capacity.get("blocked_by"):
+        lead = f"{capacity['stage']} at no load, {zero_text(capacity)}; "
     res.heat_title = (f"{lead}copper temperature ({tc.ambient_c:g} °C ambient, {tc.convection} convection): "
                       f"{res.copper_w:.2f} W in the copper, {res.parts_w:.2f} W in the parts")
     res.heat_label = "temperature (°C)"
@@ -1249,10 +1270,29 @@ class _Capacity:
                "solves": solves}
         if info.get("members"):           # all stages together: each one's current at that load
             cap["currents"] = {n: s * i for n, i in info["members"].items()}
+        elif bound == "zero":
+            cap["blocked_by"] = self.blocked_by(name, where)
         res, _ = _result(self.board, config, m, sol, losses, cap)
         if not bound and abs(f) > CAPACITY_TOL_K:
             res.notes.append(f"the search stopped {f:+.1f} K from the limit after {solves} solves")
         return res
+
+    def blocked_by(self, name: str, where: str) -> list[str]:
+        """Over the limit with stage `name` at no load: the other stages whose own loss heats the part at the
+        hottest spot ("copper at Q301 (F.Cu)", "Q301's junction"), i.e. the part's loss grows with that stage's
+        load (a quadratic or linear term in its scale), so it is their operating point that is already too hot.
+        Empty when the spot is at no part, or the part's loss is a constant of every stage."""
+        m = re.match(r"(\S+)'s junction", where) or re.search(r" at (\S+) \(", where)
+        ref = m.group(1) if m else None
+        if ref is None:
+            return []
+        out = []
+        for n, terms in self.inputs["loss_terms"].items():
+            a, b, _ = terms.get(ref, (0.0, 0.0, 0.0))
+            # its loss at its operating point that grows with its load (over 0.1 mW: not the fit's rounding)
+            if n != name and not self.inputs["stages"].get(n, {}).get("members") and a + b > 1e-4:
+                out.append(n)
+        return out
 
 
 def _first_guess(inputs: dict, name: str, f1: float, limit: float, ambient: float) -> float:

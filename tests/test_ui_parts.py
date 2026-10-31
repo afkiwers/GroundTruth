@@ -100,6 +100,15 @@ def test_capacity_tiles_and_labels():
     assert {k[0]: k for k in kpis(view(0.8))}["current capacity"][3] == "error"
     zero = {k[0]: k for k in kpis(view(0.0, "zero"))}["current capacity"]
     assert zero[1] == "0 A" and zero[3] == "error" and "even without load" in zero[2]
+    # another stage at its operating point already over the limit (the user's conv2 "0 A" from conv1's Q301): it
+    # says so instead of 0 A
+    blocked = view(0.0, "zero")
+    blocked.capacity["blocked_by"] = ["buck SW2"]
+    t = {k[0]: k for k in kpis(blocked)}["current capacity"]
+    assert t[1] == "blocked" and t[3] == "error"
+    assert t[2] == ("buck SW2 at its operating point already puts copper at Q301 (F.Cu) at 105.1 °C, over the "
+                    "105 °C limit: no headroom left for buck SW1")
+    assert blocked.label() == "Thermal: buck SW1 blocked by buck SW2"
     assert capacity_text(view(10.0, "above").capacity) == "≥ 100 A"
     assert view(1.42).label() == "Thermal: buck SW1 at its capacity (14.2 A)"
     assert ThermalResult("thermal", "power stages", "").label() == "Thermal: copper temperature"

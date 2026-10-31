@@ -2585,6 +2585,22 @@ def test_use_all_cores_is_an_opt_in_with_its_issues_explained(app, frame, monkey
 
 
 
+def test_preferences_set_the_capacity_limit(app, frame):
+    """Preferences > Thermal > Capacity limit (the user: "expose the thermal capacity limit as setting under
+    preferences"): from the settings file by default; a choice becomes thermal.capacity_c for Current capacity."""
+    from groundtruth.ui.prefs_dialog import FROM_FILE, PreferencesDialog, defaults, thermal_overrides
+    assert defaults({})["capacity_limit"] == FROM_FILE and thermal_overrides(defaults({})) == {}
+    assert defaults({"capacity_limit": "99 °C"})["capacity_limit"] == FROM_FILE      # not a choice: the file's
+    with PreferencesDialog(frame, defaults({})) as dlg:
+        assert dlg.capacity_limit.GetStringSelection() == FROM_FILE
+        dlg.capacity_limit.SetStringSelection("125 °C")
+        v = dlg.values()
+    assert v["capacity_limit"] == "125 °C"
+    assert thermal_overrides(defaults(v)) == {"capacity_c": 125.0}
+    assert thermal_overrides(defaults(dict(v, electrothermal="on", et_tolerance="2 %"))) == {
+        "capacity_c": 125.0, "electrothermal": True, "electrothermal_tolerance": 0.02}
+
+
 def test_preferences_switch_each_check_and_set_the_esd_distance(app, frame):
     """Preferences > Run checks: a tick box per check, all ticked by default, and the ESD search distance (greyed
     while ESD at connectors is unticked); values() hands them to ui.json."""
