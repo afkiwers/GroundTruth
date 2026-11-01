@@ -3752,3 +3752,30 @@ def test_the_sweep_heading_says_it_adds_to_the_operating_point_and_opens_its_hel
         assert HelpWindow._target("bridges", SWEEP_HELP) == SWEEP_HELP
     finally:
         top.Destroy()
+
+
+def test_reference_nets_gone_from_the_board_are_offered_for_removal(app, frame, monkeypatch):
+    """A ground deleted in KiCad stayed in reference_nets and blocked every run ("reference net 'GND_ISO' does not
+    exist on the board", the user: "can't seem to get rid of it", then "offer an option to remove it
+    automatically"): before a run the window asks, Yes keeps the nets still on the board (saved, one undo step),
+    No leaves the settings and the run blocked; with none of them left, the grounds found on the board."""
+    from groundtruth.config.settings import missing_reference_nets
+    f = frame
+    run_steps(app, f, [])
+    assert "GND" in f.board.nets
+    f.settings.set_reference_nets(["GND", "GND_ISO"])
+    assert missing_reference_nets(f.settings.config, f.board) == (["GND_ISO"], ["GND"])
+    asked = []
+    monkeypatch.setattr(wx, "MessageBox", lambda msg, *a, **k: asked.append(msg) or wx.NO)
+    assert not f._ready(simulate=False)                                  # No: still blocked, nothing changed
+    assert "GND_ISO" in asked[0] and f.settings.config.reference_nets == ["GND", "GND_ISO"]
+    monkeypatch.setattr(wx, "MessageBox", lambda msg, *a, **k: asked.append(msg) or wx.YES)
+    assert f._ready(simulate=False)
+    assert f.settings.config.reference_nets == ["GND"]
+    f._saver.flush()
+    from groundtruth.config.settings import SettingsFile
+    assert SettingsFile.load(f.settings.path).config.reference_nets == ["GND"]           # saved
+    f.settings.set_reference_nets(["GND_OLD"])                           # none left: the board's grounds instead
+    asked.clear()
+    assert f._ready(simulate=False) and f.settings.config.reference_nets == ["GND"]
+    assert "use GND (found on the board) instead" in asked[0]

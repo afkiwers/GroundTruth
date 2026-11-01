@@ -1706,10 +1706,38 @@ class MainFrame(ConfigActions, wx.Frame):
             if self.converters._commit():
                 self.SetStatusText("parts renamed on the board, the converters follow their GT labels: "
                                    + "; ".join(moved))
+        if self._drop_missing_reference_nets():
+            self.SetStatusText(f"reference nets now {', '.join(self.settings.config.reference_nets)}")
         errors = validate(self.settings.config, self.board)
         if errors:
             message_box("\n".join(errors), "groundtruth: settings does not match the board", wx.ICON_WARNING)
             return False
+        return True
+
+    def _drop_missing_reference_nets(self) -> bool:
+        """Reference nets in the settings that the board no longer has (a ground deleted or renamed in KiCad) block
+        every run: offer to remove them (the user: "offer an option to remove it automatically"), keeping those still
+        on the board, or the grounds guessed from the board when none is. True when the settings were changed (saved,
+        one undo step)."""
+        from ..config.settings import missing_reference_nets
+        gone, keep = missing_reference_nets(self.settings.config, self.board)
+        if not gone:
+            return False
+        names = ", ".join(gone)
+        what = "it" if len(gone) == 1 else "them"
+        instead = "" if any(r in keep for r in self.settings.config.reference_nets) else \
+            f" and use {', '.join(keep) or 'none'} (found on the board) instead"
+        if message_box(f"The reference net{'s' if len(gone) > 1 else ''} {names} {'is' if len(gone) == 1 else 'are'} "
+                       f"no longer on the board (deleted or renamed in KiCad).\n\nRemove {what} from the settings"
+                       f"{instead}?", "GroundTruth", wx.YES_NO | wx.ICON_QUESTION) != wx.YES:
+            return False
+        try:
+            self.settings.set_reference_nets(keep)
+        except ConfigError as e:
+            message_box("\n".join(e.messages), "GroundTruth", wx.ICON_WARNING)
+            return False
+        self.dirty = True
+        self.on_save()
         return True
 
     def _what_if_edits(self, board, cfg):

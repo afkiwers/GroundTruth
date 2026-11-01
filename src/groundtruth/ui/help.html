@@ -51,7 +51,10 @@ next one).</p>
   voltages, a motor's data. Press <b>Mark reviewed</b>.</li>
 <li><b>Run checks</b> (seconds): rule checks on the nets' routes against the planes.</li>
 <li><b>Simulate</b> (minutes): the field solver on everything listed. Results go to the Issues and Results
-  tabs.</li>
+  tabs. Both first check the settings against the board: a net, pin or part the board no longer has stops the
+  run with what to fix. A reference net (a ground such as GND_ISO) deleted or renamed in KiCad is offered for
+  removal instead: <b>Yes</b> takes it out of the settings (with none left, the grounds found on the board), one
+  Undo step.</li>
 <li><b>Look and fix:</b> click an issue to see it in KiCad, look at the current maps, let <b>Suggest fixes</b>
   (Fixes tab) propose vias and capacitors, try them as what-if edits, place the vias.</li>
 <li><b>Thermal</b> and <b>Current capacity</b> for power stages and bridges, after Simulate.</li>

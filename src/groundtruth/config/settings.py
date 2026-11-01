@@ -2050,6 +2050,11 @@ class SettingsFile:
                 del si[key]
         self._replace("si", si)
 
+    def set_reference_nets(self, nets: list[str]):
+        """Write `reference_nets:` (the grounds the analyses take as return planes); ConfigError leaves the
+        settings as they were."""
+        self._replace("reference_nets", _flow_seq(list(nets)))
+
     def set_victim_nets(self, nets: list[str]):
         """Write `victims: nets:` (the nets a bridge's or power stage's switching may upset, analysis/victims.py),
         keeping the rest of `victims:`; an empty list removes the entry: the victims are then found on the board
@@ -2401,6 +2406,17 @@ def implausible(c: Union[ConverterSpec, BridgeSpec]) -> list[str]:
     return _out_of_range(c, _CONVERTER_RANGES)
 
 
+def missing_reference_nets(config: Config, board: Board) -> tuple[list[str], list[str]]:
+    """(the settings' reference nets the board no longer has, the list to keep instead): those still on the board,
+    or, when none is, the ones guessed from the board (guess_reference_nets), so the analyses keep a return plane.
+    The plugin offers to write it (the user, 2026-11-01, after deleting GND_ISO from a board: "offer an option to
+    remove it automatically")."""
+    nets = set(board.nets)
+    gone = [r for r in config.reference_nets if r not in nets]
+    keep = [r for r in config.reference_nets if r in nets]
+    return gone, (keep or guess_reference_nets(board))
+
+
 def validate(config: Config, board: Board) -> list[str]:
     """Cross-check the settings against the board. Returns error messages (empty = OK). Rows switched off are
     not checked (they may be off because the board no longer has their parts)."""
@@ -2409,7 +2425,8 @@ def validate(config: Config, board: Board) -> list[str]:
     board_nets = set(board.nets)
     for r in config.reference_nets:
         if r not in board_nets:
-            errors.append(f"reference net {r!r} does not exist on the board")
+            errors.append(f"reference net {r!r} does not exist on the board (remove it from reference_nets: in "
+                          "the settings file)")
     for d in config.dc_loads:
         for pin in d.pins:
             if board.find_pin(pin) is None:
