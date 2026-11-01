@@ -1514,7 +1514,7 @@ def _appendix(config, board=None) -> str:
     """The appendix: how the run was set up (limits, distances, standards, the band, solver settings), the board's
     quasi-static limit [A47] and the method's limits, so a reader knows what the figures are."""
     from ..components.values import format_si
-    from ..emi.conducted import describe
+    from ..emi.conducted import describe, stage_limit
     a = getattr(config, "analysis", None)
     rows = []
     qs = None
@@ -1528,7 +1528,7 @@ def _appendix(config, board=None) -> str:
                      ("Plane capacitance", "on" if a.plane_capacitance
                                                                      else "off"),
                      ("Radiated limit", a.limit_text()),
-                     ("Conducted standard", describe(a.conducted, a.conducted_class) if a.conducted != "none"
+                     ("Conducted standard", describe(*stage_limit(None, None, a)) if a.conducted != "none"
                       else "none"),
                      ("Radiated: measuring distance", f"{a.distance_m:g} m" if a.distance_m else "the limit's own "
                       "(CISPR 32: 10 m below 1 GHz, 3 m above)"),

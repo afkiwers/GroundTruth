@@ -13,12 +13,13 @@ import wx
 from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 
 from ..components.values import format_si
-from ..config.settings import CONDUCTED_STANDARDS, TOPOLOGIES, ConfigError, ConverterSpec
+from ..config.settings import TOPOLOGIES, ConfigError, ConverterSpec
+from . import limit_choice as lc
 from . import theme
 from .listsel import SelectableRows
 from .widgets import InfoBox, PickDialog, button_row, parse_field, set_lazy_items, source_status, with_mark
 
-STANDARD_CHOICES = ["(analysis default)"] + list(CONDUCTED_STANDARDS)
+STANDARD_CHOICES = lc.standard_items()     # as TI WEBENCH names them; the class beside it (ui/limit_choice.py)
 SPREAD_MODES = ("random", "triangle")      # ConverterSpec.spread_mode
 
 # hover explanations of the form's fields (on the label and the field): what it is, where to find it, what it changes
@@ -62,7 +63,9 @@ FIELD_TIPS = {
     "Output connector": "The load's pins, plus then minus, e.g. J2.1, J2.2: the DC output path and its ground "
                         "return.",
     "Conducted standard": "The conducted-emission limit for this stage (default: analysis.conducted in the "
-                          "settings).",
+                          "settings). CISPR 22 / CISPR 32: equipment on the mains or a DC network (CISPR 32 replaced "
+                          "CISPR 22 with the same limits); CISPR 25: vehicles; MIL-STD-461 CE102: military.",
+    "Conducted class": lc.CLASS_TIP,
     "Spread spectrum (%)": "The controller's spread spectrum: f_sw dithered from f_sw up to f_sw x (1 + this), e.g. "
                            "20 (the LTC7890's is +20 %). The receivers then see the harmonics spread over the band "
                            "(conducted and radiated estimates). Empty: off.",
@@ -227,6 +230,9 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self.out = wx.TextCtrl(fw)
         self.standard = wx.Choice(fw, choices=STANDARD_CHOICES)
         self.standard.SetSelection(0)
+        self.std_class = wx.Choice(fw, choices=[lc.CLASS_DEFAULT])     # filled from the standard, as WEBENCH's
+        self.std_class.SetSelection(0)
+        self.standard.Bind(wx.EVT_CHOICE, lambda e: (e.Skip(), self._refill_classes()))
         self.spread = wx.TextCtrl(fw)
         self.spread.SetHint("off")
         self.spread_mode = wx.Choice(fw, choices=list(SPREAD_MODES))
@@ -257,7 +263,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
                             ("V in (V)", self.v_in), ("V out (V)", self.v_out), ("Edge time", self.rise),
                             ("C_oss", self.c_oss), ("Q_oss", self.q_oss), ("C stray (chassis)", self.c_stray),
                             ("Input connector", self.inp), ("Output connector", self.out),
-                            ("Conducted standard", self.standard), ("Spread spectrum (%)", self.spread),
+                            ("Conducted standard", self.standard), ("Conducted class", self.std_class),
+                            ("Spread spectrum (%)", self.spread),
                             ("Spread mode", self.spread_mode), ("Spread rate (Hz)", self.spread_rate),
                             ("Interleave group", self.interleave), ("Phase (°)", self.phase_deg),
                             ("R_DS(on)", self.rds_on),
@@ -351,7 +358,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
              "dead_rise": ("num", "s"), "dead_fall": ("num", "s"), "v_sd": ("num", "V"), "q_rr": ("num", "C"),
              "spread_rate": ("num", "Hz"), "phase_deg": ("num", "°"), "rail": ("net", ""), "ground": ("net", ""),
              "input_connector": ("pins", ""), "output_connector": ("pins", ""), "topology": ("choice", ""),
-             "conducted": ("choice", ""), "spread_mode": ("choice", ""), "spread": ("pct", ""),
+             "conducted": ("choice", ""), "conducted_class": ("choice", ""), "spread_mode": ("choice", ""),
+             "spread": ("pct", ""),
              "interleave": ("text", "")}
 
     def _ctrls(self) -> dict:
@@ -363,11 +371,10 @@ class ConvertersPanel(SelectableRows, wx.Panel):
                 "rds_on": self.rds_on, "rds_on_low": self.rds_on_low, "dcr": self.dcr, "diode_vf": self.diode_vf,
                 "dead_rise": self.dead_rise, "dead_fall": self.dead_fall, "v_sd": self.v_sd, "q_rr": self.q_rr,
                 "input_connector": self.inp, "output_connector": self.out, "conducted": self.standard,
-                "spread": self.spread, "spread_mode": self.spread_mode, "spread_rate": self.spread_rate,
+                "conducted_class": self.std_class, "spread": self.spread, "spread_mode": self.spread_mode, "spread_rate": self.spread_rate,
                 "interleave": self.interleave, "phase_deg": self.phase_deg}
 
-    @staticmethod
-    def _texts(c: ConverterSpec) -> dict:
+    def _texts(self, c: ConverterSpec) -> dict:
         """Every field of stage c as the form shows it."""
         def si(v, unit):
             """A value with its SI prefix and unit, "" for none."""
@@ -385,13 +392,17 @@ class ConvertersPanel(SelectableRows, wx.Panel):
                 "diode_vf": g(c.diode_vf), "dead_rise": si(c.dead_rise, "s"), "dead_fall": si(c.dead_fall, "s"),
                 "v_sd": g(c.v_sd), "q_rr": si(c.q_rr, "C"), "input_connector": ", ".join(c.input_connector),
                 "output_connector": ", ".join(c.output_connector),
-                "conducted": c.conducted or STANDARD_CHOICES[0],
+                "conducted": lc.standard_text(c.conducted),
+                "conducted_class": lc.class_text(c.conducted or lc.analysis_of(self.settings).conducted,
+                                                 c.conducted_class),
                 "spread": "" if not c.spread else f"{c.spread * 100:g}",
                 "spread_mode": c.spread_mode if c.spread_mode in SPREAD_MODES else SPREAD_MODES[0],
                 "spread_rate": si(c.spread_rate, "Hz"), "interleave": c.interleave, "phase_deg": g(c.phase_deg)}
 
     def _set(self, ctrl, text: str):
         """Show text in a control; a list (wx.Choice) gets a MIXED entry at the top while it shows one."""
+        if ctrl is self.std_class:       # the classes of the standard shown (set before it: _ctrls' order)
+            self._refill_classes(keep=False)
         if isinstance(ctrl, wx.Choice):
             has = ctrl.GetCount() and ctrl.GetString(0) == self.MIXED
             if text == self.MIXED:
@@ -460,7 +471,9 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             v = parse_field(text.replace("%", ""), "")
             return (v / 100 or None, "") if v is not None else (None, f"'{text}' is not a percentage")
         if key == "conducted":
-            return (None if text == STANDARD_CHOICES[0] else text), ""
+            return lc.standard_key(text), ""
+        if key == "conducted_class":
+            return lc.class_key(self._class_standard(), text), ""
         return text, ""
 
     def _update_many(self, rows: list):
@@ -496,6 +509,18 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             self.reselect(rows)          # the list was rebuilt: the stages stay selected for the next edit
             self._form_for_selection()
 
+    def _class_standard(self) -> str:
+        """The standard the class choice belongs to: the one chosen, else the analysis'."""
+        return lc.effective_standard(self.standard.GetStringSelection(), lc.analysis_of(self.settings))
+
+    def _refill_classes(self, keep: bool = True):
+        """The class choice filled with the chosen standard's classes (keep: the class shown, if it has it), and the
+        standard's tooltip saying what the analysis default is."""
+        shown = self.std_class.GetStringSelection() if keep else None
+        lc.refill_classes(self.std_class, self._class_standard(), shown)
+        self.standard.SetToolTip(f"{FIELD_TIPS['Conducted standard']}\n"
+                                 f"{lc.default_tip(lc.analysis_of(self.settings))}")
+
     def _show_marks(self, c: Optional[ConverterSpec]):
         """The part parameters' marks for stage c (◆ from the schematic, ! set here and different; none for None)."""
         from ..components.fields import stage_marks
@@ -514,6 +539,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             """A field's number (its unit may be typed after it), None when empty."""
             return parse_field(ctrl.GetValue(), unit)
         std = self.standard.GetStringSelection()
+        cls = lc.class_key(self._class_standard(), self.std_class.GetStringSelection())
         spec = ConverterSpec(
             name=self.name.GetValue().strip() or self.sw.GetValue() or "converter", rail=self.rail.GetValue(),
             ground=self.ground.GetValue(), switch_node=self.sw.GetValue() or None, high_side=refs(self.high),
@@ -525,7 +551,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             dead_rise=num(self.dead_rise, "s"), dead_fall=num(self.dead_fall, "s"), v_sd=num(self.v_sd, "V"),
             q_rr=num(self.q_rr, "C"),
             input_connector=refs(self.inp), output_connector=refs(self.out),
-            conducted=None if std == STANDARD_CHOICES[0] else std,
+            conducted=lc.standard_key(std), conducted_class=cls,
             spread=(parse_field(self.spread.GetValue().replace("%", ""), "") or 0.0) / 100 or None,
             spread_mode=self.spread_mode.GetStringSelection(),
             spread_rate=num(self.spread_rate, "Hz"),

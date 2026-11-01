@@ -257,13 +257,14 @@ def evaluate(setup, change: Optional[Change] = None) -> Outcome:
             line = line * filter_ratio(setup, cf[sel], change.filter)
         arr = conducted_arrays(cf[sel], line, setup.standard, setup.standard_class, spread)
         out.conducted_db, out.conducted_f = _worst(cf[sel], arr["margin_db"])
-    standard = (spec.conducted or a.conducted or "none").lower()
+    from ..emi.conducted import stage_limit
+    standard, std_class = stage_limit(spec.conducted, spec.conducted_class, a)
     from ..emi.spread import Spread
     sp = spread[1] if spread else None
     cm = cm_estimate(replace(spec, rise_time=tr, spread=sp.fraction if isinstance(sp, Spread) else None,
                              spread_mode=sp.mode if isinstance(sp, Spread) else spec.spread_mode,
                              spread_rate=sp.rate if isinstance(sp, Spread) else None),
-                     res, standard, a.conducted_class) if not spec.bridge else None
+                     res, standard, std_class) if not spec.bridge else None
     out.cm_budget_pf = cm["budget_pf"] if cm else None
     v = res.v_in or 0.0
     edges = 1 if _synchronous(spec) else 2

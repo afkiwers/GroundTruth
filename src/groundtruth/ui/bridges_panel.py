@@ -14,13 +14,14 @@ import wx
 from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 
 from ..components.values import format_si
-from ..config.settings import (CONDUCTED_STANDARDS, CONNECTIONS, DRIVE_MODES, EMF_SHAPES, PWM_SCHEMES, BridgeSpec,
+from ..config.settings import (CONNECTIONS, DRIVE_MODES, EMF_SHAPES, PWM_SCHEMES, BridgeSpec,
                                ConfigError, LegSpec, MotorSpec, simulation_blockers)
+from . import limit_choice as lc
 from . import theme
 from .listsel import SelectableRows
 from .widgets import InfoBox, PickDialog, button_row, parse_field, set_lazy_items, source_status, with_mark
 
-STANDARD_CHOICES = ["(analysis default)"] + list(CONDUCTED_STANDARDS)
+STANDARD_CHOICES = lc.standard_items()     # as TI WEBENCH names them; the class beside it (ui/limit_choice.py)
 SWEEP_HELP = "bridges-sweep"        # the help's anchor of the sweep paragraph (help.html), the info button's target
 
 FIELD_TIPS = {
@@ -29,7 +30,9 @@ FIELD_TIPS = {
     "Ground net": "The power ground the low sides return to, e.g. GND.",
     "Input connector": "Where the bus comes in, + and - pins, e.g. J5.1, J5.2 (two wire tabs: J2.1, J3.1). The LISN "
                        "of the conducted estimate goes there.",
-    "Conducted standard": "The conducted limit for this bridge; the analysis default otherwise.",
+    "Conducted standard": "The conducted limit for this bridge; the analysis default otherwise. CISPR 22 / CISPR 32: "
+                          "equipment on the mains or a DC network; CISPR 25: vehicles; MIL-STD-461 CE102: military.",
+    "Conducted class": lc.CLASS_TIP,
     "Bus voltage (V)": "The bus voltage at the operating point (20-75 V for a 48 V system).",
     "PWM frequency": "The timer's switching frequency, e.g. 20kHz or 100kHz (set in the firmware).",
     "Phase current (A)": "The mean current in the conducting phases (the motor's DC-equivalent current): 0-500 A. "
@@ -241,8 +244,23 @@ class BridgesPanel(SelectableRows, wx.Panel):
         self.ground = wx.ComboBox(fw, style=wx.CB_DROPDOWN)
         self.inp = T()
         self.standard = self._choice(STANDARD_CHOICES)
+        self.std_class = self._choice([lc.CLASS_DEFAULT])      # filled from the standard, as WEBENCH's
+        self.standard.Bind(wx.EVT_CHOICE, lambda e: (e.Skip(), self._refill_classes()))
         self._add_rows((("Name", self.name), ("Bus net", self.rail), ("Ground net", self.ground),
-                        ("Input connector", self.inp), ("Conducted standard", self.standard), None))
+                        ("Input connector", self.inp), ("Conducted standard", self.standard),
+                        ("Conducted class", self.std_class), None))
+
+    def _class_standard(self) -> str:
+        """The standard the class choice belongs to: the one chosen, else the analysis'."""
+        return lc.effective_standard(self.standard.GetStringSelection(), lc.analysis_of(self.settings))
+
+    def _refill_classes(self, keep: bool = True):
+        """The class choice filled with the chosen standard's classes (keep: the class shown, if it has it), and the
+        standard's tooltip saying what the analysis default is."""
+        shown = self.std_class.GetStringSelection() if keep else None
+        lc.refill_classes(self.std_class, self._class_standard(), shown)
+        self.standard.SetToolTip(f"{FIELD_TIPS['Conducted standard']}\n"
+                                 f"{lc.default_tip(lc.analysis_of(self.settings))}")
 
     def _form_drive(self):
         """The drive."""
@@ -430,7 +448,9 @@ class BridgesPanel(SelectableRows, wx.Panel):
         self.rail.SetValue(b.rail)
         self.ground.SetValue(b.ground)
         self.inp.SetValue(", ".join(b.input_connector))
-        self.standard.SetStringSelection(b.conducted or STANDARD_CHOICES[0])
+        self.standard.SetStringSelection(lc.standard_text(b.conducted))
+        self._refill_classes(keep=False)
+        self.std_class.SetStringSelection(lc.class_text(self._class_standard(), b.conducted_class))
         self.v_bus.SetValue("" if b.v_bus is None else f"{b.v_bus:g}")
         self.f_pwm.SetValue(format_si(b.f_pwm, "Hz"))
         self.i_phase.SetValue("" if b.i_phase is None else f"{b.i_phase:g}")
@@ -561,7 +581,8 @@ class BridgesPanel(SelectableRows, wx.Panel):
         b = BridgeSpec(
             name=self.name.GetValue().strip() or "bridge", rail=self.rail.GetValue(), ground=self.ground.GetValue(),
             legs=list(self.legs), input_connector=_refs(self.inp.GetValue()),
-            conducted=None if std == STANDARD_CHOICES[0] else std,
+            conducted=lc.standard_key(std),
+            conducted_class=lc.class_key(self._class_standard(), self.std_class.GetStringSelection()),
             v_bus=need(self.v_bus, "V", "bus voltage"), f_pwm=need(self.f_pwm, "Hz", "PWM frequency", False) or 0.0,
             i_phase=need(self.i_phase, "A", "phase current"), mode=self.mode.GetStringSelection(),
             speed_rpm=need(self.speed, "rpm", "speed"), pwm=self.pwm.GetStringSelection(),

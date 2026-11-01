@@ -48,7 +48,7 @@ from ..components.values import format_si
 from ..config.settings import Config, ConverterSpec
 from ..core.board import Board, Footprint, Pad
 from ..core.issues import Issue, resolve_severity
-from ..emi.conducted import conducted_table, describe, frequency_range, lisn_loop_impedance
+from ..emi.conducted import conducted_table, describe, frequency_range, lisn_loop_impedance, stage_limit
 from ..emi.radiation import emission_table, limit_range
 from ..emi.spectrum import analysis_band, trapezoid_harmonics
 from ..solver.peec import Branch, RouteExcitation, Solution, SolverError, TraceSegment
@@ -654,7 +654,8 @@ def prepare_converter(model: BoardModel, spec: ConverterSpec, region: Optional[t
                     "switches (check the capacitor models in the settings)", centre, "caps")
 
     # Conducted measurement: a LISN at the input connector, if the input reaches the rail through series parts
-    standard = (spec.conducted or a.conducted or "none").lower()
+    # the stage's standard and class, else the analysis' (a class only with its own standard) [CISPR 25]
+    standard, std_class = stage_limit(spec.conducted, spec.conducted_class, a)
     requested = standard
     connector: list[Pad] = []
     boost_conn: list[Pad] = []
@@ -739,7 +740,7 @@ def prepare_converter(model: BoardModel, spec: ConverterSpec, region: Optional[t
     if lisn is None and connector:
         res.notes.append("LISN not connected (no copper at the input connector pins in the model)")
         standard = "none"
-    res.conducted_standard = describe(standard, a.conducted_class) if standard != "none" else ""
+    res.conducted_standard = describe(standard, std_class) if standard != "none" else ""
 
     # Board-wide model with plane capacitance (radiated band)
     cavity = None
@@ -775,7 +776,7 @@ def prepare_converter(model: BoardModel, spec: ConverterSpec, region: Optional[t
                                boost=spec.topology == "boost")
     fine, cond = ModelRun(st, exc), ModelRun(cond_st, cond_exc)
     setup = ConverterSetup(spec, res, fine, cavity, cond, freqs, amps, amps.copy(), elements, LOOP_F, lisn,
-                           standard, a.conducted_class, issues, t_start, config=config)
+                           standard, std_class, issues, t_start, config=config)
     fine.planned = [LOOP_F_LO, LOOP_F] + ([float(spec.f_sw)] if split else [])
     if cavity is not None:
         cavity.planned = initial_frequencies(setup, a.solve_points, limit_range(a.limit_spec()))
@@ -810,7 +811,6 @@ def boost_conducted(model: BoardModel, setup: "ConverterSetup", connector: list[
     the way) gives the transfer to the input lines. Returns notes."""
     from dataclasses import replace
     board, config, spec, res = model.board, model.config, setup.spec, setup.res
-    a = config.analysis
     sw_net, inductor = switch_inductor(board, config, spec)
     if inductor is None:
         return ["boost: no inductor on the switch node; conducted emission not estimated"]
@@ -848,13 +848,13 @@ def boost_conducted(model: BoardModel, setup: "ConverterSetup", connector: list[
         return ["LISN not connected (no copper at the input connector pins in the model)"]
     duty = 1 - spec.v_in / spec.v_out
     delta_i = spec.v_in * duty / (L * spec.f_sw)
-    rng = frequency_range(standard, a.conducted_class)
+    rng = frequency_range(standard, setup.standard_class)
     setup.cond = ModelRun(st, exc)
     setup.lisn, setup.standard = lisn, standard
     setup.fine.planned = sorted(set(setup.fine.planned) | {float(spec.f_sw)})   # ripple sharing on the hot loop
     setup.cond_freqs, setup.cond_currents = ripple_harmonics(spec.f_sw, delta_i, duty, rng[1] * 1.01)
     setup.cond.planned = _conducted_start(setup, with_fsw=False)
-    res.conducted_standard = describe(standard, a.conducted_class)
+    res.conducted_standard = describe(standard, setup.standard_class)
     res.ripple = {"delta_i_pp": delta_i, "duty": duty, "L": L, "input_net": vin_net}
     return [f"boost: conducted emission from the inductor ripple ({delta_i:.2f} A p-p at D = {duty:.2f}, "
             f"L = {L * 1e6:g} µH), drawn from {vin_net}"]
@@ -1452,7 +1452,7 @@ def finish_converter(model: BoardModel, setup: ConverterSetup) -> ConverterResul
                 if p["name"].startswith("input ") and p["current_a"] > 0:
                     _rescale_path(res, p, res.input["i_in_a"] / p["current_a"])
             res.notes.append(input_note(res.input, spec.v_in or res.v_in))
-        res.cm = cm_estimate(spec, res, (spec.conducted or a.conducted or "none").lower(), a.conducted_class)
+        res.cm = cm_estimate(spec, res, *stage_limit(spec.conducted, spec.conducted_class, a))
         res.input_filter = input_filter_advice(res.conducted, rules.emi_margin_db)
         res.notes += dc_notes
         _ce101_stage(setup, res, a)

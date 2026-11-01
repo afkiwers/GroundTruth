@@ -67,7 +67,7 @@ def main():
     ap.add_argument("--series", help="comma-separated series parts to model as 5 mOhm (input path)")
     ap.add_argument("--connector", help="input connector pins 'PLUS,MINUS' for the conducted estimate")
     ap.add_argument("--output", help="the load's pins 'PLUS,MINUS' (DC output path and ground return)")
-    ap.add_argument("--standard", help="cispr32 | cispr25 | mil461")
+    ap.add_argument("--standard", help="cispr22 | cispr32 | cispr25 | mil461")
     ap.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args()
 

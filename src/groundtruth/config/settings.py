@@ -36,7 +36,9 @@ Bridges: motor drives (half-bridge legs on one bus, six-step), with the operatin
 """
 
 TOPOLOGIES = ("buck", "boost", "custom")
-CONDUCTED_STANDARDS = ("cispr32", "cispr25", "mil461", "none")
+# conducted standards, in the window's order: TI WEBENCH's two first (CISPR 22, CISPR 25), then CISPR 32 (CISPR 22's
+# successor, the default) and MIL-STD-461 CE102; their classes: emi/conducted.CLASSES
+CONDUCTED_STANDARDS = ("cispr22", "cispr25", "cispr32", "mil461", "none")
 
 
 class ConfigError(ValueError):
@@ -138,6 +140,8 @@ class ConverterSpec:
     spread_mode: str = "random"           # random (a new frequency every cycle, or spread_rate per s) | triangle
     spread_rate: Optional[float] = None   # triangle: modulation frequency; random: hops per second (default: per cycle)
     conducted: Optional[str] = None       # conducted standard for this stage (default analysis.conducted)
+    conducted_class: Optional[str] = None  # its class (emi/conducted.stage_limit: default the analysis' class with
+                                           # the analysis' standard, else the standard's strictest)
     # interleaving (analysis/interleave.py): stages with the same group name are phases of one controller, switching
     # at one frequency, this one delayed by phase_deg of the switching period (None: the group's stages spread
     # evenly, 360°/n apart in the settings' order); their conducted and radiated emissions are added as phasors
@@ -322,6 +326,7 @@ class BridgeSpec:
     legs: list[LegSpec] = field(default_factory=list)
     input_connector: list[str] = field(default_factory=list)   # [+, -] where the bus comes in (the LISN goes there)
     conducted: Optional[str] = None       # conducted standard (default analysis.conducted)
+    conducted_class: Optional[str] = None  # its class (emi/conducted.stage_limit)
     v_bus: Optional[float] = None         # V
     f_pwm: float = 20e3                   # Hz
     i_phase: Optional[float] = None       # A, mean current of the conducting phase pair (> 0; the sign is `mode`)
@@ -365,7 +370,7 @@ class BridgeSpec:
             high_side=list(leg.high_side), low_side=list(leg.low_side), topology="custom", f_sw=self.f_pwm,
             i_out=self.i_phase or 1.0, v_in=self.v_bus, duty=0.5, rise_time=self.rise_time, c_oss=self.c_oss,
             q_oss=self.q_oss, r_damp=self.r_damp, c_stray=self.c_stray, input_connector=list(self.input_connector),
-            conducted=self.conducted, source=self.source, reviewed=self.reviewed, rds_on=self.rds_on,
+            conducted=self.conducted, conducted_class=self.conducted_class, source=self.source, reviewed=self.reviewed, rds_on=self.rds_on,
             rds_on_low=self.rds_on_low, diode_vf=self.v_sd, bridge=self.name, phase=leg.phase,
             snubber=list(leg.snubber), phase_output=leg.output, low_return=leg.ground_return,
             low_shunt=list(leg.shunt)) for leg in self.legs]
@@ -782,6 +787,26 @@ def _choice(v: Any, default: str) -> str:
     return str(v if v is not None else default).strip().lower()
 
 
+def _class(v: Any) -> Optional[str]:
+    """A conducted class as written ("B", 5, "class 3", "CLASS A", "115V"), without the word "class"; None if not
+    given. Checked against its standard by class_problems."""
+    if v is None or str(v).strip() == "":
+        return None
+    c = str(v).strip()
+    return c[5:].strip() if c.lower().startswith("class") else c
+
+
+def class_problems(standard: Optional[str], cls: Optional[str]) -> list[str]:
+    """[] or the message for a conducted class its standard does not have (a stage's class with the analysis'
+    standard is checked when the stage is resolved: emi/conducted.stage_limit falls back to the strictest)."""
+    from ..emi.conducted import CLASSES, normal_class
+    if not cls or not standard or standard not in CLASSES:
+        return [] if not cls or standard != "none" else ["conducted_class needs a conducted standard"]
+    if normal_class(standard, cls) is None:
+        return [f"conducted_class {cls!r} is not a class of {standard}: one of {', '.join(CLASSES[standard])}"]
+    return []
+
+
 def _signed(v: Any, what: str) -> float:
     """A plain number that may be negative (parse_value reads no sign)."""
     if v is None or v == "":
@@ -834,6 +859,7 @@ def _bridge_from_data(b: dict, where: str, i: int) -> BridgeSpec:
         name=str(b.get("name") or f"bridge {i + 1}"), rail=str(b.get("rail") or ""), ground=str(b.get("ground") or ""),
         legs=legs, input_connector=_refs(b.get("input_connector")),
         conducted=(str(b["conducted"]).lower().replace(" ", "").replace("-", "") if b.get("conducted") else None),
+        conducted_class=_class(b.get("conducted_class")),
         v_bus=_opt(b.get("v_bus"), f"{where}.v_bus", "V"), f_pwm=_num(b.get("f_pwm", 20e3), f"{where}.f_pwm", "Hz"),
         i_phase=_opt(b.get("i_phase"), f"{where}.i_phase", "A"), mode=_choice(b.get("mode"), "motoring"),
         speed_rpm=_opt(b.get("speed_rpm"), f"{where}.speed_rpm", "rpm"), pwm=_choice(b.get("pwm"), "hpwm_lon"),
@@ -880,6 +906,7 @@ def _bridge_problems(b: BridgeSpec) -> list[str]:
         out.append(f"sweep: at most {SWEEP_MAX} operating points (currents × speeds)")
     if b.conducted is not None and b.conducted not in CONDUCTED_STANDARDS:
         out.append(f"conducted must be one of {', '.join(CONDUCTED_STANDARDS)}")
+    out += class_problems(b.conducted, b.conducted_class)
     if b.f_pwm <= 0 or b.rise_time <= 0 or b.dead_time < 0:
         out.append("f_pwm and rise_time must be positive, dead_time not negative")
     if not 0 < b.d_max <= 1:
@@ -1226,7 +1253,7 @@ def config_from_data(data: Any) -> Config:
             gpu=_gpu(a.get("gpu", "auto"), errors),
             sparse=_sparse(a.get("sparse"), errors),
             conducted=str(a.get("conducted", "cispr32")).lower().replace(" ", "").replace("-", ""),
-            conducted_class=str(a.get("conducted_class", "B")),
+            conducted_class=_class(a.get("conducted_class")) or "B",
             # "G", "H", "461H" or "MIL-STD-461H" all name the revision
             mil461=str(a.get("mil461", "G")).strip().upper().removeprefix("MIL-STD-").removeprefix("461"),
             ce101=str(a.get("ce101", "none")).lower(),
@@ -1237,6 +1264,8 @@ def config_from_data(data: Any) -> Config:
         )
         if cfg.analysis.conducted not in CONDUCTED_STANDARDS:
             errors.append(f"analysis.conducted must be one of {', '.join(CONDUCTED_STANDARDS)}")
+        elif a.get("conducted_class") is not None:      # the default "B" stands for each standard's strictest
+            errors += [f"analysis.{m}" for m in class_problems(cfg.analysis.conducted, cfg.analysis.conducted_class)]
         from ..emi.conducted import CE101_PLATFORMS, MIL461_REVISIONS
         if cfg.analysis.mil461 not in MIL461_REVISIONS:
             errors.append(f"analysis.mil461 must be one of {', '.join(MIL461_REVISIONS)} (MIL-STD-461G or 461H)")
@@ -1403,6 +1432,7 @@ def config_from_data(data: Any) -> Config:
                 spread_rate=_opt(c.get("spread_rate"), f"{where}.spread_rate", "Hz"),
                 conducted=(str(c["conducted"]).lower().replace(" ", "").replace("-", "") if c.get("conducted")
                            else None),
+                conducted_class=_class(c.get("conducted_class")),
                 interleave=str(c.get("interleave") or "").strip(),
                 phase_deg=_opt(c.get("phase_deg"), f"{where}.phase_deg"),
                 source=str(c.get("source", "manual")), reviewed=bool(c.get("reviewed", c.get("source") != "auto")),
@@ -1441,6 +1471,7 @@ def config_from_data(data: Any) -> Config:
                 problems.append(f"{key} needs two pins: [plus, minus]")
         if spec.conducted is not None and spec.conducted not in CONDUCTED_STANDARDS:
             problems.append(f"conducted must be one of {', '.join(CONDUCTED_STANDARDS)}")
+        problems += class_problems(spec.conducted or cfg.analysis.conducted, spec.conducted_class)
         if spec.f_sw <= 0 or spec.rise_time <= 0 or spec.i_out <= 0:
             problems.append("f_sw, rise_time and i_out must be positive")
         if spec.duty is not None and not 0 < spec.duty < 1:
@@ -1480,6 +1511,8 @@ def config_from_data(data: Any) -> Config:
             errors.extend(e.messages)
             continue
         problems = _bridge_problems(bridge)
+        if not bridge.conducted:      # its class with the analysis' standard
+            problems += class_problems(cfg.analysis.conducted, bridge.conducted_class)
         errors.extend(f"{where} ({bridge.name}): {m}" for m in problems)
         if not problems:
             cfg.bridges.append(bridge)
@@ -1920,6 +1953,8 @@ class SettingsFile:
                 d["loop"] = _flow(dict(c.loop))
             if c.conducted:
                 d["conducted"] = c.conducted
+            if c.conducted_class:
+                d["conducted_class"] = c.conducted_class
             if c.interleave:
                 d["interleave"] = c.interleave
                 if c.phase_deg is not None:
@@ -2256,6 +2291,8 @@ def _bridge_to_doc(b: BridgeSpec) -> CommentedMap:
         d["input_connector"] = _flow_seq(b.input_connector)
     if b.conducted:
         d["conducted"] = b.conducted
+    if b.conducted_class:
+        d["conducted_class"] = b.conducted_class
     for key in ("v_bus", "i_phase"):
         if getattr(b, key) is not None:
             d[key] = getattr(b, key)

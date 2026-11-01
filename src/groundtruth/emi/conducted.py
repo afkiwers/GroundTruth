@@ -58,6 +58,7 @@ class Lisn:
 LISNS = {
     # CISPR 16-1-2 V-network: nominal impedance 50 ohm || (50 uH + 5 ohm) [CISPR 16-1-2]
     "cispr32": Lisn("50 Ω ∥ (50 µH + 5 Ω) (CISPR 16-1-2)", 50e-6, 5.0, 0.0, 0.0),
+    "cispr22": Lisn("50 Ω ∥ (50 µH + 5 Ω) (CISPR 16-1-2)", 50e-6, 5.0, 0.0, 0.0),   # the same network [CISPR 22]
     # CISPR 25 artificial network: nominal 50 ohm || 5 uH [CISPR 25]
     "cispr25": Lisn("50 Ω ∥ 5 µH (CISPR 25)", 5e-6, 0.0, 0.0, 0.0),
     # MIL-STD-461G Figure 6 [MIL-STD-461G], as drawn: 50 uH, 8 uF + 5 ohm to the reference on the supply side, 0.25 uF
@@ -70,6 +71,7 @@ LISNS = {
 # Receiver resolution bandwidth tables [(upper frequency, bandwidth)]
 BANDS = {
     "cispr32": [(150e3, 200.0), (30e6, 9e3), (np.inf, 120e3)],          # [CISPR 16-1-1] bands A, B, C/D
+    "cispr22": [(150e3, 200.0), (30e6, 9e3), (np.inf, 120e3)],
     "cispr25": [(150e3, 200.0), (30e6, 9e3), (np.inf, 120e3)],
     "mil461": [(150e3, 1e3), (30e6, 10e3), (np.inf, 100e3)],            # [MIL-STD-461G, Table II]
 }
@@ -80,6 +82,22 @@ CISPR32_AV = {   # CISPR 32 Table A.10 / A.11, AC mains port, average detector [
     "B": [(0.15e6, 0.5e6, 56.0, 46.0), (0.5e6, 5e6, 46.0, 46.0), (5e6, 30e6, 50.0, 50.0)],
     "A": [(0.15e6, 0.5e6, 66.0, 66.0), (0.5e6, 30e6, 60.0, 60.0)],
 }
+# CISPR 22 Tables 1 / 2 (mains terminals, average detector) [CISPR 22]: the values CISPR 32 took over when it
+# replaced CISPR 22 (withdrawn 2017), kept as a standard of its own for test plans and tools (TI WEBENCH) that name it
+CISPR22_AV = CISPR32_AV
+# The quasi-peak limits of the same tables [CISPR 22] [CISPR 32, Annex A]: what TI WEBENCH draws for CISPR 22. Not used
+# for the estimate (a switcher's harmonic reads the same on every detector, so the lower average line decides), only
+# for the help's charts beside the average ones
+CISPR22_QP = {
+    "B": [(0.15e6, 0.5e6, 66.0, 56.0), (0.5e6, 5e6, 56.0, 56.0), (5e6, 30e6, 60.0, 60.0)],
+    "A": [(0.15e6, 0.5e6, 79.0, 79.0), (0.5e6, 30e6, 73.0, 73.0)],
+}
+
+# The classes each standard has, in the order the window lists them, and the one taken when a stage names a
+# standard but no class: the strictest (CISPR 22 / 32 class B, CISPR 25 class 5, MIL-STD-461's basic curve)
+CLASSES = {"cispr22": ("A", "B"), "cispr25": ("1", "2", "3", "4", "5"), "cispr32": ("A", "B"),
+           "mil461": ("basic", "115V", "220V", "270V", "440V")}
+DEFAULT_CLASS = {"cispr22": "B", "cispr25": "5", "cispr32": "B", "mil461": "basic"}
 # CISPR 25 voltage method, average detector, class 5 and the step to each lower class (class 1 = class 5 + 4 steps)
 # [CISPR 25] [A10]
 CISPR25_AV5 = [   # (f_lo, f_hi, class 5 dBµV, dB per class)
@@ -92,19 +110,25 @@ CISPR25_AV5 = [   # (f_lo, f_hi, class 5 dBµV, dB per class)
     (68e6, 87e6, 18.0, 6.0),          # VHF
     (76e6, 108e6, 18.0, 6.0),         # FM
 ]
+CISPR25_PEAK_DB = 20.0     # the peak limits are the average ones + 20 dB in every band and class [CISPR 25]: TI WEBENCH's
+                           # CISPR 25 lines (class 5: LW 70, MW 54, SW 53 dBµV); for the help's charts only
 # CE102's relaxation for sources above 28 V, dB [MIL-STD-461G, Figure CE102-1]
 MIL461_RELAX = {"basic": 0.0, "28v": 0.0, "115v": 6.0, "220v": 9.0, "270v": 10.0, "440v": 12.0}
 
 
-def band_limits(standard: str, cls: str = "B") -> list[tuple[float, float, float, float]]:
-    """The limit line of a standard and class as bands [(f_lo, f_hi, dB_lo, dB_hi)]."""
+def band_limits(standard: str, cls: str = "B", detector: str = "average") -> list[tuple[float, float, float, float]]:
+    """The limit line of a standard and class as bands [(f_lo, f_hi, dB_lo, dB_hi)]. detector "average" (what the
+    estimates are checked against), or for the help's charts the line a datasheet or WEBENCH draws: "qp" for CISPR
+    22 / 32, "peak" for CISPR 25 (MIL-STD-461's line is a peak one already)."""
     std = standard.lower()
     c = str(cls).strip().lower()
-    if std == "cispr32":
-        return CISPR32_AV["A" if c == "a" else "B"]
+    if std in ("cispr32", "cispr22"):
+        table = CISPR22_QP if detector == "qp" else CISPR32_AV if std == "cispr32" else CISPR22_AV
+        return table["A" if c == "a" else "B"]
     if std == "cispr25":
         k = int(c) if c.isdigit() and 1 <= int(c) <= 5 else 5
-        return [(lo, hi, v + (5 - k) * step, v + (5 - k) * step) for lo, hi, v, step in CISPR25_AV5]
+        up = CISPR25_PEAK_DB if detector == "peak" else 0.0
+        return [(lo, hi, v + (5 - k) * step + up, v + (5 - k) * step + up) for lo, hi, v, step in CISPR25_AV5]
     if std == "mil461":       # CE102 basic curve: 94 dBµV at 10 kHz falling 20 dB/decade to 60 dBµV at 500 kHz
         r = MIL461_RELAX.get(c.replace(" ", ""), 0.0)
         return [(10e3, 500e3, 94.0 + r, 60.0 + r), (500e3, 10e6, 60.0 + r, 60.0 + r)]
@@ -119,11 +143,11 @@ def frequency_range(standard: str, cls: str = "B") -> Optional[tuple[float, floa
     return min(b[0] for b in bands), max(b[1] for b in bands)
 
 
-def limit_line(freqs, standard: str, cls: str = "B") -> np.ndarray:
-    """dBµV per frequency, NaN outside the standard's bands."""
+def limit_line(freqs, standard: str, cls: str = "B", detector: str = "average") -> np.ndarray:
+    """dBµV per frequency, NaN outside the standard's bands (detector: see band_limits)."""
     f = np.asarray(freqs, float)
     out = np.full(f.shape, np.nan)
-    for lo, hi, a, b in band_limits(standard, cls):
+    for lo, hi, a, b in band_limits(standard, cls, detector):
         sel = (f >= lo) & (f <= hi)
         if not sel.any():
             continue
@@ -135,14 +159,53 @@ def limit_line(freqs, standard: str, cls: str = "B") -> np.ndarray:
 def describe(standard: str, cls: str = "B") -> str:
     """The standard and class in words, for reports ("CISPR 32 class B (average)")."""
     std = standard.lower()
-    if std == "cispr32":
-        return f"CISPR 32 class {'A' if str(cls).upper() == 'A' else 'B'} (average)"
+    if std in ("cispr32", "cispr22"):
+        return f"CISPR {std[-2:]} class {'A' if str(cls).upper() == 'A' else 'B'} (average)"
     if std == "cispr25":
         c = str(cls)
         return f"CISPR 25 class {c if c.isdigit() and 1 <= int(c) <= 5 else '5'} (voltage method, average)"
     if std == "mil461":
         return "MIL-STD-461 CE102" + ("" if str(cls).lower() in ("basic", "28v", "b") else f" ({cls})")
     return "none"
+
+
+# The standards' and classes' names in the window, as TI WEBENCH writes them ("CISPR 25", "CLASS 5")
+STANDARD_NAMES = {"cispr22": "CISPR 22", "cispr25": "CISPR 25", "cispr32": "CISPR 32", "mil461": "MIL-STD-461 CE102",
+                  "none": "none"}
+
+
+def class_label(standard: str, cls: str) -> str:
+    """A class as the window shows it: "CLASS B", "CLASS 5"; MIL-STD-461's by source voltage ("basic (≤ 28 V)")."""
+    if standard.lower() == "mil461":
+        return "basic (≤ 28 V)" if cls == "basic" else f"{cls[:-1]} V source"
+    return f"CLASS {cls}"
+
+
+def normal_class(standard: str, cls) -> Optional[str]:
+    """cls as CLASSES spells it for that standard (case ignored; MIL-STD-461's "28V" and an old file's default "B"
+    are its basic curve), or None when the standard has no such class."""
+    std = (standard or "").lower()
+    c = str(cls or "").strip().lower().replace(" ", "")
+    if std == "mil461" and c in ("28v", "b"):
+        return "basic"
+    return next((k for k in CLASSES.get(std, ()) if k.lower() == c), None)
+
+
+def stage_limit(stage_standard: Optional[str], stage_class: Optional[str], analysis) -> tuple[str, str]:
+    """(standard, class) a power stage or bridge is checked against. The stage's own standard, else the settings'
+    analysis.conducted; its own class, else analysis.conducted_class, but that one only while the standard is the
+    analysis' too (a stage that names CISPR 25 must not read the analysis' CISPR 32 class "B"), else the standard's
+    strictest class (DEFAULT_CLASS). "none" gives ("none", "")."""
+    std = (stage_standard or analysis.conducted or "none").lower()
+    if std not in CLASSES:
+        return std, ""
+    if stage_class:
+        cls = stage_class
+    elif not stage_standard or stage_standard.lower() == (analysis.conducted or "").lower():
+        cls = analysis.conducted_class
+    else:
+        cls = None
+    return std, normal_class(std, cls) or DEFAULT_CLASS[std]
 
 
 def lisn_loop_impedance(standard: str):

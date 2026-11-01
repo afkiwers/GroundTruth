@@ -362,6 +362,53 @@ def test_converters_form_explains_its_fields_scrolls_and_keeps_what_it_does_not_
     assert got["refused"].spread == pytest.approx(0.15)          # "abc": refused, the stage as it was
 
 
+def test_the_conducted_class_choice_follows_the_standard_as_in_webench(app, conv_frame):
+    """The user, of TI WEBENCH's noise standard and class: "I would want the same classes as TI offers". Choosing a
+    standard fills the class choice with its classes (CISPR 25: CLASS 1-5, CISPR 22: CLASS A / B, none: greyed);
+    a class the new standard has is kept; the stage saves both, and selecting it shows them again. The Bridges
+    tab's class choice fills the same way."""
+    from types import SimpleNamespace as NS
+    f = conv_frame
+    got = {}
+
+    def pick(p, text):
+        """Choose a standard as the user does (the choice's event refills the classes)."""
+        p.standard.SetStringSelection(text)
+        p.standard.GetEventHandler().ProcessEvent(wx.CommandEvent(wx.wxEVT_CHOICE, p.standard.GetId()))
+        return list(p.std_class.GetStrings())
+
+    def check():
+        p = f.converters
+        assert list(p.standard.GetStrings())[:3] == ["(analysis default)", "CISPR 22", "CISPR 25"]
+        got["c25"] = pick(p, "CISPR 25")
+        p.std_class.SetStringSelection("CLASS 3")
+        got["c22"] = pick(p, "CISPR 22")
+        got["c22_sel"] = p.std_class.GetStringSelection()
+        got["none"] = (pick(p, "none"), p.std_class.IsEnabled())
+        pick(p, "CISPR 25")
+        p.std_class.SetStringSelection("CLASS 2")
+        got["kept"] = (pick(p, "CISPR 25"), p.std_class.GetStringSelection())
+        for ctrl, v in ((p.name, "cls"), (p.rail, "VIN"), (p.ground, "GND"), (p.integrated, "U1"),
+                        (p.f_sw, "400kHz"), (p.i_out, "2"), (p.rise, "5ns"), (p.inp, "J1.1, J1.2")):
+            ctrl.SetValue(v)
+        p.on_add(None)
+        got["spec"] = f.settings.config.converters[-1]
+        pick(p, "(analysis default)")                 # the form changed, then the stage selected again
+        k = len(p.converters) - 1
+        p.list.Select(k)
+        p.on_select(NS(GetIndex=lambda: k))
+        got["shown"] = (p.standard.GetStringSelection(), p.std_class.GetStringSelection())
+        got["bridge"] = pick(f.bridges, "CISPR 22")
+    run_steps(app, f, [check])
+    assert got["c25"] == ["(default)"] + [f"CLASS {k}" for k in range(1, 6)]
+    assert got["c22"] == ["(default)", "CLASS A", "CLASS B"] and got["c22_sel"] == "(default)"
+    assert got["none"] == (["(default)"], False)
+    assert got["kept"][1] == "CLASS 2"
+    assert (got["spec"].conducted, got["spec"].conducted_class) == ("cispr25", "2")
+    assert got["shown"] == ("CISPR 25", "CLASS 2")
+    assert got["bridge"] == ["(default)", "CLASS A", "CLASS B"]
+
+
 def test_schematic_fields_fill_the_forms_and_a_value_set_here_is_flagged(app, tmp_path, monkeypatch):
     """The parts' schematic fields (HTTP lib parameters) fill a stage's R_DS(on) and C_oss: ◆ beside a value from
     the schematic, a warning '!' (with both values in its tooltip) beside one typed in that differs; Use schematic
