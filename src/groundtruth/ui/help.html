@@ -25,6 +25,7 @@ next one).</p>
   compute server)</li>
 <li><a href="#safety">Voltage-aware safety checks</a></li>
 <li><a href="#fields">Part parameters from the schematic (HTTP lib fields)</a></li>
+<li><a href="#conducted">Conducted-emission limits: standards and classes</a></li>
 <li><a href="#hotloop">The hot loop</a></li>
 <li><a href="#thermal">Thermal and Current capacity</a></li>
 <li><a href="#analog">Op-amp circuits and the transfer function</a></li>
@@ -330,8 +331,10 @@ you stop on: clicking or arrowing quickly through the rows does not make it sele
 side / low side, or "integrated" and the IC), <b>Rail</b>, <b>f_sw</b>, <b>I out</b> (the load current: the output's; the input current is worked out, see below), <b>V in→out</b>
 (? where not set), <b>Edge</b>, <b>Input</b> and <b>Output</b> (the connector pins). The form scrolls when the window
 is short. In the form, <b>Topology</b> is buck, boost or custom; <b>Integrated stage</b> takes an IC with both
-switches inside (leave High side, Low side and Switch node empty then); <b>Conducted standard</b>
-<i>(analysis default)</i> uses the settings' <code>analysis.conducted</code>; parts are references separated by
+switches inside (leave High side, Low side and Switch node empty then); <b>Conducted standard</b> and <b>Conducted
+class</b> pick the limit (CISPR 22 CLASS A / B, CISPR 25 CLASS 1-5 as in TI WEBENCH, CISPR 32, MIL-STD-461 CE102;
+<i>(analysis default)</i> uses the settings' <code>analysis.conducted</code>; see <a href="#conducted">Conducted-emission
+limits</a> for the classes and when each applies); parts are references separated by
 commas (Q1, Q2), connectors plus then minus (J1.1, J1.2). <b>R_DS(on)</b>, <b>R_DS(on) low side</b>, <b>Inductor
 DCR</b> and <b>Diode V_f (V)</b> are the losses of the thermal solve.</p>
 <p><a name="deadtime"></a><b>Dead time, reverse conduction and recovery</b> (a synchronous stage: a FET as the
@@ -437,7 +440,8 @@ operating point and the motor are yours to enter:</p>
   at every speed, from the same solves (a few seconds each).</td></tr>
 </table>
 <p>The form also has the bridge's <b>Name</b>, <b>Bus net</b>, <b>Ground net</b>, <b>Input connector</b> (+ and
-- pins, where the LISN goes), <b>Conducted standard</b> and <b>C stray (chassis)</b>, and under Motor <b>Advance
+- pins, where the LISN goes), <b>Conducted standard</b> and <b>Conducted class</b> (see <a
+href="#conducted">Conducted-emission limits</a>) and <b>C stray (chassis)</b>, and under Motor <b>Advance
 (°)</b>: the commutation advance in electrical degrees (negative: retarded). Hover over a field for what it means
 and an example value.</p>
 <p>The table's columns: <b>Name</b>, <b>Status</b>, <b>Legs</b> (how many), <b>Bus</b>, <b>V</b>, <b>f_pwm</b>,
@@ -896,6 +900,73 @@ where it comes from, nominal and used C, the change), the JSON report's <code>ca
 run's notes (capacitors at an unknown voltage, values taken at half their rating). Every solve uses it: the power
 stages' hot loops and input ripple, conducted emission, the PDN, the control loops, signal paths and op-amp
 circuits.</p>
+
+<hr><a name="conducted"></a><h3>Conducted-emission limits: standards and classes</h3>
+<p>Every power stage and motor bridge with an input connector gets a conducted-emission estimate: the voltage a test
+receiver would read across the LISN (line impedance stabilisation network) at its input, per harmonic, against a
+limit line. The <b>Conducted standard</b> and <b>Conducted class</b> on the Converters and Bridges tabs pick that
+line, as TI WEBENCH's <i>Noise standard</i> and <i>Noise class</i> do: <b>CISPR 22</b> with CLASS A / CLASS B,
+<b>CISPR 25</b> with CLASS 1 to CLASS 5, and besides those <b>CISPR 32</b> (the default) and <b>MIL-STD-461
+CE102</b>. A <b>class</b> is the same measurement with a different allowed level: which one applies is set by where
+the product is sold or by the customer's specification, not by the design.</p>
+<p><b>Which class a stage is checked against.</b> Its own class when one is chosen. <i>(default)</i>: with the
+analysis' standard (<i>(analysis default)</i>, or the same standard chosen) the settings'
+<code>analysis.conducted_class</code>; with another standard that standard's strictest class (CLASS B, CLASS 5,
+the basic CE102 curve). Hovering over the standard shows what <i>(analysis default)</i> is now. In the settings
+file: <code>conducted</code> and <code>conducted_class</code> per stage or bridge, <code>analysis.conducted</code> and
+<code>analysis.conducted_class</code> for all; a class the standard doesn't have is an error that lists the valid
+ones.</p>
+<p><b>Solid and dashed lines.</b> GroundTruth compares with the <b>average</b> limit (solid). A switching
+converter's harmonics are steady lines in the spectrum, and a steady line reads the same on the peak, quasi-peak and
+average detectors, so the lowest limit (the average one) decides [CISPR 16-1-1]. Datasheets and WEBENCH draw the
+<b>quasi-peak</b> line for CISPR 22 and the <b>peak</b> line for CISPR 25 (dashed): 10-13 dB (CISPR 22) and
+20 dB (CISPR 25) above the average ones. A margin in GroundTruth is therefore smaller than the same spectrum's
+margin in WEBENCH by about that much. Spread spectrum is the exception: it smears each harmonic over the receiver's
+bandwidth and lowers the average reading more than the peak, which Simulate models when the stage has a spread.</p>
+<p><b>CISPR 22 (and CISPR 32): CLASS A and CLASS B.</b> Information technology and multimedia equipment on the mains
+or a DC network, 150 kHz to 30 MHz, LISN 50 Ω ∥ (50 µH + 5 Ω) [CISPR 16-1-2]. CISPR 32 replaced CISPR 22 in 2017
+and kept its conducted limits, so the two lines are the same; choose the one your test plan names [CISPR 22]
+[CISPR 32, Annex A].</p>
+<ul>
+<li><b>CLASS B</b>: residential (homes, offices next to homes; anything sold to consumers). 56 dBµV at 150 kHz
+falling to 46 dBµV at 500 kHz, 46 to 5 MHz, 50 to 30 MHz (average). The strictest: 10-14 dB below class A.</li>
+<li><b>CLASS A</b>: commercial and industrial equipment not meant for homes (it carries a warning that it may cause
+interference there). 66 dBµV to 500 kHz, then 60 (average).</li>
+</ul>
+@LIMITS_CISPR22@
+<p><b>CISPR 25: CLASS 1 to CLASS 5.</b> Electronics in vehicles, boats and machines with engines, measured on the
+bench with a 5 µH artificial network [CISPR 25]. The limits protect the vehicle's own radio receivers, so they only
+exist in the broadcast bands (LW, MW, SW, CB, VHF, TV band I, FM); between the bands there is no limit and the chart
+shows none (WEBENCH draws a line across the gaps). Each class is a step looser than the next: 10 dB per class in LW,
+8 dB in MW, 6 dB above [A10].</p>
+<ul>
+<li><b>CLASS 5</b>: the strictest; the usual demand for modules near the antenna or the radio (infotainment,
+cameras and ADAS, body electronics in the cabin), and what many vehicle makers ask for by default.</li>
+<li><b>CLASS 3 and 4</b>: modules further from the receivers or behind metal, or bands the vehicle has no receiver
+for; the maker's specification often names a class per band (class 5 for AM / FM, class 3 elsewhere, for
+example).</li>
+<li><b>CLASS 1 and 2</b>: the loosest; rarely asked for (engine bay, trucks and machines without a radio).</li>
+</ul>
+<p>The 5 µH network has a lower impedance than CISPR 22's 50 µH below a few MHz, so the same converter reads lower on
+it there: dBµV on the two standards cannot be compared one to one.</p>
+@LIMITS_CISPR25@
+<p><b>MIL-STD-461 CE102.</b> Military equipment: the power leads from 10 kHz to 10 MHz, 50 µH LISN, peak detector
+[MIL-STD-461G]. The basic curve (sources up to 28 V) falls from 94 dBµV at 10 kHz to 60 dBµV at 500 kHz; higher
+source voltages relax it (115 V +6 dB, 220 V +9 dB, 270 V +10 dB, 440 V +12 dB). Its "class" in GroundTruth is that
+source voltage.</p>
+@LIMITS_MIL461@
+<table border="1" cellpadding="3" cellspacing="0">
+<tr><th>Standard</th><th>Classes</th><th>Typical products</th><th>Network</th><th>Band</th><th>Detector compared</th></tr>
+<tr><td>CISPR 22 / CISPR 32</td><td>A, B</td><td>IT, multimedia, power supplies, industrial (A) and
+consumer (B) equipment</td><td>50 µH + 5 Ω</td><td>150 kHz-30 MHz</td><td>average</td></tr>
+<tr><td>CISPR 25</td><td>1-5</td><td>vehicle, boat and engine-driven equipment</td><td>5 µH</td><td>broadcast
+bands 150 kHz-108 MHz</td><td>average</td></tr>
+<tr><td>MIL-STD-461 CE102</td><td>by source voltage</td><td>military equipment</td><td>50 µH</td><td>10 kHz-10 MHz</td>
+<td>peak</td></tr>
+</table>
+<p>What GroundTruth does not do here: size an input filter as WEBENCH does (the Fixes tab proposes changes to the
+layout and parts instead, each verified with a solve), or estimate common-mode emission at the input (see
+<a href="#limits">Limits</a>).</p>
 
 <hr><a name="issues"></a><h3>Issues tab</h3>
 <p>Every problem found, by severity (error, warning, info). Clicking one shows it in KiCad: the copper concerned

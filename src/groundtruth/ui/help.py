@@ -30,13 +30,13 @@ SHELL = Path(__file__).with_name("help_shell.html")
 REFERENCES = (Path(__file__).resolve().parents[2] / "docs" / "REFERENCES.md",
               Path(__file__).resolve().parents[3] / "docs" / "REFERENCES.md")
 TOPICS = ("workflow", "together", "checks", "nets", "converters", "bridges", "dcloads", "pdn", "si", "safety", "parts",
-          "fields", "cbias", "issues", "results", "fixes", "history", "hotloop", "thermal", "analog", "prefs", "export", "drawing", "labels",
+          "fields", "cbias", "conducted", "issues", "results", "fixes", "history", "hotloop", "thermal", "analog", "prefs", "export", "drawing", "labels",
           "siglabels", "configs", "settings", "speed", "methods", "limits", "references", "licenses", "server")
 # the sidebar's groups, by section; a section not listed goes under "More"
 GROUPS = (("Getting started", ("workflow", "together", "checks")),
           ("The tabs", ("nets", "converters", "bridges", "dcloads", "pdn", "si", "parts", "issues", "results", "fixes",
                         "history")),
-          ("Analyses and output", ("fields", "cbias", "safety", "hotloop", "thermal", "analog", "prefs", "export", "drawing")),
+          ("Analyses and output", ("fields", "cbias", "conducted", "safety", "hotloop", "thermal", "analog", "prefs", "export", "drawing")),
           ("Labels and settings", ("labels", "siglabels", "configs", "settings")),
           ("Under the hood", ("speed", "server", "methods", "limits", "references", "licenses")))
 
@@ -50,7 +50,7 @@ def page() -> str:
                        ("@PART_FIELDS@", field_rows()), ("@REFERENCES@", references_html()),
                        ("@CBIAS_CHART@", cbias_table()), ("@CHECK_BASIS@", check_basis_html())):          # wx's simple view draws no SVG: the numbers
         text = text.replace(key, value)
-    return text
+    return _limit_charts(text, svg=False)
 
 
 # The Cbias section's worked example (the user: "draw a chart with a fake curve and place 3-4 points that are used
@@ -154,6 +154,142 @@ def cbias_table() -> str:
             f"<p>Cbias Curve for this part (HTTP lib text parameter): <code>{text}</code><br>or as the change from "
             f"the nominal: <code>{pct}</code><br>Points: at least 1 (one point: the formula), two or more "
             f"interpolated, at most {BIAS_POINTS_MAX}.</p>")
+
+
+# The conducted-emission limits section's charts (the user, of TI WEBENCH's class selector: "if added there needs to
+# be a dedicated section in the help which actual graphs explaining the differences and use cases"). Drawn from
+# emi/conducted.py's own tables, so the help shows exactly what Simulate checks against. Colour: the classes are
+# ordered (looser to stricter), so one hue in steps (the CSS variables --cls1 ... --cls5, css_vars), the strictest
+# the strongest; the datasheet's quasi-peak / peak line of the same class dashed in the same colour.
+LIMIT_CHARTS = {
+    # chart: (standard, [(class, label, colour step)], frequency span Hz, dBµV span, the dashed line's detector and
+    # the classes it is drawn for: CISPR 25's five dashed lines over five solid ones were unreadable, class 5 shows it)
+    "cispr22": ("cispr22", [("A", "CLASS A", 2), ("B", "CLASS B", 5)], (0.1e6, 40e6), (30, 90), ("qp", "AB")),
+    "cispr25": ("cispr25", [(str(k), f"CLASS {k}", k) for k in range(1, 6)], (0.1e6, 120e6), (10, 120),
+                ("peak", "5")),
+    "mil461": ("mil461", [("440V", "440 V source", 1), ("270V", "270 V", 2), ("220V", "220 V", 3),
+                          ("115V", "115 V", 4), ("basic", "basic (≤ 28 V)", 5)], (8e3, 12e6), (50, 110), (None, "")),
+}
+# CISPR 25's bands named over the chart (the broadcast services the limits protect)
+BAND_NAMES = {0.15e6: "LW", 0.53e6: "MW", 5.9e6: "SW", 26e6: "CB, VHF", 76e6: "FM"}
+DETECTOR_NAMES = {"qp": "quasi-peak", "peak": "peak", None: ""}
+
+
+def _band_name(lo: float, hi: float) -> str:
+    """A band's span in words for the tooltips ("0.53-1.8 MHz")."""
+    return f"{lo / 1e6:.3g}-{hi / 1e6:.3g} MHz"
+
+
+def limit_chart_svg(chart: str) -> str:
+    """One standard's limit lines per class as an inline SVG for the browser view: dBµV against a log frequency axis,
+    the average line solid (what GroundTruth compares with), the datasheet's quasi-peak or peak line dashed; every
+    band a <title> tooltip with its value; a legend; colours from the page's CSS variables (light and dark)."""
+    import math
+    from ..emi.conducted import STANDARD_NAMES, band_limits
+    std, classes, (f_lo, f_hi), (y_lo, y_hi), (det, dashed) = LIMIT_CHARTS[chart]
+    w, h, left, right, top, bottom = 680, 340, 52, 190, 22, 40
+    lx = lambda f: left + math.log10(f / f_lo) / math.log10(f_hi / f_lo) * (w - left - right)        # noqa: E731
+    ly = lambda d: top + (y_hi - d) / (y_hi - y_lo) * (h - top - bottom)                             # noqa: E731
+    name = STANDARD_NAMES[std]
+    out = [f'<svg class="chart" viewBox="0 0 {w} {h}" width="100%" style="max-width:{w}px" role="img" '
+           f'aria-label="{name} conducted limits per class">']
+    for d in range(y_lo, y_hi + 1, 10):            # the grid: every 10 dB, every decade (1-2-5 lines lighter)
+        out.append(f'<line x1="{left}" x2="{w - right}" y1="{ly(d):.1f}" y2="{ly(d):.1f}" '
+                   'style="stroke:var(--border);stroke-width:1"/>')
+        out.append(f'<text x="{left - 6}" y="{ly(d) + 4:.1f}" text-anchor="end" font-size="11" '
+                   f'style="fill:var(--muted)">{d}</text>')
+    decade = 10 ** math.floor(math.log10(f_lo))
+    while decade <= f_hi:
+        for m in (1, 2, 5):
+            f = m * decade
+            if f_lo <= f <= f_hi:
+                out.append(f'<line x1="{lx(f):.1f}" x2="{lx(f):.1f}" y1="{top}" y2="{h - bottom}" '
+                           f'style="stroke:var(--border);stroke-width:1;opacity:{1 if m == 1 else 0.5}"/>')
+                label = f"{f / 1e6:g} MHz" if f >= 1e6 else f"{f / 1e3:g} kHz"
+                out.append(f'<text x="{lx(f):.1f}" y="{h - bottom + 16}" text-anchor="middle" font-size="11" '
+                           f'style="fill:var(--muted)">{label}</text>')
+        decade *= 10
+    out.append(f'<text x="{(left + w - right) / 2:.0f}" y="{h - 4}" text-anchor="middle" font-size="12" '
+               'style="fill:var(--text)">frequency</text>')
+    out.append(f'<text x="12" y="{(top + h - bottom) / 2:.0f}" text-anchor="middle" font-size="12" '
+               f'transform="rotate(-90 12 {(top + h - bottom) / 2:.0f})" style="fill:var(--text)">dBµV</text>')
+
+    def bands(cls, detector, colour, dashed, label):
+        """The class's bands as polylines (straight in log f within a band), each with its tooltip."""
+        style = f"stroke:var(--cls{colour});stroke-width:2;fill:none" + (";stroke-dasharray:6 4" if dashed else "")
+        for lo, hi, a, b in band_limits(std, cls, detector):
+            pts = [lo * (hi / lo) ** (k / 16) for k in range(17)]
+            p = " ".join(f"{lx(f):.2f},{ly(a + (b - a) * k / 16):.2f}" for k, f in enumerate(pts))
+            value = f"{a:g} dBµV" if a == b else f"{a:g} to {b:g} dBµV"
+            out.append(f'<polyline points="{p}" style="{style}"><title>{name} {label}, '
+                       f'{DETECTOR_NAMES.get(detector) or "average"}, {_band_name(lo, hi)}: {value}</title></polyline>')
+    for cls, label, colour in classes:
+        if det and cls in dashed:
+            bands(cls, det, colour, True, label)
+        bands(cls, "average" if std != "mil461" else "peak", colour, False, label)
+    if std == "cispr25":           # the services over their bands, the class beside each LW line (direct labels)
+        for f0, text in BAND_NAMES.items():
+            out.append(f'<text x="{lx(f0):.1f}" y="{top - 8}" font-size="11" style="fill:var(--muted)">{text}</text>')
+        for cls, _, _ in classes:
+            lo, _, a, _ = band_limits(std, cls)[0]
+            out.append(f'<text x="{lx(lo) - 5:.1f}" y="{ly(a) + 4:.1f}" text-anchor="end" font-size="10" '
+                       f'style="fill:var(--text)">{cls}</text>')
+    keys = [(f"stroke:var(--cls{c});stroke-width:2", lab) for _, lab, c in reversed(classes)]
+    keys.append(("stroke:var(--muted);stroke-width:2", "average (GroundTruth)" if det else "peak (CE102)"))
+    if det:
+        which = "" if len(dashed) == len(classes) else f", class {dashed}"
+        keys.append(("stroke:var(--muted);stroke-width:2;stroke-dasharray:6 4",
+                     f"{DETECTOR_NAMES[det]}{which} (WEBENCH)"))
+    for k, (style, label) in enumerate(keys):
+        yy = top + 12 + 18 * k
+        out.append(f'<line x1="{w - right + 12}" x2="{w - right + 36}" y1="{yy}" y2="{yy}" style="{style}"/>')
+        out.append(f'<text x="{w - right + 42}" y="{yy + 4}" font-size="11" style="fill:var(--text)">{label}</text>')
+    out.append("</svg>")
+    return "".join(out)
+
+
+def limit_chart_table(chart: str) -> str:
+    """The same limits for wx's simple HTML view (no SVG): per stretch between the classes' band edges, each class's
+    average line at its start and end (one value where flat; - where it has none) and the datasheet's line."""
+    import numpy as np
+    from ..emi.conducted import band_limits, limit_line
+    std, classes, _, _, (det, _) = LIMIT_CHARTS[chart]
+    main = "average" if std != "mil461" else "peak"
+    edges = sorted({e for cls, _, _ in classes for lo, hi, _, _ in band_limits(std, cls) for e in (lo, hi)})
+    head = "".join(f"<th>{lab}</th>" for _, lab, _ in classes)
+    rows = [f"<tr><th>band</th>{head}</tr>"]
+
+    def span(cls, detector, lo, hi):
+        """The line's value over lo..hi in words: "56-46", "46", or None where it has no limit."""
+        a, b = limit_line([lo * (1 + 1e-9), hi * (1 - 1e-9)], std, cls, detector)
+        if np.isnan(a) or np.isnan(b):
+            return None
+        return f"{a:.0f}" if abs(a - b) < 0.05 else f"{a:.0f}-{b:.0f}"
+    for lo, hi in zip(edges, edges[1:]):
+        cells = []
+        for cls, _, _ in classes:
+            text = span(cls, main, lo, hi)
+            if text and det:
+                text += f" ({span(cls, det, lo, hi)})"
+            cells.append(f"<td>{text or '-'}</td>")
+        if any(c != "<td>-</td>" for c in cells):          # a gap between CISPR 25's bands: no row
+            rows.append(f"<tr><td>{_band_name(lo, hi)}</td>{''.join(cells)}</tr>")
+    note = (f"dBµV, average; in brackets the {DETECTOR_NAMES[det]} line TI WEBENCH draws" if det else
+            "dBµV, peak (CE102 is written for the peak detector)")
+    return "<table border='1' cellpadding='3' cellspacing='0'>" + "".join(rows) + f"</table><p>{note}.</p>"
+
+
+def _limit_charts(text: str, svg: bool) -> str:
+    """help.html with its @LIMITS_<CHART>@ placeholders replaced by the charts (svg) or their tables."""
+    for chart in LIMIT_CHARTS:
+        text = text.replace(f"@LIMITS_{chart.upper()}@", limit_chart_svg(chart) if svg else limit_chart_table(chart))
+    return text
+
+
+# the class ramp of the charts (validated as an ordinal ramp: one hue, monotone lightness, the loosest still 2:1 on
+# the card): light, the theme's accent lightened and darkened; dark, the accent towards the card, brightest strictest
+CLASS_RAMP = {False: ("#5daed9", "#3499d0", "#0a84c6", "#0a6ea6", "#0b527f"),
+              True: ("#346c8c", "#3b83ab", "#4098c6", "#46ace2", "#4cc2ff")}
 
 
 def references_path() -> Optional[Path]:
@@ -317,7 +453,8 @@ def _rgba(hex_: str, alpha: float) -> str:
 def css_vars(pal=None) -> str:
     """The shell's colours (CSS custom properties) from the plugin's light or dark palette."""
     p = pal or theme.palette()
-    extra = {"accent-soft": _rgba(p.accent, 0.16), "hover": _rgba(p.text, 0.06), "zebra": _rgba(p.text, 0.025),
+    extra = {**{f"cls{k + 1}": c for k, c in enumerate(CLASS_RAMP[p.dark])},     # the limit charts' classes
+             "accent-soft": _rgba(p.accent, 0.16), "hover": _rgba(p.text, 0.06), "zebra": _rgba(p.text, 0.025),
              "code": _rgba(p.text, 0.06), "mark": _rgba(p.warn, 0.45 if p.dark else 0.55),
              "shadow": "rgba(0, 0, 0, 0.35)" if p.dark else "rgba(15, 23, 42, 0.07)"}
     base = {"bg": p.bg, "panel": p.panel, "card": p.card, "border": p.border, "text": p.text, "muted": p.muted,
@@ -333,6 +470,7 @@ def sections() -> tuple[str, list[tuple[str, str, str]]]:
                                                                                          references_html())
     text = text.replace("@CBIAS_CHART@", cbias_svg())          # the browser view draws the chart
     text = text.replace("@CHECK_BASIS@", check_basis_html())
+    text = _limit_charts(text, svg=True)
     body = re.search(r"<body[^>]*>(.*)</body>", text, re.S).group(1)
     head, _, rest = body.partition("<hr>")
     intro = re.sub(r"<p><b>Contents</b></p>.*$", "", head, flags=re.S)          # the old contents list

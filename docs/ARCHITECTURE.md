@@ -1046,6 +1046,18 @@ for a boost; duty = the high-side conduction time). The inductor current is cont
   - Limits: CISPR 32 class A/B (AC mains port), CISPR 25 voltage method classes 1–5 (band-limited), and
     MIL-STD-461 CE102 (basic curve plus the voltage relaxations). They were entered from the published tables:
     verify them against the edition in use.
+  - Standards and classes as TI WEBENCH offers them (2026-11-02, branch `conducted-classes`; the user: "I would
+    want the same classes as TI offers"): `cispr22` is a standard of its own with CISPR 32's conducted limits
+    [CISPR 22] (CISPR 32 replaced it unchanged). The class a stage or bridge is checked against comes from one
+    resolver, `emi/conducted.stage_limit(spec.conducted, spec.conducted_class, analysis)`: the stage's class, else
+    the analysis' only while the stage uses the analysis' standard, else the standard's strictest
+    (`DEFAULT_CLASS`). Before, every stage took `analysis.conducted_class`, so a stage on CISPR 25 under a CISPR 32
+    class B analysis fell silently back to class 5, and the reverse to class B. `CLASSES` lists each standard's
+    classes; the settings check them (`settings.class_problems`). The window's two choices
+    (`ui/limit_choice.py`) map the keys to WEBENCH's names ("CISPR 25", "CLASS 3"). `band_limits(...,
+    detector="qp" | "peak")` gives the datasheet's lines (CISPR 22 quasi-peak, CISPR 25 peak = average + 20 dB
+    [A10]) for the help's charts only (`ui/help.limit_chart_svg`: drawn from these tables, so the help shows what
+    Simulate checks). Tests: tests/test_conducted_classes.py.
 - **Results** (`ConverterResult`, a `RouteResult` subclass, so the heatmap, spectrum, text, JSON and HTML code
   takes it):
   - loop L and R, the L·di/dt overshoot, the ringing estimate;

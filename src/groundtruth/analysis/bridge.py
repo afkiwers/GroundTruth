@@ -353,7 +353,7 @@ def sweep(model: BoardModel, bs: BridgeSetup, legs: list, basis: RmsBasis) -> li
     b, res, w0 = bs.spec, bs.res, bs.res.waveform
     board, config = model.board, model.config
     std = legs[0].standard
-    conducted = std != "none" and frequency_range(std, config.analysis.conducted_class) is not None
+    conducted = std != "none" and frequency_range(std, legs[0].standard_class) is not None
     edge0 = max(max(w0.edges), 1e-12)
     wl = res.worst_leg
     rows = []
@@ -521,8 +521,8 @@ def _rms_issues(model: BoardModel, bs: BridgeSetup):
 def conducted_rows(model: BoardModel, legs: list, w: DriveWaveform, std: str) -> list[dict]:
     """The receiver's readings [{f, v_dbuv, limit_dbuv, margin_db}] of the legs' line currents for a drive
     waveform: each leg's high-side spectrum times its transfer to the LISN, added."""
-    a = model.config.analysis
-    rng = frequency_range(std, a.conducted_class)
+    cls = legs[0].standard_class
+    rng = frequency_range(std, cls)
     contributions, freqs = [], None
     for s in legs:
         fs, ts = _complex_transfer(s)
@@ -544,7 +544,7 @@ def conducted_rows(model: BoardModel, legs: list, w: DriveWaveform, std: str) ->
     tun = tunings_for(rng[0], rng[1], rbw, w.params.f_pwm)
     reading = receiver(freqs, v, 1.0 / w.period, tun, rbw, detector(std))
     v_db = 20 * np.log10(np.maximum(reading / math.sqrt(2), 1e-30) / 1e-6)
-    lim = limit_line(tun, std, a.conducted_class)
+    lim = limit_line(tun, std, cls)
     return [{"f": float(tun[j]), "v_dbuv": float(v_db[j]), "limit_dbuv": None if np.isnan(lim[j]) else float(lim[j]),
              "margin_db": None if np.isnan(lim[j]) else float(lim[j] - v_db[j])}
             for j in thin_rows(tun, v_db, np.arange(len(tun)), bands, REPORT_PER_DECADE)]
@@ -620,15 +620,15 @@ def _ce101(model: BoardModel, bs: BridgeSetup, legs: list):
 def _conducted(model: BoardModel, bs: BridgeSetup, legs: list):
     """The legs' line currents added at the LISN (each leg's high-side spectrum times its transfer to the LISN),
     read by the receiver against the limit; an issue below the margin."""
-    a, rules = model.config.analysis, model.config.rules
+    rules = model.config.rules
     res, b, w = bs.res, bs.spec, bs.res.waveform
     std = legs[0].standard
-    rng = frequency_range(std, a.conducted_class) if std != "none" else None
+    rng = frequency_range(std, legs[0].standard_class) if std != "none" else None
     if rng is None:
         res.notes.append("conducted emission not estimated (set the bridge's input_connector and a conducted "
                          "standard)")
         return
-    res.conducted_standard = describe(std, a.conducted_class)
+    res.conducted_standard = describe(std, legs[0].standard_class)
     res.conducted = conducted_rows(model, legs, w, std)
     compared = [r for r in res.conducted if r["margin_db"] is not None]
     if not compared:
