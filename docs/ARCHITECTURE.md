@@ -38,6 +38,9 @@ KiCad (IPC) ─kipy_source──┘        + settings file        └── anal
   it, `validate` checks only active rows, the CLI lists what it left out. The plugin's tables have a tick box per
   row (`ui/listsel.SelectableRows._init_enable`, `_show_enabled`, `_ticked`); "Update selected" keeps the state.
   Tests: `tests/test_enable.py`, GUI `test_a_row_unticked_on_the_nets_tab_is_kept_but_left_out_of_simulate`.
+  A reference net gone from the board (deleted or renamed in KiCad) would stop every run at validation:
+  `missing_reference_nets` gives (gone, the rest or `guess_reference_nets`), and before Run checks / Simulate
+  `MainFrame._drop_missing_reference_nets` asks to save the rest (`SettingsFile.set_reference_nets`, one undo step).
 - `components/models.py`: `ComponentModel`, the two-terminal model a part is replaced with (`MODEL_KINDS` short,
   open, resistor, cap, inductor, ferrite; `MODEL_PARAMS` per kind, also the Parts tab's columns and the YAML keys).
   `impedance(f)` (None = open; a short is `SHORT_OHMS` 1 mΩ; a cap ESR + j(ωESL − 1/ωC), C from `capacitance()`:
@@ -575,6 +578,17 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   `power._area_shares` / `switch_filaments` feed them evenly (the filament stands at the terminal node nearest the
   centre). A hub there would join the terminal's nodes beside the sheet and put its r_e into the hot loop. Validated
   against the transmission-line contact with R_cu ∥ R_tab under the die and the even feed's linear profile.
+  **The metal per terminal** (2026-11-01, [A78], branches `terminal-metal`, `help-terminal-contact`; the user: "Have a
+  GT field for the dimensions of the pads, like S=1x2, D=5x0.5"): the pin value `metal` = ((name, w, h, dx, dy), …),
+  written `D=4x3.5 S=1x2@0.5/0` (mm, W along the footprint's x axis) in the GT field, a parts database's `Terminal
+  Contact` field, the Pins cell or `tht: {metal: ...}` (GT > Terminal Contact > part setting > board default). A
+  name matches a pad by number or the schematic pin name, case ignored (`pins.terminal_pads`, `metal_problems`
+  reports unknown names). `simulate.terminal_rect` turns it with the footprint and centres it on the terminal's
+  largest pad (≥ 50 % of its area) or the pads' area-weighted centre; `die_branches` stands the die only on the
+  sheet nodes inside it, `part_lid` feeds and centres the lid there (a fed tab's side_spread too). It counts only with
+  a terminal sheet (Terminal Sheet Resistance / Metal): on a perfect plate the rectangle changes nothing. Validated
+  in tests/test_pad_bond.py (a die over half a tab against [Berger 1972]). refboard's Q601 (D=4.09x3.86): hottest spot
+  unchanged at 17.9 A/mm², the copper under the tab's middle 1.2 → 1.9 A/mm².
   **Terminal current in the maps** (2026-10-26, the user: "F.CU has still a knive's edge", then "Can we add a
   setting under preferences that enables option 2?"): a terminal's in-plane branches have their own kind `sheet`
   (counted with the part's joints in dc_summary, like `bond`). `simulate.terminal_vectors` turns their currents into
@@ -2629,6 +2643,12 @@ a History tab with a comparison (and the CLI).
   The Nets and Converters tables use the same path (`MainFrame._show_rows`): `nets_highlight` (all copper of the
   selected nets, lit; pours by the plane rule) and `stages_highlight` (the stages' parts plus the copper of their
   whole power flow, lit, from `power.stage_power_nets`; never ground).
+  Issues named after no stage (2026-11-01, branch `issues-tab`; `tools/dev/issue_zoom_check.py RUN_DIR` lists what
+  each issue of a kept run would select): an interleaved group's issues (`interleave` = the group's name, U303)
+  show every member stage's items (`_interleaved`); keys with `:dc:` / `:via:` (the combined DC view "all power
+  stages" among them) go to `_spot`, the copper at the issue's location or the via within 1 mm; `_lit_nets` lights
+  their nets. The Issues tab sorts by any column header (stable, the # numbers kept; severity errors first; ui.json
+  `issues_sort`) and filters with its Show checks tick list (ui.json `issues_hidden`).
 - **Series pass FETs** (`detect.pass_switches`): a surge stopper's or reverse-polarity FET (Q601 between J101's
   V_BATT and +VDC on refboard) has the default `open` model, so the connector search (`input_path`
   crosses only short/resistor/inductor/ferrite models) stopped at it. A FET with a gate pin, drain and source on
@@ -2792,6 +2812,11 @@ a History tab with a comparison (and the CLI).
   - A group created in the same commit as its items is rejected. So the items are one commit and the group a
     second, and the group is verified.
   - While a dialog is open, KiCad answers AS_BUSY: `when_ready` retries.
+  - With several editors open (PCB and schematic), newer KiCad refuses a commit without its document ("BeginCommit
+    without a document specified is not allowed when multiple editors are open"). KiCad's proto has BeginCommit
+    `ItemHeader header = 1` and EndCommit `header = 4`; kicad-python 0.8.0 has neither, so `kipy_sink.begin_commit`
+    / `end_commit` append the header as wire bytes (`_doc_field`; an older KiCad skips the unknown field). Every
+    commit of the sink goes through them (2026-11-01, branch `commit-document`).
   - KiCad centres text by default. Labels are left-aligned and stacked so they don't cover the markers or
     each other.
 - `kipy_sink.place_vias`: builds a raw `board_types_pb2.Via` (through, PST_NORMAL, F.Cu circle, drill F→B)
