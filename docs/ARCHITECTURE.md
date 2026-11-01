@@ -1781,6 +1781,19 @@ conducted emission or a ringing set by C_oss; design changes can.
   - a converter's `snubber` in the settings: `[C, R]` parts (detected like a bridge leg's, `detect._snubber`) or
     `{C, R}` values.
 - **Tools:** `tools/dev/fix_check.py BOARD SETTINGS [--only X]` or `--test-buck` prints them.
+- **In the Fixes tab** (2026-11-02, branch `fix-schematics`; the user: "It is hard to read and understand. Some
+  example filter schematics when clicking on one, maybe right click opens a dropdown"): per stage the "now" row,
+  then the changes that clear an issue, then the rest; the margins marked against `rules.emi_margin_db` (✓ / ! /
+  ✗); the whole title as the row's tooltip. A selected change shows its figures now / with it, parts and notes
+  (`fixes_panel.DetailView`, keeping a text box's SetValue / GetValue for Check in Simulate's comparison) beside its
+  example schematic: `report/schematics.figure_for(option, stage, Ink, result)` draws the π-filter (LISN of the
+  standard, C_f nominal / rating / at bias, L_f with I_sat and DCR, R_d + C_d where `damp_at` put it, the stage's
+  input capacitors `c_in`), the snubber, the gate resistor of a slower edge, both, or the common-mode path, with
+  the advisor's values (`_filter` adds `C_nom`, `i_sat`, `v_rating`, `v`, `f_c`, `standard`, `c_in` to the filter's
+  dict for it; the solves read only L, C, R_damp, C_damp, dcr, damp_at). matplotlib Agg in a `LatestOnly` worker,
+  PNG to `SchematicPreview` (scaled once per size) and `SchematicWindow` (full size, Save as PNG). Right-click:
+  `menu_items` (schematic window, copy parts, Check in Simulate, help `#fixes-design`). Tests: tests/test_schematics.py,
+  test_gui's design-change test; `window_shot.py --tabs Fixes:filter` captures it.
 - **Not yet:** bridge legs and signal nets.
 
 ## Fix suggestions (`analysis/suggest.py`, `analysis/whatif.py`, `config/modifications.py`)

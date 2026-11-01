@@ -548,6 +548,12 @@ def _filter(setup, t: Targets) -> Optional[FixOption]:
         flt = {"L": L, "C": c_eff, "R_damp": r_d, "C_damp": c_d, "dcr": dcr, "damp_at": at}
         trials.append((middlebrook(setup, flt), flt))
     mb, flt = max(trials, key=lambda x: (x[0]["ok"], x[0]["margin_db"] or -1e9))
+    # what the Fixes tab's schematic labels (report/schematics.py): the parts as bought, the stage's own input
+    # capacitance (the π's other leg, at its DC bias) and the corner; the solves read only the keys above
+    flt = {**flt, "C_nom": c_nom, "i_sat": 1.3 * i_in, "v_rating": max(1.5 * v, 25), "v": v,
+           "f_c": 1 / (2 * math.pi * math.sqrt(L * c_eff)), "standard": setup.standard,
+           "c_in": sum(m.capacitance() for c in res.caps if not c["lisn"]
+                       and (m := setup.config.model_for(c["name"])) is not None and m.kind == "cap")}
     o = evaluate(setup, Change(filter=flt))
     # its curves among the stage's Bode responses (the stage's view; the impedances in a view of their own)
     res.responses += filter_responses(setup, flt)

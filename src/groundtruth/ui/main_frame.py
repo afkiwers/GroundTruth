@@ -1917,7 +1917,8 @@ class MainFrame(ConfigActions, wx.Frame):
             self.results_panel.show(board, routes, issues)
             self._note_cells(routes)
             self.fixes.show_design([r for r in routes if r.kind == "converter" and not getattr(r, "bridge", None)
-                                    and not getattr(r, "view_of", None)])
+                                    and not getattr(r, "view_of", None)],
+                                   self.settings.config.rules.emi_margin_db if self.settings else None)
             if kept is not None and not isinstance(kept, str):
                 self.history.refresh(select=kept.id)
                 self._keep_report(kept)

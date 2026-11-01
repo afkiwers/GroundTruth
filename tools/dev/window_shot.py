@@ -8,7 +8,8 @@ in --tabs is saved as DIR/<theme>_<tab>.png; --scroll adds the Results tab's pag
 (<theme>_Results_scrolled.png: the cross-section and the spectrum under the maps); a tab "Layer window" opens the
 last map's layer alone (its ⤢ button) and saves <theme>_layer_<layer>.png. --runs N simulates N times
 (kept in DIR/groundtruth/history when Preferences keep runs); the History tab is captured with its two newest runs
-compared. Captured with Win32 PrintWindow, which works while the screen
+compared. A tab "Fixes:<kind>" (Fixes:filter, Fixes:snubber, Fixes:cm ...) selects the first design change of that
+kind after --simulate and saves <theme>_Fixes_<kind>.png once its schematic is drawn. Captured with Win32 PrintWindow, which works while the screen
 itself cannot be read (a locked or minimised remote desktop)."""
 import argparse
 import ctypes
@@ -142,6 +143,25 @@ def main() -> int:
                 win = rp.layer_windows.get(state["layer"])
                 path = out / f"{args.theme}_layer_{state['layer'].replace('.', '_')}.png"
                 print(f"{path}: {'ok' if win and capture(win, path) else 'PrintWindow failed'}")
+                return
+            if name.startswith("Fixes:"):                 # the Fixes tab with a design change selected (its kind)
+                kind, p = name.split(":", 1)[1], f.fixes
+                if state.get("design") != kind:
+                    k = next((i for i, (_, o) in enumerate(p.design) if o["kind"] == kind), None)
+                    if k is None:
+                        print(f"  no design change of kind {kind} (Simulate a stage with issues first)")
+                        return
+                    f.notebook.SetSelection(f.notebook.FindPage(p))
+                    p.design_list.Select(k)
+                    p.design_list.EnsureVisible(k)
+                    state["design"] = kind
+                    tabs.insert(0, name)                  # capture once its schematic is drawn and painted
+                    return
+                if p._drawer.busy():
+                    tabs.insert(0, name)
+                    return
+                path = out / f"{args.theme}_Fixes_{kind}.png"
+                print(f"{path}: {'ok' if capture(f, path) else 'PrintWindow failed'}")
                 return
             if name == "History" and len(f.history.runs) >= 2 and state.get("compared") is None:
                 f.history.list.Select(0)
