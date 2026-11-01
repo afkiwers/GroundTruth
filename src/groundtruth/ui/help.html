@@ -1228,10 +1228,21 @@ simulates the board with and without the enabled what-if edits and lists what ch
 <li><b>Compare what-if</b> needs enabled what-if edits in the settings (from <b>Add ticked to what-if</b>, or under
   <code>modifications:</code>).</li>
 </ul>
-<p><b>Design changes (power stages)</b>, the second list, fills after every <b>Simulate</b> for each power stage with
+<p><a name="fixes-design"></a><b>Design changes (power stages)</b>, the second list, fills after every <b>Simulate</b> for each power stage with
 ringing, radiated or conducted issues. Layout alone rarely clears those; these are the changes that do, each with its
-parts, the predicted radiated and conducted margin, the overshoot, the extra loss and the issues it clears, best
-first. The first row is the stage as it is. They are worked out on the stage's own solves (the loop, its moment and
+parts, the predicted radiated and conducted margin, the overshoot, the extra loss and the issues it clears. The first
+row is the stage as it is, then the changes that clear an issue, then the rest. The margins carry a mark against the
+rules' <code>emi_margin_db</code>: ✓ meets it, ! under the limit but inside the margin, ✗ over the limit. Hovering over
+a row shows its whole title. <b>Click</b> a change: under the list its figures now and with the change side by side,
+its parts and notes, and beside them an <b>example schematic</b> of the change with the proposed values (blue: the
+proposal; black: what is on the board or the test bench): the input π-filter between the LISN and the stage (as TI
+WEBENCH draws its input filter: C_f at the connector, L_f, the damping R_d + C_d where the advisor put it, the stage's
+own input capacitors), the RC snubber across the switch node, the gate resistor of a slower edge, both together, or the
+common-mode path (the switch node's capacitance to the chassis, a common-mode choke with Y capacitors). A shorter hot
+loop and spread spectrum have no circuit to draw. <b>Right-click</b> a change for a menu: the schematic in a window of
+its own (<b>Save as PNG…</b>), the parts copied to the clipboard, <b>Check in Simulate</b>, this help. The buttons
+beside the schematic do the same. The schematic is an example of the topology with the advisor's values, not a
+footprint-level design: rate the parts for the stage's voltage and current. They are worked out on the stage's own solves (the loop, its moment and
 its input path stay), in moments:</p>
 <ul>
 <li><b>RC snubber</b> across the switch node (C a few times C_oss, R about √(L/C_oss)): it damps the ringing; its

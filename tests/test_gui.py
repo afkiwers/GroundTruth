@@ -481,14 +481,29 @@ def test_simulate_lists_the_design_changes_and_one_is_checked_in_simulate(app, c
     def pick():
         p = f.fixes
         got["rows"] = [o["kind"] for _, o in p.design]
+        got["marks"] = [p.design_list.GetItemText(i, 3) for i in range(p.design_list.GetItemCount())]
+        k = next(i for i, (_, o) in enumerate(p.design) if o["kind"] == "filter")
+        p.design_list.Select(k)
+        p._design_selected(type("E", (), {"GetIndex": lambda self: k})())
+        p._drawer.flush()               # the schematic drawn in the worker; it arrives with the next event loop turn
+
+    def schematic():
+        p = f.fixes
+        k = p.design_list.GetFirstSelected()
+        got["filter_png"] = p._png is not None and p.open_schematic.IsEnabled()
+        got["menu"] = [(label, on) for label, _, on in p.menu_items(p.design[k][1]) if label]
         k = next(i for i, (_, o) in enumerate(p.design) if o["kind"] == "snubber")
         p.design_list.Select(k)
         p._design_selected(type("E", (), {"GetIndex": lambda self: k})())
         got["text"] = p.design_text.GetValue()
         got["enabled"] = p.check_design.IsEnabled()
         p._check()
-    run_steps(app, f, [setup, lambda: f.run(True) and None, pick])
+    run_steps(app, f, [setup, lambda: f.run(True) and None, pick, schematic])
     assert got["rows"][0] == "now" and {"snubber", "edge", "filter"} <= set(got["rows"])
+    clears = [i for i, k in enumerate(got["rows"]) if k != "now"]                 # the changes after "now"
+    assert all(m == "–" or m.endswith(("✓", "!", "✗")) for m in got["marks"])
+    assert got["filter_png"] and ("Check in Simulate", False) in got["menu"]      # a filter is off the board
+    assert ("Show the schematic in a window", True) in got["menu"] and clears
     assert "part: C " in got["text"] and got["enabled"]
     text = f.fixes.design_text.GetValue()
     assert "checked in Simulate" in text and "predicted" in text and "radiated" in text
