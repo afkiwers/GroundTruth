@@ -82,7 +82,7 @@ thermal and what-if keys are listed in their own sections below.
 | Key | Default | Meaning |
 |---|---|---|
 | `version` | 1 | File format, written by `init` (not read). |
-| `reference_nets` | `[GND]` | Ground nets the return may use and return pins are taken from. `init` guesses them from the net names (GND, AGND, PGND, VSS, 0V, …). |
+| `reference_nets` | `[GND]` | Ground nets the return may use and return pins are taken from. `init` guesses them from the net names (GND, AGND, PGND, VSS, 0V, …). A listed net the board no longer has (deleted or renamed in KiCad) blocks a run; the plugin asks before the run whether to remove it (with none left, it takes the grounds found on the board). |
 | `analysis.grid_mm` | `auto` | Grid pitch of the route and power-stage models in mm. `auto`: the dielectric height (0.05 to 0.25 mm), coarsened until `max_nodes` holds. |
 | `analysis.margin_mm` | 10 | Copper around a route that its model includes. |
 | `analysis.solve_points` | 4 | Harmonics solved first per route: the fundamental plus log-spaced harmonics across the limit band. |
