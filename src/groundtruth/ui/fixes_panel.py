@@ -128,6 +128,19 @@ class SchematicPreview(wx.Panel):
             dc.DrawLabel(self._text, wx.Rect(0, 0, w, h), wx.ALIGN_CENTER)
 
 
+def copy_png(png: bytes) -> bool:
+    """A PNG onto the clipboard as an image (to paste into a document, an e-mail, a chat); False when the clipboard
+    could not be opened."""
+    import io
+    if not wx.TheClipboard.Open():
+        return False
+    try:
+        wx.TheClipboard.SetData(wx.BitmapDataObject(wx.Bitmap(wx.Image(io.BytesIO(png), wx.BITMAP_TYPE_PNG))))
+    finally:
+        wx.TheClipboard.Close()
+    return True
+
+
 class SchematicWindow(wx.Frame):
     """A design change's schematic full size, with Save (PNG)."""
 
@@ -147,9 +160,15 @@ class SchematicWindow(wx.Frame):
         view.SetSizer(vs)
         save = theme.Button(self, "Save as PNG…")
         save.Bind(wx.EVT_BUTTON, lambda e: self._save())
+        copy = theme.Button(self, "Copy")
+        copy.SetToolTip("The schematic to the clipboard, as an image")
+        copy.Bind(wx.EVT_BUTTON, lambda e: copy_png(self.png))
+        row = wx.BoxSizer(wx.HORIZONTAL)
+        row.Add(copy, 0, wx.RIGHT, 6)
+        row.Add(save, 0)
         s = wx.BoxSizer(wx.VERTICAL)
         s.Add(view, 1, wx.EXPAND)
-        s.Add(save, 0, wx.ALL | wx.ALIGN_RIGHT, 8)
+        s.Add(row, 0, wx.ALL | wx.ALIGN_RIGHT, 8)
         self.SetSizer(s)
         avail = wx.Display(wx.Display.GetFromWindow(parent) if parent else 0).GetClientArea()
         self.SetSize(min(img.GetWidth() + 40, avail.width - 40), min(img.GetHeight() + 100, avail.height - 40))
@@ -359,6 +378,13 @@ class FixesPanel(wx.Panel):
         stage, o = self.design[k]
         SchematicWindow(self, f"{stage}: {o['title']}", self._png).Show()
 
+    def _copy_schematic(self):
+        """The selected change's schematic to the clipboard, as an image."""
+        if self._png is not None and copy_png(self._png):
+            top = self.GetTopLevelParent()
+            if hasattr(top, "SetStatusText"):
+                top.SetStatusText("schematic copied to the clipboard")
+
     def _copy(self):
         """The selected change's parts and notes to the clipboard."""
         k = self.design_list.GetFirstSelected()
@@ -396,6 +422,7 @@ class FixesPanel(wx.Panel):
         """The right-click menu of a change: [(label, function, enabled)], None as the label for a separator (a
         method of its own: the popup is modal, tests read the entries here)."""
         return [("Show the schematic in a window", self._open_schematic, self._png is not None),
+                ("Copy the schematic", self._copy_schematic, self._png is not None),
                 ("Copy the parts list", self._copy, o["kind"] != "now"),
                 ("Check in Simulate", self._check, self._checkable(o)),
                 (None, None, False),
