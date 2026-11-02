@@ -313,7 +313,11 @@ def test_converters_form_explains_its_fields_scrolls_and_keeps_what_it_does_not_
     def check():
         p = f.converters
         labels = {w.GetLabel(): w for w in p.form_win.GetChildren() if isinstance(w, wx.StaticText)
-                  and not isinstance(w, FieldMark)}           # the ◆ / ! marks beside the part parameters
+                  and not isinstance(w, FieldMark)           # the ◆ / ! marks beside the part parameters
+                  and w.GetName() not in ("section", "muted")}   # the sections' titles and notes
+        sections = p.form_sections()                 # every field in one section, titled and explained
+        assert [lab for _, _, rows in sections for lab, _ in rows] == [lab for lab in labels]
+        assert all(title and note for title, note, _ in sections)
         assert set(FIELD_TIPS) <= set(labels)
         for label, w in labels.items():
             assert w.GetToolTipText() == FIELD_TIPS[label]
@@ -3933,6 +3937,42 @@ def test_the_spread_rate_hint_follows_the_spread_mode(app, conv_frame):
     assert got["greyed"] == (False, "5kHz")
     s = got["saved"]
     assert (s.spread, s.spread_mode, s.spread_rate) == (pytest.approx(0.2), "random", None)
+
+
+def test_an_integrated_stage_greys_the_discrete_switch_fields(app, conv_frame):
+    """The user: "when entering Integrated stage = U502, should you grey out the High side, Low side and Switch node
+    then. It is very confusing otherwise". Typing an IC greys the three (their text kept), clearing it enables them
+    again, Add saves none of them for the integrated stage, and a stage selected from the list shows its own
+    state."""
+    f = conv_frame
+    got = {}
+
+    def check():
+        p = f.converters
+        p.high.SetValue("Q1")
+        p.low.SetValue("Q2")
+        p.sw.SetValue("SW")
+        got["empty"] = [c.IsEnabled() for c in (p.high, p.low, p.sw)]
+        p.integrated.SetValue("U1")                      # SetValue sends EVT_TEXT, as typing does
+        got["integrated"] = ([c.IsEnabled() for c in (p.high, p.low, p.sw)], p.high.GetValue(), p.high.GetHint())
+        p.integrated.SetValue("")
+        got["cleared"] = [c.IsEnabled() for c in (p.high, p.low, p.sw)]
+        p.integrated.SetValue("U1")
+        for ctrl, v in ((p.name, "int"), (p.rail, "VIN"), (p.ground, "GND"), (p.f_sw, "400kHz"), (p.i_out, "2"),
+                        (p.rise, "5ns")):
+            ctrl.SetValue(v)
+        p.on_add(None)
+        s = f.settings.config.converters[-1]
+        got["saved"] = (s.switch, s.high_side, s.low_side, s.switch_node)
+        p.list.Select(len(f.settings.config.converters) - 1)   # selecting it shows the greyed fields
+        p._fill_one(s)
+        got["selected"] = [c.IsEnabled() for c in (p.high, p.low, p.sw)]
+    run_steps(app, f, [check])
+    assert got["empty"] == [True, True, True]
+    assert got["integrated"] == ([False, False, False], "Q1", "not used: integrated stage")
+    assert got["cleared"] == [True, True, True]
+    assert got["saved"] == (["U1"], [], [], None)
+    assert got["selected"] == [False, False, False]
 
 
 def test_simulate_shows_each_stage_s_efficiency_sweep(app, conv_frame):

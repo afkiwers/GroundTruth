@@ -925,7 +925,9 @@ def _converter_spectrum(fig: Figure, c) -> None:
         ax.vlines(f, v.min() - 10, v, color=colour, lw=0.8)
         ax.plot(f, v, "o", ms=2, color=colour, label="estimate")
         lim = np.array([np.nan if r[lim_key] is None else r[lim_key] for r in rows])
-        if np.isfinite(lim).any():
+        if kind == "conducted":                 # the standard's whole bands
+            _conducted_limit(ax, c, f, lim, lw=1.2, color="#d62728")
+        elif np.isfinite(lim).any():
             ax.plot(f, lim, "-", lw=1.2, color="#d62728", label="limit")   # breaks where no limit applies
         if kind != "ce101":
             _band_marks(ax, c, f, radiated=kind == "radiated")
@@ -971,6 +973,28 @@ def _thermal_parts(fig: Figure, t) -> None:
     room = min((_lh(FS_TICK, 2) + 0.04) / max((y1 - y0) * h_in, 0.1), 0.8)
     hi = max(max(temps), t.max_c)
     ax.set_ylim(t.ambient_c, max(hi, (max(temps) - room * t.ambient_c) / (1 - room)) + 0.02 * (hi - t.ambient_c))
+
+
+def _conducted_limit(ax, rr, f_mhz, lim, **style) -> None:
+    """The conducted limit line under a spectrum: from the standard's bands themselves (emi.conducted.limit_line on
+    a fine grid with every band edge, from 1/1.5 of the lowest harmonic to 1.2 times the highest), so each band is
+    drawn over its whole span and breaks only where the standard sets no limit (CISPR 25 limits the broadcast bands
+    alone). Read at the harmonics, a band showed only between its first and last harmonic and one holding a single
+    harmonic not at all (the user, of CISPR 25's SW band: "why is the red cispr line not complete?"). A result
+    without the keys (kept before 2026-11-02) draws the line through its harmonics' limits as before."""
+    key = getattr(rr, "conducted_limit", None) or ()
+    if len(key) != 2 or not len(f_mhz):
+        if np.isfinite(lim).any():
+            ax.plot(f_mhz, lim, label="limit", **style)    # breaks where no limit applies
+        return
+    from ..emi.conducted import band_limits, limit_line
+    lo, hi = float(np.min(f_mhz)) * 1e6 / 1.5, float(np.max(f_mhz)) * 1e6 * 1.2
+    edges = np.array([e for b in band_limits(*key) for e in b[:2] if lo <= e <= hi and np.isfinite(e)])
+    # each edge with a point just outside it: the line steps at the edge (NaN or the next band's level)
+    fd = np.unique(np.concatenate([np.geomspace(lo, hi, 1500), edges, edges * (1 - 1e-6), edges * (1 + 1e-6)]))
+    line = limit_line(fd, *key)
+    if np.isfinite(line).any():
+        ax.plot(fd / 1e6, line, label="limit", **style)
 
 
 def _band_marks(ax, rr, f_mhz, radiated: bool = True) -> None:
@@ -1498,8 +1522,7 @@ def _bridge_spectrum(fig: Figure, rr) -> None:
     v = np.array([r["v_dbuv"] for r in rows])
     ax.plot(f, v, color="#9467bd", lw=1.0, label="estimate (receiver)")
     lim = np.array([np.nan if r["limit_dbuv"] is None else r["limit_dbuv"] for r in rows])
-    if np.isfinite(lim).any():
-        ax.plot(f, lim, color="#d62728", lw=1.2, label="limit")
+    _conducted_limit(ax, rr, f, lim, color="#d62728", lw=1.2)     # the standard's whole bands
     _freq_axis(ax, f)
     ax.set_ylabel("dBµV", fontsize=FS_TEXT)
     ax.tick_params(labelsize=FS_TICK, which="both")

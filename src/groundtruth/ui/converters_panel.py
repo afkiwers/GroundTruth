@@ -40,7 +40,8 @@ FIELD_TIPS = {
                  "switch inside.",
     "Low side": "The switch(es) or catch diode between the switch node and ground, e.g. Q2 or D1. A FET here makes "
                 "the stage synchronous: only the turn-on edge costs overlap loss. A diode: both edges do.",
-    "Integrated stage": "An IC with both switches inside. Leave high side, low side and switch node empty then.",
+    "Integrated stage": "An IC with both switches inside, e.g. U502. High side, low side and switch node are then "
+                        "greyed: not used.",
     "Switching frequency": "f_sw, e.g. 750kHz (from the controller's R_T / R_FREQ formula). Sets where the "
                            "harmonics of the conducted and radiated estimates fall, the capacitor sharing at f_sw, "
                            "and the switching losses of the thermal solve (both grow with f_sw). It does not change "
@@ -206,8 +207,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         # buttons were cut off on a laptop screen)
         self.form_win = fw = wx.ScrolledWindow(self, style=wx.VSCROLL)
         fw.SetScrollRate(0, 12)
-        form = wx.FlexGridSizer(cols=2, vgap=5, hgap=8)
-        form.AddGrowableCol(1)
+        form = wx.GridBagSizer(vgap=5, hgap=8)         # label | field rows under section titles spanning both
         self.name = wx.TextCtrl(fw)
         self.topology = wx.Choice(fw, choices=list(TOPOLOGIES))
         self.topology.SetSelection(0)
@@ -268,6 +268,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self.spread_rate.SetHint(SPREAD_RATE_HINTS["random"])
         self.spread_mode.Bind(wx.EVT_CHOICE, lambda e: (e.Skip(), self._spread_hint()))
         self._spread_hint()                                 # the empty form: random, its rate greyed
+        self.integrated.Bind(wx.EVT_TEXT, lambda e: (e.Skip(), self._integrated_state()))
         self.interleave = wx.TextCtrl(fw)       # interleaving (analysis/interleave.py): a group name and a phase
         self.interleave.SetHint("none")
         self.phase_deg = wx.TextCtrl(fw)
@@ -282,35 +283,64 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         for key, ctrl in self.param_ctrls.items():
             self._rows[ctrl], self.marks[key] = with_mark(fw, ctrl)
 
+    def form_sections(self) -> list:
+        """The form's sections in order: (title, what it is for, [(label, field)]). The user: "this properties pane
+        is very complex and overwhelming, can you group it better using headings etc. Make it more glancable/self
+        explanatory": the fields by what they describe, the essentials first, the optional detail last."""
+        return [
+            ("Stage", "What it converts, between which nets.",
+             [("Name", self.name), ("Topology", self.topology), ("Rail net", self.rail), ("Ground net", self.ground)]),
+            ("Switches", "Discrete switches, or one IC with both inside.",
+             [("High side", self.high), ("Low side", self.low), ("Switch node", self.sw),
+              ("Integrated stage", self.integrated)]),
+            ("Operating point", "Needed by every analysis.",
+             [("Switching frequency", self.f_sw), ("Load current (A)", self.i_out), ("V in (V)", self.v_in),
+              ("V out (V)", self.v_out)]),
+            ("Connectors", "Where its DC current enters and leaves the board.",
+             [("Input connector", self.inp), ("Output connector", self.out)]),
+            ("Switching edges", "Spectrum, ringing, switching loss. ◆ from the schematic",
+             [("Edge time", self.rise), ("C_oss", self.c_oss), ("Q_oss", self.q_oss),
+              ("C stray (chassis)", self.c_stray)]),
+            ("Conducted emission", "The limit it is checked against; spread spectrum.",
+             [("Conducted standard", self.standard), ("Conducted class", self.std_class),
+              ("Spread spectrum (%)", self.spread), ("Spread mode", self.spread_mode),
+              ("Spread rate (Hz)", self.spread_rate)]),
+            ("Interleaving", "Optional: stages switching out of phase.",
+             [("Interleave group", self.interleave), ("Phase (°)", self.phase_deg)]),
+            ("Losses", "Empty: left out (the run says so). ◆ from the schematic",
+             [("R_DS(on)", self.rds_on), ("R_DS(on) low side", self.rds_on_low), ("Inductor DCR", self.dcr),
+              ("Diode V_f (V)", self.diode_vf), ("Dead time, rise", self.dead_rise),
+              ("Dead time, fall", self.dead_fall), ("Reverse V_SD (V)", self.v_sd), ("Q_rr", self.q_rr)]),
+            ("Efficiency", "The curve over load current: fixed losses, bench data.",
+             [("Q_g", self.qg), ("Gate drive (V)", self.v_gate), ("Controller I_q (A)", self.iq),
+              ("Efficiency currents (A)", self.eff_currents), ("Measured efficiency", self.eff_measured)]),
+        ]
+
     def _form_rows(self):
-        """Each field's label and tooltip, in the form's grid (the third build step)."""
+        """Each section's title and note (spanning both columns) and its fields' labels and tooltips, in the form's
+        grid (the third build step)."""
         fw, form, rows = self.form_win, self._form, self._rows
-        for label, ctrl in (("Name", self.name), ("Topology", self.topology), ("Rail net", self.rail),
-                            ("Switch node", self.sw), ("Ground net", self.ground), ("High side", self.high),
-                            ("Low side", self.low), ("Integrated stage", self.integrated),
-                            ("Switching frequency", self.f_sw), ("Load current (A)", self.i_out),
-                            ("V in (V)", self.v_in), ("V out (V)", self.v_out), ("Edge time", self.rise),
-                            ("C_oss", self.c_oss), ("Q_oss", self.q_oss), ("C stray (chassis)", self.c_stray),
-                            ("Input connector", self.inp), ("Output connector", self.out),
-                            ("Conducted standard", self.standard), ("Conducted class", self.std_class),
-                            ("Spread spectrum (%)", self.spread),
-                            ("Spread mode", self.spread_mode), ("Spread rate (Hz)", self.spread_rate),
-                            ("Interleave group", self.interleave), ("Phase (°)", self.phase_deg),
-                            ("R_DS(on)", self.rds_on),
-                            ("R_DS(on) low side", self.rds_on_low), ("Inductor DCR", self.dcr),
-                            ("Diode V_f (V)", self.diode_vf), ("Dead time, rise", self.dead_rise),
-                            ("Dead time, fall", self.dead_fall),
-                            ("Reverse V_SD (V)", self.v_sd), ("Q_rr", self.q_rr), ("Q_g", self.qg),
-                            ("Gate drive (V)", self.v_gate), ("Controller I_q (A)", self.iq),
-                            ("Efficiency currents (A)", self.eff_currents),
-                            ("Measured efficiency", self.eff_measured)):
-            text = wx.StaticText(fw, label=label)
-            tip = FIELD_TIPS.get(label, "")
-            if tip:                          # on the label and the field: hovering either explains it
-                text.SetToolTip(tip)
-                ctrl.SetToolTip(tip)
-            form.Add(text, 0, wx.ALIGN_CENTER_VERTICAL)
-            form.Add(rows.get(ctrl, ctrl), 1, wx.EXPAND)
+        r = 0
+        for n, (title, note, fields) in enumerate(self.form_sections()):
+            if n:                                # a line between sections
+                form.Add(wx.StaticLine(fw), (r, 0), (1, 2), wx.EXPAND | wx.TOP, 8)
+                r += 1
+            head = wx.StaticText(fw, label=title, name="section")
+            head.SetFont(head.GetFont().Bold().Scaled(1.1))
+            form.Add(head, (r, 0), (1, 2))
+            sub = wx.StaticText(fw, label=note, name="muted")      # muted: theme.style_tree colours it
+            form.Add(sub, (r + 1, 0), (1, 2), wx.BOTTOM, 2)
+            r += 2
+            for label, ctrl in fields:
+                text = wx.StaticText(fw, label=label)
+                tip = FIELD_TIPS.get(label, "")
+                if tip:                          # on the label and the field: hovering either explains it
+                    text.SetToolTip(tip)
+                    ctrl.SetToolTip(tip)
+                form.Add(text, (r, 0), flag=wx.ALIGN_CENTER_VERTICAL | wx.LEFT, border=10)
+                form.Add(rows.get(ctrl, ctrl), (r, 1), flag=wx.EXPAND)
+                r += 1
+        form.AddGrowableCol(1)                   # after the rows: a GridBagSizer has no columns before them
 
     def _form_layout(self):
         """The buttons, the labels' help and the tab's layout (the last build step)."""
@@ -468,6 +498,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         for key, text in self._texts(c).items():
             self._set(ctrls[key], text)
         self._spread_hint()
+        self._integrated_state()
         self._show_marks(c)
 
     def _form_for_selection(self):
@@ -553,6 +584,20 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             self.reselect(rows)          # the list was rebuilt: the stages stay selected for the next edit
             self._form_for_selection()
 
+    def _integrated_state(self):
+        """High side, Low side and Switch node greyed while Integrated stage names an IC (the user: "when entering
+        Integrated stage = U502, should you grey out the High side, Low side and Switch node then"): both switches
+        are inside it, so those three are not used and _form saves none of them; their text stays, for a stage
+        turned back into discrete switches. Several stages selected keep all four greyed (OWN)."""
+        if getattr(self, "_multi", None) is not None:
+            return
+        used = not self.integrated.GetValue().strip()
+        for ctrl in (self.high, self.low, self.sw):
+            ctrl.Enable(used)
+        hint = "" if used else "not used: integrated stage"
+        self.high.SetHint(hint)
+        self.low.SetHint(hint)
+
     def _spread_hint(self):
         """The Spread rate field for the mode shown: its hint (SPREAD_RATE_HINTS; several stages with mixed modes:
         none) and greyed for random (the user: "if random is set, it should grey out the other field"), which then
@@ -592,10 +637,13 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             return parse_field(ctrl.GetValue(), unit)
         std = self.standard.GetStringSelection()
         cls = lc.class_key(self._class_standard(), self.std_class.GetStringSelection())
+        integrated = refs(self.integrated)
         spec = ConverterSpec(
             name=self.name.GetValue().strip() or self.sw.GetValue() or "converter", rail=self.rail.GetValue(),
-            ground=self.ground.GetValue(), switch_node=self.sw.GetValue() or None, high_side=refs(self.high),
-            low_side=refs(self.low), switch=refs(self.integrated), topology=self.topology.GetStringSelection(),
+            ground=self.ground.GetValue(), switch_node=None if integrated else (self.sw.GetValue() or None),
+            # an integrated stage: its greyed discrete fields are not used (_integrated_state)
+            high_side=[] if integrated else refs(self.high), low_side=[] if integrated else refs(self.low),
+            switch=integrated, topology=self.topology.GetStringSelection(),
             f_sw=num(self.f_sw, "Hz") or 0.0, i_out=num(self.i_out, "A") or 0.0, v_in=num(self.v_in, "V"),
             v_out=num(self.v_out, "V"), rise_time=num(self.rise, "s") or 0.0, c_oss=num(self.c_oss, "F"),
             q_oss=num(self.q_oss, "C"), c_stray=num(self.c_stray, "F"), rds_on=num(self.rds_on, "Ω"),

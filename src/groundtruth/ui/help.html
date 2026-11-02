@@ -367,8 +367,11 @@ you stop on: clicking or arrowing quickly through the rows does not make it sele
 <p>The table's columns: <b>Name</b>, <b>Status</b> (as on the Signal paths tab), <b>Topology</b>, <b>Switches</b> (high
 side / low side, or "integrated" and the IC), <b>Rail</b>, <b>f_sw</b>, <b>I out</b> (the load current: the output's; the input current is worked out, see below), <b>V in→out</b>
 (? where not set), <b>Edge</b>, <b>Input</b> and <b>Output</b> (the connector pins). The form scrolls when the window
-is short. In the form, <b>Topology</b> is buck, boost or custom; <b>Integrated stage</b> takes an IC with both
-switches inside (leave High side, Low side and Switch node empty then); <b>Conducted standard</b> and <b>Conducted
+is short. The form is grouped, each group with a line saying what it is for: <b>Stage</b>, <b>Switches</b>,
+<b>Operating point</b> and <b>Connectors</b> are what every stage needs; <b>Switching edges</b>, <b>Conducted
+emission</b>, <b>Interleaving</b>, <b>Losses</b> and <b>Efficiency</b> refine it (an empty value is left out and
+the run says so). <b>Topology</b> is buck, boost or custom; <b>Integrated stage</b> takes an IC with both
+switches inside (High side, Low side and Switch node are then greyed: not used); <b>Conducted standard</b> and <b>Conducted
 class</b> pick the limit (CISPR 22 CLASS A / B, CISPR 25 CLASS 1-5 as in TI WEBENCH, CISPR 32, MIL-STD-461 CE102;
 <i>(analysis default)</i> uses the settings' <code>analysis.conducted</code>; see <a href="#conducted">Conducted-emission
 limits</a> for the classes and when each applies); parts are references separated by
