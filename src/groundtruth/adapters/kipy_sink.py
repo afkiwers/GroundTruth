@@ -186,6 +186,27 @@ def end_commit(editor: Any, commit: Any, message: str = "", drop: bool = False) 
     editor._kicad.send(command, EndCommitResponse)
 
 
+# Items per create / remove request. The user, drawing every layer's arrows (up to 6000 arrows, 18 000 strokes):
+# "Error receiving reply from KiCad: Timed out": one request with all of them took KiCad longer than the API client
+# waits for a reply. In requests of this size, inside the same commit (still one undo step), each is answered well
+# within it.
+CREATE_CHUNK = 1000
+
+
+def _create_items(board: Any, items: list) -> list:
+    """board.create_items in requests of CREATE_CHUNK items (inside the caller's commit); the created items."""
+    created = []
+    for k in range(0, len(items), CREATE_CHUNK):
+        created += list(board.create_items(items[k: k + CREATE_CHUNK]))
+    return created
+
+
+def _remove_ids(board: Any, ids: list):
+    """board.remove_items_by_id in requests of CREATE_CHUNK ids (inside the caller's commit)."""
+    for k in range(0, len(ids), CREATE_CHUNK):
+        board.remove_items_by_id(ids[k: k + CREATE_CHUNK])
+
+
 def _commit_group(board: Any, items: list, name: str, message: str) -> int:
     """Create the items, then group them under `name` so 'Clear GT markers' finds them.
 
@@ -198,7 +219,7 @@ def _commit_group(board: Any, items: list, name: str, message: str) -> int:
     from kipy.board_types import Group
     commit = begin_commit(board)
     try:
-        created = board.create_items(items)
+        created = _create_items(board, items)
         end_commit(board, commit, message)
     except Exception:
         end_commit(board, commit, drop=True)
@@ -271,7 +292,7 @@ def clear(board: Any, prefix: str = GROUP_PREFIX) -> int:
     commit = begin_commit(board)
     try:
         if ids:
-            board.remove_items_by_id(ids)
+            _remove_ids(board, ids)
         board.remove_items(groups)
         end_commit(board, commit, "groundtruth: clear drawings")
     except Exception:
@@ -473,7 +494,7 @@ def place_vias(board: Any, mods) -> int:
         return 0
     commit = begin_commit(board)
     try:
-        created = board.create_items(items)
+        created = _create_items(board, items)
         end_commit(board, commit, f"groundtruth: add {len(items)} stitching via(s)")
     except Exception:
         end_commit(board, commit, drop=True)

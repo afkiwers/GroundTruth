@@ -553,3 +553,60 @@ def test_the_return_arrow_colour_preference_takes_only_a_colour():
     for bad in ("red", "#ff88", "", None, 12):
         assert return_colour({"return_arrow_colour": bad}) == RETURN_ARROW_COLOUR
     assert defaults({})["return_arrow_colour"] == RETURN_ARROW_COLOUR
+
+
+def test_many_arrows_go_to_kicad_in_requests_kicad_answers_in_time():
+    """The user, drawing every layer's arrows: "Error receiving reply from KiCad: Timed out". 2500 arrows (7500
+    strokes) go in requests of at most CREATE_CHUNK items, all in one commit (one undo step), then one group; the
+    next drawing clears them the same way. The connection waits API_TIMEOUT_MS for a reply, not kipy's 2 s."""
+    pytest.importorskip("kipy")
+    import inspect
+    from types import SimpleNamespace
+    from kipy.util.board_layer import layer_from_canonical_name
+    from groundtruth.adapters import kipy_source
+    from groundtruth.adapters.kipy_sink import CREATE_CHUNK, draw_arrows
+
+    class Board:
+        def __init__(self):
+            self.requests, self.commits, self.groups, self.removed = [], [], [], []
+            self.enabled = [layer_from_canonical_name(n) for n in ("F.Cu", "B.Cu", "User.7")]
+
+        def get_enabled_layers(self):
+            return self.enabled
+
+        def get_groups(self):
+            return self.groups
+
+        def begin_commit(self):
+            self.commits.append("begin")
+            return "c"
+
+        def create_items(self, items):
+            if not isinstance(items, list):                 # the group, its own commit
+                self.groups.append(SimpleNamespace(name=items.proto.name,
+                                                   proto=SimpleNamespace(items=list(range(7500)))))
+                return [items]
+            self.requests.append(len(items))
+            return items
+
+        def push_commit(self, commit, message):
+            self.commits.append("push")
+
+        def drop_commit(self, commit):
+            self.commits.append("drop")
+
+        def remove_items_by_id(self, ids):
+            self.removed.append(len(ids))
+
+        def remove_items(self, groups):
+            self.groups = [g for g in self.groups if g not in groups]
+
+    b = Board()
+    arrows = [(1.0 + 0.01 * k, 1.0, 1.0, 0.0) for k in range(2500)]
+    assert draw_arrows(b, arrows, "User.7", "test") == 2500
+    assert sum(b.requests) == 7500 and max(b.requests) <= CREATE_CHUNK and len(b.requests) == 8
+    assert b.commits == ["begin", "push", "begin", "push"]          # the strokes, then the group
+    draw_arrows(b, arrows[:1], "User.7", "test")                    # replaces them: the clear is chunked too
+    assert sum(b.removed) == 7500 and max(b.removed) <= CREATE_CHUNK
+    assert "timeout_ms=API_TIMEOUT_MS" in inspect.getsource(kipy_source.connect)
+    assert kipy_source.API_TIMEOUT_MS >= 10_000

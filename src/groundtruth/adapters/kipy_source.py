@@ -77,6 +77,13 @@ def when_ready(fn: Callable[..., T], *args, wait: Optional[float] = None, progre
             delay = min(2 * delay, 1.0)
 
 
+# How long the API client waits for KiCad's reply (kicad-python's default is 2 s). A large but honest request (the
+# group of every layer's arrows: one request naming 18 000 items, which cannot be split) can take KiCad longer, and
+# the user saw "Error receiving reply from KiCad: Timed out" while KiCad was still working. A KiCad that is busy
+# (a dialog, a tool) still answers at once (AS_BUSY, when_ready), so only a slow reply waits this long.
+API_TIMEOUT_MS = 30_000
+
+
 def connect():
     """Connect to the running KiCad (env KICAD_API_SOCKET / KICAD_API_TOKEN set by KiCad)."""
     try:
@@ -84,7 +91,7 @@ def connect():
     except ImportError as e:
         raise KiCadConnectionError("kicad-python (kipy) is not installed in this environment") from e
     try:
-        kicad = KiCad(client_name="groundtruth")
+        kicad = KiCad(client_name="groundtruth", timeout_ms=API_TIMEOUT_MS)
         version = kicad.get_version()
     except Exception as e:  # kipy raises various connection errors
         raise KiCadConnectionError(
