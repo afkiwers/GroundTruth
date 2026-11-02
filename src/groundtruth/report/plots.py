@@ -2059,3 +2059,103 @@ def _close_title_gap(fig, margin_in: float = 0.12, min_gap_in: float = 0.5) -> N
         gap = low - top - margin_in / h
         for t in texts:
             t.set_y(t.get_position()[1] - gap)
+
+
+# --------------------------------------------------------------------------- efficiency (analysis/efficiency.py)
+EFF_MAX_SERIES = 7             # loss categories drawn on their own; the smaller ones together as "other"
+
+
+def _loss_series(e) -> list[tuple[str, list]]:
+    """The loss categories to stack, largest at the stage's own current first, at most EFF_MAX_SERIES, the rest
+    together as "other" (eight colours at most, PDN_COLOURS)."""
+    k = e.at(e.i_ref) or 0
+    order = sorted(e.by, key=lambda c: -e.by[c][k])
+    keep = [c for c in order if c != "other"][:EFF_MAX_SERIES]
+    if "copper" in e.by and "copper" not in keep:   # the loss layout changes: always a band of its own
+        keep[-1:] = ["copper"]
+    rest = [c for c in e.by if c not in keep]
+    out = [(c, list(e.by[c])) for c in keep]
+    if rest:
+        out.append(("other", [sum(e.by[c][j] for c in rest) for j in range(len(e.currents))]))
+    return out
+
+
+def draw_efficiency(fig: Figure, e) -> None:
+    """A power stage's efficiency sweep (analysis/efficiency.EfficiencyResult): the efficiency against the load
+    current above, the loss below on the same current axis, stacked by cause (the largest at the stage's own current
+    at the bottom), the total as a line. The stage's own current is a dotted line; below `ccm_from` the band is
+    shaded (the inductor current may reach zero: a controller may skip pulses there, the model runs continuous). A
+    measured CSV's points (with_measured) are drawn over both."""
+    fig.clear()
+    if e.error or not e.currents:
+        ax = fig.add_subplot(111)
+        ax.text(0.5, 0.5, e.error or "no efficiency sweep", ha="center", va="center", transform=ax.transAxes,
+                fontsize=FS_TEXT)
+        ax.set_axis_off()
+        return
+    gs = fig.add_gridspec(2, 1, height_ratios=[1, 1], hspace=0.08)
+    ax = fig.add_subplot(gs[0])
+    ax_l = fig.add_subplot(gs[1], sharex=ax)
+    i = np.asarray(e.currents)
+    ax.plot(i, 100 * np.asarray(e.efficiency), color=PDN_COLOURS[0], lw=1.6, label="model")
+    series = _loss_series(e)
+    ax_l.stackplot(i, *[v for _, v in series], labels=[c for c, _ in series],
+                   colors=[PDN_COLOURS[k % len(PDN_COLOURS)] for k in range(len(series))], alpha=0.85,
+                   edgecolor="white", linewidth=0.6)
+    ax_l.plot(i, e.p_loss, color="#222222", lw=1.2, label="total")
+    if e.measured:
+        mi = [p[0] for p in e.measured]
+        ax.plot(mi, [100 * p[1] for p in e.measured], "o", ms=4, mfc="none", color="#d62728", label="measured")
+        ml = [(p[0], p[2]) for p in e.measured if p[2] is not None]
+        if ml:
+            ax_l.plot([p[0] for p in ml], [p[1] for p in ml], "o", ms=4, mfc="none", color="#d62728",
+                      label="measured")
+    lo = min(i[0], min((p[0] for p in e.measured), default=i[0]))
+    for a_ in (ax, ax_l):
+        if e.ccm_from and e.ccm_from > lo:
+            a_.axvspan(lo, e.ccm_from, color="#888888", alpha=0.12, lw=0)
+        a_.axvline(e.i_ref, color="#888888", lw=0.9, ls=":")
+        a_.grid(True, alpha=0.3)
+        a_.tick_params(labelsize=FS_TICK)
+    lows = [100 * x for x in e.efficiency] + [100 * p[1] for p in e.measured]
+    ax.set_ylim(max(0.0, min(lows) - 5), min(100.0, max(lows) + 3))
+    ax.set_ylabel("efficiency (%)", fontsize=FS_TEXT)
+    ax.tick_params(labelbottom=False)
+    ax_l.set_ylabel("loss (W)", fontsize=FS_TEXT)
+    ax_l.set_xlabel("load current (A)", fontsize=FS_TEXT)
+    ax_l.set_ylim(bottom=0)
+    if e.ccm_from and e.ccm_from > lo:
+        ax.text(lo, ax.get_ylim()[0], " may run discontinuous", fontsize=FS_TICK, color="#666666", va="bottom")
+    ax_l.legend(fontsize=FS_TICK, frameon=False, loc="upper left", ncol=2)
+    w_in, _ = fig.get_size_inches()
+    left_in, right_in = _lh(FS_TEXT) + _width_in("100.0", FS_TICK) + 0.24, 0.25
+    k = e.at(e.i_ref)
+    title = (f"{e.net}: {e.v_in:g} V → {e.v_out:g} V, efficiency {100 * e.efficiency[k]:.1f} % at {e.i_ref:g} A "
+             f"(dotted)")
+    header = _title_and_key(ax, title, w_in - left_in - right_in)
+    _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TICK) + 0.08 + _lh(FS_TEXT), header + 0.06, hspace=0.08)
+
+
+def draw_efficiency_breakdown(fig: Figure, e) -> None:
+    """The loss at the stage's own load current by cause, as bars (largest at the top), with each one's share."""
+    fig.clear()
+    ax = fig.add_subplot(111)
+    k = e.at(e.i_ref) if e.currents else None
+    if k is None:
+        ax.set_axis_off()
+        return
+    rows = sorted(((c, v[k]) for c, v in e.by.items() if v[k] > 0), key=lambda r: r[1])
+    total = sum(w for _, w in rows) or 1.0
+    names = [c for c, _ in rows]
+    ax.barh(names, [w for _, w in rows], color=PDN_COLOURS[0], height=0.6)
+    for y, (_, w) in enumerate(rows):
+        ax.text(w, y, f" {w * 1e3:.3g} mW ({100 * w / total:.0f} %)", va="center", fontsize=FS_TICK)
+    ax.set_xlim(0, max((w for _, w in rows), default=1.0) * 1.45)
+    ax.set_xlabel("loss (W)", fontsize=FS_TEXT)
+    ax.tick_params(labelsize=FS_TICK)
+    ax.grid(True, axis="x", alpha=0.3)
+    w_in, _ = fig.get_size_inches()
+    left_in = _width_in(max(names, key=len, default="x"), FS_TICK) + 0.3
+    header = _title_and_key(ax, f"{e.net}: loss at {e.currents[k]:.3g} A by cause, {total:.3g} W in all",
+                            w_in - left_in - 0.25)
+    _adjust(fig, left_in, 0.25, 0.10 + _lh(FS_TICK) + 0.08 + _lh(FS_TEXT), header + 0.06)

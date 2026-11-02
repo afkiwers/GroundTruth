@@ -122,10 +122,11 @@ def settings_key(cfg) -> Optional[str]:
                         base_dir=""))
 
 
-def result_views(res) -> list:
+def result_views(res, config=None) -> list:
     """The views a Simulate's result adds after its routes: every power stage, each DC path's view (the stages'
-    currents together first), each bridge with its legs, RMS currents and sweep, and each DC rail with loads (a
-    DcLoadResult is its own view: its DC map)."""
+    currents together first), each bridge with its legs, RMS currents and sweep, each DC rail with loads (a
+    DcLoadResult is its own view: its DC map), and each stage's efficiency sweep (with its measured CSV, read here
+    from `config`'s board folder: efficiency.with_measured)."""
     from ..analysis.bridge import rms_view, sweep_view
     from ..analysis.power import COMBINED_VIEW, dc_view
     views = [dc_view(cr, p["name"]) for cr in res.converters for p in cr.dc]
@@ -136,10 +137,14 @@ def result_views(res) -> list:
         legs = [cr for cr in res.converters if getattr(cr, "bridge", None) == br.net]
         more = [rms_view(br, legs[0]) if legs else None, sweep_view(br)]
         stages += [br] + legs + [v for v in more if v is not None]
+    from ..analysis.efficiency import with_measured
+    effs = [cr.efficiency for cr in res.converters if getattr(cr, "efficiency", None) is not None
+            and not getattr(cr, "bridge", None)]
+    effs = [with_measured(e, config) if config is not None else e for e in effs]
     loads = [d for d in getattr(res, "dc_loads", ()) if not d.error]
     rails = [p for p in getattr(res, "pdn", ()) if not p.error and p.ports]     # each PDN rail: its curves
     from ..analysis.transfer import bode_views
-    return stages + loads + rails + views + bode_views(res)     # the responses' Bode and pole-zero views last
+    return stages + effs + loads + rails + views + bode_views(res)  # the responses' Bode and pole-zero views last
 
 
 def portable_keep(keep):
@@ -1817,7 +1822,7 @@ class MainFrame(ConfigActions, wx.Frame):
                     sim = (board, cfg, res)
                 else:
                     res.drop_models()
-                return (b, res.issues, res.routes + result_views(res), sim, c, res.solver, kept,
+                return (b, res.issues, res.routes + result_views(res, c), sim, c, res.solver, kept,
                         getattr(res.checks, "si", None))
             from ..rules.checks import run_checks
             res = run_checks(b, c)
@@ -2724,7 +2729,8 @@ class MainFrame(ConfigActions, wx.Frame):
                 keep = dict(keep, history=history_for(keep["path"]), settings=lambda t=text: t,
                             t0=time.monotonic() - float(meta.get("run_s") or 0.0))
             kept = keep_run(keep, res, inputs["cfg"], progress) if isinstance(keep, dict) else keep
-            return ("simulate", inputs["board"], res.issues, res.routes + result_views(res), None, inputs["cfg"],
+            return ("simulate", inputs["board"], res.issues, res.routes + result_views(res, inputs["cfg"]), None,
+                    inputs["cfg"],
                     res.solver, kept, inputs.get("what_if", False), getattr(getattr(res, "checks", None), "si", None),
                     src)
 

@@ -382,6 +382,11 @@ def ripple_pp(board: Board, config: Config, spec, duty: float, v_in: Optional[fl
     return v_in * d_on / (l_h * spec.f_sw)
 
 
+# the loss categories of part_losses' rows ("by": {category: W}), the efficiency sweep's breakdown (efficiency.py)
+LOSS_CATEGORIES = ("conduction", "switching", "output charge", "reverse recovery", "dead time", "diode", "inductor",
+                   "series parts", "connectors", "other")
+
+
 def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], list[str]]:
     """[{"ref", "power_w", "what"}] of every power stage's parts at its operating point, and notes on what is
     missing."""
@@ -389,13 +394,15 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
     out: dict[str, dict] = {}
     notes = []
 
-    def add(ref: str, w: float, what: str):
-        """Add a loss to a part, with its cause."""
+    def add(ref: str, w: float, what: str, cat: str = "other"):
+        """Add a loss to a part, with its cause and its category (LOSS_CATEGORIES: the efficiency sweep's
+        breakdown, analysis/efficiency.py)."""
         if w <= 0 or board.footprint(ref) is None:
             return
-        e = out.setdefault(ref, {"ref": ref, "power_w": 0.0, "what": []})
+        e = out.setdefault(ref, {"ref": ref, "power_w": 0.0, "what": [], "by": {}})
         e["power_w"] += w
         e["what"].append(what)
+        e["by"][cat] = e["by"].get(cat, 0.0) + w
 
     from .pins import params_cache, series_note
     pin_params = params_cache(board, config)
@@ -413,9 +420,10 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
             # a DC rail with loads (analysis/dcload.py): its series parts (a fuse, a shunt) at the rail's current
             for path in getattr(res, "dc", []) or []:
                 for p in path.get("parts", []):
-                    add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"in DC load {res.net}")
+                    add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"in DC load {res.net}", "series parts")
                 for p in path.get("joints", []):        # its solder joints (power.dc_summary) at the part
-                    add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"solder joints, DC load {res.net}")
+                    add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"solder joints, DC load {res.net}",
+                        "series parts")
             if res.net in loads:
                 from .dcload import pin_currents
                 for pin, amps in pin_currents(loads[res.net]).items():
@@ -447,6 +455,11 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
         main = [r for r in main if not _is_diode(r)]
         sync = _synchronous(spec)
         d_hs, d_ls = d, 1 - d                             # conduction share: the high side d in both topologies
+        # the inductor current's ripple: a triangle of ΔI p-p on I_L, so its square's mean is I_L² + ΔI²/12 (continuous
+        # conduction [Erickson 2001] [A80]): the switches' and the winding's I²R take it. At light load it is most of
+        # their loss (the user's measured efficiencies fall there); none without the inductor's L (ripple_pp)
+        di_rip = ripple_pp(board, config, spec, d, spec.v_in or res.v_in) or 0.0
+        i_sq = i_l ** 2 + di_rip ** 2 / 12.0
         # a synchronous rectifier FET conducts in reverse in the dead times (both switches off: the inductor
         # current, continuous and positive, freewheels through it at v_sd [A48]): the whole hard-edge dead time,
         # and at the soft edge what is left after the current has swung the node across (reverse_conduction); its
@@ -460,7 +473,7 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
             # the node's charge at the soft edge: both FETs' output charge (the side's q_oss, the other side taken
             # alike), else C_oss·V each; neither: no swing taken off the dead time (the larger loss)
             q_node = 2 * spec.q_oss if spec.q_oss else (2 * spec.c_oss * v if spec.c_oss and v else 0.0)
-            di = ripple_pp(board, config, spec, d, spec.v_in or res.v_in)
+            di = di_rip                                  # the ripple, above
             rc = reverse_conduction(t_hard, t_soft, i_l, di or 0.0, q_node)
             hard_rev = t_hard > 0 and rc["i_hard"] > 0
             off = min((rise + fall) * spec.f_sw, d_hs if boost else d_ls)    # the channel's share given up
@@ -472,24 +485,26 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
                 add(ref, rc["charge"] * spec.f_sw * v_sd / len(rect_fets),
                     f"reverse conduction {v_sd:g} V: {t_hard * 1e9:g} ns at the hard turn-on, "
                     f"{rc['t_soft_rev'] * 1e9:.3g} of {t_soft * 1e9:g} ns after the {rc['slew'] * 1e9:.3g} ns node "
-                    "swing")
+                    "swing", "dead time")
         if spec.rds_on is not None:
             r_lo = spec.rds_on_low if spec.rds_on_low is not None else spec.rds_on
             fets_hs, fets_ls = [r for r in hs if not _is_diode(r)], [r for r in ls if not _is_diode(r)]
-            for ref in fets_hs:              # parallel switches share the current: (I/n)² each
+            for ref in fets_hs:              # parallel switches share the current: I²/n² each (ripple too)
                 if spec.switch:                  # integrated: both switches inside, the current always flows
-                    add(ref, i_l ** 2 * spec.rds_on / len(fets_hs), f"conduction {i_l:g} A")
+                    add(ref, i_sq * spec.rds_on / len(fets_hs), f"conduction {i_l:g} A", "conduction")
                 else:
-                    add(ref, d_hs * (i_l / len(fets_hs)) ** 2 * spec.rds_on,
-                        f"conduction {d_hs * 100:.0f} % of the time")
+                    add(ref, d_hs * i_sq / len(fets_hs) ** 2 * spec.rds_on,
+                        f"conduction {d_hs * 100:.0f} % of the time", "conduction")
             for ref in fets_ls:
-                add(ref, d_ls * (i_l / len(fets_ls)) ** 2 * r_lo, f"conduction {d_ls * 100:.0f} % of the time")
+                add(ref, d_ls * i_sq / len(fets_ls) ** 2 * r_lo, f"conduction {d_ls * 100:.0f} % of the time",
+                    "conduction")
         else:
             notes.append(f"{spec.name}: no rds_on, so the switches' conduction loss is left out")
         for ref in rect:                     # a rectifier diode conducts while the main switch is off
             if _is_diode(ref):
                 vf = spec.diode_vf if spec.diode_vf is not None else DIODE_VF
-                add(ref, (d_hs if boost else d_ls) * i_l * vf, f"{'boost' if boost else 'catch'} diode {vf:g} V")
+                add(ref, (d_hs if boost else d_ls) * i_l * vf, f"{'boost' if boost else 'catch'} diode {vf:g} V",
+                    "diode")
         if v and spec.f_sw and main:
             # overlap of voltage and current: synchronous, only the main switch's turn-on edge is hard (at its
             # turn-off the inductor current carries the switch node across while the channel is already off);
@@ -509,21 +524,24 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
             # before it: a diode always, a synchronous FET's body diode in the dead time
             e_rr = spec.q_rr * v if spec.q_rr and (not sync or hard_rev) else 0.0
             for ref in main:
-                add(ref, p_edge / len(main), "switching, turn-on edge" if sync else "switching, both edges")
-                add(ref, e_oss * spec.f_sw, f"output charge {how}·f_sw")
+                add(ref, p_edge / len(main), "switching, turn-on edge" if sync else "switching, both edges",
+                    "switching")
+                add(ref, e_oss * spec.f_sw, f"output charge {how}·f_sw", "output charge")
                 if e_rr:
-                    add(ref, e_rr * spec.f_sw / len(main), f"reverse recovery Q_rr·V·f_sw ({spec.q_rr * 1e9:g} nC)")
+                    add(ref, e_rr * spec.f_sw / len(main), f"reverse recovery Q_rr·V·f_sw ({spec.q_rr * 1e9:g} nC)",
+                        "reverse recovery")
         _, inductor = switch_inductor(board, config, spec)
         if inductor is not None:
             if spec.dcr is not None:
-                add(inductor.reference, i_l ** 2 * spec.dcr, f"DCR {spec.dcr * 1e3:g} mΩ")
+                add(inductor.reference, i_sq * spec.dcr, f"DCR {spec.dcr * 1e3:g} mΩ", "inductor")
             else:
                 notes.append(f"{spec.name}: no dcr, so {inductor.reference}'s winding loss is left out")
         for path in getattr(res, "dc", []) or []:
             for p in path.get("parts", []):
-                add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"in DC {path['name']}")
+                add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"in DC {path['name']}", "series parts")
             for p in path.get("joints", []):            # its solder joints (power.dc_summary) at the part
-                add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"solder joints, DC {path['name']}")
+                add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"solder joints, DC {path['name']}",
+                    "series parts")
     # each fed pin's solder joint and mating contact (analysis/pins.py): I²·R at its part, with the pin's current
     # summed over the stages and rails through it (a connector feeding two converters)
     for pin, amps in sorted(pin_amps.items()):
@@ -531,7 +549,7 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
         pp = pin_params(ref)
         if pp.series > 0:
             parts = [f"{k} {getattr(pp, k) * 1e3:g} mΩ" for k in ("contact", "joint") if getattr(pp, k)]
-            add(ref, amps ** 2 * pp.series, f"pin {pin} at {amps:.3g} A: {' + '.join(parts)}")
+            add(ref, amps ** 2 * pp.series, f"pin {pin} at {amps:.3g} A: {' + '.join(parts)}", "connectors")
         note = series_note(ref, pin, amps, pp)
         if note:
             notes.append(note)

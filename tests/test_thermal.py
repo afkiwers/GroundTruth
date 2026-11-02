@@ -81,11 +81,20 @@ def test_the_adapter_reproduces_pcb_thermals_own_board_reading(tmp_path):
             assert get(b) == pytest.approx(get(a), rel=1e-6, abs=1e-9)
 
 
+def _rip2(cfg, d_on, v_in, f_sw):
+    """The inductor ripple's mean-square share ΔI²/12, ΔI = V_in·d_on/(L·f_sw) [Erickson 2001] with L from L1's model
+    (d_on: D(1−D) for a buck, D_sw for a boost); 0 without a model."""
+    m = cfg.model_for("L1")
+    l_h = m.get("L") if m is not None and m.kind == "inductor" else 0.0
+    return (v_in * d_on / (l_h * f_sw)) ** 2 / 12 if l_h else 0.0
+
+
 def test_part_losses_follow_the_operating_point(tmp_path):
     """Synchronous buck at 24 → 5 V, 5 A, 500 kHz, 2 ns: D = 5/24. High side D·I²·R, one hard edge ½·V·I·t·f (at
     its turn-off the inductor current carries the switch node), and the output charge C_oss·V²·f, or Q_oss·V·f
     when Q_oss is given; low side (1−D)·I²·R; inductor I²·DCR. No R_DS(on) or DCR: left out, with a note. No dead
-    time here (dead_rise, dead_fall 0): its reverse conduction is test_dead_time's."""
+    time here (dead_rise, dead_fall 0): its reverse conduction is test_dead_time's. The switches and the winding
+    carry the ripple too: I² + ΔI²/12."""
     from dataclasses import replace
     from groundtruth.analysis.detect import detect_converters
     from groundtruth.analysis.thermal import part_losses
@@ -94,16 +103,18 @@ def test_part_losses_follow_the_operating_point(tmp_path):
                    rise_time=2e-9, c_oss=600e-12, rds_on=0.010, dcr=0.020, dead_rise=0.0, dead_fall=0.0)
     cfg = replace(sc.config, converters=[spec])
     d = 5.0 / 24.0
+    i2 = 25 + _rip2(cfg, d * (1 - d), 24.0, 500e3)
+    assert i2 > 25
     res = NS(net=spec.name, duty=d, v_in=24.0, dc=[])
     rows = {r["ref"]: r for r in part_losses(board, cfg, [res])[0]}
     edge = 0.5 * 24 * 5 * 2e-9 * 500e3
-    assert rows["Q1"]["power_w"] == pytest.approx(d * 25 * 0.010 + edge + 600e-12 * 24 ** 2 * 500e3)
+    assert rows["Q1"]["power_w"] == pytest.approx(d * i2 * 0.010 + edge + 600e-12 * 24 ** 2 * 500e3)
     assert "turn-on edge" in rows["Q1"]["what"] and "C_oss·V²" in rows["Q1"]["what"]
-    assert rows["Q2"]["power_w"] == pytest.approx((1 - d) * 25 * 0.010)
-    assert rows["L1"]["power_w"] == pytest.approx(25 * 0.020)
+    assert rows["Q2"]["power_w"] == pytest.approx((1 - d) * i2 * 0.010)
+    assert rows["L1"]["power_w"] == pytest.approx(i2 * 0.020)
     with_q = replace(cfg, converters=[replace(spec, q_oss=38e-9)])               # the EPC2306's Q_OSS
     rows = {r["ref"]: r for r in part_losses(board, with_q, [res])[0]}
-    assert rows["Q1"]["power_w"] == pytest.approx(d * 25 * 0.010 + edge + 38e-9 * 24 * 500e3)
+    assert rows["Q1"]["power_w"] == pytest.approx(d * i2 * 0.010 + edge + 38e-9 * 24 * 500e3)
     assert "Q_oss·V" in rows["Q1"]["what"]
     bare = replace(cfg, converters=[replace(spec, rds_on=None, dcr=None)])
     rows, notes = part_losses(board, bare, [res])
@@ -113,7 +124,7 @@ def test_part_losses_follow_the_operating_point(tmp_path):
 def test_switching_losses_of_a_diode_buck_and_a_boost(tmp_path):
     """With a rectifier diode both edges are hard and only the switch's own output energy is lost (≈ ½·Q_oss·V);
     the diode (1−D)·I·V_f. A boost's hard-switched transistor is its low side, switching V_out at the inductor
-    current I_out / (1 − D); its diode is the high side."""
+    current I_out / (1 − D); its diode is the high side. Conduction with the ripple: I² + ΔI²/12."""
     from groundtruth.analysis.thermal import part_losses
     from groundtruth.config.settings import ConverterSpec
     board, sc, _ = make(tmp_path, boost_board(), "boost", nets=())
@@ -122,18 +133,20 @@ def test_switching_losses_of_a_diode_buck_and_a_boost(tmp_path):
                          rise_time=t, q_oss=q, rds_on=0.02, diode_vf=0.4)
     from dataclasses import replace
     d = 5.0 / 12.0
+    i2 = 4 + _rip2(sc.config, d * (1 - d), 12.0, f)
     rows = {r["ref"]: r for r in part_losses(board, replace(sc.config, converters=[buck]),
                                              [NS(net="buck", duty=d, v_in=12.0, dc=[])])[0]}
-    assert rows["Q1"]["power_w"] == pytest.approx(d * 4 * 0.02 + 0.5 * 12 * 2 * 2 * t * f + 0.5 * q * 12 * f)
+    assert rows["Q1"]["power_w"] == pytest.approx(d * i2 * 0.02 + 0.5 * 12 * 2 * 2 * t * f + 0.5 * q * 12 * f)
     assert "both edges" in rows["Q1"]["what"] and "½·Q_oss·V" in rows["Q1"]["what"]
     assert rows["D1"]["power_w"] == pytest.approx((1 - d) * 2 * 0.4)
     boost = ConverterSpec("boost", "VOUT", "GND", "SW", ["D1"], ["Q1"], topology="boost", f_sw=f, i_out=1.0,
                           v_in=12.0, v_out=24.0, rise_time=t, q_oss=q, rds_on=0.02, diode_vf=0.4)
     d = 0.5
     i_l = 1.0 / (1 - d)
+    i2 = i_l ** 2 + _rip2(sc.config, 1 - d, 12.0, f)
     rows = {r["ref"]: r for r in part_losses(board, replace(sc.config, converters=[boost]),
                                              [NS(net="boost", duty=d, v_in=12.0, dc=[])])[0]}
-    assert rows["Q1"]["power_w"] == pytest.approx(d * i_l ** 2 * 0.02 + 0.5 * 24 * i_l * 2 * t * f
+    assert rows["Q1"]["power_w"] == pytest.approx(d * i2 * 0.02 + 0.5 * 24 * i_l * 2 * t * f
                                                   + 0.5 * q * 24 * f)
     assert rows["D1"]["power_w"] == pytest.approx((1 - d) * i_l * 0.4) and "boost diode" in rows["D1"]["what"]
 
@@ -264,7 +277,8 @@ def test_capacity_inputs_rescale_shared_copper_with_the_cross_term(tmp_path):
 def test_capacity_inputs_scale_the_part_losses_with_the_load_current(tmp_path):
     """The losses as quadratics in the load-current scale s, from three part_losses evaluations: at s = 1.7 the
     high side has d·(1.7·I)²·R + ½·V·(1.7·I)·t_r·f + C_oss·V²·f (C_oss stays), the low side and the inductor
-    their I² terms (no dead time: dead_rise, dead_fall 0)."""
+    their I² terms (no dead time: dead_rise, dead_fall 0); the ripple's ΔI²/12 does not scale with the load: in the
+    constant term."""
     from dataclasses import replace
     from groundtruth.analysis.detect import detect_converters
     from groundtruth.analysis.thermal import capacity_inputs
@@ -276,11 +290,13 @@ def test_capacity_inputs_scale_the_part_losses_with_the_load_current(tmp_path):
     stage = NS(kind="converter", net=spec.name, view_of=None, error=None, duty=d, v_in=24.0, dc=[], dc_vectors={},
                dc_grids={})
     terms = capacity_inputs(board, cfg, [stage])["loss_terms"][spec.name]
+    r2 = _rip2(cfg, d * (1 - d), 24.0, 500e3)
     at = {ref: a * s * s + b * s + c for ref, (a, b, c) in terms.items()}
-    assert at["Q1"] == pytest.approx(d * i * i * 0.010 + 0.5 * 24 * i * 2e-9 * 500e3 + 600e-12 * 24 ** 2 * 500e3)
-    assert at["Q2"] == pytest.approx((1 - d) * i * i * 0.010)
-    assert at["L1"] == pytest.approx(i * i * 0.020)
-    assert terms["Q1"][2] == pytest.approx(600e-12 * 24 ** 2 * 500e3)     # at no load only C_oss·V²·f is left
+    assert at["Q1"] == pytest.approx(d * (i * i + r2) * 0.010 + 0.5 * 24 * i * 2e-9 * 500e3 + 600e-12 * 24 ** 2 * 500e3)
+    assert at["Q2"] == pytest.approx((1 - d) * (i * i + r2) * 0.010)
+    assert at["L1"] == pytest.approx((i * i + r2) * 0.020)
+    # at no load C_oss·V²·f and the ripple's conduction are left
+    assert terms["Q1"][2] == pytest.approx(600e-12 * 24 ** 2 * 500e3 + d * r2 * 0.010)
 
 
 def test_capacity_of_a_real_stage_is_confirmed_by_a_fresh_solve(tmp_path):

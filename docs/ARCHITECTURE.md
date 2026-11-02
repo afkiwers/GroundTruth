@@ -1252,6 +1252,19 @@ for a boost; duty = the high-side conduction time). The inductor current is cont
   - Detection works on discrete and integrated stages, the settings file round-trips, and the CLI runs `detect`,
     `simulate`, JSON, JUnit and HTML end to end.
 
+- **Efficiency over load current** (`analysis/efficiency.py`, 2026-11-02, branch `efficiency-sweep` [A80]; the
+  user, with a report's efficiency and power-loss plots per rail: "can we sweep and create these kind of graphs?").
+  After `input_estimate` each stage's `res.efficiency` (an `EfficiencyResult`, kind "efficiency": its own Results
+  view, `CURVE_KINDS`) sweeps the load current (`efficiency_currents`, else 24 points over 5-120 % of i_out): at each
+  current `thermal.part_losses` again (its rows now carry `by`: {category: W}, `LOSS_CATEGORIES`; the switches'
+  conduction and the DCR with the ripple I² + ΔI²/12, which also changed Thermal's figures slightly), the DC paths'
+  copper scaled as I² (input paths at the energy balance's I_in, EFF_ROUNDS rounds), gate drive `qg`·`v_gate`·f_sw per
+  switching FET (`qg` also from the FETs' Qg field) and the controller `iq`·V_in. `ccm_from` = ΔI/2 (a boost's
+  I_out·d). A measured CSV (`efficiency_measured`) is read where the result is shown (`with_measured`, from
+  result_views / render_html with the settings), never on a compute server. Drawn by `plots.draw_efficiency` (two
+  panels on one current axis: efficiency, losses stacked by cause) and `draw_efficiency_breakdown`; tiles
+  `kpi._efficiency`; text `formats.efficiency_text` (also in converter_text); the report's part "Efficiency".
+  Tests: tests/test_efficiency.py (each term against its closed form).
 ## Radiated limits and spread spectrum (2026-10-16, branch `weak-spots`)
 - `emi/radiation.RadiatedLimit` (settings `analysis: radiated_limit`, `config.settings._radiated_limit`): a user
   curve (log-f linear between points, NaN outside), its distance and bandwidth table (`MIL461_RBW` = MIL-STD-461G

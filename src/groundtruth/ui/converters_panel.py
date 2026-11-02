@@ -113,6 +113,16 @@ FIELD_TIPS = {
             "Qrr field), e.g. 60n. GaN has none: leave it empty. Its loss Q_rr·V·f_sw in the main switch, a current "
             "spike I_rr = √(2·Q_rr·di/dt) in the hot loop's spectrum, and the overshoot I_rr·√(L/C_oss) when it "
             "snaps off.",
+    "Q_g": "One switching FET's total gate charge (the FET's Qg field), e.g. 12n: the efficiency sweep's gate-drive "
+           "loss Q_g·V_gate·f_sw per FET. Empty: left out.",
+    "Gate drive (V)": "The gate-drive voltage the controller drives the FETs with, e.g. 5 (empty: 5 V assumed).",
+    "Controller I_q (A)": "The controller's own supply current from the input, e.g. 2m (its datasheet's operating "
+                          "or quiescent current while switching): the sweep's loss I_q·V_in. Empty: left out.",
+    "Efficiency currents (A)": "The efficiency sweep's load currents, e.g. 0.5, 1, 2, 4, 6. Empty: 24 currents from "
+                               "5 % to 120 % of the load current.",
+    "Measured efficiency": "A CSV of bench measurements drawn over the model's efficiency curve: columns load "
+                           "current (A), efficiency (% or 0-1) and optionally the loss (W); a header row is "
+                           "skipped. A file name relative to the board's groundtruth/ folder, or a full path.",
 }
 BUTTON_TIPS = {
     "Add": "Add a new power stage from the form.",
@@ -233,6 +243,16 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self.v_sd.SetHint("GaN 2, Si 0.8")
         self.q_rr = wx.TextCtrl(fw)
         self.q_rr.SetHint("none")
+        self.qg = wx.TextCtrl(fw)                # the efficiency sweep's fixed losses, its currents, a measurement
+        self.qg.SetHint("none")
+        self.v_gate = wx.TextCtrl(fw)
+        self.v_gate.SetHint("5 (assumed)")
+        self.iq = wx.TextCtrl(fw)
+        self.iq.SetHint("none")
+        self.eff_currents = wx.TextCtrl(fw)
+        self.eff_currents.SetHint("5-120 % of the load")
+        self.eff_measured = wx.TextCtrl(fw)
+        self.eff_measured.SetHint("none (a CSV in groundtruth/)")
         self.inp = wx.TextCtrl(fw)
         self.out = wx.TextCtrl(fw)
         self.standard = wx.Choice(fw, choices=STANDARD_CHOICES)
@@ -256,7 +276,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self.param_ctrls = {"c_oss": self.c_oss, "q_oss": self.q_oss, "rds_on": self.rds_on,
                             "rds_on_low": self.rds_on_low, "dcr": self.dcr, "diode_vf": self.diode_vf,
                             "dead_rise": self.dead_rise, "dead_fall": self.dead_fall, "v_sd": self.v_sd,
-                            "q_rr": self.q_rr}
+                            "q_rr": self.q_rr, "qg": self.qg}
         self.marks = {}
         self._rows = {}
         for key, ctrl in self.param_ctrls.items():
@@ -280,7 +300,10 @@ class ConvertersPanel(SelectableRows, wx.Panel):
                             ("R_DS(on) low side", self.rds_on_low), ("Inductor DCR", self.dcr),
                             ("Diode V_f (V)", self.diode_vf), ("Dead time, rise", self.dead_rise),
                             ("Dead time, fall", self.dead_fall),
-                            ("Reverse V_SD (V)", self.v_sd), ("Q_rr", self.q_rr)):
+                            ("Reverse V_SD (V)", self.v_sd), ("Q_rr", self.q_rr), ("Q_g", self.qg),
+                            ("Gate drive (V)", self.v_gate), ("Controller I_q (A)", self.iq),
+                            ("Efficiency currents (A)", self.eff_currents),
+                            ("Measured efficiency", self.eff_measured)):
             text = wx.StaticText(fw, label=label)
             tip = FIELD_TIPS.get(label, "")
             if tip:                          # on the label and the field: hovering either explains it
@@ -369,7 +392,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
              "input_connector": ("pins", ""), "output_connector": ("pins", ""), "topology": ("choice", ""),
              "conducted": ("choice", ""), "conducted_class": ("choice", ""), "spread_mode": ("choice", ""),
              "spread": ("pct", ""),
-             "interleave": ("text", "")}
+             "interleave": ("text", ""), "qg": ("num", "C"), "v_gate": ("num", "V"), "iq": ("num", "A"),
+             "efficiency_currents": ("nums", "A"), "efficiency_measured": ("text", "")}
 
     def _ctrls(self) -> dict:
         """ConverterSpec field -> its control on the form."""
@@ -381,7 +405,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
                 "dead_rise": self.dead_rise, "dead_fall": self.dead_fall, "v_sd": self.v_sd, "q_rr": self.q_rr,
                 "input_connector": self.inp, "output_connector": self.out, "conducted": self.standard,
                 "conducted_class": self.std_class, "spread": self.spread, "spread_mode": self.spread_mode, "spread_rate": self.spread_rate,
-                "interleave": self.interleave, "phase_deg": self.phase_deg}
+                "interleave": self.interleave, "phase_deg": self.phase_deg, "qg": self.qg, "v_gate": self.v_gate,
+                "iq": self.iq, "efficiency_currents": self.eff_currents, "efficiency_measured": self.eff_measured}
 
     def _texts(self, c: ConverterSpec) -> dict:
         """Every field of stage c as the form shows it."""
@@ -406,7 +431,10 @@ class ConvertersPanel(SelectableRows, wx.Panel):
                                                  c.conducted_class),
                 "spread": "" if not c.spread else f"{c.spread * 100:g}",
                 "spread_mode": c.spread_mode if c.spread_mode in SPREAD_MODES else SPREAD_MODES[0],
-                "spread_rate": si(c.spread_rate, "Hz"), "interleave": c.interleave, "phase_deg": g(c.phase_deg)}
+                "spread_rate": si(c.spread_rate, "Hz"), "interleave": c.interleave, "phase_deg": g(c.phase_deg),
+                "qg": si(c.qg, "C"), "v_gate": g(c.v_gate), "iq": si(c.iq, "A"),
+                "efficiency_currents": ", ".join(f"{x:g}" for x in c.efficiency_currents),
+                "efficiency_measured": c.efficiency_measured}
 
     def _set(self, ctrl, text: str):
         """Show text in a control; a list (wx.Choice) gets a MIXED entry at the top while it shows one."""
@@ -474,6 +502,11 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             return v, ""
         if kind == "net":
             return (text, "") if self.board is None or text in self.board.nets else (None, f"'{text}' is no net")
+        if kind == "nums":                       # comma-separated numbers (the efficiency sweep's currents)
+            vals = [parse_field(x.strip(), unit) for x in text.split(",") if x.strip()]
+            if any(v is None or not v > 0 for v in vals):
+                return None, f"'{text}' is not a list of positive numbers"
+            return vals, ""
         if kind == "pins":
             return [r.strip() for r in text.split(",") if r.strip()], ""
         if kind == "pct":
@@ -568,7 +601,10 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             q_oss=num(self.q_oss, "C"), c_stray=num(self.c_stray, "F"), rds_on=num(self.rds_on, "Ω"),
             rds_on_low=num(self.rds_on_low, "Ω"), dcr=num(self.dcr, "Ω"), diode_vf=num(self.diode_vf, "V"),
             dead_rise=num(self.dead_rise, "s"), dead_fall=num(self.dead_fall, "s"), v_sd=num(self.v_sd, "V"),
-            q_rr=num(self.q_rr, "C"),
+            q_rr=num(self.q_rr, "C"), qg=num(self.qg, "C"), v_gate=num(self.v_gate, "V"), iq=num(self.iq, "A"),
+            efficiency_currents=[v for v in (parse_field(x.strip(), "A") for x in self.eff_currents.GetValue()
+                                             .split(",") if x.strip()) if v],
+            efficiency_measured=self.eff_measured.GetValue().strip(),
             input_connector=refs(self.inp), output_connector=refs(self.out),
             conducted=lc.standard_key(std), conducted_class=cls,
             spread=(parse_field(self.spread.GetValue().replace("%", ""), "") or 0.0) / 100 or None,

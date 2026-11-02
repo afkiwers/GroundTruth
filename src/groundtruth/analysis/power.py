@@ -134,6 +134,7 @@ class ConverterResult(RouteResult):
     dc_unsolved: list = field(default_factory=list)     # DC paths whose solve failed: missing from `dc`, the input
                                                         # estimate's copper and Thermal's heat (each says so)
     input: Optional[dict] = None                        # DC input current from output power + losses (input_estimate)
+    efficiency: Optional[object] = None                 # efficiency.EfficiencyResult: the sweep over load current
     dc_branch: dict = field(default_factory=dict)       # path name -> (build, signed DC current per branch, A):
                                                         # the paths of all stages add up on the shared model (combine_dc)
     # DC paths the settings keep from being modelled: [{path, connector, net, from, from_net, suggest}] (dc_plan:
@@ -190,6 +191,8 @@ class ConverterResult(RouteResult):
         d.pop("dc_ripple_via", None)
         d.pop("dc_plan", None)
         d.pop("switch_pins", None)
+        if self.efficiency is not None:
+            d["efficiency"] = self.efficiency.summary()
         d["kind"] = "converter"
         return d
 
@@ -1447,6 +1450,12 @@ def finish_converter(model: BoardModel, setup: ConverterSetup) -> ConverterResul
         # the input current again, now with the DC paths' copper losses; the input path was solved at the estimate
         # without them, so its figures are scaled to the final current (a DC solve is linear in its current)
         res.input = input_estimate(model.board, config, spec, res, res.dc, res.dc_unsolved)
+        # the efficiency over load current from these losses and DC paths (no new solve; never fails the stage)
+        try:
+            from .efficiency import sweep as efficiency_sweep
+            res.efficiency = efficiency_sweep(model.board, config, spec, res)
+        except Exception as e:                      # noqa: BLE001 - a note, not a failed Simulate
+            res.notes.append(f"efficiency sweep not made: {e}")
         if res.input is not None:
             for p in res.dc:
                 if p["name"].startswith("input ") and p["current_a"] > 0:
