@@ -994,6 +994,38 @@ def layer_change_board(stitch_distance: Optional[float], second_plane_net: str =
 PDN_IC = (20.0, 15.0)
 
 
+def plane_pair_line(length: float, w: float = 10.0, h: float = 0.2) -> tuple:
+    """A parallel-plate line on 2 layers: VDD on F.Cu over GND on B.Cu, both a strip `w` mm wide from x = 5 to
+    5 + `length`, `h` mm of FR4 apart. U1 at the near end (its VDD pad on the VDD strip, its GND pad in a clearance
+    hole with a via to B.Cu); a row of 0402 capacitors across the far end, 1 mm apart, VDD to GND (a via in each GND
+    pad, the pad and via in a hole of the VDD strip): with a short's model (C 1 F, ESR 1 uOhm, ESL 1 fH) the line's
+    far end. Returns (BoardGen, the capacitors' references)."""
+    g = BoardGen(layers=2, size=(length + 10.0, w + 10.0), dielectrics=[h])
+    x0, x1, y0, y1 = 5.0, 5.0 + length, 5.0, 5.0 + w
+    yc = (y0 + y1) / 2
+
+    def hole(cx, cy, hw, hh):
+        """A rectangular clearance hole in the VDD strip."""
+        return [(cx - hw, cy - hh), (cx + hw, cy - hh), (cx + hw, cy + hh), (cx - hw, cy + hh)]
+    n = max(2, int(w // 1.0))
+    ys = [y0 + (k + 0.5) * w / n for k in range(n)]
+    holes = [hole(x0 + 2.1, yc, 0.5, 0.6)] + [hole(x1 - 1.0, y, 0.45, 0.4) for y in ys]
+    rect = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    g.zone("VDD", "F.Cu", rect, holes)
+    g.zone("GND", "B.Cu", rect)
+    g.footprint("U1", "MCU", "Package_SO:Fake_IC", (x0 + 1.5, yc), [
+        {"number": 1, "at": (-0.6, 0.0), "net": "VDD", "size": (0.6, 0.8), "pinfunction": "VDD", "pintype": "power_in"},
+        {"number": 2, "at": (0.6, 0.0), "net": "GND", "size": (0.6, 0.8), "pinfunction": "GND", "pintype": "power_in"}])
+    g.via((x0 + 2.1, yc), "GND")
+    refs = []
+    for k, y in enumerate(ys):
+        ref = f"C{k + 1}"
+        g.two_pin(ref, "1F", (x1 - 1.5, y), "VDD", "GND", kind="C")
+        g.via((x1 - 1.0, y), "GND")
+        refs.append(ref)
+    return g, refs
+
+
 def pdn_board(caps: Sequence[tuple] = (), source: bool = False, size: Pt = (40.0, 30.0),
               cut_ic: bool = False) -> BoardGen:
     """A power-distribution test board: 4 layers 0.2 mm apart, a GND plane on In1.Cu and a VDD plane on In2.Cu over

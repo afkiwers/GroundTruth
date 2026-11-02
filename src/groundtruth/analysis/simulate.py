@@ -464,8 +464,11 @@ class BoardModel:
         # Vertical branches: stitching vias and through-hole pads of plane nets
         snap = max(1.5 * d, 0.4)
         for v in vias:
-            add_vertical(st, v.net, v.position, v.layers, v.drill,
-                         f"via {v.net} @({v.position[0]:.2f}, {v.position[1]:.2f})", snap)
+            # joined around its barrel where the grid is finer than the drill (add_pin; one node otherwise): at
+            # one node the plane read the current as a point source, its spreading inductance growing with each
+            # finer grid, mu0*h/(2*pi)*ln(r_via/r_node) too high (~80 pH at 0.1 mm cells on 0.2 mm FR4 [A79])
+            add_pin(st, v.net, v.position, v.layers, v.drill,
+                    f"via {v.net} @({v.position[0]:.2f}, {v.position[1]:.2f})", snap)
         pin_params = params_cache(board, config)
         for p in pads:
             if p.pad_type == "thru_hole" and len(p.layers) > 1:

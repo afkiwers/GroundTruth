@@ -44,6 +44,34 @@ def skin_thickness(t, f, sigma):
     return float(out) if out.ndim == 0 else out
 
 
+def slab_impedance(t, f, sigma):
+    """The internal impedance per square (ohm) of a conducting slab t m thick with its magnetic field on one face
+    only, as a plane facing its partner of a plane pair (and a strip over its return plane) has [A79]:
+
+        Z = (1 + j) / (sigma * delta) * coth((1 + j) * t / delta)        [Ramo 1994] [Dowell 1966]
+
+    Its real part is the AC resistance skin_thickness gives (Dowell's F, m = 1), its imaginary part the copper's own
+    (internal) inductance: omega * mu0 * t / 3 at low frequency (the current fills the thickness), omega * mu0 *
+    delta / 2 once delta << t (it crowds onto the face). With the strips placed at the facing surfaces, a plane
+    pair's inductance per square is then mu0 * (h + 2t/3) at low frequency and mu0 * (h + delta) at high frequency,
+    h the dielectric between them; at the foils' centres without this term the model read mu0 * (h + t) at every
+    frequency (17 % high for 0.2 mm FR4 and 35 um copper at high frequency; the cross-check with KiPI, 2026-11-02).
+    Returns complex (array for array input)."""
+    t = np.asarray(t, float)
+    f = np.asarray(f, float)
+    with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+        delta = 1.0 / np.sqrt(np.pi * np.maximum(f, 1e-300) * MU0 * sigma)
+        x = np.where(f > 0, t / delta, 0.0)
+        u = (1 + 1j) * np.minimum(x, 30.0)              # coth(u) is 1 to double precision beyond
+        exact = u / np.tanh(np.where(x > 0, u, 1.0))
+        # thin foil: u coth u = 1 + u²/3 - u⁴/45 with u² = 2j x² (the formula above cancels badly there): the
+        # resistance 1 + 4x⁴/45 (skin_thickness's series) and the internal reactance 2x²/3 (omega * mu0 * t / 3)
+        series = 1.0 + 4.0 * x ** 4 / 45.0 + 1j * (2.0 * x ** 2 / 3.0)
+        factor = np.where(x < 0.1, series, exact)
+    out = factor / (sigma * t)
+    return complex(out) if out.ndim == 0 else out
+
+
 @lru_cache(maxsize=None)
 def leggauss(n: int) -> tuple[np.ndarray, np.ndarray]:
     """Gauss-Legendre nodes and weights [Abramowitz 1964, §25.4] (cached: numpy solves an eigenvalue problem on
