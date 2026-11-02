@@ -3933,3 +3933,36 @@ def test_the_spread_rate_hint_follows_the_spread_mode(app, conv_frame):
     assert got["greyed"] == (False, "5kHz")
     s = got["saved"]
     assert (s.spread, s.spread_mode, s.spread_rate) == (pytest.approx(0.2), "random", None)
+
+
+def test_simulate_shows_each_stage_s_efficiency_sweep(app, conv_frame):
+    """The user, with a report's efficiency and power-loss plots per rail: "can we sweep and create these kind of
+    graphs?". After Simulate the stage has a view "<stage>  efficiency" in the Results list: curves (no layers), its
+    plot and the loss by cause drawn, its tiles (efficiency, peak, loss)."""
+    from groundtruth.config.settings import ConverterSpec
+    f = conv_frame
+    spec = ConverterSpec("buck", "VIN", "GND", switch=["U1"], f_sw=500e3, i_out=5.0, v_in=48.0, v_out=12.0,
+                         rise_time=2e-9, c_oss=600e-12, rds_on=5e-3, qg=10e-9, iq=3e-3,
+                         input_connector=["J1.1", "J1.2"])
+    got = {}
+
+    def setup():
+        f.settings.set_converters([spec])
+        f.converters.load(f.board, f.settings)
+
+    def pick():
+        rp = f.results_panel
+        names = [rp.choice.GetString(k) for k in range(rp.choice.GetCount())]
+        got["names"] = names
+        k = next(k for k, n in enumerate(names) if n.endswith("efficiency"))
+        rp.choice.SetSelection(k)
+        rp._route_changed()
+
+    def look():
+        rp = f.results_panel
+        got["tiles"] = rp.tile_text()
+        got["fig"] = [t.get_text() for ax in rp.fig.axes for t in (ax.title, ax.xaxis.label, ax.yaxis.label)]
+    run_steps(app, f, [setup, lambda: f.run(True) and None, pick, look])
+    assert "buck  efficiency" in got["names"]
+    assert "efficiency" in got["tiles"] and "peak" in got["tiles"] and "loss" in got["tiles"]
+    assert "load current (A)" in got["fig"] and "efficiency (%)" in got["fig"] and "loss (W)" in got["fig"]

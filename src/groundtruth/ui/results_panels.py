@@ -418,7 +418,7 @@ class HeatmapWindow(wx.Frame):
             self._resized = wx.CallLater(300, lambda: self and self.on_resized and self.on_resized())
 
 
-CURVE_KINDS = ("pdn", "bode")       # views drawn as curves, not maps (no layers, arrows or board drawing)
+CURVE_KINDS = ("pdn", "bode", "efficiency")   # views drawn as curves, not maps (no layers, arrows or board drawing)
 
 
 # the tooltip of an action that needs a Simulate first, greyed out until there is one (theme.Button.block; the user:
@@ -1035,7 +1035,7 @@ class ResultsPanel(wx.Panel):
         self.board, self.routes, self.issues = board, routes, issues
         # a power stage's (or bridge leg's) main view says what it is beside its DC and Bode views (the user: "should
         # Q301->Q302 have some comment behind it like (EMI results)?"): the hot loop's current and its emission
-        _set_items(self.choice, [r.label() if r.kind in ("thermal", "bridge", "pdn", "bode")
+        _set_items(self.choice, [r.label() if r.kind in ("thermal", "bridge", "pdn", "bode", "efficiency")
                                  else f"{r.net}  RMS currents" if getattr(r, "rms_of", None)
                                  else f"{r.net}  DC {r.view_of}" if getattr(r, "view_of", None)
                                  else f"{r.net}  hot loop {r.driver}→{r.receiver} (EMI)" if r.kind == "converter"
@@ -1190,6 +1190,10 @@ class ResultsPanel(wx.Panel):
                 from ..report.plots import draw_bode
                 draw_bode(fig, rr)
                 return
+            if rr.kind == "efficiency":         # a stage's efficiency and losses over load current
+                from ..report.plots import draw_efficiency
+                draw_efficiency(fig, rr)
+                return
             # the Preferences' Terminal current: the maps with the parts' terminals' current added (a copy, made
             # here in the render thread); the tiles and issues keep the copper's own
             from ..results.terminals import with_terminals
@@ -1209,6 +1213,9 @@ class ResultsPanel(wx.Panel):
             elif rr.kind == "bode":             # and their poles and zeros in the s-plane
                 from ..report.plots import draw_pz
                 views.append((self.canvas2, lambda fig: draw_pz(fig, rr)))
+            elif rr.kind == "efficiency":       # and the loss at its own current by cause
+                from ..report.plots import draw_efficiency_breakdown
+                views.append((self.canvas2, lambda fig: draw_efficiency_breakdown(fig, rr)))
             else:
                 views.append((self.canvas2, lambda fig: draw_spectrum(fig, rr)))
         if self.window:                         # the enlarged window shows the same view
@@ -1442,6 +1449,9 @@ class ResultsPanel(wx.Panel):
         if rr.kind == "pdn":
             from ..report.formats import pdn_text
             return "\n".join(pdn_text(rr))
+        if rr.kind == "efficiency":
+            from ..report.formats import efficiency_text
+            return "\n".join(line.strip() for line in efficiency_text(rr) + rr.notes)
         if rr.kind == "bode":
             from ..report.formats import response_lines
             return "\n".join(line for r in rr.responses for line in response_lines(r))

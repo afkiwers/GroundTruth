@@ -26,6 +26,7 @@ next one).</p>
 <li><a href="#safety">Voltage-aware safety checks</a></li>
 <li><a href="#fields">Part parameters from the schematic (HTTP lib fields)</a></li>
 <li><a href="#conducted">Conducted-emission limits: standards and classes</a></li>
+<li><a href="#efficiency">Efficiency over load current</a></li>
 <li><a href="#hotloop">The hot loop</a></li>
 <li><a href="#thermal">Thermal and Current capacity</a></li>
 <li><a href="#analog">Op-amp circuits and the transfer function</a></li>
@@ -283,6 +284,35 @@ in the schematic: see <a href="#siglabels">Labelling a signal path</a>.</p>
   for (the text can be selected and copied).</li>
 </ul>
 
+<hr><a name="efficiency"></a><h3>Efficiency over load current</h3>
+<p>Every <b>Simulate</b> sweeps each power stage's load current and shows its <b>efficiency</b> and <b>losses</b>
+as a Results view of their own (<i>&lt;stage&gt; efficiency</i>), a part of the report and lines in the console
+output. No new solve is needed: the losses are the ones Thermal heats the parts with, worked out again at each
+current, and the copper of the stage's DC paths scales with the square of its current (one Simulate gives its
+resistance).</p>
+<ul>
+<li><b>The plot</b>: the efficiency against the load current above, the losses below on the same current axis,
+  stacked by cause (conduction, the inductor's winding, output charge, switching, dead time, reverse recovery, a
+  diode, copper, series parts and connector pins, gate drive, the controller), the total as a line. The dotted line
+  is the stage's own load current. The second plot shows the loss at that current by cause, with each one's share:
+  the place to start when the efficiency should be higher.</li>
+<li><b>Light load</b>: the switches' conduction and the winding carry the inductor's ripple as well as the load
+  (I² + ΔI²/12), and the gates' drive and the controller's own supply cost the same at every current, so the
+  efficiency falls at light load as measured curves do. Below the shaded band's edge (I = ΔI/2) the inductor current
+  reaches zero each cycle: a controller may skip pulses, burst or run discontinuous there and do better than the
+  curve, which stays in continuous conduction.</li>
+<li><b>What it needs</b> (Converters tab): R_DS(on), the inductor's DCR and C_oss / Q_oss as for Thermal, and for
+  the fixed losses <b>Q_g</b> (one FET's gate charge, its Qg field), <b>Gate drive (V)</b> (5 V when empty) and
+  <b>Controller I_q</b> (its supply current while switching). A value not given is left out and the view's notes say
+  so. Inductor core loss is not modelled (it needs the maker's loss data).</li>
+<li><b>The currents</b>: 24 points from 5 % to 120 % of the stage's load current, or the list in <b>Efficiency
+  currents (A)</b> (settings: <code>efficiency_currents: [0.5, 1, 2, 4, 6]</code>).</li>
+<li><b>Measured points</b>: <b>Measured efficiency</b> names a CSV (a file in the board's groundtruth/ folder, or
+  a full path) with the load current (A), the efficiency (% or 0-1) and optionally the loss (W) in its first three
+  columns; a header row is skipped, commas or semicolons both work. Its points are drawn as open circles over the
+  model's curves, and a tile gives the largest difference. The file is read on the computer that shows the result,
+  so it also works with a compute server.</li>
+</ul>
 <hr><a name="hotloop"></a><h3>The hot loop</h3>
 <p>In a buck, the on-time loop (input capacitor, high-side switch, inductor, output capacitor) and the off-time loop
 (low-side switch, inductor, output capacitor) both carry trapezoidal currents: the inductor current never stops.
@@ -327,7 +357,9 @@ frequency every switching cycle, no rate needed (a settings file may still give 
 second; the form's Update saves none for random). A <b>triangle</b> needs its modulation frequency from the
 controller's datasheet: how fast the sweep runs against the EMI receiver's bandwidth (9 kHz from 150 kHz to 30 MHz)
 decides how much the reading drops (a slow sweep hardly lowers it, a fast one by several dB), so there is no safe
-default; the field's grey hint says so when triangle is chosen. <b>Interleave group</b> and <b>Phase (°)</b> mark
+default; the field's grey hint says so when triangle is chosen. <b>Q_g</b>, <b>Gate drive (V)</b>, <b>Controller
+I_q (A)</b>, <b>Efficiency currents (A)</b> and <b>Measured efficiency</b> feed the efficiency sweep (<a
+href="#efficiency">Efficiency over load current</a>). <b>Interleave group</b> and <b>Phase (°)</b> mark
 the phases of one controller (<a href="#interleave">Interleaved stages</a> below). The buttons are those of the Signal paths
 tab, and the rows show in KiCad the same way: clicking a row selects the stage's switches and hot-loop capacitors
 and highlights its switch node (<b>Zoom KiCad to the selected power stages</b> also zooms). KiCad shows the row

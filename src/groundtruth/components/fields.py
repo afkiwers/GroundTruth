@@ -45,6 +45,8 @@ PARAMS = (
           "switching loss Q_oss·V·f, the charge per edge"),
     Param("Vsd", "FET", "v_sd: reverse conduction in the dead time (a synchronous rectifier's, a bridge's switches)",
           "V", 1.0, "V", 0.0, 10.0, "2.1V", "dead-time losses, the drive model"),
+    Param("Qg", "FET", "qg: one FET's total gate charge (its gate driven every switching cycle)", "C", 1e-9, "nC",
+          0.0, 1e-6, "12 nanocoulomb", "the efficiency sweep's gate-drive loss Q_g·V_gate·f_sw per FET"),
     Param("Qrr", "FET", "q_rr: the synchronous rectifier's reverse-recovery charge (silicon body diode; GaN has none)",
           "C", 1e-9, "nC", 0.0, 1e-5, "62 nanocoulomb",
           "recovery loss Q_rr·V·f_sw, the recovery current spike in the spectrum and the overshoot"),
@@ -352,6 +354,7 @@ def stage_values(board, config, spec) -> tuple[dict[str, Reading], list[str]]:
     rect = [r for r in (spec.high_side if spec.topology == "boost" else spec.low_side) if not r.upper().startswith("D")]
     put("v_sd", rect, "Vsd")
     put("q_rr", rect, "Qrr", len(rect))
+    put("qg", [r for r in hs + spec.low_side if not r.upper().startswith("D")], "Qg")    # one FET's
     if rect:
         for edge, r in _controller_dead_times(board, spec).items():
             out.setdefault(f"dead_{edge}", r)
@@ -434,7 +437,7 @@ def same(a, b) -> bool:
 
 
 STAGE_KEYS = {"converter": ("rds_on", "rds_on_low", "c_oss", "q_oss", "diode_vf", "dcr", "v_sd", "q_rr",
-                            "dead_rise", "dead_fall"),
+                            "dead_rise", "dead_fall", "qg"),
               "bridge": ("rds_on", "rds_on_low", "c_oss", "q_oss", "v_sd")}
 
 
@@ -462,7 +465,7 @@ def show_value(v, unit: str = "") -> str:
 
 
 _KEY_UNITS = {"rds_on": "Ω", "rds_on_low": "Ω", "dcr": "Ω", "ESR": "Ω", "R": "Ω", "c_oss": "F", "C": "F",
-              "C_bias": "F", "q_oss": "C", "q_rr": "C", "dead_rise": "s", "dead_fall": "s", "v_sd": "V", "diode_vf": "V",
+              "C_bias": "F", "q_oss": "C", "q_rr": "C", "qg": "C", "dead_rise": "s", "dead_fall": "s", "v_sd": "V", "diode_vf": "V",
               "ESL": "H", "L": "H", "gbw": "Hz",
               "bandwidth": "Hz", "z_out": "Ω", "c_in": "F", "r_in": "Ω", "slew": "V/s", "cmrr": "dB", "gain": "",
               "aol": "dB", "fp2": "Hz", "pm": "°"}

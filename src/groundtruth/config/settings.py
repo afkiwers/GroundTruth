@@ -165,6 +165,14 @@ class ConverterSpec:
     dead_fall: Optional[float] = None     # s (default DEFAULT_DEAD_TIME)
     v_sd: Optional[float] = None          # V, its reverse conduction (default: GaN 2 V, silicon body diode 0.8 V)
     q_rr: Optional[float] = None          # C, reverse-recovery charge of the side's FETs together (default none)
+    # the efficiency sweep's fixed losses (analysis/efficiency.py [A80]): each switching FET's total gate charge,
+    # driven from v_gate every cycle (Q_g·V_gate·f_sw per FET), and the controller's own supply current from the input
+    qg: Optional[float] = None            # C, total gate charge of one FET (its Qg field); none: no gate-drive loss
+    v_gate: Optional[float] = None        # V, the gate-drive voltage (default EFF_V_GATE, assumed)
+    iq: Optional[float] = None            # A, the controller's supply current from the input (none: left out)
+    efficiency_currents: list = field(default_factory=list)   # A, the sweep's load currents (default: 5-120 % of i_out)
+    efficiency_measured: str = ""         # a CSV of measured efficiency (current A, efficiency %[, loss W]), relative to
+                                          # the board's groundtruth/ folder: drawn over the model's curve
     # keys taken from the parts' schematic fields (components/fields.py): refreshed from them on every open and run;
     # the other parameters are set in GroundTruth (flagged where they differ from the schematic)
     from_schematic: list[str] = field(default_factory=list)
@@ -1447,6 +1455,12 @@ def config_from_data(data: Any) -> Config:
                 dead_fall=_opt(c.get("dead_fall", c.get("dead_time")), f"{where}.dead_fall", "s"),
                 v_sd=_opt(c.get("v_sd"), f"{where}.v_sd", "V"),
                 q_rr=_opt(c.get("q_rr"), f"{where}.q_rr", "C"),
+                qg=_opt(c.get("qg"), f"{where}.qg", "C"),
+                v_gate=_opt(c.get("v_gate"), f"{where}.v_gate", "V"),
+                iq=_opt(c.get("iq"), f"{where}.iq", "A"),
+                efficiency_currents=[_num(x, f"{where}.efficiency_currents", "A")
+                                     for x in (c.get("efficiency_currents") or [])],
+                efficiency_measured=str(c.get("efficiency_measured") or ""),
                 # "dead_time" in a list of 2026-10-20 (one dead time for both edges) is both edges now
                 from_schematic=list(dict.fromkeys(k for r in _refs(c.get("from_schematic"))
                                                   for k in (("dead_rise", "dead_fall") if r == "dead_time" else (r,)))),
@@ -1479,6 +1493,10 @@ def config_from_data(data: Any) -> Config:
         dead_sum = (spec.dead_rise or 0.0) + (spec.dead_fall or 0.0)
         if any(v is not None and v < 0 for v in (spec.dead_rise, spec.dead_fall, spec.v_sd, spec.q_rr)):
             problems.append("dead_rise, dead_fall (dead_time), v_sd and q_rr must not be negative")
+        if any(v is not None and v < 0 for v in (spec.qg, spec.v_gate, spec.iq)):
+            problems.append("qg, v_gate and iq must not be negative")
+        if any(x <= 0 for x in spec.efficiency_currents):
+            problems.append("efficiency_currents must be positive currents (A)")
         elif spec.f_sw > 0 and dead_sum * spec.f_sw >= 0.5:
             problems.append(f"the dead times ({dead_sum * 1e9:g} ns per period together) are half of the "
                             f"{1e6 / spec.f_sw:g} µs period or more: check their unit (ns)")
@@ -1707,6 +1725,8 @@ class SettingsFile:
                                  "  a synchronous rectifier FET: dead_time (both edges; dead_rise / dead_fall one each,\n"
                                  "  or the controller's GT field dead:20ns), v_sd (its reverse conduction), q_rr\n"
                                  "  (a silicon body diode's recovery)\n"
+                                 "  efficiency sweep: qg (one FET's gate charge), v_gate, iq (the controller's supply\n"
+                                 "  current), efficiency_currents [0.5, 1, 2, ...], efficiency_measured: bench.csv\n"
                                  "  output_connector: the load's + and - pins (DC output path and ground return)")
         doc.yaml_set_comment_before_after_key(
             "bridges", before="Motor bridges (`groundtruth detect --write` finds the legs; the operating point and the "
@@ -1939,6 +1959,13 @@ class SettingsFile:
                 d["v_sd"] = c.v_sd
             if c.q_rr is not None:
                 d["q_rr"] = format_si(c.q_rr, "C")
+            for key, unit in (("qg", "C"), ("v_gate", ""), ("iq", "A")):
+                if getattr(c, key) is not None:
+                    d[key] = format_si(getattr(c, key), unit) if unit else getattr(c, key)
+            if c.efficiency_currents:
+                d["efficiency_currents"] = _flow_seq([float(f"{x:.6g}") for x in c.efficiency_currents])
+            if c.efficiency_measured:
+                d["efficiency_measured"] = c.efficiency_measured
             if c.snubber:
                 d["snubber"] = list(c.snubber)
             elif c.snubber_c and c.snubber_r:
@@ -2409,7 +2436,10 @@ _CONVERTER_RANGES = _SWITCH_RANGES + (("f_sw", 1e3, 1e8, "a switching frequency 
                                       ("dead_rise", 0.0, 2e-6, "a dead time (ns)", "n", "s"),
                                       ("dead_fall", 0.0, 2e-6, "a dead time (ns)", "n", "s"),
                                       ("v_sd", 0.0, 10.0, "a reverse-conduction voltage (V)", "", "V"),
-                                      ("q_rr", 0.0, 1e-5, "a reverse-recovery charge (nC)", "n", "C"))
+                                      ("q_rr", 0.0, 1e-5, "a reverse-recovery charge (nC)", "n", "C"),
+                                      ("qg", 0.0, 1e-6, "a gate charge (nC)", "n", "C"),
+                                      ("v_gate", 0.0, 30.0, "a gate-drive voltage (V)", "", "V"),
+                                      ("iq", 0.0, 1.0, "a controller's supply current (mA)", "m", "A"))
 _BRIDGE_RANGES = _SWITCH_RANGES + (("f_pwm", 1e3, 5e6, "a PWM frequency (kHz)", "k", "Hz"),
                                    ("dead_time", 0.0, 2e-6, "a dead time (ns)", "n", "s"),
                                    ("v_bus", 1.0, 1000.0, "a bus voltage (V)", "", "V"),

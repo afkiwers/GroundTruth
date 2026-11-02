@@ -22,6 +22,7 @@ the [README](../../README.md); how the fields are read in detail: [the settings 
 | `Qoss` | FET | nC | `38 nanocoulomb` | output charge: switching loss Q_oss·V·f | Bridges |
 | `Vsd` | FET | V | `2.1V` | reverse conduction of a synchronous rectifier in the dead time: dead-time loss | Bridges |
 | `Qrr` | FET | nC | `62 nanocoulomb` | a silicon body diode's reverse-recovery charge (GaN has none): recovery loss and current spike | |
+| `Qg` | FET | nC | `12 nanocoulomb` | total gate charge: the efficiency sweep's gate-drive loss Q_g·V_gate·f_sw per switch | Efficiency |
 | `Vds` | FET | V | `100V` | the switch's voltage rating: the fix advisor keeps the switch-node peak below 80 % of it | Run checks |
 | `Vf` | diode | V | `0.55V` | a buck's catch diode: its conduction loss | |
 | `Cj` | diode | pF | `120 picofarad` | a diode buck's catch-diode capacitance at the switch node: ringing, node charge current | |

@@ -46,6 +46,8 @@ def kpis(rr, rules=None) -> list[Kpi]:
         return _dc(rr, rules)
     if rr.kind == "pdn":                        # a supply rail's PDN impedance (analysis/pdn.py)
         return _pdn(rr)
+    if rr.kind == "efficiency":                 # a power stage's efficiency sweep (analysis/efficiency.py)
+        return _efficiency(rr)
     if rr.kind == "bode":                       # responses with their poles and zeros (analysis/transfer.py)
         return _bode(rr)
     if rr.kind == "converter":
@@ -118,6 +120,34 @@ def _bode(rr) -> list[Kpi]:
                     (f"Q {p['q']:.2g}" if p["q"] else "real pole") + (f" · {how}" if how else ""), "",
                     "the response's dominant pole (its lowest natural frequency); every pole and zero is in the "
                     "map below and the report"))
+    return out
+
+
+def _efficiency(e) -> list[Kpi]:
+    """A power stage's efficiency sweep: at its own load current, the peak (and where), the loss there, where
+    continuous conduction ends, and the largest gap to the measured points when there are any."""
+    k = e.at(e.i_ref)
+    best = max(range(len(e.efficiency)), key=lambda j: e.efficiency[j])
+    out = [("efficiency", f"{100 * e.efficiency[k]:.1f} %", f"at {e.currents[k]:.3g} A", "",
+            "the model's efficiency at the stage's own load current (P_out / (P_out + P_loss))"),
+           ("peak", f"{100 * e.efficiency[best]:.1f} %", f"at {e.currents[best]:.3g} A", "",
+            "the highest efficiency over the sweep"),
+           ("loss", f"{e.p_loss[k]:.3g} W", f"at {e.currents[k]:.3g} A", "",
+            "every loss the model has at the stage's own current (the bars below: by cause)")]
+    if e.ccm_from:
+        out.append(("continuous from", f"{e.ccm_from:.3g} A", "inductor current", "",
+                    "below this load current the inductor current reaches zero each cycle: a controller may skip "
+                    "pulses or run discontinuous there, the model stays continuous (shaded)"))
+    if e.measured:
+        import numpy as np
+        mi = [p[0] for p in e.measured if e.currents[0] <= p[0] <= e.currents[-1]]
+        if mi:
+            model = np.interp(mi, e.currents, e.efficiency)
+            gaps = [100 * (m - p[1]) for m, p in zip(model, e.measured) if e.currents[0] <= p[0] <= e.currents[-1]]
+            g = max(gaps, key=abs)
+            out.append(("model − measured", f"{g:+.1f} pt", f"{len(gaps)} point(s)", "",
+                        "the largest difference between the model's efficiency and the measured points (percentage "
+                        "points; positive: the model reads higher)"))
     return out
 
 

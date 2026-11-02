@@ -299,6 +299,7 @@ def converter_text(c) -> list[str]:
         r = c.resonance
         pair = f" ({r['pair'][0]}–{r['pair'][1]})" if r.get("pair") else ""
         out.append(f"    plane resonance: loop moment {r['rise_db']:+.1f} dB at {r['f'] / 1e6:.4g} MHz{pair}")
+    out += [line.replace("  ", "    ", 1) for line in efficiency_text(getattr(c, "efficiency", None))]
     nodes = sum(int(g.node.sum()) for g in c.layer_grids.values()) if c.layer_grids else 0
     out.append(f"    model: {nodes} nodes at {c.grid.d:.2f} mm on {', '.join(c.plane_layers)}"
                + (f"; board-wide {c.cavity['nodes']} nodes at {c.cavity['d_mm']:.2f} mm" if c.cavity else ""))
@@ -338,6 +339,24 @@ def fix_lines(rows: list[dict]) -> list[str]:
         out.append(f"      - {o['title']}" + (f": {figs}" if figs else "") + clears)
         out += [f"          {p}" for p in o["parts"]]
         out += [f"          ({n})" for n in o["notes"] if o["kind"] in ("cm", "loop", "combined", "now")]
+    return out
+
+
+def efficiency_text(e) -> list[str]:
+    """A power stage's efficiency sweep in the console report: at its own current, the peak, a few points along the
+    sweep with the largest loss's cause, and what the model leaves out."""
+    if e is None:
+        return []
+    k = e.at(e.i_ref)
+    best = max(range(len(e.efficiency)), key=lambda j: e.efficiency[j])
+    out = [f"  efficiency {100 * e.efficiency[k]:.1f} % at {e.currents[k]:.3g} A ({e.p_loss[k]:.3g} W lost), peak "
+           f"{100 * e.efficiency[best]:.1f} % at {e.currents[best]:.3g} A"
+           + (f"; continuous conduction from {e.ccm_from:.3g} A" if e.ccm_from else "")]
+    step = max(1, len(e.currents) // 6)
+    for j in list(range(0, len(e.currents), step)):
+        top = max(e.by, key=lambda c: e.by[c][j]) if e.by else ""
+        out.append(f"    {e.currents[j]:7.3g} A  {100 * e.efficiency[j]:5.1f} %  {e.p_loss[j]:7.3g} W"
+                   + (f"  (most: {top})" if top else ""))
     return out
 
 

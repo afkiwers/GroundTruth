@@ -473,7 +473,8 @@ def render_html(board: Board, issues: list[Issue], routes: list, mode: str, sett
     combined = dc_combined if dc_combined is not None and getattr(dc_combined, "dc", None) else None
     n_figs = (sum(3 for _ in routes) + sum(2 + len(c.dc) for c in stages) + (combined is not None)
               + sum(4 + len(legs[b.net]) + bool(b.sweep) for b in bridges) + (2 if thermal else 0) + len(capacity)
-              + len(dc_loads or ()) + len(pdn or ()) + (1 if si is not None and (si.nets or si.pairs) else 0))
+              + len(dc_loads or ()) + len(pdn or ()) + (1 if si is not None and (si.nets or si.pairs) else 0)
+              + sum(2 for c in stages if getattr(c, "efficiency", None) is not None))
     figs = _Figures(n_figs, progress, max_vias, outlines, names, marks, config, return_colour)
     figs.sharper = {_view_key(v): v for v in sharper or ()}
     # live KiCad boards read "kicad-ipc:<name>": the cover shows the name
@@ -524,6 +525,16 @@ def render_html(board: Board, issues: list[Issue], routes: list, mode: str, sett
              together + "".join(_dc_load(board, d, issues, rules, figs) for d in rails),
              ([(_anchor("stage", COMBINED_NET), "All DC currents together")] if together else [])
              + [(_anchor("dcload", d.net), d.net) for d in rails])
+    effs = [c.efficiency for c in stages if getattr(c, "efficiency", None) is not None]
+    if effs:
+        from ..analysis.efficiency import with_measured
+        effs = [with_measured(x, config) if config is not None else x for x in effs]
+        part("efficiency", "Efficiency", "Each power stage's efficiency and losses against its load current, from "
+             "the losses Thermal uses (switches, edges, dead times, the inductor, series parts) and the copper of its "
+             "DC paths, plus the gates' drive and the controller's supply where they are given; no new solve. The "
+             "losses are stacked by cause; the shaded band is where the controller may leave continuous conduction "
+             "(the model stays continuous), open circles are measured points.",
+             "".join(_efficiency(x, figs) for x in effs), [(_anchor("efficiency", x.net), x.net) for x in effs])
     if pdn:
         part("pdn", "Power integrity", "Each checked supply rail's impedance as its ICs see it between their supply "
              "and ground pins, from 10 kHz to 1 GHz: the decaps, the planes' capacitance, the vias and the regulator "
@@ -1132,6 +1143,31 @@ def _cap_bias(rows) -> str:
                    + _num(change, "{:+.0f} %") + f"<td>{e(r.curve)}</td><td>{e(how.get(r.how, r.how))}</td></tr>")
     return _table(["Part", "Nets", "#Worst-case DC V", "Where the voltage comes from", "#C nominal", "#C used", "#Change",
                    "Cbias", "DC-bias loss"], out, paged=True)
+
+
+def _efficiency(x, figs) -> str:
+    """The article of one power stage's efficiency sweep (analysis/efficiency.py): the efficiency at its own current
+    and the peak, the loss and where continuous conduction ends, the sweep's plot, the loss at its own current by
+    cause, and what the model leaves out."""
+    from .plots import draw_efficiency, draw_efficiency_breakdown
+    body = [f"<article class='item' id='{_anchor('efficiency', x.net)}'><header><h3>{e(x.net)}</h3>"
+            f"<span class='what'>{x.v_in:g} V → {x.v_out:g} V</span></header>"]
+    if x.error or not x.currents:
+        return "".join(body) + f"<p class='note'>{e(x.error or 'no sweep')}</p></article>"
+    k = x.at(x.i_ref)
+    best = max(range(len(x.efficiency)), key=lambda j: x.efficiency[j])
+    cards = [_kpi("Efficiency", f"{100 * x.efficiency[k]:.1f} %", f"at {x.currents[k]:.3g} A"),
+             _kpi("Peak", f"{100 * x.efficiency[best]:.1f} %", f"at {x.currents[best]:.3g} A"),
+             _kpi("Loss", f"{x.p_loss[k]:.3g} W", f"at {x.currents[k]:.3g} A")]
+    if x.ccm_from:
+        cards.append(_kpi("Continuous from", f"{x.ccm_from:.3g} A", "below: the shaded band"))
+    body.append(_kpis(cards))
+    body.append(_img(figs.png(f"{x.net} efficiency", draw_efficiency, x, size=(9.5, 6.0)),
+                     f"{x.net}: efficiency (above) and losses by cause (below) against the load current"))
+    body.append(_img(figs.png(f"{x.net} losses", draw_efficiency_breakdown, x, size=(9.5, 3.2)),
+                     f"{x.net}: the loss at {x.currents[k]:.3g} A by cause"))
+    body.append(_notes(([x.measured_note] if x.measured_note else []) + list(x.notes)))
+    return "".join(body) + "</article>"
 
 
 def _pdn(d, issues, figs) -> str:
