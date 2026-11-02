@@ -25,7 +25,7 @@ SPREAD_MODES = ("random", "triangle")      # ConverterSpec.spread_mode
 # "every cycle": "why do I have to define the spread rate if i define the spread spectrum?"): random hops every cycle
 # without one, a triangle's modulation frequency has no default (a slow sweep barely lowers a reading, a fast one by
 # several dB: emi/spread.py), so the hint says it is needed
-SPREAD_RATE_HINTS = {"random": "every cycle", "triangle": "needed: modulation frequency (datasheet)"}
+SPREAD_RATE_HINTS = {"random": "every cycle (random)", "triangle": "needed: modulation frequency (datasheet)"}
 
 # hover explanations of the form's fields (on the label and the field): what it is, where to find it, what it changes
 FIELD_TIPS = {
@@ -84,8 +84,8 @@ FIELD_TIPS = {
     "Phase (°)": "This stage's delay in degrees of the switching period within its group (the controller's "
                  "datasheet; a dual buck's channels are usually 180° apart). Empty: the group's stages 360°/n apart "
                  "in list order.",
-    "Spread rate (Hz)": "triangle: the modulation frequency (e.g. 10kHz); random: hops per second. Empty: random "
-                        "hops every switching cycle; a triangle needs one.",
+    "Spread rate (Hz)": "triangle only: its modulation frequency, from the controller's datasheet (e.g. 10kHz). "
+                        "Greyed for random, which hops to a new frequency every switching cycle.",
     "R_DS(on)": "The high-side (or integrated) switch's on-resistance, e.g. 3m (datasheet, at the expected "
                 "temperature): its conduction loss D·I²·R. Empty: left out of the thermal solve.",
     "R_DS(on) low side": "The low-side FET's on-resistance, e.g. 3m: its conduction loss (1−D)·I²·R. Empty: the "
@@ -247,6 +247,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self.spread_rate = wx.TextCtrl(fw)
         self.spread_rate.SetHint(SPREAD_RATE_HINTS["random"])
         self.spread_mode.Bind(wx.EVT_CHOICE, lambda e: (e.Skip(), self._spread_hint()))
+        self._spread_hint()                                 # the empty form: random, its rate greyed
         self.interleave = wx.TextCtrl(fw)       # interleaving (analysis/interleave.py): a group name and a phase
         self.interleave.SetHint("none")
         self.phase_deg = wx.TextCtrl(fw)
@@ -520,9 +521,12 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             self._form_for_selection()
 
     def _spread_hint(self):
-        """The Spread rate field's hint for the mode shown (SPREAD_RATE_HINTS; several stages with mixed modes: no
-        hint of either)."""
-        self.spread_rate.SetHint(SPREAD_RATE_HINTS.get(self.spread_mode.GetStringSelection(), ""))
+        """The Spread rate field for the mode shown: its hint (SPREAD_RATE_HINTS; several stages with mixed modes:
+        none) and greyed for random (the user: "if random is set, it should grey out the other field"), which then
+        hops every switching cycle; its text stays, for a switch back to triangle (_form saves no rate for random)."""
+        mode = self.spread_mode.GetStringSelection()
+        self.spread_rate.SetHint(SPREAD_RATE_HINTS.get(mode, ""))
+        self.spread_rate.Enable(mode != "random")
 
     def _class_standard(self) -> str:
         """The standard the class choice belongs to: the one chosen, else the analysis'."""
@@ -569,7 +573,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             conducted=lc.standard_key(std), conducted_class=cls,
             spread=(parse_field(self.spread.GetValue().replace("%", ""), "") or 0.0) / 100 or None,
             spread_mode=self.spread_mode.GetStringSelection(),
-            spread_rate=num(self.spread_rate, "Hz"),
+            # random hops every cycle: its greyed rate field is not used (_spread_hint)
+            spread_rate=None if self.spread_mode.GetStringSelection() == "random" else num(self.spread_rate, "Hz"),
             interleave=self.interleave.GetValue().strip(), phase_deg=num(self.phase_deg, "°"))
         from ..config.settings import validate
         from copy import copy
