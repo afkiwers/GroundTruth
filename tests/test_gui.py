@@ -492,6 +492,12 @@ def test_simulate_lists_the_design_changes_and_one_is_checked_in_simulate(app, c
         k = p.design_list.GetFirstSelected()
         got["filter_png"] = p._png is not None and p.open_schematic.IsEnabled()
         got["menu"] = [(label, on) for label, _, on in p.menu_items(p.design[k][1]) if label]
+        from groundtruth.ui.fixes_panel import copy_png
+        got["copied"] = copy_png(p._png)                 # the schematic onto the clipboard as an image
+        if got["copied"] and wx.TheClipboard.Open():
+            data = wx.BitmapDataObject()
+            got["pasted"] = wx.TheClipboard.GetData(data) and data.GetBitmap().GetWidth()
+            wx.TheClipboard.Close()
         k = next(i for i, (_, o) in enumerate(p.design) if o["kind"] == "snubber")
         p.design_list.Select(k)
         p._design_selected(type("E", (), {"GetIndex": lambda self: k})())
@@ -504,6 +510,7 @@ def test_simulate_lists_the_design_changes_and_one_is_checked_in_simulate(app, c
     assert all(m == "–" or m.endswith(("✓", "!", "✗")) for m in got["marks"])
     assert got["filter_png"] and ("Check in Simulate", False) in got["menu"]      # a filter is off the board
     assert ("Show the schematic in a window", True) in got["menu"] and clears
+    assert ("Copy the schematic", True) in got["menu"] and got["copied"] and got.get("pasted", 0) > 100
     assert "part: C " in got["text"] and got["enabled"]
     text = f.fixes.design_text.GetValue()
     assert "checked in Simulate" in text and "predicted" in text and "radiated" in text

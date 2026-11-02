@@ -141,11 +141,13 @@ class Sketch:
             self.wire((x - 0.2 + 0.2 * k, y - 0.2), (x - 0.3 + 0.2 * k, y - 0.34))
 
     def box(self, x0, y0, x1, y1, label: str, dashed: bool = False, colour: Optional[str] = None):
-        """A labelled box (a block: the power stage, the LISN, a driver)."""
+        """A labelled box (a block: the power stage, the LISN, a driver). Each box is noted on the figure
+        (`fig.gt_boxes`: its rectangle and its text) so a test can check the text stays inside."""
         c = colour or self.ink.line
         self.wire((x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0), dashed=dashed, colour=c)
-        self.text(((x0 + x1) / 2, (y0 + y1) / 2), label, colour=c, ha="center", va="center", size=8.5,
-                  linespacing=1.2)
+        text = self.ax.text((x0 + x1) / 2, (y0 + y1) / 2, label, color=c, fontsize=8.5 * TEXT_SCALE, ha="center",
+                            va="center", linespacing=1.2)
+        self.fig.gt_boxes = getattr(self.fig, "gt_boxes", []) + [((x0, y0, x1, y1), text)]
 
     def source(self, top, bottom, label: str):
         """A DC source (circle, + at the top) from bottom to top."""
@@ -155,8 +157,11 @@ class Sketch:
         self.wire(top, (x, my + 0.3))
         self.wire((x, my - 0.3), bottom)
         self.ax.add_patch(Circle((x, my), 0.3, fill=False, ec=self.ink.line, lw=1.4))
-        self.text((x, my + 0.1), "+", ha="center", va="center", size=9)
-        self.text((x, my - 0.14), "−", ha="center", va="center", size=9)
+        # the signs as strokes sized to the circle (as text they overlapped each other at the labels' size)
+        s = 0.07
+        self.wire((x - s, my + 0.12), (x + s, my + 0.12))
+        self.wire((x, my + 0.12 - s), (x, my + 0.12 + s))
+        self.wire((x - s, my - 0.13), (x + s, my - 0.13))
         self.text((x - 0.42, my), label, ha="right", va="center")
 
     def switch(self, top, bottom, label: str, side: int = -1):
@@ -187,6 +192,32 @@ def _subscript(name: str) -> str:
 
 
 # ---------------------------------------------------------------- the design changes
+STAGE_LINE_CHARS = 14      # a stage name's line in its 2.4-unit box (TEXT_SCALE'd 8.5 pt: ~16 characters fit)
+STAGE_LINES = 4
+
+
+def _stage_label(stage: str) -> str:
+    """The power stage's box text: "power stage" and its name wrapped to the box (breaking after "/" and at spaces,
+    STAGE_LINE_CHARS a line, at most STAGE_LINES, the rest cut with "…"). The user saw "buck Payload and
+    Avionics/SW1" run out of its box over the stage's input capacitors' text."""
+    import re
+    words = [w for w in re.split(r"\s+|(?<=/)", stage) if w]
+    lines, cur = [], ""
+    for w in words:
+        join = cur + ("" if not cur or cur.endswith("/") else " ") + w
+        if cur and len(join) > STAGE_LINE_CHARS:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = join
+    if cur:
+        lines.append(cur)
+    lines = [ln if len(ln) <= STAGE_LINE_CHARS else ln[:STAGE_LINE_CHARS - 1] + "…" for ln in lines]
+    if len(lines) > STAGE_LINES:
+        lines = lines[:STAGE_LINES - 1] + [lines[STAGE_LINES - 1][:STAGE_LINE_CHARS - 1] + "…"]
+    return "\n".join(["power stage"] + lines)
+
+
 def _lisn_name(standard: str) -> str:
     """The test network the stage sees at its connector, in words."""
     return {"cispr25": "LISN\n5 µH ∥ 50 Ω", "mil461": "LISN\n50 µH"}.get(standard or "", "LISN\n50 µH ∥ 50 Ω")
@@ -205,16 +236,16 @@ def draw_filter(flt: dict, stage: str, ink: Ink):
     x_in = x_l1 + 1.0                                    # the stage's input capacitors
     x_dv = x_in + gap if conv else None                  # damping at the stage
     x_box = (x_dv or x_in) + gap
-    sk = Sketch(ink, x_box + 4.2, 6.8)
+    sk = Sketch(ink, x_box + 4.2, 7.4)                  # room above L_f's three lines for the headings
     top, bot = 3.6, 0.6
     sk.source((0, top), (0, bot), "V in")
     sk.wire((0, top), (0.4, top))
     sk.box(0.4, top - 0.6, 2.8, top + 0.6, _lisn_name(flt.get("standard", "")))
     sk.wire((0, bot), (x_box, bot))
     sk.wire((2.8, top), (x_l0, top))
-    sk.wire((3.3, -0.3), (3.3, 5.0), dashed=True, colour=ink.muted)
-    sk.text((1.6, 5.0), "line, LISN", colour=ink.muted, ha="center", va="bottom")
-    sk.text((3.4, 5.0), "connector", colour=ink.muted, ha="left", va="bottom")
+    sk.wire((3.3, -0.3), (3.3, 5.6), dashed=True, colour=ink.muted)
+    sk.text((1.6, 5.6), "line, LISN", colour=ink.muted, ha="center", va="bottom")
+    sk.text((3.4, 5.6), "connector", colour=ink.muted, ha="left", va="bottom")
     v = flt.get("v")
     c_value = f"{si(flt.get('C_nom', flt['C']), 'F')} X7R"
     if flt.get("v_rating"):
@@ -248,8 +279,8 @@ def draw_filter(flt: dict, stage: str, ink: Ink):
     shunt_dots(x_in)
     if x_dv:
         damping(x_dv)
-    sk.box(x_box, bot - 0.2, x_box + 2.4, top + 0.2, f"power stage\n{stage}")
-    sk.text((x_box + 2.4, 5.0), "blue: proposed\nblack: on the board or the test bench", colour=ink.muted,
+    sk.box(x_box, bot - 0.2, x_box + 2.4, top + 0.2, _stage_label(stage))
+    sk.text((x_box + 2.4, 5.6), "blue: proposed\nblack: on the board or the test bench", colour=ink.muted,
             ha="right", va="bottom", size=8)
     if flt.get("f_c"):
         sk.note(f"corner f_c = 1/(2π√(L_f·C_f)) ≈ {si(flt['f_c'], 'Hz')}: the filter falls 40 dB/decade above it")
@@ -330,7 +361,7 @@ def draw_common_mode(stage: str, budget_pf: Optional[float], ink: Ink):
     sk.capacitor((5.7, bot), (5.7, ch), "C_Y", "− line", side=-1)
     sk.dot((6.9, top))
     sk.dot((5.7, bot))
-    sk.box(8.9, bot - 0.5, 11.1, top + 0.5, f"power stage\n{stage}")
+    sk.box(8.9, bot - 0.5, 11.4, top + 0.5, _stage_label(stage))
     sk.dot((10.0, bot - 0.5))
     sk.capacitor((10.0, bot - 0.5), (10.0, ch), "C_stray", (f"≤ {budget_pf:.2g} pF" if budget_pf else "")
                  + "\nswitch node to\nchassis / heatsink", proposed=False, dashed=True)

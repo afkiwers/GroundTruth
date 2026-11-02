@@ -49,3 +49,49 @@ def test_common_mode_shows_the_budget_and_changes_without_a_circuit_draw_nothing
     assert "≤ 0.015 pF" in t and "common-mode choke" in t
     for kind in ("loop", "spread", "now"):
         assert figure_for({"kind": kind, "change": {}}, "b", Ink(), STAGE) is None
+
+
+LONG = "buck Payload and Avionics/SW1"              # a stage name as long as the user's (overflowed its box)
+
+
+def _all_figures(stage: str):
+    """Every schematic kind, with the given stage name."""
+    opts = [{"kind": "filter", "change": {"filter": FILTER}},
+            {"kind": "filter", "change": {"filter": {**FILTER, "damp_at": "connector", "c_in": 1.38e-4}}},
+            {"kind": "snubber", "change": {"snubber_c": 2.7e-9, "snubber_r": 1.3}},
+            {"kind": "edge", "change": {"rise_time": 6e-9}},
+            {"kind": "combined", "change": {"rise_time": 4e-9, "snubber_c": 2.7e-9, "snubber_r": 1.3,
+                                            "loop_scale": 0.7}},
+            {"kind": "cm", "change": {}, "title": "common mode: the switch node may have at most 0.44 pF to a"}]
+    return [(o["kind"], figure_for(o, stage, Ink(), STAGE)) for o in opts]
+
+
+@pytest.mark.parametrize("stage", ["b", LONG, "a very long stage name without any break at all in it/SW12"])
+def test_no_text_overlaps_another_or_leaves_its_box(stage):
+    """The user's screenshots: a long stage name ran out of its box and over the input capacitors' label. In every
+    drawing no two texts overlap, every text is inside the figure, and a box's text inside its box."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    for kind, fig in _all_figures(stage):
+        canvas = FigureCanvasAgg(fig)
+        canvas.draw()
+        r = canvas.get_renderer()
+        ax = fig.axes[0]
+        texts = [t for t in ax.texts if t.get_text().strip()]
+        boxes = [t.get_window_extent(r) for t in texts]
+        full = fig.bbox
+        for t, b in zip(texts, boxes):
+            assert full.x0 <= b.x0 and b.x1 <= full.x1 and full.y0 <= b.y0 and b.y1 <= full.y1, \
+                (kind, t.get_text())
+        for i in range(len(texts)):
+            for j in range(i + 1, len(texts)):
+                a, b = boxes[i].padded(-1), boxes[j].padded(-1)      # touching is fine, overlapping is not
+                assert not a.overlaps(b), (kind, texts[i].get_text(), texts[j].get_text())
+        inside = {id(t) for _, t in getattr(fig, "gt_boxes", [])}
+        for (x0, y0, x1, y1), t in getattr(fig, "gt_boxes", []):
+            (px0, py0), (px1, py1) = ax.transData.transform([(x0, y0), (x1, y1)])
+            b = t.get_window_extent(r)
+            assert px0 < b.x0 and b.x1 < px1 and py0 < b.y0 and b.y1 < py1, (kind, t.get_text())
+            rect = type(b).from_extents(px0, py0, px1, py1)
+            for other, ob in zip(texts, boxes):          # and no part's label runs into the box
+                if id(other) not in inside:
+                    assert not ob.padded(-1).overlaps(rect), (kind, other.get_text(), t.get_text())
