@@ -17,7 +17,7 @@ from ..components.values import format_si
 from ..config.settings import ConfigError, DcLoadSpec, load_text, parse_load_text
 from .listsel import SelectableRows
 from .pin_complete import complete_field, complete_load_line, pin_table
-from .widgets import button_row
+from .widgets import button_row, section_form, section_rows
 
 FIELD_TIPS = {
     "Name": "A name for this rail, used in the lists, the Results tab and the reports (e.g. VDD rail).",
@@ -218,9 +218,7 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
         self.list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_select)
 
         fw = wx.Panel(self)
-        form = wx.FlexGridSizer(cols=2, vgap=5, hgap=8)
-        form.AddGrowableCol(1)
-        form.AddGrowableRow(3)
+        form = section_form()
         self.name = wx.TextCtrl(fw)
         self.source = wx.TextCtrl(fw)
         self.source_return = wx.TextCtrl(fw)
@@ -243,13 +241,13 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
             "source_return": PinPopup(self.source_return, lambda text, col, _line: complete_field(
                 self.pins, "source_return", text, col, source=self.source.GetValue().strip())),
             "loads": PinPopup(self.loads, self._ask_load)}
-        for label, ctrl in (("Name", self.name), ("Source pin", self.source), ("Source return", self.source_return),
-                            ("Loads", self.loads), ("Max drop (V)", self.max_drop), ("Note", self.note)):
-            text = wx.StaticText(fw, label=label)
-            text.SetToolTip(FIELD_TIPS[label])
-            ctrl.SetToolTip(FIELD_TIPS[label])
-            form.Add(text, 0, wx.ALIGN_TOP | wx.TOP, 3)
-            form.Add(ctrl, 1, wx.EXPAND)
+        section_rows(fw, form, [
+            ("Rail", "Where the supply enters the board, and where it returns.",
+             [("Name", self.name), ("Source pin", self.source), ("Source return", self.source_return),
+              ("Note", self.note)]),
+            ("Loads", "The pins that draw current from it, how much, and the drop they allow.",
+             [("Loads", self.loads), ("Max drop (V)", self.max_drop)])], FIELD_TIPS)
+        form.AddGrowableRow(form.GetItemPosition(self.loads).GetRow())     # the loads' box takes the spare height
         fw.SetSizer(form)
         btns = button_row(self, [("Fill from net…", self.on_fill), ("Add", self.on_add),
                                  ("Update selected", self.on_update), ("Remove selected", self.on_remove)], BUTTON_TIPS)
