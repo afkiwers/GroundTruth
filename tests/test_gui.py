@@ -2656,7 +2656,7 @@ def test_preferences_shows_cell_sizes_from_the_history_before_a_simulate(app, fr
 
     class Dialog:
         """Stands in for the dialog: records the cell size it was given, answers Cancel."""
-        def __init__(self, parent, prefs, cell_mm=None):
+        def __init__(self, parent, prefs, cell_mm=None, past_jobs=None):
             seen.append(cell_mm)
 
         def __enter__(self):
@@ -3848,3 +3848,54 @@ def test_reference_nets_gone_from_the_board_are_offered_for_removal(app, frame, 
     asked.clear()
     assert f._ready(simulate=False) and f.settings.config.reference_nets == ["GND"]
     assert "use GND (found on the board) instead" in asked[0]
+
+
+def test_clear_past_jobs_asks_for_its_password(app, frame, monkeypatch):
+    """Preferences › Compute server › Clear past jobs (the user: "offer a clear past jobs button ... ideally, have
+    some sort of password that is required to do so"): without a password it asks for one first; Set password…
+    keeps only its hash in ui.json; a wrong password clears nothing; the right one, after a Yes, clears every past
+    job (the window's clear) and nothing else."""
+    from groundtruth.ui import jobs_password as jp, prefs_dialog, theme
+    from groundtruth.ui.prefs_dialog import PreferencesDialog, defaults
+    told, answers, cleared = [], [], []
+    monkeypatch.setattr(wx, "MessageBox", lambda text, *a, **k: (told.append(text), wx.YES)[1])
+    monkeypatch.setattr(prefs_dialog, "_ask_password", lambda parent, message: answers.pop(0))
+    past = (lambda: 3, lambda: (cleared.append(True), 3)[1])
+    with PreferencesDialog(frame, defaults({}), past_jobs=past) as dlg:
+        assert dlg.clear_past.IsEnabled() and dlg.set_password.IsEnabled()
+        dlg.on_clear_past()                                     # no password yet
+        assert "set one with Set password" in told[-1] and not cleared
+        answers[:] = ["s3cret-pw", "s3cret-pw"]
+        dlg.on_set_password()
+        wait_for(app, lambda: jp.record(theme.prefs()) is not None, timeout=20)
+        rec = jp.record(theme.prefs())
+        assert "s3cret-pw" not in theme.pref_path().read_text(encoding="utf-8") and jp.matches(rec, "s3cret-pw")
+        wait_for(app, lambda: dlg.clear_past.IsEnabled(), timeout=20)
+        answers[:] = ["wrong-pw"]
+        dlg.on_clear_past()
+        wait_for(app, lambda: "Wrong password" in told[-1], timeout=20)
+        assert not cleared
+        answers[:] = ["s3cret-pw"]
+        dlg.on_clear_past()
+        wait_for(app, lambda: cleared and "cleared" in told[-1], timeout=20)
+        assert any("Remove the 3 past job(s)" in t for t in told)
+        answers[:] = ["not-it"]                                 # changing it needs the current one
+        dlg.on_set_password()
+        wait_for(app, lambda: "not the current password" in told[-1], timeout=20)
+    with PreferencesDialog(frame, defaults({})) as dlg:         # opened without the window's jobs: greyed
+        assert not dlg.clear_past.IsEnabled()
+
+
+def test_clearing_past_jobs_keeps_the_current_ones(app, frame):
+    """The window's clear_past_jobs: shown, failed, cancelled and lost jobs leave the list (remembered as removed,
+    so the rebuild from the servers leaves them out); queued, running and ready ones stay."""
+    jobs = frame.remote_jobs
+    for jid, state in (("a1", "shown"), ("b2", "failed"), ("c3", "cancelled"), ("d4", "lost"), ("e5", "running"),
+                       ("f6", "queued"), ("g7", "ready")):
+        jobs.add({"id": jid, "server": "server-pc", "kind": "simulate", "board_name": "b.kicad_pcb"}, {})
+        jobs.update(jid, state=state)
+    assert frame._past_job_count() == 4
+    assert frame.clear_past_jobs() == 4
+    assert sorted(m["id"] for m in jobs.all()) == ["e5", "f6", "g7"]
+    assert {"a1", "b2", "c3", "d4"} <= jobs.removed()
+    assert frame._past_job_count() == 0

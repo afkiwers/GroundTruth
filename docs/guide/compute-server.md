@@ -43,7 +43,9 @@ connection**. Simulate and Suggest fixes are **handed over**: the window is free
 lists the job, and its result comes back by itself whenever the server can be reached (a sleeping laptop or a night at
 home only delay it) and is shown, or offered there (Show results). Only the user cancels a job (Cancel job, or
 Remove from list, which also takes it off the list; a job whose server can't be reached any more is removed after a
-second question). Check in Simulate,
+second question). Preferences › Compute server › Clear past jobs… removes every past job (shown, failed, cancelled,
+lost) from this computer's list at once, after a password set there with Set password… (only its salted PBKDF2 hash is
+kept, in ui.json under `past_jobs_password`); queued, running and unshown jobs stay. Check in Simulate,
 Compare what-if, Thermal and Current capacity run there too while the window waits (Thermal with its electro-thermal rounds as one job: each round's DC paths are solved on the server too). Jobs queue first come, first
 served (`workers` at once; with as many workers as GPUs, one GPU each); every job lives on the server's disk, so a
 restart keeps the queue and the results; a result waits 24 h (`keep_hours`) and is removed once fetched. The server's
