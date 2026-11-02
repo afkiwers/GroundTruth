@@ -21,6 +21,11 @@ from .widgets import InfoBox, PickDialog, button_row, parse_field, set_lazy_item
 
 STANDARD_CHOICES = lc.standard_items()     # as TI WEBENCH names them; the class beside it (ui/limit_choice.py)
 SPREAD_MODES = ("random", "triangle")      # ConverterSpec.spread_mode
+# the Spread rate field's grey hint per mode (the user, of a triangle refused for its missing rate while the hint read
+# "every cycle": "why do I have to define the spread rate if i define the spread spectrum?"): random hops every cycle
+# without one, a triangle's modulation frequency has no default (a slow sweep barely lowers a reading, a fast one by
+# several dB: emi/spread.py), so the hint says it is needed
+SPREAD_RATE_HINTS = {"random": "every cycle", "triangle": "needed: modulation frequency (datasheet)"}
 
 # hover explanations of the form's fields (on the label and the field): what it is, where to find it, what it changes
 FIELD_TIPS = {
@@ -70,7 +75,9 @@ FIELD_TIPS = {
                            "20 (the LTC7890's is +20 %). The receivers then see the harmonics spread over the band "
                            "(conducted and radiated estimates). Empty: off.",
     "Spread mode": "random: a new frequency every cycle (or Spread rate hops per second; most controllers' pseudo-"
-                   "random dither); triangle: swept up and down at Spread rate.",
+                   "random dither, the LTC7890's too): no rate needed. triangle: swept up and down at Spread rate, "
+                   "which it then needs (the controller's modulation frequency, from its datasheet): how fast the "
+                   "sweep is decides how much a receiver's reading drops.",
     "Interleave group": "Stages with the same group name are phases of one controller (a dual or multiphase buck): "
                         "Simulate adds their input currents and hot-loop fields as phasors, so phases 180° apart "
                         "cancel at the odd harmonics of f_sw. Empty: the stage is analysed alone.",
@@ -238,7 +245,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self.spread_mode = wx.Choice(fw, choices=list(SPREAD_MODES))
         self.spread_mode.SetSelection(0)
         self.spread_rate = wx.TextCtrl(fw)
-        self.spread_rate.SetHint("every cycle")
+        self.spread_rate.SetHint(SPREAD_RATE_HINTS["random"])
+        self.spread_mode.Bind(wx.EVT_CHOICE, lambda e: (e.Skip(), self._spread_hint()))
         self.interleave = wx.TextCtrl(fw)       # interleaving (analysis/interleave.py): a group name and a phase
         self.interleave.SetHint("none")
         self.phase_deg = wx.TextCtrl(fw)
@@ -430,6 +438,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             ctrls[key].Enable(True)
         for key, text in self._texts(c).items():
             self._set(ctrls[key], text)
+        self._spread_hint()
         self._show_marks(c)
 
     def _form_for_selection(self):
@@ -448,6 +457,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             self._set(ctrls[key], shown[key])
         for key in self.OWN:
             ctrls[key].Enable(False)
+        self._spread_hint()
         self._show_marks(None)
         self._multi = shown
 
@@ -508,6 +518,11 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         if self._commit():
             self.reselect(rows)          # the list was rebuilt: the stages stay selected for the next edit
             self._form_for_selection()
+
+    def _spread_hint(self):
+        """The Spread rate field's hint for the mode shown (SPREAD_RATE_HINTS; several stages with mixed modes: no
+        hint of either)."""
+        self.spread_rate.SetHint(SPREAD_RATE_HINTS.get(self.spread_mode.GetStringSelection(), ""))
 
     def _class_standard(self) -> str:
         """The standard the class choice belongs to: the one chosen, else the analysis'."""

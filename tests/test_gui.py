@@ -3899,3 +3899,22 @@ def test_clearing_past_jobs_keeps_the_current_ones(app, frame):
     assert sorted(m["id"] for m in jobs.all()) == ["e5", "f6", "g7"]
     assert {"a1", "b2", "c3", "d4"} <= jobs.removed()
     assert frame._past_job_count() == 0
+
+
+def test_the_spread_rate_hint_follows_the_spread_mode(app, conv_frame):
+    """The user, of a triangle refused for its missing rate while the field's hint read "every cycle": "why do I have
+    to define the spread rate if i define the spread spectrum?". The hint says the rate is needed for a triangle;
+    random keeps "every cycle"; the settings' message says where it comes from and that random needs none."""
+    from groundtruth.ui.converters_panel import SPREAD_RATE_HINTS
+    f = conv_frame
+    got = {}
+
+    def check():
+        p = f.converters
+        got["random"] = p.spread_rate.GetHint()
+        p.spread_mode.SetStringSelection("triangle")
+        p.spread_mode.GetEventHandler().ProcessEvent(wx.CommandEvent(wx.wxEVT_CHOICE, p.spread_mode.GetId()))
+        got["triangle"] = p.spread_rate.GetHint()
+    run_steps(app, f, [check])
+    assert got["random"] == SPREAD_RATE_HINTS["random"] == "every cycle"
+    assert got["triangle"] == SPREAD_RATE_HINTS["triangle"] and "needed" in got["triangle"]
