@@ -1493,7 +1493,9 @@ def config_from_data(data: Any) -> Config:
         if spec.spread_mode not in ("random", "triangle"):
             problems.append("spread_mode must be random or triangle")
         if spec.spread and spec.spread_mode == "triangle" and not spec.spread_rate:
-            problems.append("spread_mode triangle needs spread_rate (the modulation frequency)")
+            problems.append("spread_mode triangle needs spread_rate: the triangle's modulation frequency, from the "
+                            "controller's datasheet (Converters tab: Spread rate); a controller with a pseudo-random "
+                            "dither is spread_mode random, which needs none")
         if spec.phase_deg is not None and not spec.interleave:
             problems.append("phase_deg needs interleave (the name of the group of interleaved stages)")
         errors.extend(f"{where} ({spec.name}): {m}" for m in problems)

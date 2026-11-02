@@ -103,7 +103,9 @@ def test_spread_settings_round_trip():
     c = config_from_data({"converters": [{"name": "x", "rail": "VIN", "ground": "GND", "switch": "U1", "spread": 0.2,
                                           "spread_mode": "triangle", "spread_rate": "4kHz"}]}).converters[0]
     assert (c.spread, c.spread_mode, c.spread_rate) == (0.2, "triangle", pytest.approx(4e3))
-    with pytest.raises(ConfigError, match="needs spread_rate"):
+    # the message says where the rate comes from and that a pseudo-random dither needs none
+    with pytest.raises(ConfigError, match="needs spread_rate: the triangle.s modulation frequency.*spread_mode "
+                                          "random, which needs none"):
         config_from_data({"converters": [{"name": "x", "rail": "VIN", "ground": "GND", "switch": "U1", "spread": 0.2,
                                           "spread_mode": "triangle"}]})
 
