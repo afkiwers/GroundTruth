@@ -1792,19 +1792,16 @@ class DcBoard:
     grids: list
     t: list
     d: float
-    vias: list                      # [(branch indices, name, radius m, x mm, y mm)]: one per barrel segment
-                                    # (simulate.via_groups: a via's joints together; an older model: one index)
+    vias: list                      # [(branch index, name, radius m, x mm, y mm)]: one per via branch, a via's
+                                    # joints (add_pin) each, at the via's centre (simulate.via_groups)
     branches: int                   # the model's branch count (all kinds)
     fingerprint: str = ""
     via_ends: list = field(default_factory=list)   # [(layer a, layer b, R ohm at DC)] with `vias`: each barrel
                                                    # segment's two layers and resistance (its heat, thermal [A43])
 
     def via_currents(self, i_branch) -> np.ndarray:
-        """A path's branch currents (the full model's) at this model's vias, in the order of `vias`: each barrel
-        segment's joints added up."""
-        i_branch = np.asarray(i_branch)
-        return np.array([i_branch[list(v[0]) if isinstance(v[0], tuple) else v[0]].sum() for v in self.vias]) \
-            if self.vias else np.zeros(0)
+        """A path's branch currents (the full model's) at this model's vias, in the order of `vias`."""
+        return np.asarray(i_branch)[[v[0] for v in self.vias]] if self.vias else np.zeros(0)
 
 
 def dc_board_of(st: StackBuild) -> DcBoard:
@@ -1814,12 +1811,14 @@ def dc_board_of(st: StackBuild) -> DcBoard:
         return got
     import hashlib
     vias, ends = [], []
-    for ix, name, radius, x, y, a, b in via_groups(st, st.plane.branches):   # a via's joints (add_pin) as one
+    # each joint of a via (add_pin) on its own, with its own R: their heat is the sum of R_k I_k^2, which one barrel
+    # at the joints' summed current and parallel R reads low when they share unequally (0.7 % of a hot loop's copper
+    # heat on the test buck); all at the via's centre, so Thermal heats the via there, and reports group them
+    for ix, name, radius, x, y, a, b in via_groups(st, st.plane.branches):
         if not name.startswith("pad "):
-            vias.append((ix, name, radius, x, y))
-            # the joints in parallel: R = 1 / sum(1/R_k) (each joint carries k times the barrel's R)
-            g = sum(1.0 / max(float(complex(st.plane.branches[k].z(DC_F)).real), 1e-30) for k in ix)
-            ends.append((st.names[a], st.names[b], 1.0 / g))
+            for k in ix:
+                vias.append((k, name, radius, x, y))
+                ends.append((st.names[a], st.names[b], float(complex(st.plane.branches[k].z(DC_F)).real)))
     # rounded figures only: the same board and settings give the same text in every process (no hash() salts)
     h = hashlib.sha256()
     h.update(repr((list(st.names), [round(float(t), 12) for t in st.t], round(float(st.d), 9),
@@ -2345,8 +2344,16 @@ def combine_dc(results, rules, plating_um: float = 25.0):
                 rip_v += i_v ** 2
     maps = {layer: np.sqrt(jx * jx + jy * jy + rip_sq[layer]) for layer, (jx, jy) in vec.items()}
     best, best_s = _density_peaks(st, maps)
+    joined: dict[tuple, list] = {}          # a via's joints between two layers as one: their currents added
+    ends_ = getattr(st, "via_ends", None) or []
+    for n_, (_, vname, radius, x, y) in enumerate(st.vias):
+        key = (vname,) + (tuple(ends_[n_][:2]) if len(ends_) == len(st.vias) else (n_,))
+        j = joined.setdefault(key, [vname, radius, x, y, 0.0, 0.0])
+        j[4] += float(cur[n_])
+        j[5] += math.sqrt(max(float(rip_v[n_]), 0.0))   # one via's joints switch together: their RMS values add
     vias: dict[str, dict] = {}
-    for (_, vname, radius, x, y), a_ in zip(st.vias, np.sqrt(cur ** 2 + rip_v)):
+    for vname, radius, x, y, c_, r_ in joined.values():
+        a_ = math.sqrt(c_ * c_ + r_ * r_)
         if a_ < 0.01:
             continue
         old = vias.get(vname)

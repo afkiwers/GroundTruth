@@ -180,7 +180,8 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
   term it was μ0·(h + t) at every frequency (13-20 % high for 0.2 mm FR4). Vias join planes around their barrel
   (`add_pin`, as through-hole pins) where the grid is finer than the drill; everything that reports or heats a via
   (DC paths, `DcBoard`, bridge RMS, transfers, Thermal's via segments) reads it through `simulate.via_groups`: a
-  via's joints between two layers as one barrel segment, currents added, at the joints' centre, R in parallel.
+  via's joints between two layers as one barrel segment, currents added, at the joints' centre; heat and loss per
+  joint (R_k·I_k², at the centre: unequal shares heat more than one barrel at their sum).
   Test models must put copper centres h + t apart for a dielectric h (the cavity tools, the hot-loop microstrip
   reference at the dielectric's height with Hammerstad-Jensen's thickness Δw). Validated: tests/test_plane_pair.py (a
   shorted parallel-plate line, two lengths on one grid; fails on the old model by +12.6 %); tools/dev/

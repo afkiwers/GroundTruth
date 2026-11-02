@@ -140,21 +140,31 @@ def _nearest(sol_freqs, f: float) -> Optional[float]:
 
 
 def _via_squares(st, I: np.ndarray, M: np.ndarray, phasors: bool) -> list:
-    """Each via barrel segment's mean square on model `st`: [((id(st), branch indices), A², {"name", "radius", "x",
-    "y", "a", "b", "r_ohm"})]. I: the sources' branch currents (source × branch), M: their correlation (real, the
-    slow part) or cross spectrum (complex phasors, the fast part: ½·Re). A via's joints (add_pin) carry one barrel's
-    current between them, so their currents are added before squaring (simulate.via_groups), and the segment's R
-    is theirs in parallel."""
+    """Each via barrel segment's mean square on model `st`: [(A², {"name", "radius", "x", "y"}, [((id(st), branch),
+    joint's A², {"x", "y", "a", "b", "r_ohm", "name"}), ...])]. I: the sources' branch currents (source × branch),
+    M: their correlation (real, the slow part) or cross spectrum (complex phasors, the fast part: ½·Re). A via's
+    joints (add_pin) carry one barrel's current between them: the segment's current is their sum, squared after
+    adding (simulate.via_groups); its heat is each joint's R_k times its own mean square (unequal shares heat more
+    than one barrel at their sum), at the via's centre."""
     groups = via_groups(st, st.plane.branches)
     if not groups:
         return []
-    Ig = np.stack([I[:, list(ix)].sum(1) for ix, *_ in groups], axis=1)
-    ms = 0.5 * np.einsum("sb,st,tb->b", Ig, M, Ig.conj()).real if phasors else np.einsum("sb,st,tb->b", Ig, M, Ig)
-    out = []
+
+    def msq(cols: np.ndarray) -> np.ndarray:
+        """Mean squares of current columns (source × column)."""
+        return 0.5 * np.einsum("sb,st,tb->b", cols, M, cols.conj()).real if phasors else \
+            np.einsum("sb,st,tb->b", cols, M, cols)
+    ms = msq(np.stack([I[:, list(ix)].sum(1) for ix, *_ in groups], axis=1))
+    ms_joint = msq(I[:, [k for ix, *_ in groups for k in ix]])
+    out, n = [], 0
     for (ix, name, radius, x, y, a, b), m in zip(groups, ms):
-        g = sum(1.0 / max(float(complex(st.plane.branches[k].z(DC_F)).real), 1e-30) for k in ix)
-        out.append(((id(st), ix), float(m), {"name": name, "radius": radius, "x": x, "y": y, "a": st.names[a],
-                                             "b": st.names[b], "r_ohm": 1.0 / g}))
+        joints = []
+        for k in ix:
+            joints.append(((id(st), k), float(ms_joint[n]),
+                           {"name": name, "x": x, "y": y, "a": st.names[a], "b": st.names[b],
+                            "r_ohm": float(complex(st.plane.branches[k].z(DC_F)).real)}))
+            n += 1
+        out.append((float(m), {"name": name, "radius": radius, "x": x, "y": y}, joints))
     return out
 
 
@@ -241,9 +251,10 @@ class RmsBasis:
                                 for a in range(len(J)) for c in range(len(J)))
                 grids[layer] = st.grids[k]
             branch_sq = np.einsum("sb,st,tb->b", I, g, I)
-            for key, ms, seg in _via_squares(st, I, g, False):
+            for ms, seg, joints in _via_squares(st, I, g, False):
                 via_sq[seg["name"]] = max(via_sq.get(seg["name"], (0.0, None))[0], ms), seg
-                seg_sq[key] = (seg_sq.get(key, (0.0,))[0] + ms, seg)
+                for key, mj, js in joints:
+                    seg_sq[key] = (seg_sq.get(key, (0.0,))[0] + mj, js)
             part_rms: dict[str, list] = {}      # a part's parallel branches (simulate.part_pairs): RMS currents add
             for bi, br in enumerate(st.plane.branches):
                 if br.kind == "part" and branch_sq[bi] > 1e-12:     # a series part carrying current (caps: open)
@@ -263,10 +274,11 @@ class RmsBasis:
                     sq[layer] = sq[layer] + _resample(grids[layer], st.grids[k], acc)
                 else:
                     sq[layer], grids[layer] = acc, st.grids[k]
-            for key, ms, seg in _via_squares(st, I, cc, True):
+            for ms, seg, joints in _via_squares(st, I, cc, True):
                 old, where = via_sq.get(seg["name"], (0.0, seg))
                 via_sq[seg["name"]] = old + ms, where
-                seg_sq[key] = (seg_sq.get(key, (0.0,))[0] + ms, seg)
+                for key, mj, js in joints:
+                    seg_sq[key] = (seg_sq.get(key, (0.0,))[0] + mj, js)
         rho = COPPER.resistivity_20c * 1e3                                 # Ω·mm
         best, best_s = (0.0, "", (0.0, 0.0)), (0.0, "", (0.0, 0.0))
         copper_w = 0.0

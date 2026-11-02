@@ -241,9 +241,11 @@ def test_TW13_a_via_s_barrel_heats_the_board_with_its_own_loss(tmp_path):
     assert total == pytest.approx(res.dc[0]["loss_w"], rel=0.002)
     from groundtruth.analysis.thermal import _via_power, _via_segments
     barrel = RHO * (1.51e-3 + 0.035e-3) / (math.pi * 0.3e-3 * 25e-6)       # Ω, so W at 1 A
-    segs = _via_segments([res])
-    assert len(segs) == 1 and {segs[0]["a"], segs[0]["b"]} == {"F.Cu", "B.Cu"}
-    assert _via_power(segs[0]) == pytest.approx(barrel, rel=0.01)
+    segs = _via_segments([res])         # one per joint of the via around its barrel (add_pin), all at its centre
+    assert len({(round(s["x"], 6), round(s["y"], 6)) for s in segs}) == 1
+    assert all({s["a"], s["b"]} == {"F.Cu", "B.Cu"} for s in segs)
+    assert math.dist((segs[0]["x"], segs[0]["y"]), v) < 0.15
+    assert sum(_via_power(s) for s in segs) == pytest.approx(barrel, rel=0.01)
 
 
 def test_TW7_a_track_with_a_gap_is_not_connected(tmp_path):
