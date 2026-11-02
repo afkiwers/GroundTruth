@@ -42,6 +42,55 @@ class FieldMark(wx.StaticText):
         self.SetToolTip(tip or "")
 
 
+def section_form(vgap: int = 5) -> wx.GridBagSizer:
+    """The grid a tab's form is laid out in by section_rows: label | field, the sections' titles across both."""
+    return wx.GridBagSizer(vgap=vgap, hgap=8)
+
+
+def section_rows(parent, form: wx.GridBagSizer, sections: list, tips: dict, cells: Optional[dict] = None,
+                 start: int = 0) -> int:
+    """A tab's form in sections (the user, of the Converters tab: "this properties pane is very complex and
+    overwhelming, can you group it better using headings etc. Make it more glancable/self explanatory", then "do
+    the same menu structering for the other tabs"): per section (title, note, [(label, field)]) a line above it
+    (not the first), its title in bold, its note muted (a one-liner saying what the section is for), then its
+    fields' labels, indented, each label and field with the field's tooltip from `tips` (hovering either explains
+    it). `cells`: what goes into the grid in place of a field (its sizer with a ◆ mark). A note may be a window
+    of its own (a note with an info button). The titles are named "section" and the notes "muted"
+    (theme.style_tree colours those), so a lookup of the form's labels can leave them out. `start`: the grid row to
+    begin at (a form built in several steps); returns the row after the last."""
+    cells = cells or {}
+    r = start
+    for title, note, fields in sections:
+        if r:                                    # a line between sections
+            form.Add(wx.StaticLine(parent), (r, 0), (1, 2), wx.EXPAND | wx.TOP, 8)
+            r += 1
+        head = wx.StaticText(parent, label=title, name="section")
+        head.SetFont(head.GetFont().Bold().Scaled(1.1))
+        if tips.get(title):                      # a section whose title has a tooltip of its own (a bridge's Sweep)
+            head.SetToolTip(tips[title])
+        form.Add(head, (r, 0), (1, 2))
+        r += 1
+        if note:
+            form.Add(note if isinstance(note, wx.Window) else wx.StaticText(parent, label=note, name="muted"),
+                     (r, 0), (1, 2), wx.BOTTOM, 2)
+            r += 1
+        for label, ctrl in fields:
+            text = wx.StaticText(parent, label=label)
+            tip = tips.get(label, "")
+            if tip:
+                text.SetToolTip(tip)
+                ctrl.SetToolTip(tip)
+            # a list or a multi-line text: its label at its top
+            tall = isinstance(ctrl, wx.ListBox) or (isinstance(ctrl, wx.TextCtrl) and ctrl.IsMultiLine())
+            form.Add(text, (r, 0), flag=(wx.ALIGN_TOP if tall else wx.ALIGN_CENTER_VERTICAL) | wx.LEFT,
+                     border=10)
+            form.Add(cells.get(ctrl, ctrl), (r, 1), flag=wx.EXPAND)
+            r += 1
+    if r > start and not form.IsColGrowable(1):
+        form.AddGrowableCol(1)                   # after the rows: a GridBagSizer has no columns before them
+    return r
+
+
 def with_mark(parent, ctrl) -> tuple[wx.BoxSizer, FieldMark]:
     """A form field with its FieldMark to the right."""
     mark = FieldMark(parent)

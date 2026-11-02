@@ -19,7 +19,8 @@ from ..config.settings import (CONNECTIONS, DRIVE_MODES, EMF_SHAPES, PWM_SCHEMES
 from . import limit_choice as lc
 from . import theme
 from .listsel import SelectableRows
-from .widgets import InfoBox, PickDialog, button_row, parse_field, set_lazy_items, source_status, with_mark
+from .widgets import (InfoBox, PickDialog, button_row, parse_field, section_rows, set_lazy_items, source_status,
+                      with_mark)
 
 STANDARD_CHOICES = lc.standard_items()     # as TI WEBENCH names them; the class beside it (ui/limit_choice.py)
 SWEEP_HELP = "bridges-sweep"        # the help's anchor of the sweep paragraph (help.html), the info button's target
@@ -216,29 +217,18 @@ class BridgesPanel(SelectableRows, wx.Panel):
         c.SetSelection(first)
         return c
 
-    def _add_rows(self, rows, marked: Optional[dict] = None):
-        """Rows of the form: (label, control), None for a gap, a string for a heading."""
-        fw, form = self.form_win, self._form_sizer
-        for row in rows:
-            if row is None or isinstance(row, str):        # a gap, or a heading
-                form.Add(wx.StaticText(fw, label=row or ""), 0, wx.TOP, 4)
-                form.Add(wx.StaticText(fw, label=""), 0)
-                continue
-            label, ctrl = row
-            text = wx.StaticText(fw, label=label)
-            tip = FIELD_TIPS.get(label, "")
-            if tip:
-                text.SetToolTip(tip)
-                ctrl.SetToolTip(tip)
-            form.Add(text, 0, wx.ALIGN_CENTER_VERTICAL)
-            form.Add((marked or {}).get(ctrl, ctrl), 1, wx.EXPAND)
+    def _add_sections(self, sections, marked: Optional[dict] = None):
+        """Sections of the form (title, note, [(label, control)]), under the ones a previous build step added
+        (widgets.section_rows: a title and a one-line note each, as on the Converters tab)."""
+        self._form_row = section_rows(self.form_win, self._form_sizer, sections, FIELD_TIPS, marked,
+                                      start=getattr(self, "_form_row", 0))
 
     def _form_bridge(self):
         """The bridge's nets (the form's ~45 controls are built in five steps, one event-loop step each,
         `build_steps`: three blocked the window 97-131 ms each on refboard's copy)."""
         T, fw = self._text, self.form_win
-        self._form_sizer = wx.FlexGridSizer(cols=2, vgap=5, hgap=8)
-        self._form_sizer.AddGrowableCol(1)
+        self._form_sizer = wx.GridBagSizer(vgap=5, hgap=8)
+        self._form_row = 0
         self.name = T()
         self.rail = wx.ComboBox(fw, style=wx.CB_DROPDOWN)
         self.ground = wx.ComboBox(fw, style=wx.CB_DROPDOWN)
@@ -246,9 +236,12 @@ class BridgesPanel(SelectableRows, wx.Panel):
         self.standard = self._choice(STANDARD_CHOICES)
         self.std_class = self._choice([lc.CLASS_DEFAULT])      # filled from the standard, as WEBENCH's
         self.standard.Bind(wx.EVT_CHOICE, lambda e: (e.Skip(), self._refill_classes()))
-        self._add_rows((("Name", self.name), ("Bus net", self.rail), ("Ground net", self.ground),
-                        ("Input connector", self.inp), ("Conducted standard", self.standard),
-                        ("Conducted class", self.std_class), None))
+        self._add_sections([
+            ("Bridge", "Its supply nets and where the supply enters the board.",
+             [("Name", self.name), ("Bus net", self.rail), ("Ground net", self.ground),
+              ("Input connector", self.inp)]),
+            ("Conducted emission", "The limit it is checked against.",
+             [("Conducted standard", self.standard), ("Conducted class", self.std_class)])])
 
     def _class_standard(self) -> str:
         """The standard the class choice belongs to: the one chosen, else the analysis'."""
@@ -272,10 +265,11 @@ class BridgesPanel(SelectableRows, wx.Panel):
         self.sync = wx.CheckBox(fw)
         self.sync.SetValue(True)
         self.dead, self.rise = T("50ns"), T("2ns")
-        self._add_rows((("Bus voltage (V)", self.v_bus), ("PWM frequency", self.f_pwm),
-                        ("Phase current (A)", self.i_phase), ("Mode", self.mode), ("Speed (rpm)", self.speed),
-                        ("PWM scheme", self.pwm), ("Synchronous", self.sync), ("Dead time", self.dead),
-                        ("Edge time", self.rise), None))
+        self._add_sections([
+            ("Operating point", "How it is driven: needed by every analysis.",
+             [("Bus voltage (V)", self.v_bus), ("PWM frequency", self.f_pwm), ("Phase current (A)", self.i_phase),
+              ("Mode", self.mode), ("Speed (rpm)", self.speed), ("PWM scheme", self.pwm),
+              ("Synchronous", self.sync), ("Dead time", self.dead), ("Edge time", self.rise)])])
 
     def _form_parts(self):
         """The switches' parameters and the motor."""
@@ -291,12 +285,15 @@ class BridgesPanel(SelectableRows, wx.Panel):
         for key, ctrl in (("rds_on", self.rds_on), ("rds_on_low", self.rds_on_low), ("v_sd", self.v_sd),
                           ("c_oss", self.c_oss), ("q_oss", self.q_oss)):
             marked[ctrl], self.marks[key] = with_mark(fw, ctrl)
-        self._add_rows((("R_DS(on)", self.rds_on), ("R_DS(on) low side", self.rds_on_low),
-                        ("Reverse conduction (V)", self.v_sd), ("C_oss", self.c_oss), ("Q_oss", self.q_oss),
-                        ("C stray (chassis)", self.c_stray), "Motor",
-                        ("Connection", self.connection), ("R line-to-line", self.r_ll),
-                        ("L line-to-line", self.l_ll), ("Back-EMF (V/krpm)", self.ke_ll), ("Pole pairs", self.poles),
-                        ("EMF shape", self.emf), ("Advance (°)", self.advance)), marked)
+        self._add_sections([
+            ("Switches", "Losses, edges and ringing. Empty: left out (the run says so). ◆ from the schematic",
+             [("R_DS(on)", self.rds_on), ("R_DS(on) low side", self.rds_on_low),
+              ("Reverse conduction (V)", self.v_sd), ("C_oss", self.c_oss), ("Q_oss", self.q_oss),
+              ("C stray (chassis)", self.c_stray)]),
+            ("Motor", "The load the bridge drives (line-to-line values).",
+             [("Connection", self.connection), ("R line-to-line", self.r_ll), ("L line-to-line", self.l_ll),
+              ("Back-EMF (V/krpm)", self.ke_ll), ("Pole pairs", self.poles), ("EMF shape", self.emf),
+              ("Advance (°)", self.advance)])], marked)
 
     def _form_legs(self):
         """The sweep and the selected leg."""
@@ -311,11 +308,13 @@ class BridgesPanel(SelectableRows, wx.Panel):
                                    "current-sense resistor per phase), e.g. /Phase A/PHASE_GND; empty when the low "
                                    "side is on the ground")
         self.leg_shunt.SetToolTip("the parts between that net and the ground, e.g. R12")
-        self._add_rows((("Sweep", self._sweep_note()), ("Sweep currents (A)", self.sweep_i),
-                        ("Sweep speeds (rpm)", self.sweep_rpm),
-                        "Selected leg", ("Phase", self.leg_phase), ("Switch node", self.leg_node),
-                        ("High side", self.leg_high), ("Low side", self.leg_low),
-                        ("Ground return", self.leg_return), ("Shunt", self.leg_shunt), ("Output pin", self.leg_out)))
+        self._add_sections([
+            ("Sweep", self._sweep_note(),
+             [("Sweep currents (A)", self.sweep_i), ("Sweep speeds (rpm)", self.sweep_rpm)]),
+            ("Selected leg", "The leg picked in the list beside: its switches and nets.",
+             [("Phase", self.leg_phase), ("Switch node", self.leg_node), ("High side", self.leg_high),
+              ("Low side", self.leg_low), ("Ground return", self.leg_return), ("Shunt", self.leg_shunt),
+              ("Output pin", self.leg_out)])])
 
     def _sweep_note(self) -> wx.Window:
         """Beside the Sweep heading: that the sweep is on top of the operating point above, and an info button that
@@ -323,7 +322,7 @@ class BridgesPanel(SelectableRows, wx.Panel):
         single speed/phase current settings at the top")."""
         holder = wx.Panel(self.form_win)
         hs = wx.BoxSizer(wx.HORIZONTAL)
-        note = wx.StaticText(holder, label="optional, in addition to the operating point above")
+        note = wx.StaticText(holder, label="Optional, in addition to the operating point above.")
         note.SetName("muted")
         info = wx.BitmapButton(holder, bitmap=wx.ArtProvider.GetBitmap(wx.ART_INFORMATION, wx.ART_BUTTON,
                                                                         self.FromDIP(wx.Size(16, 16))),

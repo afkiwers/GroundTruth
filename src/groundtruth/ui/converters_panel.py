@@ -17,7 +17,8 @@ from ..config.settings import TOPOLOGIES, ConfigError, ConverterSpec
 from . import limit_choice as lc
 from . import theme
 from .listsel import SelectableRows
-from .widgets import InfoBox, PickDialog, button_row, parse_field, set_lazy_items, source_status, with_mark
+from .widgets import (InfoBox, PickDialog, button_row, parse_field, section_rows, set_lazy_items, source_status,
+                      with_mark)
 
 STANDARD_CHOICES = lc.standard_items()     # as TI WEBENCH names them; the class beside it (ui/limit_choice.py)
 SPREAD_MODES = ("random", "triangle")      # ConverterSpec.spread_mode
@@ -319,28 +320,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
     def _form_rows(self):
         """Each section's title and note (spanning both columns) and its fields' labels and tooltips, in the form's
         grid (the third build step)."""
-        fw, form, rows = self.form_win, self._form, self._rows
-        r = 0
-        for n, (title, note, fields) in enumerate(self.form_sections()):
-            if n:                                # a line between sections
-                form.Add(wx.StaticLine(fw), (r, 0), (1, 2), wx.EXPAND | wx.TOP, 8)
-                r += 1
-            head = wx.StaticText(fw, label=title, name="section")
-            head.SetFont(head.GetFont().Bold().Scaled(1.1))
-            form.Add(head, (r, 0), (1, 2))
-            sub = wx.StaticText(fw, label=note, name="muted")      # muted: theme.style_tree colours it
-            form.Add(sub, (r + 1, 0), (1, 2), wx.BOTTOM, 2)
-            r += 2
-            for label, ctrl in fields:
-                text = wx.StaticText(fw, label=label)
-                tip = FIELD_TIPS.get(label, "")
-                if tip:                          # on the label and the field: hovering either explains it
-                    text.SetToolTip(tip)
-                    ctrl.SetToolTip(tip)
-                form.Add(text, (r, 0), flag=wx.ALIGN_CENTER_VERTICAL | wx.LEFT, border=10)
-                form.Add(rows.get(ctrl, ctrl), (r, 1), flag=wx.EXPAND)
-                r += 1
-        form.AddGrowableCol(1)                   # after the rows: a GridBagSizer has no columns before them
+        section_rows(self.form_win, self._form, self.form_sections(), FIELD_TIPS, self._rows)
 
     def _form_layout(self):
         """The buttons, the labels' help and the tab's layout (the last build step)."""

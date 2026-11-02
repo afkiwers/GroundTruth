@@ -18,7 +18,7 @@ from ..config.settings import ConfigError, NetSpec
 from . import theme
 from .background import LatestOnly
 from .listsel import SelectableRows
-from .widgets import InfoBox, PickDialog, button_row, set_lazy_items, source_status
+from .widgets import InfoBox, PickDialog, button_row, section_form, section_rows, set_lazy_items, source_status
 
 # hover explanations of the form's fields (on the label and the field)
 NET_TIPS = {
@@ -155,8 +155,7 @@ class NetsPanel(SelectableRows, wx.Panel):
         self.list.Bind(wx.EVT_LIST_ITEM_DESELECTED,
                        lambda e: (e.Skip(), wx.CallAfter(lambda: self and self._form_for_selection())))
 
-        form = wx.FlexGridSizer(cols=2, vgap=6, hgap=8)
-        form.AddGrowableCol(1)
+        form = section_form(vgap=6)
         self.net = wx.ComboBox(self, style=wx.CB_DROPDOWN)
         self.net.Bind(wx.EVT_COMBOBOX, self.on_net)
         self.net.Bind(wx.EVT_TEXT_ENTER, self.on_net)
@@ -182,21 +181,27 @@ class NetsPanel(SelectableRows, wx.Panel):
         while self.build_steps and not in_steps:
             self.build_steps.pop(0)()
 
+    def form_sections(self) -> list:
+        """The form's sections in order (widgets.section_rows): the path itself first, then what drives it, the
+        driver's and receivers' circuits, and the optional Bode sweep."""
+        return [
+            ("Path", "Where the signal starts, where it goes, what it passes through.",
+             [("Start net", self.net), ("Driver pin", self.driver), ("Receiver pins", self.receivers),
+              ("Pass through", self.through)]),
+            ("Signal", "What the driver sends.",
+             [("Frequency", self.freq), ("Rise time", self.rise), ("Fall time", self.fall),
+              ("Amplitude (V)", self.ampl), ("Duty cycle", self.duty)]),
+            ("Source and load", "The driver's output and the receivers' input. Empty: defaults.",
+             [("Source R (Ω)", self.src_r), ("Source L (nH)", self.src_l), ("Source C (pF)", self.src_c),
+              ("Load R (Ω)", self.load_r), ("Load C (pF)", self.load_c)]),
+            ("Bode sweep", "Optional: the path's frequency response. Empty: automatic.",
+             [("Sweep from", self.sweep_from), ("Sweep to", self.sweep_to), ("Sweep points", self.sweep_pts),
+              ("Max bandwidth", self.max_bw)]),
+        ]
+
     def _form_rows(self):
-        """Each field's label and tooltip, in the form's grid (the first build step)."""
-        form = self._form_sizer
-        for label, ctrl in (("Start net", self.net), ("Driver pin", self.driver), ("Receiver pins", self.receivers),
-                            ("Frequency", self.freq), ("Rise time", self.rise), ("Amplitude (V)", self.ampl),
-                            ("Duty cycle", self.duty), ("Fall time", self.fall), ("Source R (Ω)", self.src_r),
-                            ("Source L (nH)", self.src_l), ("Source C (pF)", self.src_c), ("Load R (Ω)", self.load_r),
-                            ("Load C (pF)", self.load_c), ("Pass through", self.through),
-                            ("Sweep from", self.sweep_from), ("Sweep to", self.sweep_to),
-                            ("Sweep points", self.sweep_pts), ("Max bandwidth", self.max_bw)):
-            text = wx.StaticText(self, label=label)
-            text.SetToolTip(NET_TIPS[label])         # on the label and the field: hovering either explains it
-            ctrl.SetToolTip(NET_TIPS[label])
-            form.Add(text, 0, wx.ALIGN_CENTER_VERTICAL)
-            form.Add(ctrl, 1, wx.EXPAND)
+        """The form's sections, each field's label and tooltip, in its grid (the first build step)."""
+        section_rows(self, self._form_sizer, self.form_sections(), NET_TIPS)
 
     def _path_grip(self):
         """A thin strip under the path box (the user: "should be able to change the height of this window to view

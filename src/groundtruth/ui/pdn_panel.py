@@ -16,7 +16,7 @@ from .messages import box as message_box   # laid-out message boxes (ui/messages
 from ..components.values import format_si
 from ..config.settings import ConfigError, PdnSpec
 from .listsel import SelectableRows
-from .widgets import button_row
+from .widgets import button_row, section_form, section_rows
 
 AUTO_SOURCE = "found by itself"
 NO_SOURCE = "none"
@@ -81,8 +81,7 @@ class PdnPanel(SelectableRows, wx.Panel):
     def _build_form(self):
         """The rail's form (the first build step)."""
         fw = self._fw = wx.Panel(self)
-        form = wx.FlexGridSizer(cols=2, vgap=5, hgap=8)
-        form.AddGrowableCol(1)
+        form = section_form()
         self.rail = wx.ComboBox(fw)
         self.ground = wx.ComboBox(fw)
         self.voltage = wx.TextCtrl(fw)
@@ -99,15 +98,15 @@ class PdnPanel(SelectableRows, wx.Panel):
                            (self.check_to, "100M")):
             ctrl.SetHint(hint)
         self.rail.Bind(wx.EVT_TEXT, self._rail_changed)
-        for label, ctrl in (("Rail", self.rail), ("Ground", self.ground), ("Voltage (V)", self.voltage),
-                            ("Ripple (%)", self.ripple), ("Load step (A)", self.step), ("Source", self.source),
-                            ("Source R (Ω)", self.vrm_r), ("Source L (H)", self.vrm_l), ("ICs", self.parts),
-                            ("Check up to (Hz)", self.check_to), ("Note", self.note)):
-            text = wx.StaticText(fw, label=label)
-            text.SetToolTip(FIELD_TIPS[label])
-            ctrl.SetToolTip(FIELD_TIPS[label])
-            form.Add(text, 0, wx.ALIGN_CENTER_VERTICAL)
-            form.Add(ctrl, 1, wx.EXPAND)
+        section_rows(fw, form, [            # sections as on the Converters tab (widgets.section_rows)
+            ("Supply", "The rail and its return.",
+             [("Rail", self.rail), ("Ground", self.ground), ("Voltage (V)", self.voltage), ("Note", self.note)]),
+            ("Target", "The impedance the rail must stay below: its allowed ripple at a load step.",
+             [("Ripple (%)", self.ripple), ("Load step (A)", self.step), ("Check up to (Hz)", self.check_to)]),
+            ("Regulator", "What feeds the rail. Empty: defaults.",
+             [("Source", self.source), ("Source R (Ω)", self.vrm_r), ("Source L (H)", self.vrm_l)]),
+            ("Read at", "Where the impedance is read. Empty: every IC on the rail.",
+             [("ICs", self.parts)])], FIELD_TIPS)
         fw.SetSizer(form)
 
     def _build_layout(self):
