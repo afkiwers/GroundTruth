@@ -2102,6 +2102,13 @@ power stages: one big item can't be split further.</p>
   on the server and takes it off the list. When its server can't be reached (switched off, renamed, a new address),
   you are asked whether to remove it anyway: should that server come back with the job, it finishes it there and
   nobody fetches the result.</li>
+<li><b>Clearing past jobs</b>: Preferences › Compute server › <b>Clear past jobs…</b> removes every past job (shown,
+  failed, cancelled, no longer on the server) from this computer's list at once; jobs still queued or running and
+  results not shown yet stay, and nothing on a server changes. It asks for a password, set once with <b>Set
+  password…</b> (at least 6 characters; changing it asks for the current one). Only a salted hash of it is kept, in
+  this computer's ui.json, never the password: it guards against clearing the list by accident, not against someone
+  using your Windows account. Forgotten? Remove the <code>past_jobs_password</code> entry from ui.json and set a new
+  one; single jobs can always be removed with <b>Remove from list</b>.</li>
 <li>Check in Simulate, Compare what-if, Thermal and Current capacity also run on the server, but the window waits for
   them (the progress bar shows the server's progress or your place in its queue, Cancel cancels the job there); a
   lost connection is waited out, not given up. They are listed on the <b>Server jobs</b> tab too while they run

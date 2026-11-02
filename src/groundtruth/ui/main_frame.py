@@ -927,7 +927,8 @@ class MainFrame(ConfigActions, wx.Frame):
         from .prefs_dialog import PreferencesDialog
         # the cell sizes: this session's last Simulate, else the newest run kept for this board (History tab)
         cell = self._cell_mm if self._cell_mm is not None else getattr(self.history, "cell_mm", None)
-        with PreferencesDialog(self, theme.prefs(), cell) as dlg:
+        with PreferencesDialog(self, theme.prefs(), cell, past_jobs=(self._past_job_count, self.clear_past_jobs)
+                               ) as dlg:
             if dlg.ShowModal() == wx.ID_OK:
                 self.apply_preferences(dlg.values())
 
@@ -2780,6 +2781,22 @@ class MainFrame(ConfigActions, wx.Frame):
                 self.SetStatusText(f"job {jid} kept: its server is asked again until it answers")
             self._refresh_jobs()
         threading.Thread(target=cancel, name="gt-cancel-job", daemon=True).start()
+
+    def _past_job_count(self) -> int:
+        """How many past jobs (shown, failed, cancelled, lost) the Server jobs tab lists."""
+        from ..remote.jobs import PAST
+        return sum(1 for m in self.remote_jobs.all() if m.get("state") in PAST)
+
+    def clear_past_jobs(self) -> int:
+        """Preferences › Clear past jobs (after its password): every past job leaves this computer's list (as Remove
+        from list: remembered, so the rebuild from the servers leaves it out); queued, running and ready jobs stay.
+        Returns how many."""
+        from ..remote.jobs import PAST
+        gone = [m["id"] for m in self.remote_jobs.all() if m.get("state") in PAST]
+        for jid in gone:
+            self.remote_jobs.remove(jid)
+        self._refresh_jobs()
+        return len(gone)
 
     def on_remove_job(self, jid: str):
         """Server jobs tab, Remove from list: forget a job here (one still on the server is cancelled there first,

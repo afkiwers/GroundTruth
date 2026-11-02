@@ -428,15 +428,36 @@ class ServersPanel(wx.Panel):
         self.start_check()
 
 
+def _off_thread(window, work, done):
+    """Run work() in a thread (a password hash takes ~0.5 s: never on the GUI thread) and then done(its result) on
+    the GUI thread, unless `window` is gone by then."""
+    import threading
+
+    def run():
+        """(thread) The work, then back to the GUI thread."""
+        out = work()
+        wx.CallAfter(lambda: done(out) if window else None)
+    threading.Thread(target=run, name="gt-password", daemon=True).start()
+
+
+def _ask_password(parent, message: str) -> Optional[str]:
+    """A masked password entry, None when cancelled."""
+    with wx.PasswordEntryDialog(parent, message, "GroundTruth: past jobs") as dlg:
+        return dlg.GetValue() if dlg.ShowModal() == wx.ID_OK else None
+
+
 class PreferencesDialog(wx.Dialog):
     """cell_mm: the 1× cell of the last Simulate's coarsest model (None before one): each Resolution entry shows
     its own."""
 
-    def __init__(self, parent, prefs: dict, cell_mm: Optional[float] = None):
+    def __init__(self, parent, prefs: dict, cell_mm: Optional[float] = None, past_jobs=None):
         """The dialog with `prefs` (ui.json; missing entries at their defaults) in its controls, in groups of
         label/control rows laid out in two columns on a pane that scrolls when the screen is shorter than the
         dialog (the user, on a laptop: "settings space is tight. make it a double row and add some vertical scroll
-        bars for smaller screens"). Nothing is saved here: the caller reads values() after OK."""
+        bars for smaller screens"). Nothing is saved here: the caller reads values() after OK; except the past
+        jobs' password, saved when it is set (only its hash, jobs_password). past_jobs: the window's (count(),
+        clear() -> number cleared) of the Server jobs tab's past jobs, for Clear past jobs (None: greyed)."""
+        self.past_jobs = past_jobs
         super().__init__(parent, title="Preferences", style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         from ..analysis.simulate import RESOLUTION_MIN_MM, RESOLUTIONS
         p = defaults(prefs)
@@ -581,6 +602,26 @@ class PreferencesDialog(wx.Dialog):
                 ctrl.Enable(on)
         self.compute.Bind(wx.EVT_CHOICE, server_fields)
         server_fields()
+        # Clear past jobs behind a password of this computer (jobs_password; the user: "offer a clear past jobs
+        # button ... ideally, have some sort of password that is required to do so"): only this computer's records
+        # of finished, failed, cancelled and lost jobs, never a running job or anything on a server
+        jobs_row = wx.BoxSizer(wx.HORIZONTAL)
+        self.set_password = wx.Button(self, label="Set password…")
+        self.clear_past = wx.Button(self, label="Clear past jobs…")
+        jobs_row.Add(self.set_password, 0, wx.RIGHT, gap)
+        jobs_row.Add(self.clear_past, 0)
+        holder = wx.Panel(self)
+        for b in (self.set_password, self.clear_past):
+            b.Reparent(holder)
+        holder.SetSizer(jobs_row)
+        row(comp, "Past jobs", holder,
+            "Clear past jobs removes the Server jobs tab's past jobs (shown, failed, cancelled, no longer on the "
+            "server) from this computer's list, never a job still queued or running, nor anything on a server. It "
+            "asks for the password set with Set password… (kept in this computer's ui.json as a salted hash only; "
+            "it guards against clearing by accident, not against someone using your Windows account)")
+        self.set_password.Bind(wx.EVT_BUTTON, lambda e: self.on_set_password())
+        self.clear_past.Bind(wx.EVT_BUTTON, lambda e: self.on_clear_past())
+        self.clear_past.Enable(past_jobs is not None)
         if self.compute.GetSelection() == 1 and p["server"] and p["server_key"]:
             wx.CallAfter(lambda: self and self.servers.start_check())      # once the dialog shows
 
@@ -787,6 +828,90 @@ class PreferencesDialog(wx.Dialog):
         parent = self.GetParent()
         if hasattr(parent, "show_reference"):
             parent.show_reference(ref)
+
+    def _password_busy(self, busy: bool):
+        """Grey the two past-jobs buttons while a password is hashed (off the GUI thread)."""
+        self.set_password.Enable(not busy)
+        self.clear_past.Enable(not busy and self.past_jobs is not None)
+
+    def on_set_password(self):
+        """Set password…: the current one first when one is set, then the new one twice; saved at once (its hash
+        only, jobs_password.make_record)."""
+        from . import jobs_password as jp
+        rec = jp.record(theme.prefs())
+
+        def ask_new():
+            """The new password, twice; hashed off the GUI thread and saved."""
+            new = _ask_password(self, f"New password for clearing past jobs (at least {jp.MIN_LENGTH} characters):")
+            if new is None:
+                return
+            again = _ask_password(self, "The new password again:")
+            if again is None:
+                return
+            why = jp.problem(new, again)
+            if why:
+                message_box(f"Not set: {why}.", "GroundTruth: past jobs", wx.ICON_WARNING)
+                return
+            self._password_busy(True)
+
+            def saved(made):
+                """The hash is made: store it."""
+                theme.save_prefs(**{jp.PREF_KEY: made})
+                self._password_busy(False)
+                message_box("The password for clearing past jobs is set.", "GroundTruth: past jobs",
+                            wx.ICON_INFORMATION)
+            _off_thread(self, lambda: jp.make_record(new), saved)
+        if rec is None:
+            ask_new()
+            return
+        old = _ask_password(self, "The current password for clearing past jobs:")
+        if old is None:
+            return
+        self._password_busy(True)
+
+        def checked(ok):
+            """The current password checked: on to the new one, or refused."""
+            self._password_busy(False)
+            if not ok:
+                message_box("That is not the current password.", "GroundTruth: past jobs", wx.ICON_WARNING)
+                return
+            ask_new()
+        _off_thread(self, lambda: jp.matches(rec, old), checked)
+
+    def on_clear_past(self):
+        """Clear past jobs…: the password (checked off the GUI thread), then a Yes/No naming how many, then the
+        window's clear(). Without a password set, the user is asked to set one first."""
+        from . import jobs_password as jp
+        if self.past_jobs is None:
+            return
+        count, clear = self.past_jobs
+        n = count()
+        if not n:
+            message_box("There are no past jobs to clear.", "GroundTruth: past jobs", wx.ICON_INFORMATION)
+            return
+        rec = jp.record(theme.prefs())
+        if rec is None:
+            message_box("Clearing past jobs needs a password: set one with Set password… first.",
+                        "GroundTruth: past jobs", wx.ICON_INFORMATION)
+            return
+        pw = _ask_password(self, "Password for clearing past jobs:")
+        if pw is None:
+            return
+        self._password_busy(True)
+
+        def checked(ok):
+            """The password checked: ask, then clear."""
+            self._password_busy(False)
+            if not ok:
+                message_box("Wrong password: nothing was cleared.", "GroundTruth: past jobs", wx.ICON_WARNING)
+                return
+            if message_box(f"Remove the {n} past job(s) from this computer's list? Jobs still queued or running and "
+                           "anything on the servers stay.", "GroundTruth: past jobs",
+                           wx.YES_NO | wx.ICON_QUESTION) != wx.YES:
+                return
+            done = clear()
+            message_box(f"{done} past job(s) cleared.", "GroundTruth: past jobs", wx.ICON_INFORMATION)
+        _off_thread(self, lambda: jp.matches(rec, pw), checked)
 
     def values(self) -> dict:
         """The dialog's choices, as ui.json entries (vias shown "all" is None: no limit)."""
