@@ -208,6 +208,7 @@ def plugin_main(argv: Optional[list[str]] = None, started: Optional[float] = Non
         except Exception as e:
             wx.CallAfter(failed, f"start-up failed ({type(e).__name__})", f"GroundTruth could not start:\n{e}")
 
+    preload_wx_extensions()
     threading.Thread(target=work, name="groundtruth-start", daemon=True).start()
     old_log = wx.Log.SetActiveTarget(_LogToFile(startup.log_path()))
     try:
@@ -215,6 +216,20 @@ def plugin_main(argv: Optional[list[str]] = None, started: Optional[float] = Non
     finally:
         wx.Log.SetActiveTarget(old_log)
     return exit_code[0]
+
+
+# wx's extension modules that the window's modules import at their top. Their first import initialises parts of
+# wxWidgets (wxHTML: its file-system, socket and image handlers), which must happen on the GUI thread: done in the
+# start-up worker, KiCad 10's wx 4.2.2 asserted "timer can only be started from the main thread" and the window did
+# not open (2026-11-02, fixes_panel's new `import wx.html`). tests/test_startup_imports.py checks the list is complete.
+WX_EXTENSIONS = ("wx.html", "wx.grid")
+
+
+def preload_wx_extensions():
+    """(GUI thread) Import WX_EXTENSIONS here, so the worker's import of the window's modules finds them loaded."""
+    import importlib
+    for name in WX_EXTENSIONS:
+        importlib.import_module(name)
 
 
 class _LogToFile(wx.Log):
