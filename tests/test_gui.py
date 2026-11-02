@@ -313,7 +313,11 @@ def test_converters_form_explains_its_fields_scrolls_and_keeps_what_it_does_not_
     def check():
         p = f.converters
         labels = {w.GetLabel(): w for w in p.form_win.GetChildren() if isinstance(w, wx.StaticText)
-                  and not isinstance(w, FieldMark)}           # the ◆ / ! marks beside the part parameters
+                  and not isinstance(w, FieldMark)           # the ◆ / ! marks beside the part parameters
+                  and w.GetName() not in ("section", "muted")}   # the sections' titles and notes
+        sections = p.form_sections()                 # every field in one section, titled and explained
+        assert [lab for _, _, rows in sections for lab, _ in rows] == [lab for lab in labels]
+        assert all(title and note for title, note, _ in sections)
         assert set(FIELD_TIPS) <= set(labels)
         for label, w in labels.items():
             assert w.GetToolTipText() == FIELD_TIPS[label]
