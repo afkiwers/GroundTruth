@@ -47,6 +47,7 @@ class BridgeResult(RouteResult):
     conducted: list = field(default_factory=list)
     conducted_worst: Optional[dict] = None
     conducted_standard: str = ""
+    conducted_limit: tuple = ()                          # (standard, class) keys: the plots draw its whole bands
     ce101: list = field(default_factory=list)            # MIL-STD-461 CE101 lead current (rows: f, i_dbua, limit, margin)
     ce101_worst: Optional[dict] = None
     ce101_limit: str = ""
@@ -629,6 +630,7 @@ def _conducted(model: BoardModel, bs: BridgeSetup, legs: list):
                          "standard)")
         return
     res.conducted_standard = describe(std, legs[0].standard_class)
+    res.conducted_limit = (std, legs[0].standard_class) if std != "none" else ()
     res.conducted = conducted_rows(model, legs, w, std)
     compared = [r for r in res.conducted if r["margin_db"] is not None]
     if not compared:

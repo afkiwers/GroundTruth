@@ -124,6 +124,7 @@ class ConverterResult(RouteResult):
     conducted: list = field(default_factory=list)   # receiver readings (rows)
     conducted_worst: Optional[dict] = None
     conducted_standard: str = ""
+    conducted_limit: tuple = ()                     # (standard, class) keys: the plots draw its whole bands
     ce101: list = field(default_factory=list)       # MIL-STD-461 CE101 readings (rows: f, i_dbua, limit_dbua, margin)
     ce101_worst: Optional[dict] = None
     ce101_limit: str = ""                           # the CE101 limit in words (Ce101.describe)
@@ -744,6 +745,7 @@ def prepare_converter(model: BoardModel, spec: ConverterSpec, region: Optional[t
         res.notes.append("LISN not connected (no copper at the input connector pins in the model)")
         standard = "none"
     res.conducted_standard = describe(standard, std_class) if standard != "none" else ""
+    res.conducted_limit = (standard, std_class) if standard != "none" else ()
 
     # Board-wide model with plane capacitance (radiated band)
     cavity = None
@@ -858,6 +860,7 @@ def boost_conducted(model: BoardModel, setup: "ConverterSetup", connector: list[
     setup.cond_freqs, setup.cond_currents = ripple_harmonics(spec.f_sw, delta_i, duty, rng[1] * 1.01)
     setup.cond.planned = _conducted_start(setup, with_fsw=False)
     res.conducted_standard = describe(standard, setup.standard_class)
+    res.conducted_limit = (standard, setup.standard_class) if standard != "none" else ()
     res.ripple = {"delta_i_pp": delta_i, "duty": duty, "L": L, "input_net": vin_net}
     return [f"boost: conducted emission from the inductor ripple ({delta_i:.2f} A p-p at D = {duty:.2f}, "
             f"L = {L * 1e6:g} µH), drawn from {vin_net}"]

@@ -143,3 +143,27 @@ def test_the_help_explains_the_classes_with_charts_from_the_limit_tables():
     assert "<svg" not in sec and "50 (70)" in sec and "56-46 (66-56)" in sec
     assert classic.count('href="#conducted"') >= 3
     assert "--cls5:" in h.css_vars()
+
+
+def test_the_plotted_limit_spans_each_band_not_only_its_harmonics():
+    """The user, of a 750 kHz stage's CISPR 25 class 5 plot: "why is the red cispr line not complete?". Drawn
+    through the harmonics' limits, MW (0.53-1.8 MHz) showed only from 0.75 to 1.5 MHz and SW (5.9-6.2 MHz, one
+    harmonic at 6.0 MHz) not at all. Drawn from the bands: MW from 0.53 MHz, SW's 33 dBµV line, no line between
+    the bands (the standard limits the broadcast bands only); a result without the keys keeps the old drawing."""
+    from types import SimpleNamespace as NS
+    from matplotlib.figure import Figure
+    from groundtruth.emi.conducted import limit_line
+    from groundtruth.report.plots import _conducted_limit
+    f = np.arange(1, 145) * 0.75                               # MHz: 750 kHz harmonics to 108 MHz
+    lim = limit_line(f * 1e6, "cispr25", "5")
+    ax = Figure().add_subplot(111)
+    _conducted_limit(ax, NS(conducted_limit=("cispr25", "5")), f, lim)
+    x, y = (np.asarray(v, float) for v in ax.lines[0].get_data())
+    mw = np.isfinite(y) & (x >= 0.5) & (x <= 1.9)
+    assert x[mw].min() == pytest.approx(0.53, rel=1e-3) and x[mw].max() == pytest.approx(1.8, rel=1e-3)
+    sw = np.isfinite(y) & (x > 5.8) & (x < 6.3)
+    assert sw.sum() > 5 and np.allclose(y[sw], 33.0)
+    assert not np.isfinite(y[(x > 2.0) & (x < 5.8)]).any()     # no limit between MW and SW
+    ax2 = Figure().add_subplot(111)
+    _conducted_limit(ax2, NS(), f, lim)                        # an old result: through the harmonics
+    assert np.allclose(np.asarray(ax2.lines[0].get_xdata(), float), f)
