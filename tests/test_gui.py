@@ -3909,12 +3909,27 @@ def test_the_spread_rate_hint_follows_the_spread_mode(app, conv_frame):
     f = conv_frame
     got = {}
 
+    def pick(p, mode):
+        """Choose a spread mode as the user does."""
+        p.spread_mode.SetStringSelection(mode)
+        p.spread_mode.GetEventHandler().ProcessEvent(wx.CommandEvent(wx.wxEVT_CHOICE, p.spread_mode.GetId()))
+
     def check():
         p = f.converters
-        got["random"] = p.spread_rate.GetHint()
-        p.spread_mode.SetStringSelection("triangle")
-        p.spread_mode.GetEventHandler().ProcessEvent(wx.CommandEvent(wx.wxEVT_CHOICE, p.spread_mode.GetId()))
-        got["triangle"] = p.spread_rate.GetHint()
+        got["random"] = (p.spread_rate.GetHint(), p.spread_rate.IsEnabled())
+        pick(p, "triangle")
+        got["triangle"] = (p.spread_rate.GetHint(), p.spread_rate.IsEnabled())
+        p.spread_rate.SetValue("5kHz")
+        pick(p, "random")                    # greyed, its text kept for a switch back; Add saves no rate
+        got["greyed"] = (p.spread_rate.IsEnabled(), p.spread_rate.GetValue())
+        for ctrl, v in ((p.name, "spr"), (p.rail, "VIN"), (p.ground, "GND"), (p.integrated, "U1"),
+                        (p.f_sw, "400kHz"), (p.i_out, "2"), (p.rise, "5ns"), (p.spread, "20")):
+            ctrl.SetValue(v)
+        p.on_add(None)
+        got["saved"] = f.settings.config.converters[-1]
     run_steps(app, f, [check])
-    assert got["random"] == SPREAD_RATE_HINTS["random"] == "every cycle"
-    assert got["triangle"] == SPREAD_RATE_HINTS["triangle"] and "needed" in got["triangle"]
+    assert got["random"] == (SPREAD_RATE_HINTS["random"], False)
+    assert got["triangle"][0] == SPREAD_RATE_HINTS["triangle"] and "needed" in got["triangle"][0] and got["triangle"][1]
+    assert got["greyed"] == (False, "5kHz")
+    s = got["saved"]
+    assert (s.spread, s.spread_mode, s.spread_rate) == (pytest.approx(0.2), "random", None)

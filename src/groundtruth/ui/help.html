@@ -322,8 +322,9 @@ Q_oss, R_DS(on), DCR and V_f come from the parts' schematic fields where they ha
 (<a href="#fields">Part parameters from the schematic</a>). The controller's
 <b>spread spectrum</b> is on the form: <b>Spread spectrum (%)</b> (f_sw dithered up to that much above it; empty:
 off), <b>Spread mode</b> (random hops, or a triangle sweep) and <b>Spread rate</b> (the triangle's modulation
-frequency, or random hops per second; empty: random hops every cycle). <b>random</b> is the pseudo-random dither most
-controllers use (the LTC7890's too) and needs no rate. A <b>triangle</b> needs its modulation frequency from the
+frequency; greyed for random). <b>random</b> is the pseudo-random dither most controllers use (the LTC7890's too): a new
+frequency every switching cycle, no rate needed (a settings file may still give <code>spread_rate</code> as hops per
+second; the form's Update saves none for random). A <b>triangle</b> needs its modulation frequency from the
 controller's datasheet: how fast the sweep runs against the EMI receiver's bandwidth (9 kHz from 150 kHz to 30 MHz)
 decides how much the reading drops (a slow sweep hardly lowers it, a fast one by several dB), so there is no safe
 default; the field's grey hint says so when triangle is chosen. <b>Interleave group</b> and <b>Phase (°)</b> mark
