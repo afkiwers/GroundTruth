@@ -268,6 +268,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self.spread_rate.SetHint(SPREAD_RATE_HINTS["random"])
         self.spread_mode.Bind(wx.EVT_CHOICE, lambda e: (e.Skip(), self._spread_hint()))
         self._spread_hint()                                 # the empty form: random, its rate greyed
+        self.integrated.Bind(wx.EVT_TEXT, lambda e: (e.Skip(), self._integrated_state()))
         self.interleave = wx.TextCtrl(fw)       # interleaving (analysis/interleave.py): a group name and a phase
         self.interleave.SetHint("none")
         self.phase_deg = wx.TextCtrl(fw)
@@ -468,6 +469,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         for key, text in self._texts(c).items():
             self._set(ctrls[key], text)
         self._spread_hint()
+        self._integrated_state()
         self._show_marks(c)
 
     def _form_for_selection(self):
@@ -553,6 +555,20 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             self.reselect(rows)          # the list was rebuilt: the stages stay selected for the next edit
             self._form_for_selection()
 
+    def _integrated_state(self):
+        """High side, Low side and Switch node greyed while Integrated stage names an IC (the user: "when entering
+        Integrated stage = U502, should you grey out the High side, Low side and Switch node then"): both switches
+        are inside it, so those three are not used and _form saves none of them; their text stays, for a stage
+        turned back into discrete switches. Several stages selected keep all four greyed (OWN)."""
+        if getattr(self, "_multi", None) is not None:
+            return
+        used = not self.integrated.GetValue().strip()
+        for ctrl in (self.high, self.low, self.sw):
+            ctrl.Enable(used)
+        hint = "" if used else "not used: integrated stage"
+        self.high.SetHint(hint)
+        self.low.SetHint(hint)
+
     def _spread_hint(self):
         """The Spread rate field for the mode shown: its hint (SPREAD_RATE_HINTS; several stages with mixed modes:
         none) and greyed for random (the user: "if random is set, it should grey out the other field"), which then
@@ -592,10 +608,13 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             return parse_field(ctrl.GetValue(), unit)
         std = self.standard.GetStringSelection()
         cls = lc.class_key(self._class_standard(), self.std_class.GetStringSelection())
+        integrated = refs(self.integrated)
         spec = ConverterSpec(
             name=self.name.GetValue().strip() or self.sw.GetValue() or "converter", rail=self.rail.GetValue(),
-            ground=self.ground.GetValue(), switch_node=self.sw.GetValue() or None, high_side=refs(self.high),
-            low_side=refs(self.low), switch=refs(self.integrated), topology=self.topology.GetStringSelection(),
+            ground=self.ground.GetValue(), switch_node=None if integrated else (self.sw.GetValue() or None),
+            # an integrated stage: its greyed discrete fields are not used (_integrated_state)
+            high_side=[] if integrated else refs(self.high), low_side=[] if integrated else refs(self.low),
+            switch=integrated, topology=self.topology.GetStringSelection(),
             f_sw=num(self.f_sw, "Hz") or 0.0, i_out=num(self.i_out, "A") or 0.0, v_in=num(self.v_in, "V"),
             v_out=num(self.v_out, "V"), rise_time=num(self.rise, "s") or 0.0, c_oss=num(self.c_oss, "F"),
             q_oss=num(self.q_oss, "C"), c_stray=num(self.c_stray, "F"), rds_on=num(self.rds_on, "Ω"),
