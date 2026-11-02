@@ -178,7 +178,11 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
   the internal inductance μ0·t/3 → μ0·δ/2 (the temperature scale acts on the resistance only). A plane pair is then
   μ0·(h + 2t/3) per square at low frequency and μ0·(h + δ) at high frequency; at the centres without the internal
   term it was μ0·(h + t) at every frequency (13-20 % high for 0.2 mm FR4). Vias join planes around their barrel
-  (`add_pin`, as through-hole pins) where the grid is finer than the drill. Validated: tests/test_plane_pair.py (a
+  (`add_pin`, as through-hole pins) where the grid is finer than the drill; everything that reports or heats a via
+  (DC paths, `DcBoard`, bridge RMS, transfers, Thermal's via segments) reads it through `simulate.via_groups`: a
+  via's joints between two layers as one barrel segment, currents added, at the joints' centre, R in parallel.
+  Test models must put copper centres h + t apart for a dielectric h (the cavity tools, the hot-loop microstrip
+  reference at the dielectric's height with Hammerstad-Jensen's thickness Δw). Validated: tests/test_plane_pair.py (a
   shorted parallel-plate line, two lengths on one grid; fails on the old model by +12.6 %); tools/dev/
   plane_pair_check.py (line, --axis, --pitch), kipi_crosscheck.py (both tools on kicad-cli-filled boards; cases
   bare, near4, near_far, radialS[_dD]) and kipi_side.py (KiPI in its own venv). Open: near a feed (a pad beside a

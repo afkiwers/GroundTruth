@@ -1054,6 +1054,28 @@ def add_pin(st: StackBuild, net: str, pos, span: list[str], drill_mm: float, nam
     return added
 
 
+def via_groups(st: StackBuild, branches) -> list[tuple]:
+    """Every via or pin barrel segment of `branches` as one: [(branch indices, name, radius m, x mm, y mm, layer
+    index a, layer index b)]. add_pin joins a via to each layer at k points around its barrel, k parallel branches
+    with the via's name between the same two layers: their currents add, and the segment sits at the joints' mean
+    (the via's centre; one joint: its node). Reports, Thermal and the DC models count vias through this, so a via
+    is one via however many joints it has."""
+    groups: dict[tuple, list] = {}
+    for k, b in enumerate(branches):
+        if b.kind != "via":
+            continue
+        x, y = st.xy(b.a)
+        g = groups.get((b.name, b.a[0], b.b[0]))
+        if g is None:
+            groups[(b.name, b.a[0], b.b[0])] = [[k], float(b.radius), x, y]
+        else:
+            g[0].append(k)
+            g[2] += x
+            g[3] += y
+    return [(tuple(ix), name, r, sx / len(ix), sy / len(ix), a, b)
+            for (name, a, b), (ix, r, sx, sy) in groups.items()]
+
+
 def vertical_branches(st: StackBuild, net: str, pos, span: list[str], drill_mm: float, name: str) -> list[Branch]:
     """The branches add_vertical would create, without adding them (fix candidates)."""
     snap = max(1.5 * st.d, 0.4)
@@ -3045,7 +3067,10 @@ def transfers(st: StackBuild, plane: PlaneStack, sol: Solution, route: Optional[
         if route is not None and route.segments else None
     merged: dict[str, dict] = {}
     part_sum: dict[str, complex] = {}       # a part spread over parallel branches (part_pairs): their currents add
-    joint_sum: dict[tuple, complex] = {}    # a through-hole pin's joints (add_pin): add up per layer pair
+    joint_sum: dict[tuple, complex] = {}    # a via's or pin's joints (add_pin): add up per layer pair
+    centre = {}                             # and are reported at the via's centre, not at one joint on its ring
+    for _, name, _, gx, gy, _, _ in via_groups(st, plane.branches):
+        centre.setdefault(name, (gx, gy))
     for b, cur in zip(plane.branches, sol.I_branch):
         frac = float(abs(cur))
         if b.kind == "part":
@@ -3055,7 +3080,7 @@ def transfers(st: StackBuild, plane: PlaneStack, sol: Solution, route: Optional[
             key = (b.name, b.a[0], b.b[0])
             joint_sum[key] = joint_sum.get(key, 0j) + complex(cur)
             frac = abs(joint_sum[key])
-        x, y = st.xy(b.a)
+        x, y = centre[b.name] if b.kind == "via" else st.xy(b.a)
         if b.kind in ("track", "bond", "sheet"):    # a piece of track on one layer, a part's solder joint or terminal: no
             continue                          # transfer between layers or nets of its own
         if b.kind == "via" and any(math.dist((x, y), p) < 1.0 for p in return_pins):

@@ -173,9 +173,9 @@ def test_an_ic_cut_off_from_the_rail_is_left_out_and_said(tmp_path):
 
 def test_the_pins_fine_model_makes_a_coarse_grid_converge(tmp_path, monkeypatch):
     """Above the decaps' resonance the impedance is the inductance at the IC's pins, which a coarse board-wide grid
-    gets wrong (here -43 % at 100 MHz on 1.26 mm cells). The fine regional model around the IC (_local_runs) adds
-    the difference: the coarse grid then reads the fine grid's |Z| (within 5 %; the correction itself measured
-    within 1 % from 1.26 mm to 0.30 mm cells). Below, in the capacitors' range, nothing changes."""
+    gets wrong (here -37 % at 100 MHz on 1.26 mm cells). The fine regional model around the IC (_local_runs) adds
+    the difference: the coarse grid then reads the fine grid's |Z| (within 5 %), the same from 4000 and 24000
+    nodes (within 1 %). Below, in the capacitors' range, nothing changes."""
     from groundtruth.analysis import pdn as P
     caps = [("C1", "100n", (22.0, 15.0)), ("C2", "100n", (18.0, 15.0)), ("C3", "100n", (20.0, 17.0)),
             ("C4", "100n", (20.0, 13.0))]
@@ -191,10 +191,14 @@ def test_the_pins_fine_model_makes_a_coarse_grid_converge(tmp_path, monkeypatch)
         monkeypatch.undo()
         f, z = np.log(port["f"]), np.log(port["z_ohm"])
         return [float(np.exp(np.interp(np.log(x), f, z))) for x in (1e6, 1e8)], port
-    ref, _ = z_at("fine", 24000, False)
+    # the reference on 60000 nodes: since vias join the planes around their barrel (add_pin, from ~0.3 mm cells
+    # for these 0.3 mm drills [A79]) 24000 nodes (0.388 ohm at 100 MHz, one joint) no longer is one (0.347 ohm)
+    ref, _ = z_at("fine", 60000, False)
     raw, _ = z_at("raw", 4000, False)
     corr, port = z_at("corr", 4000, True)
+    mid, _ = z_at("mid", 24000, True)
     assert abs(raw[1] / ref[1] - 1) > 0.25                     # the coarse grid alone is far off at 100 MHz
-    assert corr[1] == pytest.approx(ref[1], rel=0.05)
+    assert corr[1] == pytest.approx(ref[1], rel=0.05)          # 0.338 against 0.347 ohm
+    assert mid[1] == pytest.approx(corr[1], rel=0.01)          # and the same from either budget
     assert corr[0] == pytest.approx(ref[0], rel=0.02) and port["l_correction_nh"] > 0.1
     assert port["local_pitch_mm"] < 0.3

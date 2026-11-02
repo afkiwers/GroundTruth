@@ -27,7 +27,7 @@ from ..emi.pwm_lines import line_spectrum
 from ..solver.peec import RouteExcitation, SolverError
 from .power import (DC_F, POWER_MARGINS_MM, _area_shares, _region_build, _side, input_path, path_parts, rail_caps,
                     peak_density, sustained)
-from .simulate import ModelRun
+from .simulate import ModelRun, via_groups
 
 BANDS = 3                       # PWM harmonics with a field of their own (the leg's solves at n·f_pwm)
 SOURCES = ("hs", "ls")
@@ -139,6 +139,25 @@ def _nearest(sol_freqs, f: float) -> Optional[float]:
     return min(sol_freqs, key=lambda x: abs(math.log(x / f)), default=None) if f > 0 else None
 
 
+def _via_squares(st, I: np.ndarray, M: np.ndarray, phasors: bool) -> list:
+    """Each via barrel segment's mean square on model `st`: [((id(st), branch indices), A², {"name", "radius", "x",
+    "y", "a", "b", "r_ohm"})]. I: the sources' branch currents (source × branch), M: their correlation (real, the
+    slow part) or cross spectrum (complex phasors, the fast part: ½·Re). A via's joints (add_pin) carry one barrel's
+    current between them, so their currents are added before squaring (simulate.via_groups), and the segment's R
+    is theirs in parallel."""
+    groups = via_groups(st, st.plane.branches)
+    if not groups:
+        return []
+    Ig = np.stack([I[:, list(ix)].sum(1) for ix, *_ in groups], axis=1)
+    ms = 0.5 * np.einsum("sb,st,tb->b", Ig, M, Ig.conj()).real if phasors else np.einsum("sb,st,tb->b", Ig, M, Ig)
+    out = []
+    for (ix, name, radius, x, y, a, b), m in zip(groups, ms):
+        g = sum(1.0 / max(float(complex(st.plane.branches[k].z(DC_F)).real), 1e-30) for k in ix)
+        out.append(((id(st), ix), float(m), {"name": name, "radius": radius, "x": x, "y": y, "a": st.names[a],
+                                             "b": st.names[b], "r_ohm": 1.0 / g}))
+    return out
+
+
 def _resample(grid_to, grid_from, values: np.ndarray) -> np.ndarray:
     """Node values of one grid at the nodes of another (nearest node; 0 outside or off copper)."""
     X, Y = np.meshgrid(grid_to.x0 + np.arange(grid_to.nx) * grid_to.d, grid_to.y0 + np.arange(grid_to.ny) * grid_to.d,
@@ -222,12 +241,12 @@ class RmsBasis:
                                 for a in range(len(J)) for c in range(len(J)))
                 grids[layer] = st.grids[k]
             branch_sq = np.einsum("sb,st,tb->b", I, g, I)
+            for key, ms, seg in _via_squares(st, I, g, False):
+                via_sq[seg["name"]] = max(via_sq.get(seg["name"], (0.0, None))[0], ms), seg
+                seg_sq[key] = (seg_sq.get(key, (0.0,))[0] + ms, seg)
             part_rms: dict[str, list] = {}      # a part's parallel branches (simulate.part_pairs): RMS currents add
             for bi, br in enumerate(st.plane.branches):
-                if br.kind == "via":
-                    via_sq[br.name] = max(via_sq.get(br.name, (0.0, None))[0], branch_sq[bi]), (br, st)
-                    seg_sq[(id(st), bi)] = (seg_sq.get((id(st), bi), (0.0,))[0] + float(branch_sq[bi]), br, st)
-                elif br.kind == "part" and branch_sq[bi] > 1e-12:     # a series part carrying current (caps: open)
+                if br.kind == "part" and branch_sq[bi] > 1e-12:     # a series part carrying current (caps: open)
                     acc = part_rms.setdefault(br.name, [0.0, 0.0])
                     acc[0] += math.sqrt(branch_sq[bi])               # in phase, side by side: the RMS values add
                     acc[1] += 1.0 / max(complex(br.z(DC_F)).real, 1e-12)   # parallel: conductances add
@@ -244,12 +263,10 @@ class RmsBasis:
                     sq[layer] = sq[layer] + _resample(grids[layer], st.grids[k], acc)
                 else:
                     sq[layer], grids[layer] = acc, st.grids[k]
-            branch_sq = 0.5 * np.einsum("sb,st,tb->b", I, cc, I.conj()).real
-            for bi, br in enumerate(st.plane.branches):
-                if br.kind == "via":
-                    old, where = via_sq.get(br.name, (0.0, (br, st)))
-                    via_sq[br.name] = old + branch_sq[bi], where
-                    seg_sq[(id(st), bi)] = (seg_sq.get((id(st), bi), (0.0,))[0] + float(branch_sq[bi]), br, st)
+            for key, ms, seg in _via_squares(st, I, cc, True):
+                old, where = via_sq.get(seg["name"], (0.0, seg))
+                via_sq[seg["name"]] = old + ms, where
+                seg_sq[key] = (seg_sq.get(key, (0.0,))[0] + ms, seg)
         rho = COPPER.resistivity_20c * 1e3                                 # Ω·mm
         best, best_s = (0.0, "", (0.0, 0.0)), (0.0, "", (0.0, 0.0))
         copper_w = 0.0
@@ -273,20 +290,21 @@ class RmsBasis:
             if sus[i, j] > best_s[0]:
                 best_s = (float(sus[i, j]), layer, tuple(float(x) for x in g.xy(i, j)))
         vias = []
-        for name, (v, (br, st)) in via_sq.items():
+        for name, (v, seg) in via_sq.items():
             a = math.sqrt(max(v, 0.0))
             if a < 0.01 or name.startswith("pad "):         # a part's plated hole carries its pin, not only plating
                 continue
-            x, y = st.xy(br.a)
-            cap = via_capacity(2 * br.radius * 1e3, plating)
-            vias.append({"name": name, "current_a": a, "a_mm2": a / (math.pi * 2 * br.radius * plating * 1e-6) * 1e-6,
-                         "x": x, "y": y, "capacity_a": cap, "load_pct": 100.0 * a / cap if cap > 0 else None})
+            r = seg["radius"]
+            cap = via_capacity(2 * r * 1e3, plating)
+            vias.append({"name": name, "current_a": a, "a_mm2": a / (math.pi * 2 * r * plating * 1e-6) * 1e-6,
+                         "x": seg["x"], "y": seg["y"], "capacity_a": cap,
+                         "load_pct": 100.0 * a / cap if cap > 0 else None})
         top = max((v["current_a"] for v in vias), default=0.0)
         out["vias"] = sorted((v for v in vias if v["current_a"] >= 0.01 * top), key=lambda v: -v["current_a"])
         # (x, y, layer a, layer b, R ohm, mean square A²) of every via segment that carries current: Thermal puts its
         # I²R into the copper at both ends (the slow and the fast parts on their own models: mean squares add)
-        out["via_heat"] = [(*st.xy(br.a), st.names[br.a[0]], st.names[br.b[0]], float(complex(br.z(DC_F)).real), ms)
-                           for ms, br, st in seg_sq.values() if ms > 1e-12 and not br.name.startswith("pad ")]
+        out["via_heat"] = [(s["x"], s["y"], s["a"], s["b"], s["r_ohm"], ms)
+                           for ms, s in seg_sq.values() if ms > 1e-12 and not s["name"].startswith("pad ")]
         # the copper's loss counts the barrels too (on the test bridge 16 % of it: large currents through few vias)
         copper_w += sum(r * ms for *_, r, ms in out["via_heat"])
         out["parts"].sort(key=lambda p: -p["rms_a"])
