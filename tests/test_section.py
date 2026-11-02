@@ -96,7 +96,7 @@ def test_the_section_figure(tmp_path):
     assert f"{via['fraction'] * 100:.0f} %" in [t.get_text() for t in side.texts]
     assert set(fig._gt_section) == {top, side}
     text = section_value(fig._gt_section[side], 8.0)
-    assert text.startswith("s 8.") and "In1.Cu 89 %" in text and "within ±4.7 mm" in text
+    assert text.startswith("s 8.") and "In1.Cu 91 %" in text and "within ±4.7 mm" in text   # 89 % before [A79]
     draw_section(fig, board, NS(section={}, kind="converter"))
     assert fig.axes[0].texts[0].get_text() == SECTION_NONE
 

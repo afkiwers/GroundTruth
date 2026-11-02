@@ -20,16 +20,19 @@ from groundtruth.solver.peec import (EPS0, MultiPlaneProblem, PlaneLayer, PlaneP
                                 TraceSegment, build_grid)
 
 T, ER = 0.2e-3, 4.5
+T_CU = 35e-6                    # each plate's copper (PlaneLayer's default)
 
 
 def plate_pair(a_mm: float, b_mm: float, d_mm: float, tan_delta: float = 0.0) -> MultiPlaneProblem:
-    """Two square plates a x b mm, d mm cells, T apart, with a probe between them near a corner and their
-    capacitance per area (and loss tangent) as a plane pair."""
+    """Two square plates a x b mm, d mm cells, their faces T apart (centres T + T_CU: the model couples the plates
+    between the faces they turn to each other [A79]), with a probe between them near a corner and their
+    capacitance per area eps0*er/T (and loss tangent) as a plane pair."""
     grids = [build_grid(box(0, 0, a_mm, b_mm), (0, 0, a_mm, b_mm), d_mm) for _ in range(2)]
     i = j = 1
     x, y = i * d_mm * 1e-3, j * d_mm * 1e-3
-    probe = [TraceSegment(np.array([x, y, -T]), np.array([x, y, 0.0]), 0.3e-3)]   # source between the plates
-    return MultiPlaneProblem([PlaneLayer("top", 0.0, grids[0]), PlaneLayer("bottom", -T, grids[1])], probe,
+    zb = -(T + T_CU)
+    probe = [TraceSegment(np.array([x, y, zb]), np.array([x, y, 0.0]), 0.3e-3)]   # source between the plates
+    return MultiPlaneProblem([PlaneLayer("top", 0.0, grids[0], T_CU), PlaneLayer("bottom", zb, grids[1], T_CU)], probe,
                              (1, i, j), (0, i, j), [], capacitance=[PlanePair(0, 1, EPS0 * ER / T, tan_delta)])
 
 

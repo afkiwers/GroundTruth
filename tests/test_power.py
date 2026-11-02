@@ -42,12 +42,19 @@ def strip_loops(tmp_path_factory):
 
 
 def test_hot_loop_inductance_per_length_matches_a_wide_microstrip(strip_loops):
-    """The switching current runs along a 4 mm VIN pour 0.235 mm over the GND plane: the hot-loop inductance grows
-    by Hammerstad's per-length value of that microstrip (capacitor, IC and via terms cancel in the difference)."""
+    """The switching current runs along a 4 mm VIN pour over the GND plane, 0.2 mm of dielectric between them (the
+    copper's centres 0.235 mm apart): the hot-loop inductance grows by Hammerstad's per-length value of that
+    microstrip, its width widened by the strip's 35 µm thickness [Hammerstad 1980] (capacitor, IC and via terms
+    cancel in the difference). The model couples the copper faces [A79]: 55.3 against 53.1 nH/m, 4 % above (the
+    copper's own internal inductance and the plane's finite width add to it); against the centres' distance
+    (0.235 mm, the reference until the face coupling) it would be 10 % low."""
     per_m = (strip_loops[40.0].loop_nh - strip_loops[20.0].loop_nh) * 1e-9 / 0.020
-    h, w = 0.235, 4.0
-    hammerstad = MU0 / (w / h + 1.393 + 0.667 * math.log(w / h + 1.444))
-    assert per_m == pytest.approx(hammerstad, rel=0.10), (per_m * 1e9, hammerstad * 1e9)
+    h, w, t = 0.2, 4.0, 0.035
+    u, tn = w / h, t / h                                         # Hammerstad-Jensen's Δw for a thick strip
+    w_eff = w + h * tn / math.pi * math.log(1 + 4 * math.e / (tn / math.tanh(math.sqrt(6.517 * u)) ** 2))
+    hammerstad = MU0 / (w_eff / h + 1.393 + 0.667 * math.log(w_eff / h + 1.444))
+    assert per_m == pytest.approx(hammerstad, rel=0.06), (per_m * 1e9, hammerstad * 1e9)
+    assert per_m > hammerstad                                  # never below the ideal strip's (no internal L there)
 
 
 def test_the_series_lc_fit_removes_the_capacitor_reactance(strip_loops):

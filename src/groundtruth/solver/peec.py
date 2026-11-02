@@ -66,6 +66,7 @@ from . import gpu
 from . import sparse as _sparse
 from . import stats as _stats
 from .kernel import (GMD_FLAT, MU0, filament_mutual, leggauss, segment_mutual, segment_vector_potential, skin_thickness,
+                     slab_impedance,
                      strip_kernel, strip_self, strip_self_numeric)
 
 SIGMA_CU = 5.8e7            # S/m, annealed copper at 20 °C [IEC 60028]
@@ -1756,6 +1757,19 @@ class PlaneStack:
         return None
 
     # ------------------------------------------------------------------ inductance
+    def face_gap(self, s: int, t: int) -> float:
+        """The distance (m) between the faces layers s and t turn to each other: their centres' distance less half
+        of each one's copper (0 for one layer) [A79]."""
+        if s == t:
+            return 0.0
+        gap = abs(self.zs[s] - self.zs[t]) - 0.5 * (self.layers[s].thickness + self.layers[t].thickness)
+        return max(gap, 1e-6)                       # layers that touch (a malformed stackup): 1 um, never 0
+
+    def face_z(self, k: int, z: float) -> float:
+        """Layer k's face towards height z (m): its centre moved half its copper towards z [A79]."""
+        t = 0.5 * self.layers[k].thickness
+        return self.zs[k] + (t if z > self.zs[k] else -t)
+
     def _kernels(self):
         """The layer-pair kernel spectra, per orientation one real (P0 // 2 + 1, P1 // 2 + 1, N, N) array: a quarter
         of each spectrum (they are even in both axes, K[i, j] = K[P0 - i, j] = K[i, P1 - j], to 4e-17), pixel-major
@@ -1777,8 +1791,12 @@ class PlaneStack:
         sum_y = np.zeros((self.N, self.N))
         for s in range(self.N):
             for t in range(s, self.N):
-                # mutual inductance depends only on the layers' distance: one kernel per pair, symmetric in s, t
-                kx, ky, c, sx, sy = _kernel_pair(nx, ny, d, abs(self.zs[s] - self.zs[t]))
+                # mutual inductance depends only on the layers' distance: one kernel per pair, symmetric in s, t.
+                # The distance between the faces the two layers turn to each other, not between the foils'
+                # centres [A79]: at high frequency the current runs on those faces (the copper's own depth is
+                # surface_impedance's internal inductance). At the centres a plane pair read mu0 * (h + t) per
+                # square at every frequency, 17 % above mu0 * h for 0.2 mm and 35 um (KiPI cross-check).
+                kx, ky, c, sx, sy = _kernel_pair(nx, ny, d, self.face_gap(s, t))
                 Kx[:, :, s, t] = Kx[:, :, t, s] = kx
                 Ky[:, :, s, t] = Ky[:, :, t, s] = ky
                 centre[s, t] = centre[t, s] = c
@@ -1900,18 +1918,25 @@ class PlaneStack:
         track_impedance). A square strip's R is its sheet resistance."""
         return 1 / (self.sigma * skin_thickness(t, f, self.sigma))
 
+    def surface_impedance(self, f: float, t: float) -> complex:
+        """Sheet impedance (ohm per square) of copper t thick at f: surface_resistance plus the copper's internal
+        inductance, the one-face slab (kernel.slab_impedance [A79]): the strips stand at their layer's facing
+        surface (_kernels), so the current's depth into the copper is this term's."""
+        return slab_impedance(t, f, self.sigma)
+
     def _impedances(self, f: float):
-        """(w, each strip's resistance, the impedances of the other unknowns: capacitances, then branches) at f.
-        The strips' inductance is not here: it is the L_p product (Lp_matvec)."""
+        """(w, each strip's own impedance per its sheet (resistance and internal inductance), the impedances of the
+        other unknowns: capacitances, then branches) at f. The strips' partial inductance is not here: it is the
+        L_p product (Lp_matvec)."""
         w = 2 * math.pi * f
-        rs = np.array([self.surface_resistance(f, l.thickness) for l in self.layers])
-        # a square strip's R is the sheet resistance; one φ of the pitch wide, sheet resistance / φ (φ with a change
+        zs = np.array([self.surface_impedance(f, l.thickness) for l in self.layers])
+        # a square strip's Z is the sheet impedance; one φ of the pitch wide, sheet impedance / φ (φ with a change
         # of width along the strip in series: _widths)
-        R_strip = (np.concatenate([rs[self.xa[:, 0]], rs[self.ya[:, 0]]]) / self.r_width if self.ns
-                   else np.zeros(0))
-        scale = getattr(self, "r_scale", None)            # the copper at its temperature (set_resistance_scale)
-        if scale is not None and self.ns:
-            R_strip = R_strip * scale
+        R_strip = (np.concatenate([zs[self.xa[:, 0]], zs[self.ya[:, 0]]]) / self.r_width if self.ns
+                   else np.zeros(0, complex))
+        scale = getattr(self, "r_scale", None)            # the copper at its temperature (set_resistance_scale): its
+        if scale is not None and self.ns:                 # resistance only, the internal inductance stays
+            R_strip = R_strip.real * scale + 1j * R_strip.imag
         if self.ncap:   # Y = jωC(1 - j·tanδ): susceptance plus dielectric-loss conductance [Pozar 2012]
             C, tand = self.cap[:, 4], self.cap[:, 5]
             z_cap = 1.0 / (w * C * tand + 1j * w * C) if w > 0 else np.full(self.ncap, 1e18 + 0j)
@@ -2308,11 +2333,15 @@ class PlaneStack:
             centres = np.stack([i * d + (d / 2 if axis == 0 else 0.0), j * d + (d / 2 if axis == 1 else 0.0),
                                 self.zs[k]], axis=1)
             acc = np.zeros(len(idx))
+            half = 0.5 * np.array([l.thickness for l in self.layers])[k]
             for s in horiz:
                 ab = s.b - s.a
                 L = np.linalg.norm(ab)
                 if abs(ab[axis]) < 1e-15 * L:      # a segment perpendicular to these strips couples nothing
                     continue
+                # each strip at its layer's face towards the segment (as the layer pairs, face_gap [A79])
+                zseg = 0.5 * (s.a[2] + s.b[2])
+                centres[:, 2] = self.zs[k] + np.where(zseg > self.zs[k], half, -half)
                 rho_min = max(0.5 * s.width, 1e-7)
                 a_c = segment_vector_potential(s.a, s.b, centres, rho_min)
                 near = _dist_to_segment(centres, s.a, s.b) < 3 * d + 2 * s.width

@@ -57,7 +57,7 @@ from .simulate import (BoardModel, ModelRun, RouteResult, StackBuild, _choose_pi
                        add_terminal_vectors, terminal_vectors,
                        _solve_row, _top_plane_pair, band_moments, band_notes, band_top, indicative_text,
                        initial_frequencies, mark_quasi_static, resonance_text, transfers, unsolved_band,
-                       unsolved_issue)
+                       unsolved_issue, via_groups)
 
 LOOP_F = 100e6              # hot-loop inductance: far above the input capacitors' self-resonance
 LOOP_F_LO = 30e6            # second point of the series-LC fit
@@ -1729,19 +1729,20 @@ def dc_summary(st: StackBuild, sol: Solution, current: float, name: str, plating
         if sus[i, j] > best_s[0]:
             best_s = (float(sus[i, j]), layer, tuple(float(v) for v in g.xy(i, j)))
     vias: dict[str, dict] = {}
-    for b, cur, cd in zip(st.plane.branches, sol.I_branch, i_d):
-        if b.kind != "via" or b.name.startswith("pad "):    # a part's hole carries its pin, not only plating
+    i_b, i_bd = np.asarray(sol.I_branch), np.asarray(i_d)
+    for ix, vname, vr, vx, vy, _, _ in via_groups(st, st.plane.branches):   # a via's joints (add_pin) as one
+        if vname.startswith("pad "):                     # a part's hole carries its pin, not only plating
             continue
-        a_ = float(math.hypot(abs(cur), k_r * abs(cd))) * e             # RMS (the mean alone without ripple)
+        vc, vd = complex(i_b[list(ix)].sum()), complex(i_bd[list(ix)].sum())
+        a_ = float(math.hypot(abs(vc), k_r * abs(vd))) * e              # RMS (the mean alone without ripple)
         if a_ < 0.01 * current:                          # vias of other nets, or idle ones
             continue
-        dens = a_ / (math.pi * 2 * b.radius * plating_um * 1e-6) * 1e-6
-        old = vias.get(b.name)
-        if old is None or a_ > old["current_a"]:
-            x, y = st.xy(b.a)
-            cap = via_capacity(2 * b.radius * 1e3, plating_um)
-            vias[b.name] = {"name": b.name, "current_a": a_, "a_mm2": dens, "x": x, "y": y,
-                            "capacity_a": cap, "load_pct": 100.0 * a_ / cap if cap > 0 else None}
+        dens = a_ / (math.pi * 2 * vr * plating_um * 1e-6) * 1e-6
+        old = vias.get(vname)
+        if old is None or a_ > old["current_a"]:        # its busiest segment between two layers
+            cap = via_capacity(2 * vr * 1e3, plating_um)
+            vias[vname] = {"name": vname, "current_a": a_, "a_mm2": dens, "x": vx, "y": vy,
+                           "capacity_a": cap, "load_pct": 100.0 * a_ / cap if cap > 0 else None}
     top = sorted(vias.values(), key=lambda v: -v["current_a"])      # every via with ≥ 1 % of the current
     # Series parts on the path (a current-sense shunt, a fuse, a surge stopper's model) are in R: their share is
     # |I_b|²·Re(Z_b) per A² (Tellegen [Tellegen 1952]: the path's R is the sum over all branches), so is each part's
@@ -1800,7 +1801,8 @@ class DcBoard:
     grids: list
     t: list
     d: float
-    vias: list                      # [(branch index, name, radius m, x mm, y mm)]
+    vias: list                      # [(branch index, name, radius m, x mm, y mm)]: one per via branch, a via's
+                                    # joints (add_pin) each, at the via's centre (simulate.via_groups)
     branches: int                   # the model's branch count (all kinds)
     fingerprint: str = ""
     via_ends: list = field(default_factory=list)   # [(layer a, layer b, R ohm at DC)] with `vias`: each barrel
@@ -1818,11 +1820,14 @@ def dc_board_of(st: StackBuild) -> DcBoard:
         return got
     import hashlib
     vias, ends = [], []
-    for k, b in enumerate(st.plane.branches):
-        if b.kind == "via" and not b.name.startswith("pad "):
-            x, y = st.xy(b.a)
-            vias.append((k, b.name, float(b.radius), x, y))
-            ends.append((st.names[b.a[0]], st.names[b.b[0]], float(complex(b.z(DC_F)).real)))
+    # each joint of a via (add_pin) on its own, with its own R: their heat is the sum of R_k I_k^2, which one barrel
+    # at the joints' summed current and parallel R reads low when they share unequally (0.7 % of a hot loop's copper
+    # heat on the test buck); all at the via's centre, so Thermal heats the via there, and reports group them
+    for ix, name, radius, x, y, a, b in via_groups(st, st.plane.branches):
+        if not name.startswith("pad "):
+            for k in ix:
+                vias.append((k, name, radius, x, y))
+                ends.append((st.names[a], st.names[b], float(complex(st.plane.branches[k].z(DC_F)).real)))
     # rounded figures only: the same board and settings give the same text in every process (no hash() salts)
     h = hashlib.sha256()
     h.update(repr((list(st.names), [round(float(t), 12) for t in st.t], round(float(st.d), 9),
@@ -2348,8 +2353,16 @@ def combine_dc(results, rules, plating_um: float = 25.0):
                 rip_v += i_v ** 2
     maps = {layer: np.sqrt(jx * jx + jy * jy + rip_sq[layer]) for layer, (jx, jy) in vec.items()}
     best, best_s = _density_peaks(st, maps)
+    joined: dict[tuple, list] = {}          # a via's joints between two layers as one: their currents added
+    ends_ = getattr(st, "via_ends", None) or []
+    for n_, (_, vname, radius, x, y) in enumerate(st.vias):
+        key = (vname,) + (tuple(ends_[n_][:2]) if len(ends_) == len(st.vias) else (n_,))
+        j = joined.setdefault(key, [vname, radius, x, y, 0.0, 0.0])
+        j[4] += float(cur[n_])
+        j[5] += math.sqrt(max(float(rip_v[n_]), 0.0))   # one via's joints switch together: their RMS values add
     vias: dict[str, dict] = {}
-    for (_, vname, radius, x, y), a_ in zip(st.vias, np.sqrt(cur ** 2 + rip_v)):
+    for vname, radius, x, y, c_, r_ in joined.values():
+        a_ = math.sqrt(c_ * c_ + r_ * r_)
         if a_ < 0.01:
             continue
         old = vias.get(vname)

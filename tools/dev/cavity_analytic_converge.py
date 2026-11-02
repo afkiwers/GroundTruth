@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 C0 = 299_792_458.0
 T_DIEL, ER = 0.2e-3, 4.5
+T_CU = 35e-6        # each plate's copper: the faces T_DIEL apart, the centres T_DIEL + T_CU [A79]
 
 
 def plate_pair(a_mm: float, b_mm: float, d_mm: float, sub: int, tan_delta: float):
@@ -34,8 +35,9 @@ def plate_pair(a_mm: float, b_mm: float, d_mm: float, sub: int, tan_delta: float
     g = grids[0]
     i, j = g.nearest_node(1.0, 1.0)
     x, y = (g.x0 + i * d_mm - g.x0) * 1e-3, (g.y0 + j * d_mm - g.y0) * 1e-3
-    probe = [TraceSegment(np.array([x, y, -T_DIEL]), np.array([x, y, 0.0]), 0.3e-3)]
-    return MultiPlaneProblem([PlaneLayer("top", 0.0, grids[0]), PlaneLayer("bottom", -T_DIEL, grids[1])], probe,
+    zb = -(T_DIEL + T_CU)
+    probe = [TraceSegment(np.array([x, y, zb]), np.array([x, y, 0.0]), 0.3e-3)]
+    return MultiPlaneProblem([PlaneLayer("top", 0.0, grids[0], T_CU), PlaneLayer("bottom", zb, grids[1], T_CU)], probe,
                              (1, i, j), (0, i, j), [], capacitance=[PlanePair(0, 1, EPS0 * ER / T_DIEL, tan_delta)])
 
 
