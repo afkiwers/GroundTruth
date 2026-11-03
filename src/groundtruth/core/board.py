@@ -242,6 +242,9 @@ class Zone:
     name: str = ""
     uuid: str = ""
     line: int = 0
+    # KiCad's own "this zone has been filled" flag (the file's `(fill yes ...)`, the API's Zone.filled): a zone can be
+    # filled and still have no copper (every island removed, no room between other nets' copper); None: not known
+    fill_done: Optional[bool] = None
 
     @property
     def is_filled(self) -> bool:
@@ -375,5 +378,8 @@ class Board:
 
     def unfilled_zones(self) -> list[Zone]:
         """Copper zones of a net that have never been filled (the model would miss their copper: the checks and
-        the plugin ask the user to fill them, or refill them with kicad-cli)."""
-        return [z for z in self.zones if not z.is_rule_area and z.net and not z.is_filled]
+        the plugin ask the user to fill them, or refill them with kicad-cli). A zone KiCad filled that came out
+        empty is not one of them (the user: "it still ask in the beginning, even if it already filled. I literraly
+        did it before opening the plugin": two zones without copper after the fill made the plugin ask every time);
+        without KiCad's flag (fill_done None), no fill polygons is taken as unfilled, as before."""
+        return [z for z in self.zones if not z.is_rule_area and z.net and not z.is_filled and not z.fill_done]

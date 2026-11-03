@@ -62,15 +62,19 @@ class BoardGen:
         return u
 
     def zone(self, net: str, layer: str, outline: Sequence[Pt], holes: Sequence[Sequence[Pt]] = (),
-             filled: bool = True) -> str:
+             filled: bool = True, empty: bool = False) -> str:
+        """A zone as KiCad writes it: filled (its fill flag `(fill yes)` and its filled polygon), never filled
+        (`filled=False`: `(fill)` without yes, no polygon), or filled and left empty (`empty`: the flag, no polygon:
+        every island removed)."""
         u = _u()
         pts = " ".join(f"(xy {x} {y})" for x, y in outline)
         fill = ""
-        if filled:
+        if filled and not empty:
             fpts = " ".join(f"(xy {x} {y})" for x, y in fracture(outline, holes))
             fill = f'\t\t(filled_polygon\n\t\t\t(layer {_q(layer)})\n\t\t\t(pts {fpts})\n\t\t)\n'
+        flag = "(fill yes)" if filled else "(fill\n\t\t\t(thermal_gap 0.5)\n\t\t)"
         self.items.append(f'\t(zone\n\t\t(net {_q(net)})\n\t\t(layer {_q(layer)})\n\t\t(uuid {_q(u)})\n'
-                          f'\t\t(min_thickness 0.2)\n\t\t(fill yes)\n\t\t(polygon\n\t\t\t(pts {pts})\n\t\t)\n{fill}\t)')
+                          f'\t\t(min_thickness 0.2)\n\t\t{flag}\n\t\t(polygon\n\t\t\t(pts {pts})\n\t\t)\n{fill}\t)')
         return u
 
     def mask_rect(self, layer: str, x0: float, y0: float, x1: float, y1: float) -> str:

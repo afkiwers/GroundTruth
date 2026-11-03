@@ -337,7 +337,9 @@ class _KipyReader:
                 continue
             net = z.net.name if z.net is not None else ""
             zone = Zone(net, [self.layer_name(l) for l in z.layers if self.layer_name(l) in order],
-                        is_rule_area=z.type == ZoneType.ZT_RULE_AREA, name=z.name, uuid=z.id.value)
+                        is_rule_area=z.type == ZoneType.ZT_RULE_AREA, name=z.name, uuid=z.id.value,
+                        # KiCad's flag: filled, even when it came out empty (None from a kipy without it)
+                        fill_done=bool(z.filled) if hasattr(type(z), "filled") else None)
             for layer, polys in z.filled_polygons.items():
                 lname = self.layer_name(layer)
                 if lname in order:
