@@ -810,7 +810,50 @@ class MainFrame(ConfigActions, wx.Frame):
         if not nets:
             message_box(NO_SELECTION, "GroundTruth", wx.ICON_INFORMATION)
             return
+        pins = [p.pin for p in self.board.pads() if p.uuid and p.uuid in set(pads)]
+        if len(pins) == 2 and len(set(nets)) == 2:
+            self._trace_pads(pins, nets)            # two pads: the path between them, traced
+            return
         self.add_nets(nets, pads)
+
+    def _trace_pads(self, pins: list[str], nets: list[str]):
+        """Two pads selected in KiCad (the user: "maybe the user could select the two ports (pads) and then click the
+        add signal button and GT traces it this way"): every route between them (analysis/path_map.routes_between,
+        a job: a route search on a big board takes a moment), then the one route as the path, or the user picks one
+        of several (the shortest first); no route: the nets on their own, as before, saying why."""
+        board, config = self.board, self.settings.config
+
+        def work(progress):
+            """(worker) The routes between the two pads, in the direction a signal can take."""
+            from ..analysis.path_map import routes_between
+            return routes_between(board, config, pins[0], pins[1])
+
+        def done(result):
+            """Add the route picked (or the only one) as a signal path."""
+            from ..analysis.path_map import proposal_for_route, route_text
+            start, end, routes = result
+            if not routes:
+                self.add_nets(nets)
+                self.SetStatusText(f"no route between {pins[0]} and {pins[1]} through parts GroundTruth can follow "
+                                   "(an op-amp or buffer needs its GT labels): the two nets added on their own · "
+                                   "tools/dev/path_map.py maps what is between them")
+                return
+            route = routes[0]
+            if len(routes) > 1:
+                more = " (and more: the search stopped there)" if len(routes) >= 50 else ""
+                with wx.SingleChoiceDialog(self, f"{len(routes)} routes from {start} to {end}{more}. Which one is the "
+                                                 "signal path? (shortest first)", "GroundTruth: pick the route",
+                                           [route_text(r) for r in routes]) as dlg:
+                    if dlg.ShowModal() != wx.ID_OK:
+                        return
+                    route = routes[dlg.GetSelection()]
+            proposal = proposal_for_route(board, config, route, start, end)
+            if proposal.error:
+                message_box(proposal.error, "GroundTruth", wx.ICON_WARNING)
+                return
+            self._add_path(proposal)
+        self._start(f"tracing the routes between {pins[0]} and {pins[1]}…", work, done,
+                    what="trace between the selected pads", cancellable=False)
 
     def add_nets(self, nets: list[str], pads: list[str] = ()):
         """Add what was picked in KiCad. Several nets joined by parts are one signal path (one bit of each net
@@ -894,7 +937,9 @@ class MainFrame(ConfigActions, wx.Frame):
         self.on_config_change()
         self.notebook.SetSelection(self.notebook.FindPage(self.nets))
         self.nets.select(spec.name)
-        amps = ", ".join(f"{r} (pins {' → '.join(m.pins)})" for r, m in proposal.models.items())
+        # an op-amp picked by its pins says them; one traced through its labels (a quad's channel) its model
+        amps = ", ".join(f"{r} (pins {' → '.join(m.pins)})" if m.pins else f"{r} ({m.kind})"
+                         for r, m in proposal.models.items())
         self.SetStatusText(f"{'replaced' if old else 'added'} the path {spec.name}: {proposal.notes[0]}"
                            + (f" · op-amp model for {amps}" if amps else "")
                            + " · orange until reviewed: set its frequency and rise time")
