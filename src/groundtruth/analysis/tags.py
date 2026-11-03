@@ -17,6 +17,10 @@ An op-amp stage in a signal path (part model `amplifier`, its gain from a Gain f
 
     GT = amp_in:3, amp_out:1     the stage's input and output pins (a dual op-amp: amp_in:5, amp_out:7);
                                  amp_inv:2 its inverting input where the pin names don't say (analysis/analog_net)
+    GT = amp_in:2, amp_inv:1, amp_out:14, amp_in:4, amp_inv:5, amp_out:6
+                                 several channels of one part (a quad op-amp), one group each, in order: a group
+                                 starts where a role comes again; the channels are U3A, U3B ... (amp_label_groups).
+                                 Lists (amp_in:[2,4]) are not read: a problem says so, with the groups to write
 
 A logic buffer in a signal path (part model `buffer`: a Schmitt trigger; its values from its Rise Time, Zout, Cin,
 Threshold Rising / Falling and Hysteresis fields):
@@ -57,6 +61,7 @@ CONNECTOR_ROLES = ("in", "out")                                          # share
 TAG = re.compile(r"^(conv|hb)([a-z0-9.+]*)_([a-z]+)(?:_([a-z0-9.+]+))?$", re.I)   # conv1_out or conv_out_1
 SIG = re.compile(r"^sig(?:_(drv|rx))?(?::(.+))?$", re.I)                         # sig, sig:9, sig_drv:PA3
 AMP = re.compile(r"^amp_(in|inv|out):(.+)$", re.I)                                # amp_in:3, amp_inv:2, amp_out:OUTA
+AMP_LIST = re.compile(r"amp_(in|inv|out)\s*:\s*\[([^\]]*)\]", re.I)                # amp_in:[2,4,9]: not read (groups)
 BUF = re.compile(r"^buf_(in|out):(.+)$", re.I)                                     # buf_in:1, buf_out:6 (a logic buffer)
 # a controller's dead time (the converter's dead_rise / dead_fall): dead:20ns (every stage it controls, both edges),
 # dead1:20ns (the stage on its SW1 pin), conv1_dead:20ns (the stage labelled conv1); _rise / _fall: one edge only
@@ -130,6 +135,8 @@ HELP = {
         "  amp_in:3, amp_out:1   an op-amp stage's input and output pins: the path runs through it (gain from a "
         "Gain field or the Parts tab)\n"
         "  amp_inv:2    its inverting input (where the pin names don't say): the circuit around it is solved\n"
+        "  amp_in:2, amp_inv:1, amp_out:14, amp_in:4, amp_inv:5, amp_out:6   a dual or quad op-amp: one group per "
+        "channel, in order (U3A, U3B ...); not amp_in:[2,4], amp_out:[14,6]\n"
         "  buf_in:1, buf_out:6   a logic buffer's (Schmitt trigger's) input and output pin: the path runs through "
         "it, the stretch after it driven by the buffer's own edge (a dual: buf_in:1, buf_out:6, buf_in:3, buf_out:4)\n"
         "Label the driving pin, each op-amp and the receiving pin; leave the resistors and capacitors between them "
@@ -229,7 +236,12 @@ class BoardTags:
         if self.signals:
             parts.append(f"signal labels on {', '.join(sorted({t.ref for t in self.signals}))}")
         if self.amps:
-            parts.append(f"op-amp labels on {', '.join(sorted({t.ref for t in self.amps}))}")
+            # a part with several channels (a quad op-amp: amp_in comes again) says how many
+            n = {}
+            for t in self.amps:
+                n[t.ref] = n.get(t.ref, 0) + (t.role == "in")
+            parts.append("op-amp labels on " + ", ".join(f"{r} ({n[r]} channels)" if n[r] > 1 else r
+                                                         for r in sorted(n)))
         if self.ignored:
             parts.append(f"ignored: {', '.join(sorted(self.ignored))}")
         line = "GT labels on this board: " + ("; ".join(parts) if parts else "none usable")
@@ -250,7 +262,10 @@ def tag_text(fp: Footprint) -> str:
 def parse(text: str, ref: str = "") -> tuple[list[Tag], bool, list[str]]:
     """(tags, ignore, problems) of a GT field's value."""
     tags, ignore, problems = [], False, []
-    for raw in re.split(r"[,;]", text or ""):
+    text, problem = _amp_lists(text or "", ref)
+    if problem:
+        problems.append(problem)
+    for raw in re.split(r"[,;]", text):
         word = raw.strip().replace(" ", "")
         if not word:
             continue
@@ -341,17 +356,52 @@ def stage_ident(board: Board, refs: list[str]) -> str:
     return next((st.ident for st in board_tags(board).of("conv") if want & set(st.refs(*st.roles))), "")
 
 
-def amp_label_roles(fp: Footprint) -> dict[str, str]:
-    """A part's GT amp labels by role: {"in": pin, "inv": pin, "out": pin} (those it has)."""
-    tags, _, _ = parse(tag_text(fp), fp.reference)
-    return {t.role: t.ident for t in tags if t.kind == "amp"}
+def _amp_lists(text: str, ref: str) -> tuple[str, str]:
+    """(the field without its amp label lists, a problem or ""). Lists such as amp_in:[2,4,9], amp_inv:[1,5,8],
+    amp_out:[14,6,7] are not read (the user, 2026-11-03, chose one group per channel: a channel's pins together,
+    an amp_inv that one channel lacks can't shift the others): the problem names the groups to write instead when
+    the lists line up, so the user can copy them."""
+    found = [(m.group(1).lower(), [x.strip() for x in m.group(2).split(",") if x.strip()])
+             for m in AMP_LIST.finditer(text)]
+    if not found:
+        return text, ""
+    rest = AMP_LIST.sub("", text)
+    lists = dict(found)
+    n = {len(v) for v in lists.values()}
+    if len(n) == 1 and "in" in lists and "out" in lists:
+        groups = ", ".join(f"amp_{role}:{lists[role][k]}" for k in range(n.pop()) for role in ("in", "inv", "out")
+                           if role in lists)
+        hint = f"write one group per channel: {groups}"
+    else:
+        hint = "write one group per channel, e.g. amp_in:2, amp_inv:1, amp_out:14, amp_in:4, amp_inv:5, amp_out:6"
+    return rest, f"{ref}: GT amp label lists ({', '.join(f'amp_{r}:[…]' for r, _ in found)}) are not read: {hint}"
 
 
-def amp_label_pins(fp: Footprint) -> Optional[tuple[str, str]]:
-    """(input pin, output pin) a part's GT amp_in / amp_out labels name, or None without both."""
+def amp_label_groups(fp: Footprint) -> list[dict[str, str]]:
+    """A part's GT amp labels as op-amp channels, in the order written: [{"in": pin, "inv": pin, "out": pin}] (the
+    roles each has). A new channel starts where a role comes again (amp_in:2, amp_inv:1, amp_out:14, amp_in:4 ...
+    gives two; amp_out:4, amp_in:1 one: a single channel's labels may come in any order)."""
     tags, _, _ = parse(tag_text(fp), fp.reference)
-    pins = {t.role: t.ident for t in tags if t.kind == "amp"}
-    return (pins["in"], pins["out"]) if "in" in pins and "out" in pins else None
+    groups: list[dict[str, str]] = []
+    for t in tags:
+        if t.kind != "amp":
+            continue
+        if not groups or t.role in groups[-1]:
+            groups.append({})
+        groups[-1][t.role] = t.ident
+    return groups
+
+
+def amp_label_pins(fp: Footprint) -> list[tuple[str, str]]:
+    """(input pin, output pin) of each op-amp channel a part's GT amp labels name (amp_label_groups), in order;
+    [] without a channel that has both."""
+    return [(g["in"], g["out"]) for g in amp_label_groups(fp) if "in" in g and "out" in g]
+
+
+def channel_name(ref: str, k: int, n: int) -> str:
+    """The name of channel k (from 0) of a part with n op-amp channels: U3A, U3B ... (the reference alone for one),
+    as the schematic names a multi-unit symbol's units."""
+    return ref if n <= 1 else ref + chr(ord("A") + k)
 
 
 def buf_label_pins(fp: Footprint) -> list[tuple[str, str]]:
@@ -421,11 +471,20 @@ def _pin_problems(fp: Footprint, tags: list[Tag]) -> list[str]:
     line shows them (otherwise the label is just skipped and its path silently missing): a pin the part doesn't
     have, or an op-amp with amp_in but no amp_out (or the other way round)."""
     out = [_no_pin(t) for t in tags if t.kind in ("sig", "amp", "buf") and t.ident and _label_pad(fp, t.ident) is None]
-    roles = {t.role for t in tags if t.kind == "amp"} - {"inv"}
-    if len(roles) == 1:
-        have = roles.pop()
-        out.append(f"{fp.reference}: GT amp_{have} needs amp_{'out' if have == 'in' else 'in'} too: "
-                   "the op-amp stage's input and output pin")
+    groups = amp_label_groups(fp)
+    for k, g in enumerate(groups):
+        missing = [r for r in ("in", "out") if r not in g]
+        if not missing:
+            continue
+        if len(groups) == 1:                    # a single channel: as before
+            have = "in" if "in" in g else "out" if "out" in g else "inv"
+            need = " and ".join(f"amp_{r}" for r in missing)
+            out.append(f"{fp.reference}: GT amp_{have} needs {need} too: the op-amp stage's input and output pin")
+        else:
+            first = next(f"amp_{r}:{g[r]}" for r in ("in", "inv", "out") if r in g)
+            out.append(f"{fp.reference}: GT op-amp channel {k + 1} ({first}) has no "
+                       f"{' or '.join('amp_' + r for r in missing)}: it is left out (one group per channel, in order: "
+                       "amp_in, amp_inv, amp_out)")
     n_in = sum(1 for t in tags if t.kind == "buf" and t.role == "in")
     n_out = sum(1 for t in tags if t.kind == "buf" and t.role == "out")
     if n_in != n_out:

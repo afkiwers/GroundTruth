@@ -107,12 +107,12 @@ def unmodelled_note(refs: list[str]) -> str:
 
 
 def opamp_channels(fp: Footprint, model) -> list[OpAmpChannel]:
-    """The op-amp channels of an `amplifier` part [A52]: by the GT labels amp_in / amp_inv / amp_out (one channel),
-    else by the pins' schematic names grouped by channel; a channel without IN− is kept with inn None (the gain
-    block)."""
-    from .tags import amp_label_roles
+    """The op-amp channels of an `amplifier` part [A52]: by the GT labels amp_in / amp_inv / amp_out (one group per
+    channel: a quad's U3A, U3B ..., tags.amp_label_groups), else by the pins' schematic names grouped by channel; a
+    channel without IN− is kept with inn None (the gain block)."""
+    from .tags import amp_label_groups, channel_name
     params = dict(model.params)
-    labels = amp_label_roles(fp)
+    groups = [g for g in amp_label_groups(fp) if "in" in g and "out" in g]
 
     def pad(name):
         """The pad named by number or pin name."""
@@ -123,12 +123,16 @@ def opamp_channels(fp: Footprint, model) -> list[OpAmpChannel]:
         """The part's one pin named as an inverting input (a single op-amp), else None."""
         inv = [p for p in fp.pads if (pin_role(p.pin_function or "") or ("",))[0] == "inn" and p.net]
         return inv[0] if len(inv) == 1 else None
-    if labels and "in" in labels and "out" in labels:
-        # the labels name the stage's input and output; IN− by its own label, else by its pin name (refboard's
-        # TLV6001 U301: amp_in:1, amp_out:4, pin 3 named "−")
-        a, b = pad(labels["in"]), pad(labels["out"])
-        c = pad(labels["inv"]) if "inv" in labels else lone_inverting()
-        return [OpAmpChannel(fp.reference, fp.reference, a, c, b, params)] if a is not None and b is not None else []
+    if groups:
+        # the labels name each stage's input and output; IN− by its own label, else by its pin name (refboard's
+        # TLV6001 U301: amp_in:1, amp_out:4, pin 3 named "−"; a quad has four, so its channels need amp_inv)
+        out = []
+        for k, g in enumerate(groups):
+            a, b = pad(g["in"]), pad(g["out"])
+            c = pad(g["inv"]) if "inv" in g else lone_inverting()
+            if a is not None and b is not None:
+                out.append(OpAmpChannel(channel_name(fp.reference, k, len(groups)), fp.reference, a, c, b, params))
+        return out
     if len(model.pins) >= 2:
         a, b = pad(model.pins[0]), pad(model.pins[1])
         return ([OpAmpChannel(fp.reference, fp.reference, a, lone_inverting(), b, params)]

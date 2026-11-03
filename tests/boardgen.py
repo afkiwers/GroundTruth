@@ -328,6 +328,42 @@ def opamp_path_board(r_after: Optional[str] = None, **fields: str) -> BoardGen:
     return g
 
 
+# a quad op-amp's channels as on a 14-pin QFN part: (+ pin, − pin, output pin) per unit A, B, C
+QUAD_PINS = {"A": (2, 1, 14), "B": (4, 5, 6), "C": (9, 8, 7)}
+
+
+def quad_follower_board(gt: Optional[str] = None) -> BoardGen:
+    """Three followers in one quad op-amp U5 over a GND plane, each on a path of its own: U1.1 (IN_A) → U5A → OUT_A →
+    U6.1, U2.1 (IN_B) → U5B → OUT_B → U7.1, U3.1 (IN_C) → U5C → OUT_C → U8.1. U5's pins are named only "+" and "−"
+    (its outputs unnamed), as a quad symbol's often are: the names can't tell its channels apart. Its V+ pin 3 on +5V,
+    V− pin 10 on GND. gt: U5's GT field (amp labels)."""
+    g = BoardGen(layers=2, size=(50.0, 30.0))
+    pads = [{"number": 3, "at": (0.0, -10.0), "net": "+5V", "pintype": "power_in", "pinfunction": "V+"},
+            {"number": 10, "at": (0.0, 9.0), "net": "GND", "pintype": "power_in", "pinfunction": "V-"}]
+    x, y0 = 25.0, 15.0
+    for k, (unit, (plus, minus, out)) in enumerate(QUAD_PINS.items()):
+        dy = (k - 1) * 6.0
+        y = y0 + dy
+        pads += [{"number": plus, "at": (-1.5, dy), "net": f"IN_{unit}", "pintype": "input", "pinfunction": "+"},
+                 {"number": minus, "at": (1.5, dy + 1.5), "net": f"OUT_{unit}", "pintype": "input", "pinfunction": "-"},
+                 {"number": out, "at": (1.5, dy), "net": f"OUT_{unit}", "pintype": "output", "pinfunction": ""}]
+        g.ic(f"U{k + 1}", (5.0, y), f"IN_{unit}", gnd_offset=(0.0, 1.0))
+        g.ic(f"U{k + 6}", (45.0, y), f"OUT_{unit}", gnd_offset=(0.0, 1.0))
+        g.track((5.0, y), (x - 1.5, y), f"IN_{unit}")
+        g.track((x + 1.5, y), (45.0, y), f"OUT_{unit}")
+        g.track((x + 1.5, y), (x + 1.5, y + 1.5), f"OUT_{unit}")          # the follower's feedback: OUT to −
+        for gx in (5.0, 45.0):
+            g.via((gx, y + 1.6), "GND", (g.cu[0], g.cu[-1]))
+            g.track((gx, y + 1.0), (gx, y + 1.6), "GND")
+    g.footprint("U5", "QUAD_OPAMP", "Package_DFN_QFN:Fake_QFN-14", (x, y0), pads)
+    if gt:
+        g.fields("U5", GT=gt)
+    g.via((x, y0 + 9.6), "GND", (g.cu[0], g.cu[-1]))
+    g.track((x, y0 + 9.0), (x, y0 + 9.6), "GND")
+    g.plane("GND", g.cu[-1])
+    return g
+
+
 def buffer_path_board(labels: bool = False, pin_names: bool = True, dual: bool = False, **fields: str) -> BoardGen:
     """A Hall-type input through a logic buffer (Schmitt trigger) over a GND plane: the connector J1.1 (HW) → R1
     10 kΩ → HW_F (C1 10 pF to GND, R2 47 kΩ pull-up to +5V) → U5 channel 1 (1A pin 1 in, 1Y pin 6 out; VCC pin 5 on

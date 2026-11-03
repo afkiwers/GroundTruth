@@ -592,3 +592,40 @@ def test_detection_runs_a_path_through_an_inverting_opamp_stage(tmp_path):
         assert (d.spec.driver, d.spec.receivers) == ("U1.1", ["U2.1"]), (net, d.spec)
     from groundtruth.components.models import amplifier_pins
     assert [p.number for p in amplifier_pins(board.footprint("U3"), sc.config.model_for("U3"))] == ["4", "1"]
+
+
+def test_a_path_through_one_channel_of_a_quad_op_amp_stays_on_that_channel(tmp_path):
+    """A quad op-amp U5 with three followers, labelled one group per channel (the user's GT field, 2026-11-03):
+    U5 is an amplifier with channels U5A, U5B, U5C; a path from U2 (IN_B) to U7 (OUT_B) runs through U5B alone, into
+    OUT_B and never into channel A's or C's nets; Detect, from labels at its ends, finds the same path; the circuit
+    solves the follower to a gain of 1. Before, only the last group (U5C) was read: a path through U5A or U5B
+    stopped at U5."""
+    from boardgen import quad_follower_board
+    from conftest import make
+    from groundtruth.adapters.file_source import loads_board
+    from groundtruth.analysis.analog_net import opamp_channels
+    from groundtruth.analysis.detect import detect_nets
+    from groundtruth.analysis.simulate import simulate
+    from groundtruth.components.models import amplifier_channels
+    from groundtruth.config.settings import Config, NetSpec
+    quad = "amp_in:2, amp_inv:1, amp_out:14, amp_in:4, amp_inv:5, amp_out:6, amp_in:9, amp_inv:8, amp_out:7"
+    spec = NetSpec("IN_B", "U2.1", ["U7.1"], 1e6, 50e-9)
+    board, sc, _ = make(tmp_path, quad_follower_board(quad), "quad", nets=(spec,), solve_points=2, max_solves=3)
+    cfg = sc.config
+    fp, m = board.footprint("U5"), cfg.model_for("U5")
+    assert m.kind == "amplifier"
+    assert [(a.net, b.net) for a, b in amplifier_channels(fp, m)] == [("IN_A", "OUT_A"), ("IN_B", "OUT_B"),
+                                                                      ("IN_C", "OUT_C")]
+    assert [(c.name, c.inp.number, c.inn.number, c.out.number) for c in opamp_channels(fp, m)] == [
+        ("U5A", "2", "1", "14"), ("U5B", "4", "5", "6"), ("U5C", "9", "8", "7")]
+    rr = simulate(board, cfg).routes[0]
+    assert not rr.error, rr.error
+    assert [e["kind"] for e in rr.path["elements"]].count("amp") == 1
+    assert rr.signal_nets == ["OUT_B"]          # the field solve's stage: after U5B, on channel B's output
+    # Detect from labels at the ends (the driver and the receiver), through U5B only
+    g = quad_follower_board(quad)
+    g.label("U2", "sig_drv:1")
+    g.label("U7", "sig_rx:1")
+    labelled = loads_board(g.text(), "quadl.kicad_pcb")
+    found = [d.spec for d in detect_nets(labelled, Config(), 0) if d.spec.driver == "U2.1"]
+    assert len(found) == 1 and found[0].receivers == ["U7.1"], [(s.name, s.receivers) for s in found]
