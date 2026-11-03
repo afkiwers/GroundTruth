@@ -1933,6 +1933,7 @@ POLE_SPAN = 10.0               # poles and zeros up to this many times the sweep
 DOUBLET = 1e-3                 # a pole and a zero this close (relative) cancel in the lists and the written-out
                                # H(s) [A54]
 LOOP_LEAD = 60                 # a loop gain's points from near DC to its sweep's start (phase_margin's `lead`)
+POLES_EXACT_MAX = 1200         # a path's circuit up to this many unknowns gets exact poles (QZ, O(N³)), else fitted
 
 
 def cancel_doublets(poles, zeros) -> tuple[list, list, int]:
@@ -1976,8 +1977,26 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
         if node in net.circuit.nodes and lnode in lumped.circuit.nodes and node != net.out_node and net.on_path(name):
             outs.append((f"{name}: output", node, lnode))
     out = []
+    # a circuit too large for the exact roots (a dense QZ, O(N³): 6 s at 1200 unknowns, 90 s at 2400): its poles and
+    # zeros fitted to the sweep instead (transfer.fitted_response, vector fitting [Gustavsen 1999]), its step by BDF2
+    # on the lumped circuit (sparse), a note says so (audit 2026-11, M-13)
+    big = lumped.circuit.size > POLES_EXACT_MAX
     for title, node, lnode in outs:
         h = net.circuit.transfer(f, node)
+        if big:
+            from .transfer import fitted_response
+            r = fitted_response(title, spec.name, "voltage gain", np.asarray(f, float), h)
+            r.notes.append(f"the circuit has {lumped.circuit.size} unknowns: its poles and zeros are fitted to the "
+                           f"sweep (the exact solve, O(N³), is kept to {POLES_EXACT_MAX})")
+            s0 = 2j * math.pi * float(f[0])
+            shape = np.prod([1 - s0 / z for z in r.zeros]) / np.prod([1 - s0 / p for p in r.poles]) if r.poles \
+                else 1.0
+            r.normal = normal_form(r.poles, r.zeros, complex(h[0]) / complex(shape), f_max=f_max)
+            r.step = _step_of(lumped, lnode, r.poles, r.normal, f, None)
+            if r.step and r.step.get("note"):
+                r.notes.append(r.step["note"])
+            out.append(r)
+            continue
         poles, zeros, k = lumped.circuit.poles_zeros(lnode)
         poles, zeros, n_doublets = cancel_doublets(poles, zeros)
         r = Response(title, spec.name, "voltage gain", np.asarray(f, float), h, keep(poles), keep(zeros), exact=True)
@@ -2002,8 +2021,9 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
         f_lead = np.geomspace(max(float(f[0]) * 1e-9, 1e-9), float(f[0]), LOOP_LEAD, endpoint=False)
         # refined on T itself near its lightly damped roots (the lumped circuit's) and between samples that differ
         # much: a narrow |T| = 1 excursion between two sweep points counts (audit M-3)
-        try:
-            roots = np.concatenate(lumped.circuit.loop_roots(name)) if name in lumped.circuit.opamps else None
+        try:                    # (not for a circuit too large for exact roots: bisection alone then, M-13)
+            roots = np.concatenate(lumped.circuit.loop_roots(name)) \
+                if name in lumped.circuit.opamps and not big else None
         except (ValueError, np.linalg.LinAlgError):
             roots = None
         pm = phase_margin(f, t, lead=net.circuit.loop_gain(name, f_lead), lead_f=f_lead, roots=roots,

@@ -7,7 +7,7 @@ symbols; a capacitor's symbol takes, where a value is put in, its capacitance at
 a 0R a wire; each op-amp with its feedback an ideal one, a nullor (v₊ = v₋, its output whatever
 the circuit needs) [Franco 2015], a gain block (a part with a Gain field) a VCVS of its gain; the input an ideal
 voltage source on the driver's net (the source's resistance and the receivers' load left out: the circuit as
-designed). Its modified nodal equations [Ho 1975] are solved in s by fraction-free elimination, and H(s) = N(s)/D(s)
+designed; a note names them with their values, as the plotted response beside H(s) has them). Its modified nodal equations [Ho 1975] are solved in s by fraction-free elimination, and H(s) = N(s)/D(s)
 is put in the form a designer reads: N and D polynomials in s, D's constant term 1 where it has one (then N's is
 the DC gain), e.g. a Sallen-Key low-pass 1 / (C1·C2·R1·R2·s² + C2·(R1 + R2)·s + 1).
 
@@ -159,6 +159,14 @@ def symbolic_transfer(schematic: dict) -> Optional[SymbolicTF]:
     dnp = [ref for ref in schematic.get("dnp", ()) if any(p[0] == ref for p in parts)]
     if dnp:                                       # in H(s) as drawn; the note lets a reader drop them elsewhere
         notes.append(f"{', '.join(dnp)} not populated (DNP), kept in the circuit")
+    # the circuit as designed: the source's resistance and the load are not in H(s), but they are in the plotted
+    # response beside it (audit 2026-11, E-14: "−R2/R1" read −10 beside a plotted −9.76 with nothing said)
+    left = [f"the driver's {_ohms(schematic['source_ohms'])}" if schematic.get("source_ohms") else "",
+            f"the {_ohms(schematic['load_ohms'])} load" if schematic.get("load_ohms") else ""]
+    left = [x for x in left if x]
+    if left:
+        notes.append(f"H(s) is the circuit as designed: {' and '.join(left)} not in it (they are in the plotted "
+                     "response)")
     return SymbolicTF(text, latex, mathml, expr, {k_: v for k_, v in values.items() if v is not None}, notes)
 
 
@@ -188,6 +196,14 @@ def _poly(expr, s) -> tuple[str, str]:
     l_ = "".join((f"{sg} " if i else ("-" if sg == "-" else "")) + term + " "
                  for i, (sg, term) in enumerate(latexes)).strip()
     return t, l_
+
+
+def _ohms(r: float) -> str:
+    """A resistance for a note: '25 Ω', '1 kΩ', '2.2 MΩ'."""
+    for unit, k in (("MΩ", 1e6), ("kΩ", 1e3)):
+        if abs(r) >= k:
+            return f"{r / k:.3g} {unit}"
+    return f"{r:.3g} Ω"
 
 
 def _name(ref: str) -> str:

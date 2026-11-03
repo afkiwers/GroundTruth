@@ -454,6 +454,37 @@ def test_the_default_route_does_not_depend_on_the_files_order():
         assert texts[0] == texts[1], seed
 
 
+def test_a_bias_followers_own_feedback_pin_is_no_branch():
+    """G-16: A –R1– B → U5 → C, B biased through R2 from BIAS, the output of the follower U6 (+IN on DIV, −IN and OUT on
+    BIAS) beside a second channel U7B of a dual listening on BIAS: on BIAS U6 drives it (its inputs followed), U7B
+    listens; U6's own −IN on its output's net is no "into op-amp" branch (it was listed as one)."""
+    from groundtruth.analysis.path_map import trace
+    dual = part("U7", [(3, "Y", "input", "+INA"), (2, "Z", "input", "-INA"), (1, "Z", "output", "OUTA"),
+                       (5, "BIAS", "input", "+INB"), (6, "MON", "input", "-INB"), (7, "MON", "output", "OUTB"),
+                       (8, "+5V", "power_in", "V+"), (4, "GND", "power_in", "V-")], "DUAL")
+    parts = [IC("U1", "A"), IC("U2", "C", "input"), R("R1", "A", "B", "100"), OPA("U5", "B", "C", "C"),
+             R("R2", "B", "BIAS", "100k"), OPA("U6", "DIV", "BIAS", "BIAS"), R("R3", "+5V", "DIV", "10k"),
+             R("R4", "DIV", "GND", "10k"), dual, REG()]
+    board = board_of(parts)
+    pm = trace(board, config_of(board, {"U7": amp()}), "U1.1", ["U2.1"])
+    bias = next(b for b in pm.branches["B"] if b.part == "R2").deeper
+    kinds = {(b.kind, b.part) for b in bias}
+    assert ("opamp_out", "U6") in kinds and ("opamp_in", "U7B") in kinds
+    assert ("opamp_in", "U6") not in kinds
+
+
+def test_the_symbolic_h_says_what_it_leaves_out():
+    """E-14: an inverting stage's H(s) is −R2/R1, the circuit as designed; a note names the driver's 25 Ω and the
+    1 kΩ load it leaves out, which the plotted response (−9.76 at DC with them) has."""
+    from groundtruth.analysis.symbolic import symbolic_transfer
+    parts = [IC("U1", "SIG_IN"), IC("U2", "OUT", "input"), R("R1", "SIG_IN", "N", "1k"), R("R2", "N", "OUT", "10k"),
+             OPA("U3", "GND", "N", "OUT"), REG()]
+    _, _, _, net = network(parts, models={"U3": amp()}, load_ohms=1e3)
+    tf = symbolic_transfer(net.schematic)
+    assert tf.text == "H(s) = −R2/R1"
+    assert any("the driver's 25 Ω and the 1 kΩ load not in it" in n for n in tf.notes)
+
+
 def test_a_long_chain_and_an_unconnected_end():
     """G-14 / G-15: a chain of 1200 resistors with max_nets 2000 (a recursion limit before); an end on a pad with no
     net is said as such."""
@@ -564,19 +595,50 @@ def test_a_long_series_chain_keeps_its_receiver():
 
 
 def test_parts_left_out_of_the_circuit_are_named():
-    """E-7 / E-8: a resistor array (a resistor model on more than two nets), a feedback resistor with no settings
-    entry and an analog switch ('open') are left out with a note each, and the op-amp left without DC feedback is
-    named (it read 99 504 in silence)."""
-    rn = part("RN1", [(1, "SIG_IN", "passive", ""), (8, "M", "passive", ""), (2, "M", "passive", ""),
-                      (7, "GND", "passive", ""), (3, "P3", "passive", ""), (6, "P6", "passive", "")], "10k")
-    parts = [IC("U1", "SIG_IN"), IC("U2", "OUT", "input"), rn, OPA("U3", "M", "N", "OUT"), R("R11", "N", "OUT", "9k"),
-             R("R10", "N", "GND", "1k"), part("U8", [(1, "N", "passive", "S"), (2, "SWA", "passive", "D"),
-                                                     (3, "CTL", "input", "IN")], "SWITCH"), REG()]
-    _, _, _, net = network(parts, models={"U3": amp(), "RN1": ComponentModel("resistor", {"R": 10e3})},
-                           drop=("R11",), through=["RN1"])
+    """E-8: a feedback resistor with no settings entry and an analog switch ('open') are left out with a note each,
+    and the op-amp left without DC feedback is named (it read 99 504 in silence)."""
+    parts = [IC("U1", "SIG_IN"), IC("U2", "OUT", "input"), OPA("U3", "SIG_IN", "N", "OUT"),
+             R("R11", "N", "OUT", "9k"), R("R10", "N", "GND", "1k"),
+             part("U8", [(1, "N", "passive", "S"), (2, "SWA", "passive", "D"), (3, "CTL", "input", "IN")], "SWITCH"),
+             R("R12", "SWA", "OUT", "9k"), REG()]
+    _, _, _, net = network(parts, models={"U3": amp()}, drop=("R11",))
     text = " ".join(net.notes)
-    assert "RN1 (a resistor on" in text and "R11 (no settings entry)" in text and "U8 (model open)" in text
+    assert "R11 (no settings entry)" in text and "U8 (model open)" in text and "pins [a, b]" in text
     assert "U3: no DC path from the output back to IN−" in text
+
+
+def test_an_analog_switch_modelled_with_its_pins_closes_the_loop():
+    """E-8: the same analog switch modelled as a short on its two switched pins (pins [1, 2]) puts R12 in parallel
+    with R11: the gain 1 + (R11 ∥ R12)/R10 = 5.5 (with the open-loop gain), no note of a part left out."""
+    sw = ComponentModel("short")
+    sw.pins = ["1", "2"]
+    parts = [IC("U1", "SIG_IN"), IC("U2", "OUT", "input"), OPA("U3", "SIG_IN", "N", "OUT"),
+             R("R11", "N", "OUT", "9k"), R("R10", "N", "GND", "1k"),
+             part("U8", [(1, "N", "passive", "S"), (2, "SWA", "passive", "D"), (3, "CTL", "input", "IN")], "SWITCH"),
+             R("R12", "SWA", "OUT", "9k"), REG()]
+    _, _, _, net = network(parts, models={"U3": amp(), "U8": sw})
+    assert abs(h_at(net, 1.0)[0]) == pytest.approx(noninverting(1 + 4.5e3 / 1e3), rel=1e-3)
+    assert "U8" in net.parts and not any("left out of the circuit" in n for n in net.notes)
+
+
+def test_a_resistor_array_is_its_isolated_resistors():
+    """E-7: a 6-pad array RN1 of 10 kΩ, pads 1–6 SIG_IN–M, 2–5 M–GND, 3–4 on P3 / P4 (an element off the path): a
+    divider of 1/2 behind the driver's 25 Ω, as the nodal solve has it; a note says the array was taken so. A 5-pad
+    array (odd: no isolated pinout) is left out with a note."""
+    rn = part("RN1", [(1, "SIG_IN", "passive", ""), (6, "M", "passive", ""), (2, "M", "passive", ""),
+                      (5, "GND", "passive", ""), (3, "P3", "passive", ""), (4, "P4", "passive", "")], "10k")
+    res = ComponentModel("resistor", {"R": 10e3})
+    _, _, _, net = network([IC("U1", "SIG_IN"), IC("U2", "M", "input"), rn], models={"RN1": res}, through=["RN1"],
+                           load_pf=0.0)
+    want = nodal([("V", "s", "0", 1.0), ("R", "s", "i", R_S), ("R", "i", "m", 10e3), ("R", "m", "0", 10e3)], "m",
+                 [1.0])
+    assert h_at(net, 1.0) == pytest.approx(want, rel=1e-6)
+    assert {"RN1:1-6", "RN1:2-5"} <= set(net.parts) and any("RN1: an array taken" in n for n in net.notes)
+    odd = part("RN2", [(1, "SIG_IN", "passive", ""), (2, "M", "passive", ""), (3, "GND", "passive", ""),
+                       (4, "M", "passive", ""), (5, "X", "passive", "")], "10k")
+    _, _, _, net = network([IC("U1", "SIG_IN"), IC("U2", "M", "input"), odd, R("R1", "SIG_IN", "M", "100")],
+                           models={"RN2": res})
+    assert any("RN2 (a resistor on" in n for n in net.notes)
 
 
 def test_channels_of_a_dual_named_by_digits_and_a_part_u31():
@@ -628,3 +690,22 @@ def test_a_vias_pieces_add_up_to_the_whole_barrel():
     whole = via_impedance((zs["B.Cu"] - zs["F.Cu"]) * 1e-3, 0.3e-3)
     assert sum(l for _, l in pieces) == pytest.approx(whole(1e6).imag / (TAU * 1e6), rel=1e-9)
     assert sum(r for r, _ in pieces) == pytest.approx(whole(0.0).real, rel=1e-9)
+
+
+def test_a_circuit_too_large_for_exact_roots_gets_fitted_ones(monkeypatch):
+    """M-13: past POLES_EXACT_MAX unknowns the poles come from a fit to the sweep (the exact QZ is O(N³): 90 s at 2400
+    unknowns), a note says so, and the figures still hold: an RC low-pass (1 kΩ + the driver's 25 Ω, 100 nF) has its
+    one pole at −1/RC within 1 % [Gustavsen 1999], its step's rise 2.2·RC."""
+    import groundtruth.analysis.simulate as sim
+    monkeypatch.setattr(sim, "POLES_EXACT_MAX", 1)
+    parts = [IC("U1", "SIG_IN"), IC("U2", "OUT", "input"), R("R1", "SIG_IN", "OUT", "1k"), C("C1", "OUT", "GND")]
+    board = board_of(parts)
+    cfg = config_of(board, {"C1": ideal_cap(100e-9)})
+    spec = NetSpec("SIG_IN", "U1.1", ["U2.1"], 1e3, 1e-6, load_pf=0.0)
+    out, _, _ = sim.network_responses(board, cfg, spec, "U2.1", np.geomspace(1.0, 1e6, 300))
+    r = out[0]
+    rc = (1e3 + R_S) * 100e-9
+    assert any("fitted to the sweep" in n for n in r.notes)
+    real = [p for p in r.poles if abs(p) < 1e6]
+    assert len(real) == 1 and real[0].real == pytest.approx(-1 / rc, rel=0.01)
+    assert r.step["metrics"]["rise"] == pytest.approx(math.log(9) * rc, rel=0.02)

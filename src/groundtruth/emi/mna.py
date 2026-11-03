@@ -40,6 +40,7 @@ CANCEL = 1e-6                   # a pole and a zero this close cancel: relative 
 CANCEL_FLOOR = 1e-4             # ... so a lightly damped pair's own scale counts, not only |p| (audit M-4)
 F_REF = 1e3                     # Hz: s is scaled by 2π·F_REF for the eigenvalue problems
 PI_GL = 0.5                     # a line is stamped as its π below this |γl| (electrically short), else as its Y
+R_BRANCH = 1e-3                 # Ω: a resistor below this is a branch (v_a − v_b − R·i = 0), not a conductance (r)
 ORIGIN = 1e-6                   # a root below ORIGIN·2π·F_REF rad/s (1 mHz) is at the origin; the QZ keeps finite roots
 INFINITE = 1e9                  # up to INFINITE·2π·F_REF rad/s (1 THz): fixed bounds, [A82] (audit M-5)
 
@@ -110,8 +111,16 @@ class Circuit:
 
     def r(self, a: str, b: str, ohms: float):
         """A resistor between a and b (Ω > 0, finite: else a ValueError; a short is a small resistance, as
-        part("short") makes it): its conductance stamped into G [Ho 1975]."""
+        part("short") makes it): its conductance stamped into G [Ho 1975]; below R_BRANCH as a branch, its current an
+        unknown and v_a − v_b − R·i = 0 (as an inductor's): a conductance of 1e12 S added into a node's row beside
+        milli-siemens kept only their first digits whatever the solve did after (audit 2026-11, M-11: 1e-12 Ω beside
+        1 kΩ, 1e-3 off)."""
         ohms = _finite_value(f"resistor {a}-{b}", ohms, positive=True)
+        if ohms < R_BRANCH:
+            k = ("x", self._branch("R", f"{a}-{b}"))
+            self._stamp_branch(self.node(a), self.node(b), k)
+            self._g.append((k, k, -ohms))
+            return
         self._admit(self.node(a), self.node(b), 1.0 / ohms, self._g)
 
     def c(self, a: str, b: str, farads: float):
@@ -357,7 +366,7 @@ class Circuit:
             a = g + (2j * math.pi * fk) * c
             if rows:
                 a = a + sp.coo_matrix((vals[k], (rows, cols)), shape=(n, n)).tocsc()
-            out[k] = spl.splu(a.tocsc()).solve(b)
+            out[k] = scaled_solve(a, b)
         return out
 
     def transfer(self, f, out: str, ref: Optional[str] = None) -> np.ndarray:
@@ -435,7 +444,7 @@ class Circuit:
             a = g + s_ * c
             if rows:
                 a = a + sp.coo_matrix((vals[k], (rows, cols)), shape=a.shape).tocsc()
-            x = spl.splu(a.tocsc()).solve(rhs)
+            x = scaled_solve(a, rhs)
             d = (x[ip] if ip >= 0 else 0.0) - (x[im] if im >= 0 else 0.0)
             w1 = 2 * math.pi * prm.gbw / prm.a0
             a_ol = prm.a0 / (1 + s_ / w1) / (1 + s_ / (2 * math.pi * prm.fp2) if prm.fp2 else 1.0)
@@ -524,6 +533,23 @@ class Circuit:
             return poles, zeros, 0j
         log_k = (np.log(h) - m * np.log(s0) + np.sum(np.log(1 - s0 / pz)) - np.sum(np.log(1 - s0 / zz)))
         return poles, zeros, complex(np.exp(log_k))
+
+
+def scaled_solve(a, b: np.ndarray) -> np.ndarray:
+    """x of a·x = b (a sparse) by a sparse LU of a with its rows, then its columns, scaled to a largest entry of 1
+    [Golub 2013, §3.5.2]: Dr·a·Dc·y = Dr·b, x = Dc·y. A circuit's matrix mixes 1/(1 mΩ) beside 1/(1 TΩ) and ωC of
+    femtofarads beside ωL of nanohenries: unscaled, LU pivoted on the size of entries and lost the small ones' digits
+    (audit 2026-11, M-11: 1e-12 Ω and 1e12 Ω on one node, 3e-2 off)."""
+    import scipy.sparse as sp
+    import scipy.sparse.linalg as spl
+    a = sp.csr_matrix(a)
+    r = np.asarray(abs(a).max(axis=1).todense()).ravel()
+    dr = sp.diags(1.0 / np.where(r > 0, r, 1.0))
+    a = (dr @ a).tocsc()
+    col = np.asarray(abs(a).max(axis=0).todense()).ravel()
+    dc = 1.0 / np.where(col > 0, col, 1.0)
+    y = spl.splu((a @ sp.diags(dc)).tocsc()).solve(dr @ np.asarray(b, complex))
+    return dc * y
 
 
 def _reaches(g: np.ndarray, c: np.ndarray, b: np.ndarray, cv: np.ndarray) -> bool:

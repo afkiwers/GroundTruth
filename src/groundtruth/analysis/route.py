@@ -167,7 +167,14 @@ def signal_graph(board: Board, config: Config, through=()) -> tuple[dict, dict]:
                 way(a, b, fp)
             continue
         pads = [p for p in fp.pads if p.net]
-        if len({p.net for p in pads}) != 2 or not _passes(config, fp, through):
+        if not _passes(config, fp, through):
+            continue
+        if len({p.net for p in pads}) != 2:
+            if m is not None and m.kind in ("resistor", "cap") and not m.pins:
+                from .analog_net import array_pairs
+                for a, b in array_pairs(fp):      # a resistor or capacitor array's elements [A83]
+                    way(a, b, fp)
+                    way(b, a, fp)
             continue
         a = pads[0]
         b = next(p for p in pads if p.net != a.net)

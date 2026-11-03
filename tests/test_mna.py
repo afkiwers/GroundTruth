@@ -404,3 +404,22 @@ def test_the_loop_roots_of_a_follower_into_a_capacitive_load():
     for w in want:
         assert np.min(np.abs(poles - w)) <= 1e-6 * abs(w), (w, poles)
     assert all(np.min(np.abs(np.array(want) - p)) <= 1e-6 * abs(p) for p in poles)
+
+
+def test_a_milliohm_beside_a_teraohm_keeps_its_digits():
+    """1 kΩ into a node b (through 1e-12 Ω) with 1e12 Ω and 1 pF to ground and 1 kΩ + 1 kΩ on: v(o) = v(b)/2 with
+    v(b) the divider 1 kΩ against Zb = 1e12 ∥ 1/(sC) ∥ 2 kΩ, to 1e-9 from 1 Hz to 1 GHz (audit 2026-11, M-11: the
+    unscaled LU was 3e-2 off; the matrix is now scaled before it is factorised, mna.scaled_solve [Golub 2013])."""
+    ckt = Circuit()
+    ckt.vsource("in", "0")
+    ckt.r("in", "a", 1e3)
+    ckt.r("a", "b", 1e-12)
+    ckt.r("b", "0", 1e12)
+    ckt.c("b", "0", 1e-12)
+    ckt.r("b", "o", 1e3)
+    ckt.r("o", "0", 1e3)
+    f = np.geomspace(1, 1e9, 60)
+    s = 2j * math.pi * f
+    zb = 1 / (1 / 1e12 + s * 1e-12 + 1 / 2e3)
+    want = zb / (1e3 + 1e-12 + zb) / 2
+    assert np.allclose(ckt.transfer(f, "o"), want, rtol=1e-9, atol=0)
