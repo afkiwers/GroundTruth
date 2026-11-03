@@ -431,6 +431,11 @@ class _Loader:
                 outline = (pts, [])
         zone = Zone(net, layers, {}, outline, is_rule, node.value("name", "") or "", node.value("uuid", ""),
                     node.line)
+        # KiCad's fill flag: `(fill yes ...)` once filled (with copper or none: every island removed), `(fill ...)`
+        # without it before; no (fill) node at all: not known
+        fill = node.find("fill")
+        if fill is not None:
+            zone.fill_done = "yes" in fill.atoms()
         for fill in node.find_all("filled_polygon"):
             layer = self.layer_alias.get(fill.value("layer", ""), fill.value("layer", ""))
             pts = _pts(fill.find("pts"))

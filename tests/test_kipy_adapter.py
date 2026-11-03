@@ -114,6 +114,42 @@ def test_read_board_from_kipy_objects():
     assert len(b.outline) == 1
 
 
+def test_a_zone_kicad_filled_empty_is_not_unfilled():
+    """KiCad's own fill flag (Zone.filled), live: a zone filled and left without copper (every island removed) is not
+    'not filled' (the user: "it still ask in the beginning, even if it already filled. I literraly did it before
+    opening the plugin"); one never filled, no flag and no copper, is."""
+    fb = FakeBoard()
+    empty = Zone()
+    empty.proto.type = ZoneType.ZT_COPPER
+    empty.proto.layers.append(BoardLayer.BL_B_Cu)
+    empty.proto.copper_settings.net.name = "VIN"
+    empty.proto.filled = True                       # filled by KiCad, no polygon left
+    never = Zone()
+    never.proto.type = ZoneType.ZT_COPPER
+    never.proto.layers.append(BoardLayer.BL_F_Cu)
+    never.proto.copper_settings.net.name = "VOUT"
+    fb.zones = fb.zones + [empty, never]
+    b = read_board(fb)
+    assert [z.net for z in b.unfilled_zones()] == ["VOUT"]
+    assert [z.fill_done for z in b.zones] == [False, True, False]   # the first: copper, flag not set in the fake
+
+
+def test_the_file_reader_takes_kicads_fill_flag(tmp_path):
+    """The board file's `(fill yes ...)`: a zone filled with copper, one filled and left empty, one never filled
+    (`(fill ...)` without yes). Only the last counts as unfilled, and only it gets the file's warning."""
+    from boardgen import BoardGen
+    from groundtruth.adapters.file_source import loads_board
+    g = BoardGen(layers=2, size=(30.0, 20.0))
+    g.zone("GND", "B.Cu", [(1, 1), (29, 1), (29, 19), (1, 19)])
+    g.zone("VIN", "F.Cu", [(2, 2), (8, 2), (8, 8), (2, 8)], empty=True)
+    g.zone("VOUT", "F.Cu", [(20, 2), (28, 2), (28, 8), (20, 8)], filled=False)
+    b = loads_board(g.text(), "zones.kicad_pcb")
+    assert [(z.net, z.is_filled, z.fill_done) for z in b.zones] == [("GND", True, True), ("VIN", False, True),
+                                                                     ("VOUT", False, False)]
+    assert [z.net for z in b.unfilled_zones()] == ["VOUT"]
+    assert any("1 copper zone(s) have no fill (e.g. net 'VOUT')" in w for w in b.warnings), b.warnings
+
+
 class LiveStackupBoard(FakeBoard):
     """What KiCad 10.0.5 actually sends: every stackup item 'disabled', dielectrics without materials."""
 

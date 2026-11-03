@@ -1400,8 +1400,11 @@ class MainFrame(ConfigActions, wx.Frame):
         note = f" — {self.board.warnings[0]}" if self.board.warnings else ""
         self.SetStatusText(f"{Path(path).name}: {len(self.board.copper_layers)} copper layers, "
                            f"{len(self.board.footprints)} parts · settings {sp.name}{note}")
-        if (self.board.unfilled_zones() and self.session.live and
-                message_box("Some zones are not filled. Refill all zones now?", "groundtruth", wx.YES_NO) == wx.YES):
+        unfilled = self.board.unfilled_zones() if self.session.live else []
+        if unfilled:
+            self._sync_loading()            # the loading card gone (the tabs are filled) before the question
+        if unfilled and message_box(f"{len(unfilled)} zone(s) are not filled (e.g. net {unfilled[0].net}). Refill all "
+                                    "zones now?", "groundtruth", wx.YES_NO) == wx.YES:
             self.on_refill()                # reloads the board, and detects then if the settings are still new
             return                          # (a run waiting for this reload continues after that one)
         self._show_stale()                  # results of the board as it was before this read are marked
