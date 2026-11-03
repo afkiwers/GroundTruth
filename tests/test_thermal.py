@@ -121,6 +121,48 @@ def test_part_losses_follow_the_operating_point(tmp_path):
     assert {r["ref"] for r in rows} == {"Q1"} and any("rds_on" in n for n in notes) and any("dcr" in n for n in notes)
 
 
+def test_the_winding_loss_takes_the_inductors_r_but_never_the_placeholder(tmp_path):
+    """The stage's dcr and the inductor's R on the Parts tab are one value. Without a dcr the winding loss takes a
+    real R (a DCR field's, or typed in), never the suggested 50 mΩ placeholder; a note when the two disagree, and
+    when the stage's dcr stands beside the placeholder."""
+    from dataclasses import replace
+    from groundtruth.analysis.detect import detect_converters
+    from groundtruth.analysis.thermal import part_losses
+    from groundtruth.components.defaults import DEFAULT_INDUCTOR_DCR, placeholder_r
+    board, sc, _ = make(tmp_path, discrete_buck_board(), "buck", nets=())
+    spec = replace(detect_converters(board, sc.config)[0].spec, i_out=5.0, v_in=24.0, v_out=5.0, f_sw=500e3,
+                   rise_time=2e-9, rds_on=0.010, dead_rise=0.0, dead_fall=0.0)
+    entry = sc.config.components["L1"]
+    assert entry.model.kind == "inductor" and placeholder_r(entry.model)        # suggested: 50 mΩ, no field
+
+    def with_l1(r, from_schematic=()):
+        """The settings with L1's R set (and maybe marked as its DCR field's)."""
+        m = replace(entry.model, params=dict(entry.model.params, R=r), from_schematic=list(from_schematic))
+        return replace(sc.config, components=dict(sc.config.components, L1=replace(entry, model=m)))
+
+    d = 5.0 / 24.0
+    res = NS(net=spec.name, duty=d, v_in=24.0, dc=[])
+    i2 = 25 + _rip2(sc.config, d * (1 - d), 24.0, 500e3)
+    # no dcr, L1 the placeholder: no winding loss, and a note naming it
+    rows, notes = part_losses(board, replace(sc.config, converters=[replace(spec, dcr=None)]), [res])
+    assert "L1" not in {r["ref"] for r in rows} and any("placeholder" in n and "L1" in n for n in notes)
+    # no dcr, L1's R typed in (3 mΩ): the loss takes it
+    cfg = replace(with_l1(0.003), converters=[replace(spec, dcr=None)])
+    rows = {r["ref"]: r for r in part_losses(board, cfg, [res])[0]}
+    assert rows["L1"]["power_w"] == pytest.approx(i2 * 0.003) and "L1's R" in rows["L1"]["what"]
+    # a DCR field equal to the placeholder's value is the part's own
+    cfg = replace(with_l1(DEFAULT_INDUCTOR_DCR, ["R"]), converters=[replace(spec, dcr=None)])
+    assert {r["ref"]: r for r in part_losses(board, cfg, [res])[0]}["L1"]["power_w"] == pytest.approx(i2 * 0.05)
+    # the stage's dcr wins, with a note when L1's R says otherwise or is the placeholder
+    rows, notes = part_losses(board, replace(with_l1(0.003), converters=[replace(spec, dcr=0.020)]), [res])
+    assert {r["ref"]: r for r in rows}["L1"]["power_w"] == pytest.approx(i2 * 0.020)
+    assert any("differs" in n and "L1" in n for n in notes)
+    notes = part_losses(board, replace(sc.config, converters=[replace(spec, dcr=0.020)]), [res])[1]
+    assert any("placeholder" in n for n in notes)
+    notes = part_losses(board, replace(with_l1(0.020), converters=[replace(spec, dcr=0.020)]), [res])[1]
+    assert not any("L1" in n for n in notes)                                    # they agree: nothing to say
+
+
 def test_switching_losses_of_a_diode_buck_and_a_boost(tmp_path):
     """With a rectifier diode both edges are hard and only the switch's own output energy is lost (≈ ½·Q_oss·V);
     the diode (1−D)·I·V_f. A boost's hard-switched transistor is its low side, switching V_out at the inductor

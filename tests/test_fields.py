@@ -225,3 +225,35 @@ def test_the_part_parameters_guide_lists_every_field_the_code_reads():
     for section in text.split("\n## ")[1:]:
         rows = [line.split("|")[1].strip() for line in section.splitlines() if line.startswith("| `")]
         assert len(rows) == len(set(rows)), section.splitlines()[0]
+
+
+def test_a_stages_dcr_is_checked_against_its_inductors_r_on_the_parts_tab(tmp_path):
+    """The stage's Inductor DCR and its inductor's R / DCR on the Parts tab are one value (the user: "when changing
+    the DCR value to something different to the actual parts value, it should flag that somehow"): ◇ ("parts")
+    when they agree or the field is empty, ! when they differ, with the Parts tab's value for a reset; the
+    suggested 50 mΩ placeholder is no source. A DCR field on the inductor is the schematic's mark as before."""
+    board, sc, _ = make(tmp_path, discrete_buck_board(), "buck", nets=())
+    spec = detect_converters(board, sc.config)[0].spec
+    entry = sc.config.components["L1"]
+
+    def cfg(r):
+        """The settings with L1's R typed in on the Parts tab."""
+        m = replace(entry.model, params=dict(entry.model.params, R=r), from_schematic=[])
+        return replace(sc.config, components=dict(sc.config.components, L1=replace(entry, model=m)))
+
+    mark = stage_marks(board, cfg(0.003), replace(spec, dcr=0.0063))["dcr"]
+    assert mark.state == "differs" and mark.resettable and mark.value == pytest.approx(0.003)
+    assert mark.origin == "parts" and "L1" in mark.tip and "3mΩ" in mark.label
+    mark = stage_marks(board, cfg(0.003), replace(spec, dcr=0.003))["dcr"]
+    assert mark.state == "parts" and not mark.resettable
+    assert stage_marks(board, cfg(0.003), replace(spec, dcr=None))["dcr"].state == "parts"
+    # L1 keeps the suggested placeholder: nothing to compare with
+    assert stage_marks(board, sc.config, replace(spec, dcr=0.0063))["dcr"].state == ""
+    # a schematic field comes first, and its differing value can be reset to as well
+    gen = discrete_buck_board()
+    gen.fields("L1", DCR="5milliohm")
+    (tmp_path / "f").mkdir()
+    board2, sc2, _ = make(tmp_path / "f", gen, "buckf", nets=())
+    spec2 = replace(detect_converters(board2, sc2.config)[0].spec, dcr=0.0063, from_schematic=[])
+    mark = stage_marks(board2, sc2.config, spec2)["dcr"]
+    assert mark.state == "differs" and mark.origin == "schematic" and mark.value == pytest.approx(0.005)

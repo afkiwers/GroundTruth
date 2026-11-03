@@ -349,7 +349,11 @@ press <b>Update selected</b>: only the fields you changed are set on every selec
 keeps each stage's own value. C_oss,
 Q_oss, R_DS(on), DCR and V_f come from the parts' schematic fields where they have them: ◆ beside a field, or
 <font color="@WARN@">!</font> where a value set here differs; <b>Use schematic values</b> takes them back
-(<a href="#fields">Part parameters from the schematic</a>). The controller's
+(<a href="#fields">Part parameters from the schematic</a>). <b>Inductor DCR</b> is also checked against the
+inductor's <b>R / DCR</b> on the <a href="#parts">Parts tab</a> (one physical value): ◇ where they agree (or the
+field is empty and the losses take that R), <font color="@WARN@">!</font> where they differ. Click a
+<font color="@WARN@">!</font>, or right-click its field, to reset that one field to its source's value (the
+schematic's, or the Parts tab's R): it is saved at once, and what is typed in the other fields stays. The controller's
 <b>spread spectrum</b> is on the form: <b>Spread spectrum (%)</b> (f_sw dithered up to that much above it; empty:
 off), <b>Spread mode</b> (random hops, or a triangle sweep) and <b>Spread rate</b> (the triangle's modulation
 frequency; greyed for random). <b>random</b> is the pseudo-random dither most controllers use (the LTC7890's too): a new
@@ -800,9 +804,14 @@ the border to fit the column to its contents (the Note column too, past its usua
   the <a href="#converters">Converters tab</a> (or <a href="#bridges">Motor bridges</a>), each marked ◆ "from the
   schematic" in the stage's form (refboard's Q301 EPC2306: conv1's rds_on 3.1 mΩ, c_oss 616 pF, q_oss 44 nC,
   v_sd 1.6 V).</li>
+<li>an inductor or ferrite: <b>R / DCR</b> is its winding's DC resistance (a <b>DCR</b> field on its symbol fills it).
+  Without one it is suggested at 50 mΩ (a ferrite 100 mΩ), a placeholder, not the part's own: its Schematic cell says
+  so. A power stage's winding loss takes the stage's <b>Inductor DCR</b> (Converters tab); when that is empty, the
+  inductor's R here, but never the placeholder. A note says when the two differ: they are one value, and the DCR
+  field sets both.</li>
 </ul>
 <p>The table's columns: <b>Ref</b>, <b>Value</b>, <b>Footprint</b> (read only), <b>Model</b> (a drop-down),
-<b>R (Ω)</b>, <b>C (F)</b>, <b>C at bias</b> (the DC-bias curve), <b>C in circuit</b> (read only: the capacitance at
+<b>R / DCR (Ω)</b>, <b>C (F)</b>, <b>C at bias</b> (the DC-bias curve), <b>C in circuit</b> (read only: the capacitance at
 the part's DC voltage, worked out in the background when the tab loads), <b>L (H)</b>, <b>ESR (Ω)</b>,
 <b>ESL (H)</b>, <b>Pins</b> (a through-hole part's own pin values, see below), <b>Schematic</b> and <b>Note</b>.
 Only the parameters of the part's model can be edited; the others are shaded. A Model cell is coloured
@@ -868,10 +877,11 @@ stage's is listed on the Issues tab (<code>unusual_value</code>, info) in case a
   something else, marked <b><font color="@WARN@">!</font></b> (hover over it for both values). The issue
   <code>schematic_differs</code> (info) lists it too, so a CI run sees it. <b>Use schematic values</b> (Converters and
   Bridges tabs) or <b>Reset filtered to suggested</b> (Parts tab) takes the schematic's values back; typing the
-  schematic's value does too.</li>
+  schematic's value does too. For one field: click its <b>!</b>, or right-click the field.</li>
 <li>The Converters and Bridges forms show the mark beside each parameter; the Parts table has a <b>Schematic</b> column
   (◆ the parameters from the fields, ! the ones set here that differ, with the schematic's value) and colours a
-  differing cell.</li>
+  differing cell. An inductor's R that differs from a power stage's <b>Inductor DCR</b> is flagged there too
+  (! with the stage's value).</li>
 </ul>
 
 <hr><a name="cbias"></a><h3>Cbias: capacitance at DC bias</h3>

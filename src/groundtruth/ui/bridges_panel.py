@@ -19,8 +19,8 @@ from ..config.settings import (CONNECTIONS, DRIVE_MODES, EMF_SHAPES, PWM_SCHEMES
 from . import limit_choice as lc
 from . import theme
 from .listsel import SelectableRows
-from .widgets import (InfoBox, PickDialog, button_row, parse_field, section_rows, set_lazy_items, source_status,
-                      with_mark)
+from .widgets import (InfoBox, PickDialog, button_row, form_state, parse_field, restore_form, section_rows,
+                      set_lazy_items, source_status, with_mark)
 
 STANDARD_CHOICES = lc.standard_items()     # as TI WEBENCH names them; the class beside it (ui/limit_choice.py)
 SWEEP_HELP = "bridges-sweep"        # the help's anchor of the sweep paragraph (help.html), the info button's target
@@ -284,9 +284,10 @@ class BridgesPanel(SelectableRows, wx.Panel):
         self.marks, marked = {}, {}
         for key, ctrl in (("rds_on", self.rds_on), ("rds_on_low", self.rds_on_low), ("v_sd", self.v_sd),
                           ("c_oss", self.c_oss), ("q_oss", self.q_oss)):
-            marked[ctrl], self.marks[key] = with_mark(fw, ctrl)
+            marked[ctrl], self.marks[key] = with_mark(fw, ctrl, lambda k=key: self._reset_param(k))
         self._add_sections([
-            ("Switches", "Losses, edges and ringing. Empty: left out (the run says so). ◆ from the schematic",
+            ("Switches", "Losses, edges and ringing. Empty: left out (the run says so). ◆ from the schematic, "
+                         "! differs (click: reset)",
              [("R_DS(on)", self.rds_on), ("R_DS(on) low side", self.rds_on_low),
               ("Reverse conduction (V)", self.v_sd), ("C_oss", self.c_oss), ("Q_oss", self.q_oss),
               ("C stray (chassis)", self.c_stray)]),
@@ -485,6 +486,41 @@ class BridgesPanel(SelectableRows, wx.Panel):
         marks = stage_marks(self.board, self.settings.config, b) if b is not None and self.board else {}
         for key, mark in self.marks.items():
             mark.show(*marks.get(key, ("", "")))
+
+    def _reset_param(self, key: str):
+        """A switch parameter's mark was clicked (or its field's menu used): the selected bridge takes that one
+        value back from its FETs' schematic field (linked again) and is saved. The form's other fields and the
+        legs being edited keep what they show (not yet Updated)."""
+        from ..components.fields import stage_marks
+        rows = self.selected_rows()
+        if len(rows) != 1 or self.board is None or rows[0] >= len(self.bridges):
+            return
+        i = rows[0]
+        old = self.bridges[i]
+        mark = stage_marks(self.board, self.settings.config, old).get(key)
+        if mark is None or mark.value is None:
+            return
+        typed, legs = form_state(self.form_win), self.legs
+        new = replace(old, from_schematic=[k for k in old.from_schematic if k != key] + [key])
+        setattr(new, key, mark.value)
+        self.bridges[i] = new
+        if not self._commit():
+            return
+        self.select_only(i)
+        ctrl = {"rds_on": self.rds_on, "rds_on_low": self.rds_on_low, "v_sd": self.v_sd, "c_oss": self.c_oss,
+                "q_oss": self.q_oss}[key]
+        text = f"{mark.value:g}" if key == "v_sd" else _fmt(mark.value, {"c_oss": "F", "q_oss": "C"}.get(key, "Ω"))
+
+        def back():
+            """After the selection's refill: the typed fields and legs back, this one with its new value."""
+            if not self:
+                return
+            restore_form(typed, skip=(ctrl,))
+            ctrl.ChangeValue(text)
+            self.legs = legs
+            self._show_legs()
+            self._show_marks(new)
+        wx.CallAfter(back)
 
     def on_leg_select(self, evt):
         """A leg was selected: fill the Selected leg fields with it, and show that leg alone in KiCad (live mode)."""

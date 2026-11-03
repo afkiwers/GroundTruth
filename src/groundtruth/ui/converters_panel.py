@@ -17,8 +17,8 @@ from ..config.settings import TOPOLOGIES, ConfigError, ConverterSpec
 from . import limit_choice as lc
 from . import theme
 from .listsel import SelectableRows
-from .widgets import (InfoBox, PickDialog, button_row, parse_field, section_rows, set_lazy_items, source_status,
-                      with_mark)
+from .widgets import (InfoBox, PickDialog, button_row, form_state, parse_field, restore_form, section_rows,
+                      set_lazy_items, source_status, with_mark)
 
 STANDARD_CHOICES = lc.standard_items()     # as TI WEBENCH names them; the class beside it (ui/limit_choice.py)
 SPREAD_MODES = ("random", "triangle")      # ConverterSpec.spread_mode
@@ -93,7 +93,9 @@ FIELD_TIPS = {
     "R_DS(on) low side": "The low-side FET's on-resistance, e.g. 3m: its conduction loss (1−D)·I²·R. Empty: the "
                          "same as the high side.",
     "Inductor DCR": "The inductor's DC resistance (datasheet DCR), e.g. 6.3m: its winding loss I²·DCR. Empty: "
-                    "left out of the thermal solve.",
+                    "the inductor's R / DCR on the Parts tab (its DCR field, or typed in there; not the suggested "
+                    "50m placeholder), else left out. ◇: the same as that R; !: they differ (the losses use the value "
+                    "here; click the ! or right-click the field to take the Parts tab's).",
     "Diode V_f (V)": "A catch or boost diode's forward voltage at the load current, e.g. 0.5: its loss "
                      "(1−D)·I·V_f. Empty: 0.5 V.",
     "Dead time, rise": "A synchronous stage's dead time from the low side turning off to the high side turning on "
@@ -198,6 +200,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self._init_rows(on_show, "power stages")
         self._init_enable("converters")
         self.list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_select)
+        self.Bind(wx.EVT_SHOW, self._on_show)
         self.build_steps = [self._form_fields, self._form_fields_more, self._form_rows, self._form_layout]
         while self.build_steps and not in_steps:
             self.build_steps.pop(0)()
@@ -282,7 +285,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self.marks = {}
         self._rows = {}
         for key, ctrl in self.param_ctrls.items():
-            self._rows[ctrl], self.marks[key] = with_mark(fw, ctrl)
+            self._rows[ctrl], self.marks[key] = with_mark(fw, ctrl, lambda k=key: self._reset_param(k))
 
     def form_sections(self) -> list:
         """The form's sections in order: (title, what it is for, [(label, field)]). The user: "this properties pane
@@ -308,7 +311,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
               ("Spread rate (Hz)", self.spread_rate)]),
             ("Interleaving", "Optional: stages switching out of phase.",
              [("Interleave group", self.interleave), ("Phase (°)", self.phase_deg)]),
-            ("Losses", "Empty: left out (the run says so). ◆ from the schematic",
+            ("Losses", "Empty: left out (the run says so). ◆ schematic, ◇ Parts tab, ! differs (click: reset)",
              [("R_DS(on)", self.rds_on), ("R_DS(on) low side", self.rds_on_low), ("Inductor DCR", self.dcr),
               ("Diode V_f (V)", self.diode_vf), ("Dead time, rise", self.dead_rise),
               ("Dead time, fall", self.dead_fall), ("Reverse V_SD (V)", self.v_sd), ("Q_rr", self.q_rr)]),
@@ -599,11 +602,55 @@ class ConvertersPanel(SelectableRows, wx.Panel):
                                  f"{lc.default_tip(lc.analysis_of(self.settings))}")
 
     def _show_marks(self, c: Optional[ConverterSpec]):
-        """The part parameters' marks for stage c (◆ from the schematic, ! set here and different; none for None)."""
+        """The part parameters' marks for stage c (◆ from the schematic, ◇ as on the Parts tab, ! set here and
+        different; none for None)."""
         from ..components.fields import stage_marks
         marks = stage_marks(self.board, self.settings.config, c) if c is not None and self.board else {}
         for key, mark in self.marks.items():
             mark.show(*marks.get(key, ("", "")))
+
+    def _on_show(self, evt):
+        """The tab is shown again: the selected stage's marks again (an inductor's R edited on the Parts tab
+        meanwhile changes its DCR's ◇ / !)."""
+        evt.Skip()
+        rows = self.selected_rows()
+        if evt.IsShown() and getattr(self, "marks", None) and len(rows) == 1 and rows[0] < len(self.converters):
+            self._show_marks(self.converters[rows[0]])
+
+    def _reset_param(self, key: str):
+        """A part parameter's mark was clicked (or its field's menu used): the selected stage takes that one value
+        back from its source (the schematic's field, linked again; or a DCR from its inductor's R on the Parts tab)
+        and is saved. The form's other fields keep what is typed in them (not yet Updated)."""
+        from ..components.fields import stage_marks
+        rows = self.selected_rows()
+        if len(rows) != 1 or self.board is None or rows[0] >= len(self.converters):
+            return
+        i = rows[0]
+        old = self.converters[i]
+        mark = stage_marks(self.board, self.settings.config, old).get(key)
+        if mark is None or mark.value is None:
+            return
+        typed = form_state(self.form_win)
+        new = replace(old, from_schematic=[k for k in old.from_schematic if k != key])
+        setattr(new, key, mark.value)
+        if mark.origin == "schematic":
+            new.from_schematic.append(key)
+        self.converters[i] = new
+        if not self._commit():
+            return
+        self.reselect([i])
+
+        def back():
+            """After the selection's refill: the typed fields back, this one with its new value."""
+            if not self:
+                return
+            ctrl = self.param_ctrls[key]
+            restore_form(typed, skip=(ctrl,))
+            ctrl.ChangeValue(self._texts(new)[key])
+            self._spread_hint()
+            self._integrated_state()
+            self._show_marks(new)
+        wx.CallAfter(back)
 
     def _form(self) -> Optional[ConverterSpec]:
         """The form as a ConverterSpec, or None after telling the user what is wrong. It is checked by the

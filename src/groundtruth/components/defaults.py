@@ -21,6 +21,19 @@ ELECTROLYTIC_ESR = 0.1
 ELECTROLYTIC_ESL = 3e-9
 DEFAULT_INDUCTOR_DCR = 0.05
 DEFAULT_FERRITE_DCR = 0.1
+# the R an inductor or ferrite is suggested with: a placeholder for its DCR, not the part's own [A25]
+PLACEHOLDER_R = {"inductor": DEFAULT_INDUCTOR_DCR, "ferrite": DEFAULT_FERRITE_DCR}
+
+
+def placeholder_r(model: ComponentModel) -> bool:
+    """Whether a part's R is still the suggested placeholder: an inductor's or ferrite's R equal to PLACEHOLDER_R
+    and not taken from its DCR field. Such an R is no measured or datasheet value (the Parts tab says so, and a
+    power stage's losses don't use it); an R typed in on the Parts tab that happens to equal it can't be told
+    apart."""
+    default = PLACEHOLDER_R.get(model.kind)
+    r = model.params.get("R")
+    return default is not None and r is not None and "R" not in model.from_schematic and \
+        math.isclose(r, default, rel_tol=1e-6)
 
 
 def ref_prefix(reference: str) -> str:

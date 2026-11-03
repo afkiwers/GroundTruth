@@ -23,23 +23,39 @@ def set_lazy_items(combo: wx.ComboBox, items: list[str]):
         combo.ChangeValue(value)
 
 
-MARKS = {"schematic": "◆", "differs": "!", "": ""}
+MARKS = {"schematic": "◆", "parts": "◇", "differs": "!", "": ""}
 
 
 class FieldMark(wx.StaticText):
-    """The mark next to a part parameter's field: ◆ from the schematic fields, ! set here and different from them
-    (components/fields.stage_marks), with the explanation as its tooltip."""
-    def __init__(self, parent):
+    """The mark next to a part parameter's field: ◆ from the schematic fields, ◇ the same as the Parts tab's value,
+    ! set here and different from its source (components/fields.stage_marks), with the explanation as its tooltip.
+    With on_reset, a click on a mark whose source has another value calls it (the field takes that value back)."""
+    def __init__(self, parent, on_reset: Optional[Callable[[], None]] = None):
         """An empty mark, one character wide (fixed size: a mark appearing does not shift the form)."""
         super().__init__(parent, label="", size=wx.Size(16, -1), style=wx.ALIGN_CENTRE_HORIZONTAL | wx.ST_NO_AUTORESIZE)
+        self.on_reset = on_reset
+        self.label = ""                 # the reset's text ("Reset to 42.6mΩ (L2's R / DCR on the Parts tab)")
+        self.resettable = False
+        self.Bind(wx.EVT_LEFT_UP, self._click)
 
-    def show(self, state: str, tip: str):
-        """Show the mark for `state` ("schematic", "differs" or "": none); "differs" in the warning colour."""
+    def show(self, state: str, tip: str, value=None, origin: str = "", label: str = ""):
+        """Show the mark for `state` ("schematic", "parts", "differs" or "": none); "differs" in the warning
+        colour. value / origin / label: what a reset takes (components/fields.Mark), offered while the field
+        shows something else."""
         from . import theme
         self.SetLabel(MARKS.get(state, ""))
         self.SetForegroundColour(theme.colour(theme.palette().warn) if state == "differs" else
                                  theme.colour(theme.palette().text))
         self.SetToolTip(tip or "")
+        self.label = label
+        self.resettable = self.on_reset is not None and value is not None and state in ("differs", "")
+        self.SetCursor(wx.Cursor(wx.CURSOR_HAND if self.resettable and state else wx.CURSOR_DEFAULT))
+
+    def _click(self, evt):
+        """A click on the mark: the reset, when there is one to make."""
+        evt.Skip()
+        if self.resettable:
+            self.on_reset()
 
 
 def section_form(vgap: int = 5) -> wx.GridBagSizer:
@@ -91,13 +107,52 @@ def section_rows(parent, form: wx.GridBagSizer, sections: list, tips: dict, cell
     return r
 
 
-def with_mark(parent, ctrl) -> tuple[wx.BoxSizer, FieldMark]:
-    """A form field with its FieldMark to the right."""
-    mark = FieldMark(parent)
+def with_mark(parent, ctrl, on_reset: Optional[Callable[[], None]] = None) -> tuple[wx.BoxSizer, FieldMark]:
+    """A form field with its FieldMark to the right. With on_reset, the field's right-click menu offers the reset
+    while the mark has one (the mark's label); otherwise the field keeps its own menu (cut, copy, paste)."""
+    mark = FieldMark(parent, on_reset)
     row = wx.BoxSizer(wx.HORIZONTAL)
     row.Add(ctrl, 1, wx.EXPAND)
     row.Add(mark, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 3)
+    if on_reset is not None:
+        def menu(evt):
+            """The field's right-click menu: the reset, when its mark offers one."""
+            if not mark.resettable:
+                evt.Skip()
+                return
+            m = wx.Menu()
+            item = m.Append(wx.ID_ANY, mark.label)
+            ctrl.Bind(wx.EVT_MENU, lambda e: on_reset(), item)
+            ctrl.PopupMenu(m)
+            m.Destroy()
+        ctrl.Bind(wx.EVT_CONTEXT_MENU, menu)
     return row, mark
+
+
+def form_state(win) -> dict:
+    """What every text field and list in a form window shows now ({control: text or selection}): kept over a
+    rebuild of the form from the settings (a reset of one field keeps what is typed in the others)."""
+    out = {}
+    for w in win.GetChildren():
+        if isinstance(w, (wx.TextCtrl, wx.ComboBox)):
+            out[w] = w.GetValue()
+        elif isinstance(w, wx.Choice):
+            out[w] = w.GetSelection()
+        out.update(form_state(w))
+    return out
+
+
+def restore_form(state: dict, skip=()):
+    """Put back what form_state saw, except in the controls `skip` (without text events: the caller updates
+    what depends on them)."""
+    for w, v in state.items():
+        if w in skip or not w:
+            continue
+        if isinstance(w, wx.Choice):
+            if 0 <= v < w.GetCount():
+                w.SetSelection(v)
+        elif w.GetValue() != v:
+            w.ChangeValue(v)
 
 
 def parse_field(text: str, unit: str = "") -> Optional[float]:

@@ -387,6 +387,34 @@ LOSS_CATEGORIES = ("conduction", "switching", "output charge", "reverse recovery
                    "series parts", "connectors", "other")
 
 
+def inductor_dcr(config: Config, spec, ref: str) -> tuple[Optional[float], str, list[str]]:
+    """(the DCR a stage's winding loss uses, where it came from as a suffix for the loss's text, notes). The
+    stage's dcr when set; else its inductor's R on the Parts tab (its DCR field, or typed in there), unless that R
+    is only the suggested placeholder (components/defaults.placeholder_r): then None, the loss left out. The two
+    are one physical value, so a note says when the stage's dcr and a real R disagree, and when the part keeps the
+    placeholder (its circuit models use that R)."""
+    from ..components.defaults import placeholder_r
+    from ..components.fields import same
+    from ..components.values import format_si
+    m = config.model_for(ref)
+    r = m.params.get("R") if m is not None and m.kind in ("inductor", "ferrite") else None
+    dummy = m is not None and placeholder_r(m)
+    if spec.dcr is not None:
+        notes = []
+        if dummy:
+            notes.append(f"{ref}'s R on the Parts tab is the suggested {format_si(r, 'Ω')} placeholder (no DCR field); "
+                         f"{spec.name}'s losses use its dcr {format_si(spec.dcr, 'Ω')}")
+        elif r is not None and not same(r, spec.dcr):
+            notes.append(f"{spec.name}: dcr {format_si(spec.dcr, 'Ω')} differs from {ref}'s R {format_si(r, 'Ω')} "
+                         "(the Parts tab): the losses use dcr")
+        return spec.dcr, "", notes
+    if r is not None and not dummy:
+        return r, f" ({ref}'s R)", []
+    why = f" ({ref}'s R is the suggested {format_si(r, 'Ω')} placeholder)" if dummy else ""
+    return None, "", [f"{spec.name}: no dcr{why}, so {ref}'s winding loss is left out: give {ref} a DCR field, or "
+                      "set its R on the Parts tab or the stage's dcr"]
+
+
 def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], list[str]]:
     """[{"ref", "power_w", "what"}] of every power stage's parts at its operating point, and notes on what is
     missing."""
@@ -532,10 +560,10 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
                         "reverse recovery")
         _, inductor = switch_inductor(board, config, spec)
         if inductor is not None:
-            if spec.dcr is not None:
-                add(inductor.reference, i_sq * spec.dcr, f"DCR {spec.dcr * 1e3:g} mΩ", "inductor")
-            else:
-                notes.append(f"{spec.name}: no dcr, so {inductor.reference}'s winding loss is left out")
+            dcr, how, n = inductor_dcr(config, spec, inductor.reference)
+            notes.extend(n)
+            if dcr is not None:
+                add(inductor.reference, i_sq * dcr, f"DCR {dcr * 1e3:g} mΩ{how}", "inductor")
         for path in getattr(res, "dc", []) or []:
             for p in path.get("parts", []):
                 add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"in DC {path['name']}", "series parts")

@@ -7,7 +7,7 @@ import wx
 from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 import wx.grid as gridlib
 
-from ..components.defaults import ref_prefix, suggest_model
+from ..components.defaults import placeholder_r, ref_prefix, suggest_model
 from typing import Optional
 
 from ..components.fields import MODEL_FIELDS, model_values, same, show_value
@@ -18,7 +18,9 @@ from ..config.settings import ConfigError
 from . import theme
 from .background import LatestOnly
 
-COLS = ["Ref", "Value", "Footprint", "Model", "R (Ω)", "C (F)", "C at bias", "C in circuit", "L (H)", "ESR (Ω)",
+# "R / DCR": a resistor's R, an inductor's or ferrite's winding resistance (the user, 2026-11-03: "why is there no
+# DCR for inductors?" — it was the R column, not called so)
+COLS = ["Ref", "Value", "Footprint", "Model", "R / DCR (Ω)", "C (F)", "C at bias", "C in circuit", "L (H)", "ESR (Ω)",
         "ESL (H)", "Pins", "Schematic", "Note"]
 PINS_COL = COLS.index("Pins")             # a part's own through-hole pin values (analysis/pins.py)
 # a ceramic's capacitance at the DC voltage across it (analysis/bias.part_bias, its voltage from cap_voltages, worked
@@ -78,6 +80,10 @@ class PartsPanel(wx.Panel):
         self._volts: Optional[dict] = None
         self._volts_asked = 0
         self._volter = LatestOnly("part voltages")
+        # {inductor: [(power stage, its Inductor DCR)]}: the stages whose dcr is set, against the R shown (_texts);
+        # worked out at every refresh (a few stages), and when the tab is shown again (Converters tab edits)
+        self._dcrs: dict[str, list[tuple[str, float]]] = {}
+        self.Bind(wx.EVT_SHOW, self._on_show)
 
         top = wx.BoxSizer(wx.HORIZONTAL)
         top.Add(wx.StaticText(self, label="Filter:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
@@ -120,7 +126,8 @@ class PartsPanel(wx.Panel):
         self._sort: Optional[tuple[int, bool]] = None    # (column, ascending) the rows are sorted by, else as listed
 
         hint = wx.StaticText(self, label="Values accept SI notation (33R, 4k7, 100n, 0.4n). 'open' parts are only "
-                                         "ports; 'short' is a dead short. C at bias: a ceramic's DC-bias curve "
+                                         "ports; 'short' is a dead short. R / DCR: an inductor's or ferrite's "
+                                         "winding resistance (its DCR field). C at bias: a ceramic's DC-bias curve "
                                          "(75nF@50V, or 95nF@10V, 39nF@50V); C in circuit: its capacitance at the "
                                          "DC voltage across it, what a run uses (Cbias in the help). A FET's or "
                                          "controller's fields (Rds(on), Coss …) go to its power stage: Converters "
@@ -255,6 +262,7 @@ class PartsPanel(wx.Panel):
         g = self.grid
         if g.IsCellEditControlEnabled():    # an open cell editor is closed (and its value kept) before its row goes
             g.DisableCellEditControl()
+        self._dcrs = self._stage_dcrs()
         g.BeginBatch()
         if g.GetNumberRows():
             g.DeleteRows(0, g.GetNumberRows())
@@ -269,6 +277,27 @@ class PartsPanel(wx.Panel):
         self._natural = [g.GetColSize(i) for i in range(len(COLS))]
         self._fit_columns()
         g.EndBatch()
+
+    def _stage_dcrs(self) -> dict[str, list[tuple[str, float]]]:
+        """{inductor reference: [(stage name, its dcr)]} of the converters whose Inductor DCR is set."""
+        from ..analysis.power import switch_inductor
+        out: dict[str, list[tuple[str, float]]] = {}
+        if self.board is None or self.settings is None:
+            return out
+        config = self.settings.config
+        for c in config.converters:
+            if c.dcr is None:
+                continue
+            _, inductor = switch_inductor(self.board, config, c)
+            if inductor is not None:
+                out.setdefault(inductor.reference, []).append((c.name, c.dcr))
+        return out
+
+    def _on_show(self, evt):
+        """The tab is shown again: the table again when a stage's Inductor DCR changed meanwhile (its flags)."""
+        evt.Skip()
+        if evt.IsShown() and self.settings is not None and self._stage_dcrs() != self._dcrs:
+            self.refresh()
 
     def _fill_row(self, row: int, ref: str, new: bool = True):
         """One part's row: values, which cells can be edited (the model's parameters), and the colours. new=False
@@ -293,6 +322,16 @@ class PartsPanel(wx.Panel):
         gt_pins = gt_values(fp)[0] if fp is not None else {}
         if gt_pins:
             marks.append("◆ GT " + format_values(gt_pins))
+        if placeholder_r(m):                    # the suggested DCR, no part's own: a power stage's losses skip it
+            marks.append(f"DCR {format_si(m.get('R'), 'Ω')}: suggested placeholder, no DCR field")
+        elif m.kind in ("inductor", "ferrite") and m.params.get("R") is not None:
+            # a power stage's Inductor DCR is the same physical value as this R: flag where they disagree (the
+            # user: "when changing the DCR value to something different to the actual parts value, it should flag
+            # that somehow"); the stage's value is what its losses use
+            for stage, dcr in self._dcrs.get(ref, []):
+                if not same(m.get("R"), dcr):
+                    marks.append(f"! {stage}: Inductor DCR {format_si(dcr, 'Ω')} (Converters tab)")
+                    differs = dict(differs, R=None)     # the R cell coloured as "set here and different"
         vals = [""] * len(COLS)                 # by column: the parameter columns are not all next to each other
         vals[:4] = [ref, e.value, e.footprint, m.kind]
         vals[PINS_COL], vals[SCHEMATIC_COL], vals[NOTE_COL] = format_values(e.tht), "; ".join(marks), m.note
