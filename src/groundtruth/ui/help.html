@@ -227,6 +227,15 @@ in the schematic: see <a href="#siglabels">Labelling a signal path</a>.</p>
   A net already listed, still unreviewed and detected, whose path detection now sees differently (after GT labels
   were added, say) is offered again, ticked and marked <b>REPLACES</b>: it replaces the entry (its tick kept), and
   unreviewed entries for pieces of its path are removed. Reviewed and hand-made nets are never changed.</li>
+<li><b>A path between two pads</b>: select just the two pads at its ends in the PCB editor (Ctrl+click the second),
+  then <b>Add KiCad selection</b>. GroundTruth traces every route between them: through any part with two pins
+  (a capacitor or a large resistor too: those go into <b>Pass through</b>), and through op-amps, comparators and
+  logic buffers from input to output where their GT labels or pin names say which pins those are; never through a
+  ground or a supply. The direction is the one a signal can take (into an op-amp's input), else from the pad more
+  likely to drive. One route is added at once; for several you pick one from a list, the shortest first. With no
+  route (an op-amp still without labels on the way), the two nets are added on their own and the status line says
+  why. To see every route and everything hanging on it (bias stages, dividers, decoupling) without adding
+  anything: <code>tools/dev/path_map.py BOARD --from U4.11 --to U1.9</code>.</li>
 <li><b>A whole path from KiCad</b>: select one bit of copper on each net of the path in the PCB editor (a track,
   via or pad per net, Ctrl+click to add, any order), then <b>Add KiCad selection</b> or the toolbar button. The
   nets are put in order by the parts that join them; an op-amp's input and output pins give the direction (else the

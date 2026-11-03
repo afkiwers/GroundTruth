@@ -268,7 +268,9 @@ class NetsPanel(SelectableRows, wx.Panel):
         if on_add_selection is not None:
             b = theme.Button(self, "Add KiCad selection")
             b.SetToolTip("Adds the net of the track, via or pad selected in KiCad's PCB editor (click or right-click "
-                         "it there first). KiCad's toolbar button 'Add selected net to GroundTruth' does the same.")
+                         "it there first). Two pads selected (Ctrl+click): the path between them, traced through "
+                         "every part and labelled op-amp on the way. KiCad's toolbar button 'Add selected net to "
+                         "GroundTruth' does the same.")
             b.Bind(wx.EVT_BUTTON, lambda e: on_add_selection())
             btns.Add(b, 0, wx.RIGHT | wx.BOTTOM, 6)
 
