@@ -123,3 +123,29 @@ def test_a_worst_emission_from_a_plane_resonance_above_600_mhz_gets_a_grid_note(
     assert grid_sensitive_note({"f": 1.22e9, "margin_db": 30.0}, 183e-6, 19.7e-6, 6.0) is None   # far below
     assert grid_sensitive_note(worst, 25e-6, 19.7e-6, 6.0) is None                               # no resonance
     assert grid_sensitive_note({"f": 1.22e9, "margin_db": None}, 183e-6, 19.7e-6, 6.0) is None
+
+
+def test_a_failed_board_wide_model_leaves_the_route_models_result(tmp_path, monkeypatch):
+    """The board-wide model failing at every frequency (GMRES not converging, as on the user's phase-voltage sense
+    path, 2026-11-03) no longer loses the route: its route model solves the spectrum's frequencies instead, the
+    emission comes from it, and a note says the plane resonances are left out. Before: "solver did not converge"."""
+    from groundtruth.analysis import simulate as sim
+    from groundtruth.solver.peec import SolverError
+    board, sc, _ = make(tmp_path, layer_change_board(None), "cavfail",
+                        nets=(NetSpec("SIG", "U1.1", ["U2.1"], 50e6, 1e-9),), capacitance=True, solve_points=3,
+                        max_solves=6, cavity_max_nodes=12000)
+    real = sim.solve_at
+
+    def board_wide_fails(setup, run, f):
+        """The board-wide model's solves fail as GMRES did; the route model's go on."""
+        if run is getattr(setup, "cavity", None):
+            setup.res.notes.append(str(SolverError(f"GMRES did not converge at {f:.4g} Hz (1528 iterations)")))
+            run.sols[f] = None
+            return None
+        return real(setup, run, f)
+    monkeypatch.setattr(sim, "solve_at", board_wide_fails)
+    rr = simulate(board, sc.config).routes[0]
+    assert not rr.error, rr.error
+    assert rr.cavity == {} and rr.cavity_solves == []
+    assert len(rr.solves) >= 3 and rr.emissions                 # the spectrum from the route model
+    assert any("board-wide model" in n and "did not converge" in n for n in rr.notes)
