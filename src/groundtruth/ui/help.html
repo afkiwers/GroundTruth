@@ -1473,7 +1473,8 @@ The buffer does not pass the input's waveform: a slow, filtered edge in, a fast 
 loop of its own; the emission adds them per harmonic, each with its own spectrum, so the fast edge after the buffer
 counts even where the slow input has none [A76].</p>
 <p>A part is a logic buffer when its symbol has the GT labels <code>buf_in</code> / <code>buf_out</code> (a pair per
-channel), or a <b>Threshold Rising</b>, <b>Threshold Falling</b> or <b>Hysteresis</b> field and pins whose names pair
+channel, or one list each by position: <code>buf_in:[1,3], buf_out:[6,4]</code>; a quad comparator's four units
+the same way), or a <b>Threshold Rising</b>, <b>Threshold Falling</b> or <b>Hysteresis</b> field and pins whose names pair
 input and output (1A with 1Y, A with Y, IN with OUT); or set its model to <code>buffer</code> on the Parts tab (for a
 dual: its <code>pins</code> as input, output pairs, e.g. 1, 6, 3, 4). Its values come from its symbol's fields, which
 an HTTP library can fill in from a parts database (InvenTree parameters of the same names), at the supply it runs
@@ -1728,11 +1729,13 @@ an example in <a href="#siglabels">Labelling a signal path</a>.</p>
 <tr><td><code>amp_in:3, amp_out:1</code></td><td>an op-amp stage's input and output pin (pad number or pin name):
   the part becomes an <code>amplifier</code> the signal path runs through (<code>amp_inv:2</code> its inverting
   input; a quad: one group per channel, <code>amp_in:2, amp_inv:1, amp_out:14, amp_in:4, amp_inv:5,
-  amp_out:6</code>, not lists like <code>amp_in:[2,4]</code>; see <a href="#ampchannels">Several channels of one
+  amp_out:6</code>, or the compact <code>amp_in:[2,4], amp_inv:[1,5], amp_out:[14,6]</code>; see
+  <a href="#ampchannels">Several channels of one
   op-amp</a>)</td></tr>
 <tr><td><code>buf_in:1, buf_out:6</code></td><td>a logic buffer's (Schmitt trigger's) channel, input and output pin:
   the part becomes a <code>buffer</code> the signal path runs through (a dual: <code>buf_in:1, buf_out:6, buf_in:3,
-  buf_out:4</code>); see <a href="#buffers">Logic buffers</a></td></tr>
+  buf_out:4</code>, or compact <code>buf_in:[1,3], buf_out:[6,4]</code>; a comparator too); see <a
+  href="#buffers">Logic buffers</a></td></tr>
 <tr><td colspan="2"><b>Through-hole pin values</b> (a connector, a big inductor's leads; per pin of the part; see
   <a href="#pins">Through-hole pins</a>):</td></tr>
 <tr><td><code>contact:0.5m</code></td><td>the mating contact's resistance per pin, Ω (0.5m = 0.5 mΩ, from the
@@ -1830,10 +1833,18 @@ part and their order, as the schematic names its units. A quad op-amp U3 with th
 <p><code>GT = amp_in:2, amp_inv:1, amp_out:14, amp_in:4, amp_inv:5, amp_out:6, amp_in:9, amp_inv:8, amp_out:7</code></p>
 <p>Each channel is then a stage of its own: a path through U3A's input runs to U3A's output, never into U3B's.
 <code>amp_inv</code> is needed here because the part has four pins named −, so the name can't tell which one is the
-channel's. <b>Lists are not read:</b> <code>amp_in:[2,4,9], amp_inv:[1,5,8], amp_out:[14,6,7]</code> means the same
-channels, but GroundTruth reads only the groups above. The labels line flags such lists and shows the groups to
-write instead, and it flags a group without its <code>amp_in</code> or <code>amp_out</code> (that channel is left
-out).</p>
+channel's. The labels line flags a group without its <code>amp_in</code> or <code>amp_out</code> (that channel is
+left out).</p>
+<p><b>The compact form:</b> the same channels as lists, one per role, matched by position (the first entries are
+U3A, the second U3B, and so on):</p>
+<p><code>GT = amp_in:[2,4,9], amp_inv:[1,5,8], amp_out:[14,6,7]</code></p>
+<p>is read exactly as the groups above. Every list has one entry per channel; write <code>-</code> for a channel
+without <code>amp_inv</code> (<code>amp_inv:[1,-,8]</code>). Lists of different lengths, or without their
+<code>amp_in</code> or <code>amp_out</code> list, are not read, and a <code>-</code> in an <code>amp_in</code> or
+<code>amp_out</code> list leaves that channel out; the labels line says which. A quad comparator or a dual Schmitt
+trigger (<a href="#buffers">logic buffers</a>) takes the same form, e.g. a quad comparator's four units:
+<code>buf_in:[11,4,6,8], buf_out:[13,16,15,14]</code>. A field may also hold both forms: the lists' channels come
+after those written as groups.</p>
 <p><b>How Detect turns the labels into a path.</b> It starts at a labelled net and follows 2-pin parts and
 labelled op-amps (input net to output net) to the next labelled net. It never crosses into a ground, a reference
 net or an unlabelled supply. Branches that end at an unlabelled net (a load resistor to ground, a filter capacitor)
@@ -1880,7 +1891,8 @@ the design, so that Detect finds it again later.
 <p>The line at the bottom of the Converters tab (<b>Labels (GT field)</b>) names the parts that carry signal and
 op-amp labels, and lists as problems a GT word that is not a label (a typing error), a label naming a pin its part
 doesn't have, an op-amp with <code>amp_in</code> but no <code>amp_out</code> (or the other way round; per channel
-of a dual or quad), and amp label lists (<code>amp_in:[2,4,9]</code>, with the groups to write instead). If a
+of a dual or quad), and label lists that can't be read (<code>amp_in:[2,4,9]</code> with an <code>amp_out</code> list
+of another length, or none). If a
 labelled path still doesn't appear in Detect…, check that every net of the path is joined to the next by a 2-pin
 part or a labelled op-amp.</p>
 

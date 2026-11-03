@@ -217,7 +217,8 @@ def test_op_amp_labels_with_a_missing_pin_or_half_a_pair_are_problems(tmp_path):
 def test_a_quad_op_amps_channels_are_one_group_of_amp_labels_each(tmp_path):
     """Several op-amp channels of one part (the user's quad, 2026-11-03): one group per channel, in order; a group
     starts where a role comes again, so one channel's labels may still come in any order. A group without amp_in or
-    amp_out is a problem; lists (amp_in:[2,4,9] ...) are not read, and the problem gives the groups to write."""
+    amp_out is a problem. The compact form, lists by position (amp_in:[2,4,9] ...), gives the same channels; lists
+    that don't line up are a problem and not read."""
     from boardgen import quad_follower_board
     from groundtruth.analysis.tags import amp_label_groups, amp_label_pins
     from groundtruth.adapters.file_source import loads_board
@@ -237,13 +238,44 @@ def test_a_quad_op_amps_channels_are_one_group_of_amp_labels_each(tmp_path):
     assert amp_label_pins(board.footprint("U5")) == [("2", "14")]
     assert board_tags(board).problems == ["U5: GT op-amp channel 2 (amp_in:4) has no amp_out: it is left out (one "
                                           "group per channel, in order: amp_in, amp_inv, amp_out)"]
-    # lists: not read, the groups to write instead
-    _, _, problems = parse("amp_in:[2,4,9], amp_inv:[1,5,8], amp_out:[14,6,7]", "U5")
-    assert problems == ["U5: GT amp label lists (amp_in:[…], amp_inv:[…], amp_out:[…]) are not read: write one group "
-                        "per channel: amp_in:2, amp_inv:1, amp_out:14, amp_in:4, amp_inv:5, amp_out:6, amp_in:9, "
-                        "amp_inv:8, amp_out:7"]
+    # the compact form (the user: "we would want this as compact form too"): lists by position, the same channels
+    board = loads_board(quad_follower_board("amp_in:[2,4,9], amp_inv:[1,5,8], amp_out:[14,6,7]").text(), "l.kicad_pcb")
+    assert amp_label_groups(board.footprint("U5")) == amp_label_groups(fp) and not board_tags(board).problems
+    # a channel without amp_inv: "-" keeps the others in their places
+    assert parse("amp_in:[2,4], amp_inv:[1,-], amp_out:[14,6]", "U5")[0] == parse(
+        "amp_in:2, amp_inv:1, amp_out:14, amp_in:4, amp_out:6", "U5")[0]
+    # lists of different lengths, or without an out list: not read, and said
     tags, _, problems = parse("amp_in:[2,4], amp_out:[14], sig:3", "U5")
-    assert [t.kind for t in tags] == ["sig"] and "e.g. amp_in:2, amp_inv:1" in problems[0]     # lengths differ
+    assert [t.kind for t in tags] == ["sig"] and problems == [
+        "U5: GT amp label lists of different lengths (amp_in: 2, amp_out: 1): one entry per channel in each (- where "
+        "a channel has no amp_inv); they are not read"]
+    tags, _, problems = parse("amp_in:[2,4], amp_inv:[1,5]", "U5")
+    assert tags == [] and problems == ["U5: GT amp label lists need amp_out:[…] too: they are not read"]
+    # a "-" in an in or out list leaves that channel out; the next keeps its place
+    tags, _, problems = parse("amp_in:[2,-,9], amp_out:[14,6,7]", "U5")
+    assert [(t.role, t.ident) for t in tags] == [("in", "2"), ("out", "14"), ("in", "9"), ("out", "7")]
+    assert problems == ["U5: GT amp label lists: channel 2 has no amp_in or amp_out entry: it is left out"]
+    # groups and lists in one field: the lists' channels after the groups'
+    tags, _, _ = parse("amp_in:2, amp_out:14, amp_in:[4], amp_out:[6]", "U5")
+    assert [(t.role, t.ident) for t in tags] == [("in", "2"), ("out", "14"), ("in", "4"), ("out", "6")]
+
+
+def test_a_quad_comparators_buffer_labels_in_the_compact_form(tmp_path):
+    """A quad comparator (the user's U4, 2026-11-03) as logic buffers, its four units in lists by position
+    (buf_in:[11,4,6,8], buf_out:[13,16,15,14]): the same channels as the pairs written out; a buf_inv list is no
+    label (a buffer channel has only an input and an output)."""
+    from groundtruth.analysis.tags import buf_label_pins
+    g = BoardGen(layers=2, size=(40.0, 20.0))
+    pins = {11: "A", 13: "B", 4: "C", 16: "D", 6: "E", 15: "F", 8: "G", 14: "H"}
+    g.footprint("U4", "QUAD_COMPARATOR", "Package_DFN_QFN:Fake_QFN-16", (20.0, 10.0),
+                [{"number": n, "at": (k * 1.0 - 4.0, 0.0), "net": net} for k, (n, net) in enumerate(pins.items())])
+    g.label("U4", "buf_in:[11,4,6,8], buf_out:[13,16,15,14]")
+    from groundtruth.adapters.file_source import loads_board
+    board = loads_board(g.text(), "cmp.kicad_pcb")
+    assert buf_label_pins(board.footprint("U4")) == [("11", "13"), ("4", "16"), ("6", "15"), ("8", "14")]
+    assert not board_tags(board).problems
+    _, _, problems = parse("buf_in:[1], buf_inv:[2], buf_out:[3]", "U4")
+    assert problems == ["U4: GT buf_inv:[…]: a buffer channel has only buf_in and buf_out"]
 
 
 def test_labelled_nets_joined_by_a_large_resistor_are_one_path(tmp_path):
