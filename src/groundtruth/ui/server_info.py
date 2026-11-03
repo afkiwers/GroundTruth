@@ -171,7 +171,7 @@ class ServerInfoDialog(wx.Dialog):
             outer.Add(t, 0, wx.LEFT | wx.RIGHT | wx.TOP, 12)
 
         buttons = wx.BoxSizer(wx.HORIZONTAL)
-        copy = wx.Button(self, label="Copy details")
+        self.copy = copy = wx.Button(self, label="Copy details")
         copy.Bind(wx.EVT_BUTTON, self._copy)
         ok = wx.Button(self, wx.ID_OK, "OK")
         ok.SetDefault()
@@ -184,12 +184,10 @@ class ServerInfoDialog(wx.Dialog):
         self.CentreOnParent()
 
     def _copy(self, _=None):
-        """Copy details: the plain text to the clipboard."""
-        if wx.TheClipboard.Open():
-            try:
-                wx.TheClipboard.SetData(wx.TextDataObject(summary_text(self.summary)))
-            finally:
-                wx.TheClipboard.Close()
+        """Copy details: the plain text to the clipboard; the button says whether it worked."""
+        from .widgets import copy_text
+        self.copy.SetLabel("Copied" if copy_text(summary_text(self.summary)) else "Clipboard busy")
+        self.Layout()
 
 
 # --------------------------------------------------------------------------- Update / Update all, confirmed

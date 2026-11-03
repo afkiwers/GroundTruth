@@ -124,15 +124,10 @@ class MessageDialog(wx.Dialog):
     def on_copy(self, _=None) -> bool:
         """Put the message (caption, text and any traceback, as given) on the clipboard; the button says so. False
         when the clipboard is busy."""
-        if not wx.TheClipboard.Open():
-            self.copy.SetLabel("Clipboard busy")
-            return False
-        try:
-            wx.TheClipboard.SetData(wx.TextDataObject(self.plain))
-        finally:
-            wx.TheClipboard.Close()
-        self.copy.SetLabel("Copied")
-        return True
+        from .widgets import copy_text
+        done = copy_text(self.plain)        # no wx error box over this one when another program holds it
+        self.copy.SetLabel("Copied" if done else "Clipboard busy")
+        return done
 
 
 def box(message: str, caption: str = "GroundTruth", style: int = wx.OK | wx.CENTRE, parent=None, *a, **k) -> int:

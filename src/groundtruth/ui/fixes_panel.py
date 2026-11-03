@@ -130,15 +130,11 @@ class SchematicPreview(wx.Panel):
 
 def copy_png(png: bytes) -> bool:
     """A PNG onto the clipboard as an image (to paste into a document, an e-mail, a chat); False when the clipboard
-    could not be opened."""
+    stayed busy (widgets.copy_to_clipboard: no error box)."""
     import io
-    if not wx.TheClipboard.Open():
-        return False
-    try:
-        wx.TheClipboard.SetData(wx.BitmapDataObject(wx.Bitmap(wx.Image(io.BytesIO(png), wx.BITMAP_TYPE_PNG))))
-    finally:
-        wx.TheClipboard.Close()
-    return True
+    from .widgets import copy_to_clipboard
+    bitmap = wx.Bitmap(wx.Image(io.BytesIO(png), wx.BITMAP_TYPE_PNG))
+    return copy_to_clipboard(lambda: wx.BitmapDataObject(bitmap))
 
 
 class SchematicWindow(wx.Frame):
@@ -162,7 +158,8 @@ class SchematicWindow(wx.Frame):
         save.Bind(wx.EVT_BUTTON, lambda e: self._save())
         copy = theme.Button(self, "Copy")
         copy.SetToolTip("The schematic to the clipboard, as an image")
-        copy.Bind(wx.EVT_BUTTON, lambda e: copy_png(self.png))
+        # the button says whether it worked (another program may hold the clipboard)
+        copy.Bind(wx.EVT_BUTTON, lambda e: copy.SetLabel("Copied" if copy_png(self.png) else "Clipboard busy"))
         row = wx.BoxSizer(wx.HORIZONTAL)
         row.Add(copy, 0, wx.RIGHT, 6)
         row.Add(save, 0)
@@ -380,10 +377,13 @@ class FixesPanel(wx.Panel):
 
     def _copy_schematic(self):
         """The selected change's schematic to the clipboard, as an image."""
-        if self._png is not None and copy_png(self._png):
-            top = self.GetTopLevelParent()
-            if hasattr(top, "SetStatusText"):
-                top.SetStatusText("schematic copied to the clipboard")
+        if self._png is None:
+            return
+        done = copy_png(self._png)
+        top = self.GetTopLevelParent()
+        if hasattr(top, "SetStatusText"):
+            top.SetStatusText("schematic copied to the clipboard" if done else
+                              "the clipboard is busy (another program has it open): try again")
 
     def _copy(self):
         """The selected change's parts and notes to the clipboard."""
@@ -392,12 +392,11 @@ class FixesPanel(wx.Panel):
             return
         stage, o = self.design[k]
         text = "\n".join([f"{stage}: {o['title']}"] + [f"- {p}" for p in o["parts"]] + [f"  {n}" for n in o["notes"]])
-        if wx.TheClipboard.Open():
-            wx.TheClipboard.SetData(wx.TextDataObject(text))
-            wx.TheClipboard.Close()
-            top = self.GetTopLevelParent()
-            if hasattr(top, "SetStatusText"):
-                top.SetStatusText("parts copied to the clipboard")
+        from .widgets import copy_text
+        top = self.GetTopLevelParent()
+        if hasattr(top, "SetStatusText"):
+            top.SetStatusText("parts copied to the clipboard" if copy_text(text) else
+                              "the clipboard is busy (another program has it open): try again")
 
     def _design_menu(self, evt):
         """Right-click on a change: its schematic in a window, the parts copied, Check in Simulate, the help."""
