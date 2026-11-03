@@ -1918,6 +1918,35 @@ def test_a_loading_card_stands_in_the_tabs_place_until_the_board_is_read(app, tm
     assert got["sim"] == []                     # a run is no board load: the tabs stay
 
 
+@pytest.mark.parametrize("height", [520, 400])
+def test_every_settings_form_scrolls_and_keeps_its_buttons_in_reach(app, frame, height):
+    """A short window (the user: "all settings panes need to be scrollable so if the screen is not big enough the
+    user can still reach the buttons !!!"): on every setup tab with a form, the form scrolls and every button of
+    the tab stays inside it, whole. The Signal paths tab's form ran off the bottom with its buttons."""
+    from groundtruth.ui import theme
+    f = frame
+    run_steps(app, f, [])
+    f.SetSize((1100, height))
+    got = {}
+    for name in ("nets", "converters", "bridges", "dc_loads", "pdn", "si"):
+        p = getattr(f, name)
+        f.notebook.SetSelection(f.notebook.FindPage(p))
+        p.Layout()
+        wx.Yield()
+        forms = [w for w in p.GetChildren() if isinstance(w, wx.ScrolledWindow)]
+        panel_h = p.GetClientSize().height
+        outside = [b.GetLabel() for b in (c for c in p.GetChildren() if isinstance(c, theme.Button) and c.IsShown())
+                   if b.GetPosition().y + b.GetSize().height > panel_h]
+        got[name] = (bool(forms), forms and forms[0].GetVirtualSize().height > forms[0].GetClientSize().height,
+                     outside, panel_h)
+    for name, (has_form, scrolls, outside, panel_h) in got.items():
+        assert panel_h < height - 100, f"{name}: the window did not get short ({panel_h} px)"
+        assert has_form, f"{name}: no scrolling form"
+        assert outside == [], f"{name}: buttons below the window at {height} px: {outside}"
+    # the forms taller than the space they got scroll instead; Signal integrity's whole column (its buttons in it)
+    assert all(got[n][1] for n in ("nets", "converters", "bridges", "si")), got
+
+
 def test_parts_table_fills_the_tab_and_an_edit_updates_its_row_in_place(app, frame):
     """The columns fill the tab's width (the user: "expand the table across the whole plane"). Changing a part's
     model updates its own row (R becomes editable for a resistor) without rebuilding the table: the rebuild

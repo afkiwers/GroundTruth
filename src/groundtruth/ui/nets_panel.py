@@ -18,7 +18,8 @@ from ..config.settings import ConfigError, NetSpec
 from . import theme
 from .background import LatestOnly
 from .listsel import SelectableRows
-from .widgets import InfoBox, PickDialog, button_row, section_form, section_rows, set_lazy_items, source_status
+from .widgets import (InfoBox, PickDialog, button_row, fit_scroll_width, scroll_form, section_form, section_rows,
+                      set_lazy_items, source_status)
 
 # hover explanations of the form's fields (on the label and the field)
 NET_TIPS = {
@@ -141,6 +142,8 @@ class NetsPanel(SelectableRows, wx.Panel):
         for i, (c, w) in enumerate([("Path", 180), ("Status", 95), ("Chain", 330), ("Freq", 75), ("Rise", 60),
                                     ("Ampl.", 50), ("Class", 110)]):
             self.list.InsertColumn(i, c, width=w)
+        # it scrolls sideways: its ~900 px of columns would squeeze the scrolled form beside it (as on Converters)
+        self.list.SetMinSize(wx.Size(320, 120))
         # each row's chain (analysis.route.path_chain: a route search per path, ~5-60 ms on refboard) is
         # worked out in this thread, the newest request only, and shown when it comes back (_chains_done)
         self._chain_worker = LatestOnly("groundtruth-paths")
@@ -155,19 +158,21 @@ class NetsPanel(SelectableRows, wx.Panel):
         self.list.Bind(wx.EVT_LIST_ITEM_DESELECTED,
                        lambda e: (e.Skip(), wx.CallAfter(lambda: self and self._form_for_selection())))
 
+        # the form scrolls when the tab is short, its buttons below it in reach (widgets.scroll_form)
+        self.form_win = fw = scroll_form(self)
         form = section_form(vgap=6)
-        self.net = wx.ComboBox(self, style=wx.CB_DROPDOWN)
+        self.net = wx.ComboBox(fw, style=wx.CB_DROPDOWN)
         self.net.Bind(wx.EVT_COMBOBOX, self.on_net)
         self.net.Bind(wx.EVT_TEXT_ENTER, self.on_net)
-        self.driver = wx.Choice(self)
-        self.receivers = wx.CheckListBox(self, size=(-1, 110))
-        self.freq = wx.TextCtrl(self, value="20MHz")
-        self.rise = wx.TextCtrl(self, value="2ns")
-        self.ampl = wx.TextCtrl(self, value="3.3")
-        self.duty = wx.TextCtrl(self, value="0.5")
+        self.driver = wx.Choice(fw)
+        self.receivers = wx.CheckListBox(fw, size=(-1, 110))
+        self.freq = wx.TextCtrl(fw, value="20MHz")
+        self.rise = wx.TextCtrl(fw, value="2ns")
+        self.ampl = wx.TextCtrl(fw, value="3.3")
+        self.duty = wx.TextCtrl(fw, value="0.5")
         self.fall, self.src_r, self.src_l, self.src_c, self.load_r, self.load_c, self.through = (
-            wx.TextCtrl(self) for _ in range(7))
-        self.sweep_from, self.sweep_to, self.sweep_pts, self.max_bw = (wx.TextCtrl(self) for _ in range(4))
+            wx.TextCtrl(fw) for _ in range(7))
+        self.sweep_from, self.sweep_to, self.sweep_pts, self.max_bw = (wx.TextCtrl(fw) for _ in range(4))
         for ctrl, hint in ((self.fall, "= rise time"), (self.src_r, "25 (default)"), (self.src_l, "none"),
                            (self.src_c, "none"), (self.load_r, "none"), (self.load_c, "5 (default)"),
                            (self.through, "e.g. C12, R7"), (self.sweep_from, "auto: frequency / 100"),
@@ -201,7 +206,7 @@ class NetsPanel(SelectableRows, wx.Panel):
 
     def _form_rows(self):
         """The form's sections, each field's label and tooltip, in its grid (the first build step)."""
-        section_rows(self, self._form_sizer, self.form_sections(), NET_TIPS)
+        section_rows(self.form_win, self._form_sizer, self.form_sections(), NET_TIPS)
 
     def _path_grip(self):
         """A thin strip under the path box (the user: "should be able to change the height of this window to view
@@ -267,9 +272,13 @@ class NetsPanel(SelectableRows, wx.Panel):
             b.Bind(wx.EVT_BUTTON, lambda e: on_add_selection())
             btns.Add(b, 0, wx.RIGHT | wx.BOTTOM, 6)
 
+        inner = wx.BoxSizer(wx.VERTICAL)
+        inner.Add(form, 0, wx.EXPAND | wx.RIGHT, 12)        # room for the scroll bar
+        self.form_win.SetSizer(inner)
+        fit_scroll_width(self.form_win)
         right = wx.BoxSizer(wx.VERTICAL)
-        right.Add(form, 0, wx.EXPAND)
-        right.Add(btns, 0, wx.TOP, 8)
+        right.Add(self.form_win, 1, wx.EXPAND)              # the form takes the height left, scrolling within it
+        right.Add(btns, 0, wx.TOP, 8)                       # the buttons always below it, in reach
         left = wx.BoxSizer(wx.VERTICAL)
         left.Add(self.list_head(self.hint), 0, wx.EXPAND | wx.BOTTOM, 6)
         left.Add(self.list, 1, wx.EXPAND)

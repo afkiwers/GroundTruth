@@ -16,7 +16,7 @@ from .messages import box as message_box   # laid-out message boxes (ui/messages
 from ..components.values import format_si
 from ..config.settings import ConfigError, PdnSpec
 from .listsel import SelectableRows
-from .widgets import button_row, section_form, section_rows
+from .widgets import button_row, fit_scroll_width, scroll_form, section_form, section_rows
 
 AUTO_SOURCE = "found by itself"
 NO_SOURCE = "none"
@@ -80,7 +80,7 @@ class PdnPanel(SelectableRows, wx.Panel):
 
     def _build_form(self):
         """The rail's form (the first build step)."""
-        fw = self._fw = wx.Panel(self)
+        fw = self._fw = scroll_form(self)       # scrolls when the tab is short: the buttons stay in reach
         form = section_form()
         self.rail = wx.ComboBox(fw)
         self.ground = wx.ComboBox(fw)
@@ -107,7 +107,10 @@ class PdnPanel(SelectableRows, wx.Panel):
              [("Source", self.source), ("Source R (Ω)", self.vrm_r), ("Source L (H)", self.vrm_l)]),
             ("Read at", "Where the impedance is read. Empty: every IC on the rail.",
              [("ICs", self.parts)])], FIELD_TIPS)
-        fw.SetSizer(form)
+        inner = wx.BoxSizer(wx.VERTICAL)
+        inner.Add(form, 0, wx.EXPAND | wx.RIGHT, 12)        # room for the scroll bar
+        fw.SetSizer(inner)
+        fit_scroll_width(fw)
 
     def _build_layout(self):
         """The buttons, the note and the tab's layout (the last build step)."""
@@ -120,8 +123,8 @@ class PdnPanel(SelectableRows, wx.Panel):
                                           "the curves, and what holds the rail at each frequency).")
         about.SetName("muted")
         right = wx.BoxSizer(wx.VERTICAL)
-        right.Add(fw, 0, wx.EXPAND)
-        right.Add(btns, 0, wx.TOP | wx.EXPAND, 8)
+        right.Add(fw, 1, wx.EXPAND)                 # the height left, scrolling within it
+        right.Add(btns, 0, wx.TOP | wx.EXPAND, 8)   # always below it, in reach
         right.Add(about, 0, wx.TOP | wx.EXPAND, 8)
         left = wx.BoxSizer(wx.VERTICAL)
         left.Add(self.list_head(self.hint), 0, wx.EXPAND | wx.BOTTOM, 6)

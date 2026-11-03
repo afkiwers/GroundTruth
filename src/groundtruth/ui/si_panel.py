@@ -18,7 +18,7 @@ from .messages import box as message_box   # laid-out message boxes (ui/messages
 from ..components.values import format_si, parse_value
 from ..config.settings import ConfigError, DiffPairSpec, ImpedanceTarget
 from .listsel import SelectableRows
-from .widgets import button_row, section_form, section_rows
+from .widgets import button_row, fit_scroll_width, scroll_form, section_form, section_rows
 
 PAIR_TIPS = {
     "P net": "The pair's positive net (e.g. /USB/D_P); Find pairs fills the pairs it finds by name.",
@@ -95,7 +95,10 @@ class SiPanel(SelectableRows, wx.Panel):
 
     def _form_pair(self):
         """The pair's form and its buttons (the first build step)."""
-        fw = wx.Panel(self)
+        # the right column (three forms with their buttons) scrolls as one when the tab is short: every button in
+        # reach by scrolling (the user: "all settings panes need to be scrollable ... reach the buttons")
+        col = self._col = scroll_form(self)
+        fw = wx.Panel(col)
         form = section_form()
         self.p = wx.ComboBox(fw)
         self.n = wx.ComboBox(fw)
@@ -115,13 +118,14 @@ class SiPanel(SelectableRows, wx.Panel):
              [("Zdiff (Ω)", self.zdiff), ("Tolerance (%)", self.tol), ("Edge (s)", self.edge),
               ("Max skew (s)", self.skew)])], PAIR_TIPS)
         fw.SetSizer(form)
-        btns = button_row(self, [("Find pairs", self.on_find), ("Add", self.on_add),
+        btns = button_row(col, [("Find pairs", self.on_find), ("Add", self.on_add),
                                  ("Update selected", self.on_update), ("Remove selected", self.on_remove)], BUTTON_TIPS)
         self._built = {"fw": fw, "btns": btns}
 
     def _form_target(self):
         """The impedance target's and the limits' forms with their buttons (the second build step)."""
-        tw = wx.Panel(self)
+        col = self._col
+        tw = wx.Panel(col)
         tform = section_form()
         self.t_nets = wx.TextCtrl(tw)
         self.t_class = wx.TextCtrl(tw)
@@ -135,10 +139,10 @@ class SiPanel(SelectableRows, wx.Panel):
                                   [("Nets", self.t_nets), ("Net class", self.t_class), ("Z0 (Ω)", self.t_z0),
                                    ("Tol. (%)", self.t_tol), ("Layers", self.t_layers)])], TARGET_TIPS)
         tw.SetSizer(tform)
-        tbtns = button_row(self, [("Add target", self.on_add_target), ("Remove target", self.on_remove_target)],
+        tbtns = button_row(col, [("Add target", self.on_add_target), ("Remove target", self.on_remove_target)],
                            BUTTON_TIPS)
 
-        lw = wx.Panel(self)
+        lw = wx.Panel(col)
         lform = section_form()
         self.xt = wx.TextCtrl(lw)
         self.stub = wx.TextCtrl(lw)
@@ -147,14 +151,15 @@ class SiPanel(SelectableRows, wx.Panel):
                                   [("Crosstalk (%)", self.xt), ("Stub factor", self.stub),
                                    ("Cut every (mm)", self.step)])], LIMIT_TIPS)
         lw.SetSizer(lform)
-        lbtns = button_row(self, [("Apply limits", self.on_limits)], BUTTON_TIPS)
+        lbtns = button_row(col, [("Apply limits", self.on_limits)], BUTTON_TIPS)
         self._built.update(tw=tw, tbtns=tbtns, lw=lw, lbtns=lbtns)
 
     def _form_layout(self):
         """The tab's layout (the last build step)."""
         fw, btns, tw, tbtns, lw, lbtns = (self._built[k] for k in ("fw", "btns", "tw", "tbtns", "lw", "lbtns"))
         del self._built
-        about = wx.StaticText(self, label="Run checks solves cross-sections of the board along the listed nets and the "
+        col = self._col
+        about = wx.StaticText(col, label="Run checks solves cross-sections of the board along the listed nets and the "
                                           "pairs: Z0 and Zdiff against their targets, the pairs' skew, crosstalk into "
                                           "tracks beside the listed nets, and via stubs (the issues on the Issues tab, "
                                           "the figures here and in the report).")
@@ -168,13 +173,17 @@ class SiPanel(SelectableRows, wx.Panel):
         right = wx.BoxSizer(wx.VERTICAL)        # each form titles its own sections (widgets.section_rows)
         right.Add(fw, 0, wx.EXPAND)
         right.Add(btns, 0, wx.TOP | wx.EXPAND, 6)
-        right.Add(wx.StaticLine(self), 0, wx.EXPAND | wx.TOP, 10)
+        right.Add(wx.StaticLine(col), 0, wx.EXPAND | wx.TOP, 10)
         right.Add(tw, 0, wx.EXPAND | wx.TOP, 4)
         right.Add(tbtns, 0, wx.TOP | wx.EXPAND, 6)
-        right.Add(wx.StaticLine(self), 0, wx.EXPAND | wx.TOP, 10)
+        right.Add(wx.StaticLine(col), 0, wx.EXPAND | wx.TOP, 10)
         right.Add(lw, 0, wx.EXPAND | wx.TOP, 4)
         right.Add(lbtns, 0, wx.TOP | wx.EXPAND, 6)
         right.Add(about, 0, wx.TOP | wx.EXPAND, 8)
+        inner = wx.BoxSizer(wx.VERTICAL)
+        inner.Add(right, 0, wx.EXPAND | wx.RIGHT, 12)        # room for the scroll bar
+        col.SetSizer(inner)
+        fit_scroll_width(col)
         left = wx.BoxSizer(wx.VERTICAL)
         left.Add(self.list_head(self.hint), 0, wx.EXPAND | wx.BOTTOM, 6)
         left.Add(heading("Differential pairs"), 0, wx.BOTTOM, 4)
@@ -183,7 +192,7 @@ class SiPanel(SelectableRows, wx.Panel):
         left.Add(self.tlist, 2, wx.EXPAND)
         s = wx.BoxSizer(wx.HORIZONTAL)
         s.Add(left, 3, wx.EXPAND | wx.ALL, 6)
-        s.Add(right, 2, wx.EXPAND | wx.ALL, 6)
+        s.Add(col, 2, wx.EXPAND | wx.ALL, 6)
         self.SetSizer(s)
         self.hint.Hide()
         self.Bind(wx.EVT_SIZE, lambda e: (e.Skip(), about.Wrap(max(150, self.GetClientSize().width * 2 // 5 - 24))))
