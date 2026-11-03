@@ -1554,10 +1554,14 @@ Eq. 1: DC gain −R4/R1 = −4.98, f₀ = 1/(2π·√(R3·R4·C2·C5)) = 21.0 kH
 on the plot under the Bode plot: the final value (the DC gain) dashed with its ±2 % band, the settling time dotted;
 a filter's milliseconds and an op-amp's nanoseconds each on a panel of their own. The <b>step</b> tile gives the
 overshoot (amber from 20 %), the 10-90 % rise time and the settling time into ±2 %; an undershoot (the first move
-the wrong way: a right-half-plane zero) is named in the summary line and the report. It is computed from the same
-circuit in the time domain (the second-order backward differentiation formula, as SPICE does for stiff circuits,
-over 12 time constants of the slowest pole), so it is exact for the circuit, not a fit. A path with an integrator
-(a pole at the origin) has no final value and no step response.</p>
+the wrong way: a right-half-plane zero) is named in the summary line and the report. It is computed in closed form
+from the same circuit's poles and zeros (partial fractions), so it is exact for the circuit, not a fit, and so are
+its rise, overshoot and settling times, however long a lightly damped pole rings; shown over 12 time constants of
+the slowest pole that shows in it. Where that form is numerically unsafe (poles too close together) the circuit is
+integrated in the time domain instead (the second-order backward differentiation formula, as SPICE does for stiff
+circuits). An AC-coupled path (a zero at the origin: a high-pass, a coupling capacitor) has a final value of 0: its
+line gives the peak, when it comes and when it has decayed into ±2 % of the peak. A path with an integrator (a pole
+at the origin) has no final value and no step response.</p>
 <p><b>Limits.</b> A path's <b>Max bandwidth</b> (Signal paths tab; <code>max_bandwidth</code>, e.g. 1 kHz for an
 ADC input's anti-alias filter) is checked at its receiver: its bandwidth, where it has fallen 3 dB below its passband
 peak, above the limit is a <b>bandwidth_limit</b> issue (also when it does not fall 3 dB within the sweep while the

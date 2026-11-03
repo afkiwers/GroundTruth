@@ -254,6 +254,112 @@ def test_the_phase_margin_is_the_smallest_over_every_crossover_and_positive_feed
     assert m2["pm"] == pytest.approx(180 - math.degrees(math.atan(fc / 10) + math.atan(fc / 100)), abs=0.01)
 
 
+def _fuzz_loop(rng, qmax_log):
+    """A random loop gain as the audit's fuzz made it (t_pm_fuzz2): A0·β/((1 + jf/f1)(1 + jf/fp2)) times one or two
+    resonant pole-zero pairs near the crossover (Q from 0.5 to 10^qmax_log); (T(f), its phase unwrapped analytically
+    from DC in degrees, its roots in rad/s)."""
+    a0, gbw, beta0 = 10 ** rng.uniform(4, 6), 10 ** rng.uniform(5, 8), 10 ** rng.uniform(-2, 0)
+    fp2 = gbw * 10 ** rng.uniform(0, 1.5)
+    pairs = []
+    for _ in range(rng.integers(1, 3)):
+        fc = 10 ** rng.uniform(math.log10(gbw * beta0) - 3, math.log10(gbw * beta0) + 1)
+        pairs.append((fc * 10 ** rng.uniform(-0.15, 0.15), 10 ** rng.uniform(-0.3, qmax_log), fc,
+                      10 ** rng.uniform(-0.3, qmax_log)))
+
+    def t_of(f):
+        """T and its continuous phase (each factor's own arctangent: no unwrapping) at f."""
+        f = np.asarray(f, float)
+        h = np.full(f.shape, a0 * beta0, complex)
+        ph = np.zeros(f.shape)
+        for p in (gbw / a0, fp2):
+            h /= 1 + 1j * f / p
+            ph -= np.arctan(f / p)
+        for fz, qz, fp, qp in pairs:
+            xz, xp = f / fz, f / fp
+            h *= (1 - xz ** 2 + 1j * xz / qz) / (1 - xp ** 2 + 1j * xp / qp)
+            ph += np.arctan2(xz / qz, 1 - xz ** 2) - np.arctan2(xp / qp, 1 - xp ** 2)
+        return h, np.degrees(ph)
+    roots = [-2 * math.pi * gbw / a0, -2 * math.pi * fp2]
+    for fz, qz, fp, qp in pairs:
+        for f0, q in ((fz, qz), (fp, qp)):
+            w = 2 * math.pi * f0
+            roots += list(np.roots([1, w / q, w * w]))
+    return t_of, roots
+
+
+def test_the_phase_margin_of_resonant_loops_matches_a_dense_reference():
+    """Audit M-3 (a seeded port of its fuzz, t_pm_fuzz2): with resonant pole-zero pairs of Q up to 1000 near the
+    crossover, a 300-point sweep missed |T| = 1 excursions between its samples and ∠T slipped 360° (185 of 1000
+    loops off by more than 2°). Refined on T itself (fn) across the roots' resonances and by bisection, each
+    crossover by Brent: every margin within 0.05° of the reference, the crossings found on a 200 001-point grid and
+    root-found on T, the phase the factors' own arctangents from DC (no unwrapping) [Ogata 2010]."""
+    from scipy.optimize import brentq
+    from groundtruth.analysis.transfer import phase_margin
+    rng = np.random.default_rng(7)
+    for trial in range(120):
+        t_of, roots = _fuzz_loop(rng, 3.0)
+        f0 = 10 ** rng.uniform(0, 4)
+        f = np.geomspace(f0, 1e9, 300)
+        lf = np.geomspace(max(f0 * 1e-9, 1e-9), f0, 60, endpoint=False)
+        pm = phase_margin(f, t_of(f)[0], lead=t_of(lf)[0], lead_f=lf, fn=lambda x: t_of(x)[0], roots=roots)
+        fd = np.geomspace(lf[0], 1e9, 200001)
+        m = np.abs(t_of(fd)[0])
+        xs = []
+        for k in np.nonzero((m[1:] > 1) != (m[:-1] > 1))[0]:
+            fc = brentq(lambda x: abs(t_of(np.array([x]))[0][0]) - 1, fd[k], fd[k + 1], xtol=1e-13 * fd[k])
+            xs.append((fc, 180 + float(t_of(np.array([fc]))[1][0])))
+        assert (pm is None) == (not xs), trial
+        if xs:
+            fc, ref = min(xs, key=lambda c: c[1])
+            assert pm["pm"] == pytest.approx(ref, abs=0.05), (trial, pm["pm"], ref)
+            assert pm["f_c"] == pytest.approx(fc, rel=1e-6), trial
+            assert len(pm["crossings"]) == len(xs), trial
+
+
+def test_a_smooth_loops_margin_stays_exact_and_positive_feedback_is_seen_above_its_crossover():
+    """A one-pole loop 1e5/(1 + jf/10 Hz): its crossover f_c = 10·√(1e10 − 1) and margin 180° − atan(f_c/10) to 1e-9
+    with fn (Brent on T), as without it to 1e-3 [Ogata 2010]. Audit M-9: −A(s) (positive feedback) swept from 1 MHz,
+    above its crossover (|T| < 1 at the sweep's start), returned None before its sign at DC was looked at: now
+    positive feedback, −180°. A loop crossing over below the sweep's start is found in the lead's stretch."""
+    from groundtruth.analysis.transfer import phase_margin
+
+    def a(fr):
+        """The one-pole loop gain."""
+        return 1e5 / (1 + 1j * np.asarray(fr, float) / 10)
+    fc = 10 * math.sqrt(1e10 - 1)
+    want = 180 - math.degrees(math.atan(fc / 10))
+    f = np.geomspace(1.0, 1e9, 300)
+    lf = np.geomspace(1e-9, 1.0, 60, endpoint=False)
+    m = phase_margin(f, a(f), lead=a(lf), lead_f=lf, fn=a)
+    assert m["f_c"] == pytest.approx(fc, rel=1e-12) and m["pm"] == pytest.approx(want, abs=1e-9)
+    assert phase_margin(f, a(f), lead=a(lf))["pm"] == pytest.approx(want, abs=1e-3)
+    for start in (1e6, 1e7):
+        f = np.geomspace(start, 1e9, 300)
+        lf = np.geomspace(start * 1e-9, start, 60, endpoint=False)
+        neg = phase_margin(f, -a(f), lead=-a(lf))
+        assert neg is not None and neg["positive_feedback"] and neg["pm"] == -180.0
+        low = phase_margin(f, a(f), lead=a(lf), lead_f=lf, fn=a)
+        assert low["f_c"] == pytest.approx(fc, rel=1e-12) and low["pm"] == pytest.approx(want, abs=1e-9)
+        assert phase_margin(f, a(f), lead=a(lf)) is None          # no lead_f: the sweep's own stretch only
+
+
+def test_the_normal_forms_text_for_an_integrator_and_a_complex_k():
+    """Audit M-10: an integrator's text read 'H(s) = -1000 / [·s]'; a complex K's LaTeX replaced every 'e' and left
+    a brace open. Now 'H(s) = -1000 / s', a factor and the origin's pole '/ [(1 + s/ωp1)·s]', K's exponent as
+    ×10^{n} and every LaTeX brace closed."""
+    from groundtruth.analysis.transfer import normal_form
+    nf = normal_form([0j], [], -1000.0)
+    assert nf["text"] == "H(s) = -1000 / s" and nf["latex"] == r"H(s) = \frac{-1000}{s}"
+    nf = normal_form([0j, -2 * math.pi * 1e3], [], -1000.0)
+    assert nf["text"].startswith("H(s) = -1000 / [(1 + s/ωp1)·s]")
+    for k in (1.5e-5 + 2e-6j, 2.5e-7, -3e12):
+        nf = normal_form([-1.0 + 0j], [], k)
+        for tex in [nf["latex"], nf["latex_parts"]["k"]]:
+            assert tex.count("{") == tex.count("}"), tex
+        assert "e-" not in nf["latex"] and "e+" not in nf["latex"]
+    assert r"1.5\times 10^{-5}" in normal_form([-1.0 + 0j], [], 1.5e-5 + 2e-6j)["latex"]
+
+
 def test_a_doublet_cancels_only_where_it_cannot_change_the_response():
     """Audit round 7, AA-8 (tools/dev/analog_audit.py T1): a pole pair of Q 2000 at 1 MHz with a zero pair 0.05 %
     above it changes |H| by 7.7 dB near it: it is not cancelled (it was: within 0.1 % of |p|). A real pole and zero
