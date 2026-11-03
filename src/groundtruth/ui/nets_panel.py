@@ -18,8 +18,8 @@ from ..config.settings import ConfigError, NetSpec
 from . import theme
 from .background import LatestOnly
 from .listsel import SelectableRows
-from .widgets import (InfoBox, PickDialog, button_row, fit_scroll_width, scroll_form, section_form, section_rows,
-                      set_lazy_items, source_status)
+from .widgets import (FilteredCheckList, InfoBox, PickDialog, button_row, fit_scroll_width, scroll_form, section_form,
+                      section_rows, set_lazy_items, source_status)
 
 # hover explanations of the form's fields (on the label and the field)
 NET_TIPS = {
@@ -165,7 +165,7 @@ class NetsPanel(SelectableRows, wx.Panel):
         self.net.Bind(wx.EVT_COMBOBOX, self.on_net)
         self.net.Bind(wx.EVT_TEXT_ENTER, self.on_net)
         self.driver = wx.Choice(fw)
-        self.receivers = wx.CheckListBox(fw, size=(-1, 110))
+        self.receivers = FilteredCheckList(fw, 110, "filter the pins, e.g. U1 or R2")   # a filter, Select all
         self.freq = wx.TextCtrl(fw, value="20MHz")
         self.rise = wx.TextCtrl(fw, value="2ns")
         self.ampl = wx.TextCtrl(fw, value="3.3")
