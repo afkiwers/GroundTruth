@@ -228,11 +228,14 @@ in the schematic: see <a href="#siglabels">Labelling a signal path</a>.</p>
   were added, say) is offered again, ticked and marked <b>REPLACES</b>: it replaces the entry (its tick kept), and
   unreviewed entries for pieces of its path are removed. Reviewed and hand-made nets are never changed.</li>
 <li><b>A path between two pads</b>: select just the two pads at its ends in the PCB editor (Ctrl+click the second),
-  then <b>Add KiCad selection</b>. GroundTruth traces every route between them: through any part with two pins
-  (a capacitor or a large resistor too: those go into <b>Pass through</b>), and through op-amps, comparators and
-  logic buffers from input to output where their GT labels or pin names say which pins those are; never through a
-  ground or a supply. The direction is the one a signal can take (into an op-amp's input), else from the pad more
-  likely to drive. One route is added at once; for several you pick one from a list, the shortest first. With no
+  then <b>Add KiCad selection</b>. GroundTruth traces every route between them: through any passive part with two
+  pins (a capacitor or a large resistor too: those go into <b>Pass through</b>; a resistor, capacitor, inductor,
+  ferrite, fuse or diode; not a two-pin connector, whose pins are not joined inside it), and through op-amps,
+  comparators and logic buffers from input to output where their GT labels or pin names say which pins those are
+  (two channels of one package one after the other too); never through a ground or a supply. The direction is the
+  one a signal can take (into an op-amp's input), else from the pad more likely to drive. One route is added at
+  once; for several you pick one from a list, the shortest first (of equal length, the one needing fewer Pass
+  through parts first); on a dense board the list holds the 50 shortest. With no
   route (an op-amp still without labels on the way), the two nets are added on their own and the status line says
   why. To see every route and everything hanging on it (bias stages, dividers, decoupling) without adding
   anything: <code>tools/dev/path_map.py BOARD --from U4.11 --to U1.9</code>.</li>
@@ -1428,7 +1431,9 @@ status line lists each one's capacity and what limits it.</p>
 
 <hr><a name="analog"></a><h3>Op-amp circuits and the transfer function</h3>
 <p>A signal path is solved as the circuit it is on the board: every part with a model and every op-amp channel on
-its nets and on the nets beyond them, up to ground and the supply rails, whatever the topology: inverting,
+its nets and on the nets beyond them, up to ground and the supply rails (a net with a supply pin, or named like a
+rail unless only resistors are on it: a divider's tap such as VREF_MID is a node of the circuit), whatever the
+topology: inverting,
 non-inverting, differential and summing stages, integrators, transimpedance stages, Sallen-Key, multiple-feedback
 and state-variable filters, instrumentation amplifiers, several op-amps with feedback between them. The parts as
 modelled on the Parts tab (a capacitor with its ESR, ESL and DC-bias capacitance), every track as a transmission
@@ -1522,7 +1527,14 @@ algebra and NumPy / SciPy for the numbers.</p>
 <li><b>The circuit from the board.</b> From the path's nets outwards, every part with a model, every op-amp
   channel and every track and via becomes an element between named nodes (the nets; ground and the supply rails are
   AC ground). This is the same circuit for both forms below; the ideal form simply leaves out what a designer's
-  equation leaves out.</li>
+  equation leaves out. The path's own nets (from the driver forward and from the receiver backward, through op-amps
+  only from input to output) are never AC ground, whatever their name or pin types: a battery divider's VBAT_DIV
+  is a signal there, and a note says so. Its own nets and its op-amps' feedback are always in the circuit; beyond
+  them it holds up to 60 nets (a note names what it leaves out). Parts not fitted (DNP) are left out; a part on
+  its nets without a model, set to <i>open</i>, or a resistor model on more than two nets (an array: give it its
+  <i>pins</i>) is left out and named in a note, as is an op-amp left with no DC path from its output to IN−
+  (its DC gain is then the open-loop one). When the path's driver pin is an op-amp's output, the source stands
+  for that op-amp. The load resistance is at every receiver.</li>
 <li><b>The equations: modified nodal analysis.</b> Kirchhoff's current law at every node, written as one matrix
   equation (G + s·C)·x = b·u: x the node voltages plus a current for each voltage source, op-amp and inductor; G
   the conductances and the connections, C the capacitances (and the inductors), u the input. This is the standard

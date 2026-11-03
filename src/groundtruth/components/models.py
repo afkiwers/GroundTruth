@@ -375,29 +375,38 @@ def amplifier_pins(fp, model: Optional[ComponentModel], net: Optional[str] = Non
     return chans[0] if chans else None
 
 
-def amplifier_channels(fp, model: Optional[ComponentModel], net: Optional[str] = None) -> list:
-    """An amplifier's op-amp channels as (input pad, output pad) pairs, both on a net: the two `pins` in that order
-    (pad number or pin name), else its GT labels (amp_in / amp_out, one group per channel: a dual or quad op-amp's
-    U3A, U3B ..., tags.amp_label_groups), else the one non-inverting input and the one output found by their pin
-    names (a single op-amp: +IN / IN+ / INP and OUT). With `net`: only the channels with a pad on it. [] when they
-    can't be told (a dual or quad op-amp without labels)."""
+def amplifier_units(fp, model: Optional[ComponentModel]) -> list:
+    """An amplifier's channels as (name, input pads, output pad), the one resolver every analysis uses (audit 2026-11,
+    G-4: the route and the circuit told a dual's channels apart differently, so a traced path could not be routed):
+    analog_net.opamp_channels (GT labels, else `pins`, else the pin names per channel), each with both inputs (a
+    signal may enter at either: an inverting stage's at IN−); else the one input and output by their pin names
+    (_named_pair: a gain block's IN and OUT). Only pads on a net; [] for no amplifier or channels that can't be told."""
     if model is None or model.kind != "amplifier":
         return []
-    names = [tuple(model.pins[:2])] if len(model.pins) >= 2 else None
-    if names is None:
-        from ..analysis.tags import amp_label_pins       # GT = amp_in:3, amp_out:1 on the symbol
-        names = amp_label_pins(fp) or None
-    if names is not None:
-        def pad(name):
-            """The pad named `name`: by its number first, else by its schematic pin function."""
-            want = str(name).upper()
-            return next((p for p in fp.pads if str(p.number).upper() == want), None) or \
-                next((p for p in fp.pads if (p.pin_function or "").upper() == want), None)
-        pairs = [(pad(a), pad(b)) for a, b in names]
-        pairs = [(a, b) for a, b in pairs if a is not None and b is not None and a.net and b.net]
-        return [(a, b) for a, b in pairs if net is None or net in (a.net, b.net)]
-    pair = _named_pair(fp)
-    return [pair] if pair is not None and (net is None or net in (pair[0].net, pair[1].net)) else []
+    from ..analysis.analog_net import opamp_channels
+    out = []
+    for ch in opamp_channels(fp, model):
+        ins = [p for p in (ch.inp, ch.inn) if p is not None and p.net]
+        if ins and ch.out is not None and ch.out.net:
+            out.append((ch.name, ins, ch.out))
+    if not out:
+        pair = _named_pair(fp)
+        if pair is not None:
+            out.append((fp.reference, [pair[0]], pair[1]))
+    return out
+
+
+def amplifier_channels(fp, model: Optional[ComponentModel], net: Optional[str] = None) -> list:
+    """An amplifier's op-amp channels as (input pad, output pad) pairs (amplifier_units): the input is IN+, or IN− for
+    an inverting stage whose IN+ is on a ground (by its name). With `net`: only the channels with a pad on it. []
+    when they can't be told."""
+    pairs = []
+    for _, ins, out in amplifier_units(fp, model):
+        inp = ins[0]
+        if len(ins) > 1 and GROUND_NAME.match(inp.net.split("/")[-1]):
+            inp = ins[1]
+        pairs.append((inp, out))
+    return [(a, b) for a, b in pairs if net is None or net in (a.net, b.net)]
 
 
 def _named_pair(fp):

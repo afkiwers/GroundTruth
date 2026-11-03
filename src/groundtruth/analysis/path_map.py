@@ -7,15 +7,15 @@ traces it this way").
 Unlike the signal-path detection (analysis/detect, analysis/route: only parts that pass a signal by default, op-amps
 it can tell), this is a map: the nets are the nodes, and a route may run through
 
-- any part joining two nets (resistor, capacitor, inductor, ferrite, diode, 0R, a two-pin part of any model), either
-  way, unless it is not fitted (DNP);
+- any passive joining two nets (resistor, capacitor, inductor, ferrite, fuse, diode, 0R, net tie: by its model or
+  its reference prefix), either way, unless it is not fitted (DNP); not a 2-pin connector or an IC (an "ic" branch);
 - an op-amp channel, from its + or − input to its output (analysis/analog_net.opamp_channels: GT amp labels, pin
   names, or the part's model pins), and a logic buffer's or comparator's channel, input to output
   (components/models.buffer_pins).
 
 It never runs through a ground or a supply (analysis/analog_net.ac_ground_nets, detect.is_power_net) unless that is
-the end asked for. Every route is a simple path (no net twice) [A81]; the search stops at `max_routes` routes or
-`max_nets` nets per route and says so.
+the end asked for. Every route is a simple path (no net twice) [A81], found shortest first [Hart 1968]; the search
+stops at `max_routes` routes, `max_nets` nets per route or `max_steps` steps and says so.
 
 Then, for every net on a route, what else is on it (`branches`): parts to ground or a supply (decoupling, pull-ups,
 dividers), op-amps driving it (a bias stage, followed to its own inputs), op-amps listening to it, ICs' and
@@ -32,6 +32,11 @@ from ..core.board import Board, Footprint
 MAX_ROUTES = 200            # routes kept before the search stops (a dense board has many through its capacitors)
 MAX_NETS = 30               # nets on one route at most
 BRANCH_DEPTH = 3            # parts followed into a side branch
+MAX_STEPS = 200_000         # partial routes the search extends at most (a dense mesh: a note says it stopped)
+# 2-net parts a route passes, whatever their model (a diode, a fuse, a user's 'open' resistor): by reference prefix;
+# a 2-pin connector or an IC with two nets connected is no series part (audit 2026-11, G-8)
+SERIES_PREFIXES = ("R", "C", "L", "D", "FB", "F", "Z", "NT")
+SERIES_KINDS = ("short", "resistor", "cap", "inductor", "ferrite")
 
 
 @dataclass
@@ -92,6 +97,14 @@ def _model(config: Config, fp: Footprint):
     return m
 
 
+def _missing(board: Board, point: str) -> str:
+    """The note for a route end resolve can't place: a pad on no net (unconnected), or no such pin or net."""
+    pad = board.find_pin(point)
+    if pad is not None:
+        return f"{point}: the pad is on no net (unconnected)"
+    return f"{point}: no such pin or net on the board"
+
+
 def resolve(board: Board, point: str) -> Optional[str]:
     """The net of a route's end: a pin ("U4.11") or a net name (exactly, or its last part: "PH_A_DIV" for
     "/Analog Conditioning/PH_A_DIV"). None when there is no such pin or net."""
@@ -106,12 +119,11 @@ def resolve(board: Board, point: str) -> Optional[str]:
 
 def rail_nets(board: Board, config: Config) -> set[str]:
     """Grounds and supplies: never passed through (AC ground for a signal, analog_net.ac_ground_nets: reference nets,
-    nets on a supply pin, rail names; and every net detect.is_power_net calls a supply)."""
+    nets on a supply pin, nets named as rails that are not a divider's tap). Not detection's wider supply names
+    (detect.is_power_net: VOUT, VIN, RAIL anywhere in a name), which made a DAC's output or KiCad's Net-(U3-VOUT) a
+    barrier (audit 2026-11, G-9)."""
     from .analog_net import ac_ground_nets
-    from .detect import is_power_net
-    rails = set(ac_ground_nets(board, config))
-    rails |= {n for n in board.nets if n not in rails and is_power_net(board, n, config)}
-    return rails
+    return set(ac_ground_nets(board, config))
 
 
 class _Graph:
@@ -135,11 +147,30 @@ class _Graph:
             self._chans[fp.reference] = chans
         return self._chans[fp.reference]
 
+    def series(self, fp: Footprint) -> bool:
+        """Whether a 2-net part is a series part a route may pass (either way): its model a passive one
+        (SERIES_KINDS), or its reference prefix a passive's or a diode's (SERIES_PREFIXES) whatever its model."""
+        from ..components.defaults import ref_prefix
+        m = self.models.get(fp.reference)
+        prefix = ref_prefix(fp.reference)
+        # a resistor, capacitor or inductor named by its role (RIN, RF, CIN) with two pads too; not a connector (CN)
+        named = len(fp.pads) == 2 and prefix[:1] in ("R", "C", "L") and prefix not in ("CN", "CON", "CONN")
+        return (m is not None and m.kind in SERIES_KINDS) or prefix in SERIES_PREFIXES or named
+
+    def passes(self, hop: Hop) -> bool:
+        """Whether a route's hop passes a signal by default (an op-amp or buffer channel, a 0R, ferrite, small
+        resistor): a route of such hops needs no Pass through."""
+        if hop.kind != "part":
+            return True
+        m = self.models.get(hop.part)
+        return m is not None and m.passes_signal()
+
     def steps(self, net: str) -> list[tuple[str, Hop]]:
-        """[(next net, hop)] from `net`: through every fitted two-net part (either way), every op-amp channel with an
-        input on it (to its output), every buffer channel with its input on it (to its output)."""
+        """[(next net, hop)] from `net`: through every fitted two-net series part (either way), every op-amp channel
+        with an input on it (to its output; once, though both its inputs are on the net), every buffer channel with
+        its input on it (to its output); in the order of the next net's name, then the part's (not the file's)."""
         from ..components.models import buffer_pins
-        out = []
+        out, seen = [], set()
         for fp in self.by_net.get(net, []):
             if fp.dnp:
                 continue
@@ -148,89 +179,155 @@ class _Graph:
             if chans:
                 for ch in chans:
                     for inp in (ch.inp, ch.inn):
-                        if inp is not None and inp.net == net and ch.out.net and ch.out.net != net:
+                        if (inp is not None and inp.net == net and ch.out.net and ch.out.net != net
+                                and (ch.name, ch.out.net) not in seen):
+                            seen.add((ch.name, ch.out.net))
                             out.append((ch.out.net, Hop(ch.name, fp.value, "opamp", f"{fp.reference}.{inp.number}",
                                                         f"{fp.reference}.{ch.out.number}")))
                 continue
             if m is not None and m.kind == "buffer":
                 for a, b in buffer_pins(fp, m, net):
-                    if a.net == net:
+                    if a.net == net and (fp.reference, b.net) not in seen:
+                        seen.add((fp.reference, b.net))     # two channels between the same nets: one route
                         out.append((b.net, Hop(fp.reference, fp.value, "buffer", f"{fp.reference}.{a.number}",
                                                f"{fp.reference}.{b.number}")))
                 continue
             nets = fp.nets()
-            if len(nets) == 2:
+            if len(nets) == 2 and self.series(fp):
                 other = next(n for n in nets if n != net)
                 a = next(p for p in fp.pads if p.net == net)
                 b = next(p for p in fp.pads if p.net == other)
                 out.append((other, Hop(fp.reference, fp.value, "part", f"{fp.reference}.{a.number}",
                                        f"{fp.reference}.{b.number}")))
+        out.sort(key=lambda s: (s[0], s[1].part, s[1].pin_in))
         return out
 
 
+def _hop_key(hop: Hop) -> str:
+    """What a route may pass only once: a part, an op-amp channel (U3A), a buffer's channel (by its input pin: two
+    channels of one package may follow each other, audit 2026-11 G-10)."""
+    return hop.pin_in if hop.kind == "buffer" else hop.part
+
+
+def _distances(g: _Graph, targets: set, rails: set, start: str) -> dict[str, int]:
+    """Each net's fewest hops to a target (a breadth-first search backward from the targets over _Graph.steps), passing
+    no rail and no other target on the way; the start may be a rail. Nets missing from it never reach a target."""
+    back: dict[str, set] = {}
+    todo, seen = [start], {start}
+    while todo:                                   # the steps of every net the start can reach (forward)
+        net = todo.pop()
+        if net in targets or (net in rails and net != start):
+            continue
+        for nxt, _ in g.steps(net):
+            back.setdefault(nxt, set()).add(net)
+            if nxt not in seen:
+                seen.add(nxt)
+                todo.append(nxt)
+    dist = {t: 0 for t in targets}
+    frontier = list(targets)
+    while frontier:
+        nxt_frontier = []
+        for v in frontier:
+            for u in back.get(v, ()):
+                if u in dist or (u != start and (u in rails or u in targets)):
+                    continue
+                dist[u] = dist[v] + 1
+                nxt_frontier.append(u)
+        frontier = nxt_frontier
+    return dist
+
+
 def trace(board: Board, config: Config, start: str, ends: list[str], max_routes: int = MAX_ROUTES,
-          max_nets: int = MAX_NETS, branch_depth: int = BRANCH_DEPTH, branches: bool = True) -> PathMap:
+          max_nets: int = MAX_NETS, branch_depth: int = BRANCH_DEPTH, branches: bool = True,
+          max_steps: int = MAX_STEPS) -> PathMap:
     """Every route from `start` to any of `ends` (pins or nets, resolve) and what hangs on them (see the module),
-    the shortest routes first. A depth-first search over simple paths [A81]: a net is never visited twice on one
-    route, a ground or supply only as an end. branches=False: the routes only (a path picked in KiCad)."""
+    the shortest routes first: a best-first search over simple paths [A81] [Hart 1968] (a net never twice on one
+    route, a ground or supply only as an end), each partial route ranked by its hops plus the fewest hops still to
+    a target (_distances: an exact lower bound, so routes come out shortest first and `max_routes` keeps the
+    shortest, audit 2026-11 G-6). Nets that reach no target are never entered, so an end that can't be reached is
+    known at once (G-7); at most `max_steps` partial routes are extended (a note says so). Equal lengths in the order
+    of their nets' and parts' names (G-13). branches=False: the routes only (a path picked in KiCad)."""
+    import heapq
     pm = PathMap(start, list(ends))
     s = resolve(board, start)
     targets = {}
     for e in ends:
         n = resolve(board, e)
         if n is None:
-            pm.notes.append(f"{e}: no such pin or net on the board")
+            pm.notes.append(_missing(board, e))
         else:
             targets[n] = e
     if s is None:
-        pm.notes.append(f"{start}: no such pin or net on the board")
+        pm.notes.append(_missing(board, start))
         return pm
     if not targets:
         return pm
     g = _Graph(board, config)
     rails = rail_nets(board, config)
     pm.rails = sorted(rails - set(targets) - {s})
-    cut = {"routes": False, "length": False}
-
-    def walk(net: str, nets: list[str], hops: list[Hop], used: set[str]):
-        """Extend the route ending at `net` by every step not taken yet."""
-        if len(pm.routes) >= max_routes:
-            cut["routes"] = True
-            return
-        for nxt, hop in g.steps(net):
-            if nxt in nets or hop.part in used:
-                continue
-            if nxt in targets:
-                if len(pm.routes) >= max_routes:            # the cap holds for routes ending here too
-                    cut["routes"] = True
-                    return
-                pm.routes.append(Route(nets + [nxt], hops + [hop]))
-                continue
-            if nxt in rails:
-                continue
-            if len(nets) + 1 >= max_nets:
-                cut["length"] = True
-                continue
-            walk(nxt, nets + [nxt], hops + [hop], used | {hop.part})
+    cut = {"routes": False, "length": False, "steps": False}
 
     if s in targets:
         pm.notes.append(f"{start} and {targets[s]} are on the same net, {s}")
         pm.routes.append(Route([s], []))
     else:
-        walk(s, [s], [], set())
+        dist = _distances(g, set(targets), rails, s)
+        # partial routes as (net, hop, parent) nodes; the heap holds (rank, the route's nets and parts as names for a
+        # tie-break that is the same for any file order, node index)
+        nodes: list[tuple] = [(s, None, -1)]
+        heap = [(dist.get(s, 0), (s,), (), 0)] if s in dist else []
+        steps = 0
+        while heap and len(pm.routes) < max_routes:
+            _, names, parts, k = heapq.heappop(heap)
+            net, _, _ = nodes[k]
+            if net in targets:
+                chain, i = [], k
+                while i >= 0:
+                    chain.append(nodes[i])
+                    i = nodes[i][2]
+                chain.reverse()
+                pm.routes.append(Route([c[0] for c in chain], [c[1] for c in chain[1:]]))
+                continue
+            steps += 1
+            if steps > max_steps:
+                cut["steps"] = True
+                break
+            on, used = set(names), set()
+            i = k
+            while i > 0:
+                used.add(_hop_key(nodes[i][1]))
+                i = nodes[i][2]
+            for nxt, hop in g.steps(net):
+                if nxt in on or _hop_key(hop) in used or nxt not in dist:
+                    continue
+                if len(names) + 1 + dist[nxt] > max_nets:        # can't reach a target within max_nets
+                    cut["length"] = True
+                    continue
+                nodes.append((nxt, hop, k))
+                heapq.heappush(heap, (len(names) + dist[nxt], names + (nxt,), parts + (hop.part,), len(nodes) - 1))
+        if heap and len(pm.routes) >= max_routes:
+            cut["routes"] = True
     if cut["routes"]:
-        pm.notes.append(f"stopped after {max_routes} routes: there may be more (max_routes)")
+        pm.notes.append(f"stopped after {max_routes} routes, the shortest: there may be longer ones (max_routes)")
+    if cut["steps"]:
+        pm.notes.append(f"the search stopped after {max_steps} steps (a dense mesh of parts): the routes found are "
+                        "the shortest, there may be more")
     if cut["length"]:
         pm.notes.append(f"routes longer than {max_nets} nets were not followed (max_nets)")
-    if not pm.routes:
+    if not pm.routes and cut["length"] and not cut["steps"]:
+        pm.notes.append(f"no route found within {max_nets} nets (max_nets)")
+    elif not pm.routes and not cut["steps"]:
         pm.notes.append("no route found: the end may be reached only through a ground, a supply, or a part "
-                        "that is neither two-pin nor an op-amp / buffer channel GroundTruth can tell (see the "
-                        "branches: an IC's pin)")
-    pm.routes.sort(key=lambda r: len(r.hops))           # the shortest first (stable: the search's order after)
+                        "that is neither a two-pin passive nor an op-amp / buffer channel GroundTruth can tell (see "
+                        "the branches: an IC's pin)")
+    # the shortest first; of equal length those needing fewer Pass through parts (a capacitor around an op-amp after
+    # the op-amp), then by their nets' and parts' names: the same order for any file order
+    pm.routes.sort(key=lambda r: (len(r.hops), sum(not g.passes(h) for h in r.hops), r.nets,
+                                  [h.part for h in r.hops]))
     if not branches:
         return pm
     on_routes = list(dict.fromkeys(n for r in pm.routes for n in r.nets)) or [s]
-    hops_on = {h.part for r in pm.routes for h in r.hops}
+    hops_on = {_hop_key(h) for r in pm.routes for h in r.hops}
     for net in on_routes:
         pm.branches[net] = _branches(g, net, rails, set(on_routes), hops_on, branch_depth, {net})
     return pm
@@ -316,7 +413,7 @@ def _branches(g: _Graph, net: str, rails: set, on_routes: set, hops_on: set, dep
     out = []
     for fp in g.by_net.get(net, []):
         ref = fp.reference
-        if ref == via:
+        if ref == via and not g.opamp_channels(fp):
             continue
         pin = next((f"{ref}.{p.number}" for p in fp.pads if p.net == net), ref)
         if fp.dnp:
@@ -325,6 +422,8 @@ def _branches(g: _Graph, net: str, rails: set, on_routes: set, hops_on: set, dep
         chans = g.opamp_channels(fp)
         if chans:
             for ch in chans:
+                if ch.name == via:          # the channel this side branch came through (its others still listed)
+                    continue
                 if ch.out.net == net and ch.name not in hops_on:
                     # an op-amp driving this net (a bias or reference stage): what drives its inputs
                     deeper = []
@@ -333,20 +432,21 @@ def _branches(g: _Graph, net: str, rails: set, on_routes: set, hops_on: set, dep
                             if inp is not None and inp.net and inp.net not in seen and inp.net != net:
                                 deeper.append(Branch("net", ch.name, fp.value, f"{ref}.{inp.number}", inp.net,
                                                      _side(g, inp.net, rails, on_routes, hops_on, depth - 1,
-                                                           seen | {inp.net}, ref)))
+                                                           seen | {inp.net}, ch.name)))
                     out.append(Branch("opamp_out", ch.name, fp.value, f"{ref}.{ch.out.number}", net, deeper))
                 for inp in (ch.inp, ch.inn):
-                    if inp is not None and inp.net == net and ch.name not in hops_on:
+                    # an input listening here; not a follower's own IN− on its output's net (its feedback, G-16)
+                    if inp is not None and inp.net == net and ch.out.net != net and ch.name not in hops_on:
                         out.append(Branch("opamp_in", ch.name, fp.value, f"{ref}.{inp.number}", ch.out.net))
             continue
         m = g.models.get(ref)
         if m is not None and m.kind == "buffer":
             for a, b in buffer_pins(fp, m, net):
-                if a.net == net and ref not in hops_on:
+                if a.net == net and f"{ref}.{a.number}" not in hops_on:
                     out.append(Branch("buffer_in", ref, fp.value, f"{ref}.{a.number}", b.net))
             continue
         nets = fp.nets()
-        if len(nets) != 2:
+        if len(nets) != 2 or not g.series(fp):
             out.append(Branch("ic", ref, fp.value, pin + _pin_name(fp, net)))
             continue
         if ref in hops_on:

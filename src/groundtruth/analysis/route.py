@@ -22,6 +22,9 @@ from ..core.board import Board, Pad, Point, Track
 from ..geometry.shapes import arc_points, clean_polygon, pad_shape, track_shape
 
 
+PART_STEP = 1000.0             # mm: a step through a part weighs this much more than its pads' distance (find_route)
+
+
 class RouteError(ValueError):
     """No copper path between the pins (the message says what may block it): reported as route_missing."""
     pass
@@ -104,25 +107,11 @@ def _passes(config: Config, fp, through) -> bool:
     return model is not None and model.passes_signal()
 
 
-def _amp_pads(config: Config, fp):
-    """(input pad, output pad) of a part modelled as an amplifier (an op-amp stage the path runs through), or
-    None (no amplifier, or its pins can't be told: components.models.amplifier_pins)."""
-    from ..components.models import amplifier_pins
-    return amplifier_pins(fp, config.model_for(fp.reference))
-
-
-def _amp_channels(config: Config, fp, net: Optional[str] = None) -> list:
-    """The (input pad, output pad) channels of a part modelled as an amplifier (on `net` when given: a quad
-    op-amp's channel on a path), or [] (components.models.amplifier_channels)."""
-    from ..components.models import amplifier_channels
-    return amplifier_channels(fp, config.model_for(fp.reference), net)
-
-
-def _buffer_pads(config: Config, fp, net: Optional[str] = None) -> list:
-    """The (input pad, output pad) channels of a part modelled as a logic buffer (on `net` when given), or []
-    (components.models.buffer_pins)."""
-    from ..components.models import buffer_pins
-    return buffer_pins(fp, config.model_for(fp.reference), net)
+def _amp_units(config: Config, fp) -> list:
+    """The channels of a part modelled as an amplifier (components.models.amplifier_units), [] for none or when its
+    pins can't be told."""
+    from ..components.models import amplifier_units
+    return amplifier_units(fp, config.model_for(fp.reference))
 
 
 def _blocking(board: Board, config: Config, nets: set[str], through) -> str:
@@ -133,7 +122,7 @@ def _blocking(board: Board, config: Config, nets: set[str], through) -> str:
     for fp in board.footprints:
         fn = fp.nets()
         model = config.model_for(fp.reference)
-        if model is not None and model.kind == "amplifier" and set(fn) & nets and _amp_pads(config, fp) is None:
+        if model is not None and model.kind == "amplifier" and set(fn) & nets and not _amp_units(config, fp):
             found.append(f"{fp.reference} (an amplifier whose input and output pins can't be told: set pins "
                          "[in, out] on the Parts tab)")
             continue
@@ -148,35 +137,100 @@ def _blocking(board: Board, config: Config, nets: set[str], through) -> str:
             "one of them, name it in the net's `through` (Signal paths tab: Pass through)")
 
 
-def signal_nets(board: Board, config: Config, net: str, through=(), stop=()) -> set[str]:
-    """The net plus every net reachable through series parts that pass signals (and the parts in `through`). `stop`:
-    nets never entered nor crossed (a path's circuit stops at AC ground: a part in `through` to a supply led it on
-    into the regulator behind that supply)."""
-    refs = set(config.reference_nets) | set(stop)
+def signal_graph(board: Board, config: Config, through=()) -> tuple[dict, dict]:
+    """The ways a signal goes from net to net, as (forward, backward) {net: {next net: [(part, input pad, output
+    pad)]}}: through every fitted 2-net part that passes signals (_passes: its model, or named in `through`) both
+    ways, and through every op-amp channel (components.models.amplifier_units: from each input, IN+ or IN−, to its
+    output) and logic-buffer channel (buffer_pins) from its input to its output only [A81]. Parts not fitted (DNP)
+    pass nothing. `backward` is `forward` reversed."""
     through = set(through)
-    group = {net}
-    frontier = [net]
-    by_net = board.parts_by_net()
-    while frontier:
-        n = frontier.pop()
-        for fp in by_net.get(n, []):
-            amp = _amp_channels(config, fp, n)         # an op-amp's channel on this net (a quad: that one)
-            chans = _buffer_pads(config, fp, n)        # a logic buffer's channel on this net
-            if amp or chans:                           # an op-amp stage or a buffer: from its input's net to its output's
-                pair = amp[0] if amp else chans[0]
-                if n in (pair[0].net, pair[1].net):
-                    for other in (pair[0].net, pair[1].net):
-                        if other not in group and other not in refs and other:
-                            group.add(other)
-                            frontier.append(other)
-                continue
-            if not _passes(config, fp, through) or len(fp.nets()) != 2:
-                continue
-            for other in fp.nets():
-                if other not in group and other not in refs and other:
-                    group.add(other)
-                    frontier.append(other)
-    return group
+    fwd: dict[str, dict] = {}
+    back: dict[str, dict] = {}
+
+    def way(a: Pad, b: Pad, fp):
+        """A step from a's net to b's net through part fp."""
+        if a.net and b.net and a.net != b.net:
+            fwd.setdefault(a.net, {}).setdefault(b.net, []).append((fp, a, b))
+            back.setdefault(b.net, {}).setdefault(a.net, []).append((fp, b, a))
+    from ..components.models import amplifier_units, buffer_pins
+    for fp in board.footprints:
+        if fp.dnp:
+            continue
+        m = config.model_for(fp.reference)
+        if m is not None and m.kind == "amplifier":
+            for _, ins, out in amplifier_units(fp, m):
+                for p in ins:
+                    way(p, out, fp)
+            continue
+        if m is not None and m.kind == "buffer":
+            for a, b in buffer_pins(fp, m):
+                way(a, b, fp)
+            continue
+        pads = [p for p in fp.pads if p.net]
+        if len({p.net for p in pads}) != 2 or not _passes(config, fp, through):
+            continue
+        a = pads[0]
+        b = next(p for p in pads if p.net != a.net)
+        way(a, b, fp)
+        way(b, a, fp)
+    return fwd, back
+
+
+def _reach(graph: dict, start: str, barriers: set) -> set[str]:
+    """The nets reachable from `start` along `graph` (signal_graph's), never entering a barrier."""
+    seen, todo = {start}, [start]
+    while todo:
+        for nxt in graph.get(todo.pop(), {}):
+            if nxt not in seen and nxt not in barriers:
+                seen.add(nxt)
+                todo.append(nxt)
+    return seen
+
+
+def path_nets(board: Board, config: Config, driver_net: str, receiver_net: str, through=(), barriers=None,
+              graph=None) -> set[str]:
+    """The nets a signal from the driver's net can pass on its way to the receiver's net: those reachable forward
+    from the driver and backward from the receiver (signal_graph; op-amps and buffers only from input to output), so
+    a bias or reference follower beside the path, a monitor buffer listening to it, or an op-amp crossed from its
+    output to its input is not on it (audit 2026-11, G-1/G-2/G-3/E-6) [A81]. Never entering a barrier net
+    (default: the reference nets), the two end nets excepted. Empty when the receiver is not reached."""
+    fwd, back = graph if graph is not None else signal_graph(board, config, through)
+    stop = (set(config.reference_nets) if barriers is None else set(barriers)) - {driver_net, receiver_net}
+    f = _reach(fwd, driver_net, stop)
+    if receiver_net not in f:
+        return set()
+    return f & _reach(back, receiver_net, stop)
+
+
+def route_nets(board: Board, config: Config, driver_net: str, receiver_net: str, through=()) -> tuple[set, set]:
+    """(the path's nets, the supply-like nets it runs through): path_nets never entering AC ground
+    (analog_net.ac_ground_nets: a part passing signals into a supply would lead on into the regulator behind it),
+    else, when the receiver is reached only through such a net, never entering a hard supply (a reference net, a
+    regulator's output, a pin named as a supply: analog_net.supply_pin_nets hard), and those nets named: a path
+    through a net named like a rail or with an IC's power_in pin on it (a battery divider VBAT_DIV) is a signal
+    there, not AC ground (audit 2026-11, E-1: such a net shorted the signal, −6000 dB)."""
+    from .analog_net import ac_ground_nets, supply_pin_nets
+    graph = signal_graph(board, config, through)
+    soft = ac_ground_nets(board, config)
+    nets = path_nets(board, config, driver_net, receiver_net, through, soft, graph)
+    if nets:
+        return nets, set()
+    hard = set(config.reference_nets) | supply_pin_nets(board, hard=True)
+    nets = path_nets(board, config, driver_net, receiver_net, through, hard, graph)
+    return nets, (nets & soft) - {driver_net, receiver_net}
+
+
+def signal_nets(board: Board, config: Config, net: str, through=(), stop=None) -> set[str]:
+    """The net plus every net reachable through series parts that pass signals (and the parts in `through`) and
+    through op-amp and buffer channels (every channel of a part: a quad's cascade, audit 2026-11 G-1), either way
+    (the path's nets from any of them: the Signal paths tab, the highlight). `stop`: nets never entered nor crossed;
+    default AC ground (analog_net.ac_ground_nets: a resistor into a supply no longer leads on through it, G-5)."""
+    if stop is None:
+        from .analog_net import ac_ground_nets
+        stop = ac_ground_nets(board, config) - {net}
+    fwd, back = signal_graph(board, config, through)
+    both = {n: set(fwd.get(n, ())) | set(back.get(n, ())) for n in set(fwd) | set(back)}
+    return _reach(both, net, set(config.reference_nets) | set(stop))
 
 
 class _Graph:
@@ -307,52 +361,67 @@ def find_route(board: Board, config: Config, net: str, driver_pin: str, receiver
     if driver is None or receiver is None:
         raise RouteError(f"pin {driver_pin if driver is None else receiver_pin!r} not found")
     through = set(through)
-    reach = signal_nets(board, config, net, through)
-    nets = reach | ({driver.net, receiver.net} - set(config.reference_nets))
+    ends = {driver.net, receiver.net} - set(config.reference_nets)
+    # the path's nets: forward from the driver and backward from the receiver, op-amps and buffers only from input
+    # to output (route_nets: the receiver reached only against a channel's direction, or across a supply, is no path)
+    on_path, crossed = route_nets(board, config, driver.net, receiver.net, through)
+    nets = on_path | ends
 
     g = copper_graph(board, nets)
-
-    # Series parts that pass the signal (0R, termination R, ferrite): pad-to-pad edge.
-    for fp in board.footprints:
-        amp = _amp_pads(config, fp)
-        chans = [c for c in (_amp_channels(config, fp) if amp is not None else _buffer_pads(config, fp))
-                 if c[0].net in nets and c[1].net in nets]
-        if amp is not None or chans:                  # an op-amp stage or a buffer's channel: input pin to output pin
-            for a, b in chans:
-                if a.net in nets and b.net in nets:
-                    g.edge(g.node(a.layers[0], a.position), g.node(b.layers[0], b.position),
-                           math.dist(a.position, b.position), ("part", fp, a.layers[0]))
+    # Parts between the path's nets: a pad-to-pad edge, both ways for a part that passes the signal (0R, termination
+    # R, ferrite), one way (input pin to output pin) for an op-amp's or buffer's channel. Each part step weighs
+    # PART_STEP more than its pads' distance, so the route never leaves its net through two resistors and comes back
+    # where the net's own track is longer (audit 2026-11, G-11).
+    fwd, _ = signal_graph(board, config, through)
+    oneway = []
+    for a_net, outs in fwd.items():
+        if a_net not in nets:
             continue
-        if not _passes(config, fp, through):
-            continue
-        fp_pads = [p for p in fp.pads if p.net in nets]
-        if len(fp_pads) == 2 and fp_pads[0].net != fp_pads[1].net:
-            a, b = fp_pads
-            g.edge(g.node(a.layers[0], a.position), g.node(b.layers[0], b.position),
-                   math.dist(a.position, b.position), ("part", fp, a.layers[0]))
+        for b_net, steps in outs.items():
+            if b_net not in nets:
+                continue
+            for fp, a, b in steps:
+                edge = (g.node(a.layers[0], a.position), g.node(b.layers[0], b.position),
+                        math.dist(a.position, b.position) + PART_STEP, ("part", fp, a.layers[0]))
+                oneway.append(edge)       # a passing part is in fwd both ways: both its directions are here
 
     src = g.node(driver.layers[0], driver.position)
     dst = g.node(receiver.layers[0], receiver.position)
     n = len(g.pos)
-    if not g.edges:
+    if not g.edges and not oneway:
         raise RouteError(f"net {net!r} has no copper connecting {driver_pin} and {receiver_pin}")
-    # The graph as a symmetric sparse matrix (each edge both ways) for scipy's Dijkstra: the shortest copper
-    # path is what a signal's current follows at low frequency only roughly, but it is the copper the signal
-    # really runs on (a route has one path; branches and stubs are not part of the loop). Where two edges join
-    # the same nodes the shorter one counts, and `info` keeps what it is.
-    rows = [e[0] for e in g.edges] + [e[1] for e in g.edges]
-    cols = [e[1] for e in g.edges] + [e[0] for e in g.edges]
-    w = [e[2] for e in g.edges] * 2
+    # The graph as a sparse matrix for scipy's Dijkstra [Dijkstra 1959], copper both ways, part steps as given: the
+    # shortest copper path is what a signal's current follows at low frequency only roughly, but it is the copper
+    # the signal really runs on (a route has one path; branches and stubs are not part of the loop). Where two edges
+    # join the same nodes the shorter one counts, and `info` keeps what it is.
+    edges = [(a, b, w, inf) for a, b, w, inf in g.edges] + [(b, a, w, inf) for a, b, w, inf in g.edges] + oneway
+    edges = [e for e in edges if e[0] != e[1]]
     info = {}
-    for a, b, wt, inf in g.edges:
-        for key in ((a, b), (b, a)):
-            if key not in info or info[key][0] > wt:
-                info[key] = (wt, inf)
+    for a, b, wt, inf in edges:
+        if (a, b) not in info or info[(a, b)][0] > wt:
+            info[(a, b)] = (wt, inf)
+    rows = [k[0] for k in info]
+    cols = [k[1] for k in info]
+    w = [v[0] for v in info.values()]
     mat = coo_matrix((w, (rows, cols)), shape=(n, n)).tocsr()
-    dist, pred = dijkstra(mat, indices=src, return_predecessors=True)
+    dist, pred = dijkstra(mat, directed=True, indices=src, return_predecessors=True)
     if not np.isfinite(dist[dst]):
+        reach = signal_nets(board, config, net, through)
+        why = ""
+        if not on_path:
+            graph = signal_graph(board, config, through)
+            if path_nets(board, config, driver.net, receiver.net, through, graph=graph):
+                from .analog_net import supply_pin_nets
+                rails = sorted(path_nets(board, config, driver.net, receiver.net, through, graph=graph)
+                               & (supply_pin_nets(board, hard=True) - {driver.net, receiver.net}))
+                why = (f"; the signal reaches {receiver_pin} only through {', '.join(rails) or 'a supply'} (a "
+                       "regulator's output or a supply pin: AC ground for a signal)")
+            elif path_nets(board, config, receiver.net, driver.net, through, graph=graph):
+                why = (f"; {receiver_pin} reaches {driver_pin} only from an op-amp's or buffer's output to its input "
+                       "(the signal goes the other way: swap the driver and the receiver)")
         raise RouteError(f"no copper path from {driver_pin} to {receiver_pin} on net {net!r} "
-                         "(unrouted, or a series part is modelled as open)" + _blocking(board, config, reach, through))
+                         "(unrouted, or a series part is modelled as open)" + why
+                         + _blocking(board, config, reach, through))
 
     order = [dst]                       # walk the predecessors back from the receiver
     while order[-1] != src:
@@ -360,6 +429,8 @@ def find_route(board: Board, config: Config, net: str, driver_pin: str, receiver
     order.reverse()
 
     route = Route(net, driver, receiver)
+    if crossed:
+        route.notes.append(_crossed_note(crossed))
     for a, b in zip(order, order[1:]):
         (pa, la), (pb, lb) = g.pos[a], g.pos[b]
         _, inf = info[(a, b)]
@@ -386,6 +457,13 @@ def find_route(board: Board, config: Config, net: str, driver_pin: str, receiver
             route.steps.append(RouteSegment(pa, pb, la, 0.2, "pad", "", 0, ""))
     route.steps = _merge_collinear(route.steps)
     return route
+
+
+def _crossed_note(crossed: set) -> str:
+    """The note for supply-like nets a path runs through (route_nets): taken as the path's own nets."""
+    return (f"the path runs through {', '.join(sorted(crossed))}, which look{'s' if len(crossed) == 1 else ''} like a "
+            "supply (a rail's name, or an IC's power_in pin): taken as a signal net "
+            "there, not AC ground")
 
 
 SHUNT_KINDS = ("resistor", "cap", "inductor", "ferrite", "short")     # part models that can sit across a path
@@ -501,8 +579,8 @@ def path_branches(board: Board, config: Config, route: Route) -> list:
     for ref in route.parts:
         sfp = board.footprint(ref)
         snets = {p.net for p in sfp.pads if p.net} if sfp is not None else set()
-        amp = next((c for c in _amp_channels(config, sfp) if c[0].net in on_route and c[1].net in on_route),
-                   None) if sfp is not None else None
+        amp = next(((p, out) for _, ins, out in (_amp_units(config, sfp) if sfp is not None else [])
+                    for p in ins if p.net in on_route and out.net in on_route and p.net != out.net), None)
         if amp is not None:                 # an op-amp stage (its channel on the route) spans its input's and
             snets = {amp[0].net, amp[1].net}    # output's nets: its feedback
         if len(snets) == 2:

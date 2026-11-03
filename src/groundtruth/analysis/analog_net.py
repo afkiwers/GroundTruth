@@ -4,9 +4,10 @@ model that can calculate any circuit made from an OPA".
 
 - **The network** (`analog_network`, [A53]): from the path's nets, every two-pin part with a model (resistor, capacitor,
   inductor, ferrite, 0R) and every op-amp channel with a pin on a net of it, and the nets on their other pins, until
-  AC ground: the reference nets and the supply rails (`ac_ground_nets`). At most MAX_NETS nets (a note when it
-  stops there). An IC that is not an op-amp is open on the network (its pins draw nothing), except the path's
-  driver (the source) and receivers (the load).
+  AC ground: the reference nets and the supply rails (`ac_ground_nets`), never a net of the path itself
+  (route.route_nets). At most MAX_NETS nets besides the path's and its op-amps' (a note names what it leaves
+  out). An IC that is not an op-amp is open on the network (its pins draw nothing), except the path's driver (the
+  source) and receivers (the load); every part it leaves out is named in a note.
 - **The copper**: the network's nets as route.copper_graph has them; pads, vias' joins, through-hole pads and pours
   join their nodes (ideal: a pour is a plane), each track is its own transmission line (emi/path.PathLine with the
   cross-section's Z0 and εeff and its copper and dielectric loss, as the path's stretches have; `lumped=True`: its
@@ -123,6 +124,15 @@ def opamp_channels(fp: Footprint, model) -> list[OpAmpChannel]:
         """The part's one pin named as an inverting input (a single op-amp), else None."""
         inv = [p for p in fp.pads if (pin_role(p.pin_function or "") or ("",))[0] == "inn" and p.net]
         return inv[0] if len(inv) == 1 else None
+
+    def same_channel(p: Pad, role: str) -> Optional[Pad]:
+        """The pin of role `role` in the same channel as pad p by their pin names (+INA beside −INA, IN1+ beside
+        IN1−), else None (p's name says no channel, or the channel has not exactly one such pin)."""
+        r = pin_role(p.pin_function or "")
+        if r is None or r[0] == "supply":
+            return None
+        found = [q for q in fp.pads if q.net and (pin_role(q.pin_function or "") or ("", None))[:2] == (role, r[1])]
+        return found[0] if len(found) == 1 else None
     if groups:
         # the labels name each stage's input and output; IN− by its own label, else by its pin name (refboard's
         # TLV6001 U301: amp_in:1, amp_out:4, pin 3 named "−"; a quad has four, so its channels need amp_inv)
@@ -135,8 +145,17 @@ def opamp_channels(fp: Footprint, model) -> list[OpAmpChannel]:
         return out
     if len(model.pins) >= 2:
         a, b = pad(model.pins[0]), pad(model.pins[1])
-        return ([OpAmpChannel(fp.reference, fp.reference, a, lone_inverting(), b, params)]
-                if a is not None and b is not None else [])
+        if a is None or b is None:
+            return []
+        # IN− from the same channel as the input named (a dual's −INA beside +INA): the whole part's search finds
+        # none on a dual, and the channel became a unity gain block (audit 2026-11, E-4); `pins` naming the inverting
+        # input itself (an inverting stage) takes the channel's + input beside it
+        role = (pin_role(a.pin_function or "") or ("",))[0]
+        plus = same_channel(a, "inp") if role == "inn" else None
+        if plus is not None:
+            return [OpAmpChannel(fp.reference, fp.reference, plus, a, b, params)]
+        inn = same_channel(a, "inn") or lone_inverting()
+        return [OpAmpChannel(fp.reference, fp.reference, a, inn, b, params)]
     chans: dict[str, dict] = {}
     for p in fp.pads:
         r = pin_role(p.pin_function or "")
@@ -145,8 +164,8 @@ def opamp_channels(fp: Footprint, model) -> list[OpAmpChannel]:
     out = []
     for ch, roles in sorted(chans.items()):
         if "inp" in roles and "out" in roles:
-            name = fp.reference + (ch if len(chans) > 1 and ch else "")
-            out.append(OpAmpChannel(name, fp.reference, roles["inp"], roles.get("inn"), roles["out"], params))
+            out.append(OpAmpChannel(_unit_name(fp.reference, ch) if len(chans) > 1 else fp.reference,
+                                    fp.reference, roles["inp"], roles.get("inn"), roles["out"], params))
     if not out:                         # an unnamed output pin: the single op-amp by its inputs and output type
         pins = opamp_pin_roles(fp)
         if pins is not None and all(p.net for p in pins.values()):
@@ -154,18 +173,54 @@ def opamp_channels(fp: Footprint, model) -> list[OpAmpChannel]:
     return out
 
 
-def ac_ground_nets(board: Board, config: Config) -> set[str]:
-    """The nets that are AC ground for a small-signal circuit [A53]: the reference nets, every net on a supply pin of
-    a part (schematic pin type power_in / power_out, or an op-amp's V+ / V− / VCC / VEE pin), and nets named as
-    rails (+3V3, VCC, VDD_x, VREF ...): stiff sources, decoupled to ground."""
-    out = set(config.reference_nets)
+def _unit_name(ref: str, ch: str) -> str:
+    """A channel's name from its part and its pin names' channel: U3A for a letter; U3.1 for a digit, as U31 is
+    another part's name (two channels with the same name: one was dropped, audit 2026-11, E-9)."""
+    return f"{ref}.{ch}" if ch.isdigit() else ref + ch
+
+
+def supply_pin_nets(board: Board, hard: bool = False) -> set[str]:
+    """Nets on a part's supply pin: schematic pin type power_out (a regulator's output) or a pin named as a supply
+    (V+ / V− / VCC / VDD / VEE / VSS: pin_role), and with hard=False also pin type power_in (an IC's supply input:
+    a symbol may give that type to a pin that is not one, a gate driver's GNDB on a phase node)."""
+    types = ("power_out",) if hard else ("power_in", "power_out")
+    out = set()
     for fp in board.footprints:
         for p in fp.pads:
-            if not p.net:
-                continue
-            if p.pin_type in ("power_in", "power_out") or (pin_role(p.pin_function or "") or ("",))[0] == "supply":
+            if p.net and (p.pin_type in types or (pin_role(p.pin_function or "") or ("",))[0] == "supply"):
                 out.add(p.net)
-    out |= {n for n in board.nets if _RAIL_NAME.match(n)}
+    return out
+
+
+def resistor_only_nets(board: Board, config: Config) -> set[str]:
+    """Nets every fitted part on which is a resistor (its model, or an R part without a model): a divider's tap, not a
+    rail, whatever its name (no decoupling, no supply pin, no regulator's inductor or connector)."""
+    from ..components.defaults import ref_prefix
+    kinds: dict[str, set] = {}
+    for fp in board.footprints:
+        if fp.dnp:
+            continue
+        m = config.model_for(fp.reference)
+        res = m.kind == "resistor" if m is not None else ref_prefix(fp.reference) == "R"
+        for n in fp.nets():
+            kinds.setdefault(n, set()).add(res)
+    return {n for n, k in kinds.items() if k == {True}}
+
+
+def rail_named(net: str) -> bool:
+    """A net named as a rail (+3V3, VCC, VDD_x, VBAT, VREF ...: _RAIL_NAME); never KiCad's automatic name for a
+    pin's net (Net-(U3-VOUT))."""
+    return not net.rsplit("/", 1)[-1].startswith("Net-(") and bool(_RAIL_NAME.match(net))
+
+
+def ac_ground_nets(board: Board, config: Config) -> set[str]:
+    """The nets that are AC ground for a small-signal circuit [A53]: the reference nets, every net on a supply pin of
+    a part (supply_pin_nets), and nets named as rails (rail_named): stiff sources, decoupled to ground. Not a
+    rail-named net with only resistors on it: a divider's tap (audit 2026-11, E-2: one named VREF_MID was grounded,
+    its resistors left out, the AC coupling's corner 159 Hz for 106 Hz)."""
+    out = set(config.reference_nets) | supply_pin_nets(board)
+    taps = resistor_only_nets(board, config)
+    out |= {n for n in board.nets if rail_named(n) and n not in taps}
     return out
 
 
@@ -202,10 +257,12 @@ class AnalogNetwork:
         known."""
         if not self.path_nets:
             return True
+        # the path's nets are directed (route.path_nets: forward from the driver and backward from the receiver), and
+        # the input counted is not the output's own net: a follower's IN− is its output (audit 2026-11, G-3)
         path = set(self.path_nets)
         for nm, inp, inn, out, _ in self.schematic.get("opamps", ()):
             if nm == name:
-                return out in path and (inp in path or inn in path)
+                return out in path and any(n in path and n != out for n in (inp, inn) if n)
         return True
 
 
@@ -215,21 +272,26 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
     (exact
     poles and zeros; a track longer than SHORT_TRACK of the wavelength at f_top gets a note), else as lines.
     cache: the cross-section cache (simulate.line_cache) for the tracks' Z0."""
-    from .route import copper_graph, signal_nets
+    from ..components.models import model_pads
+    from .route import _crossed_note, copper_graph, route_nets
     a = config.analysis
     drv, rcv = board.find_pin(spec.driver), board.find_pin(receiver)
     if drv is None or rcv is None:
         raise ValueError(f"pin {spec.driver if drv is None else receiver!r} not found")
-    # AC ground, but never the path's own ends: a driver pin of type power_in (a gate driver's GNDB on a phase node,
-    # the user's phase-voltage sense path, 2026-11-03) made its net a "supply", the source shorted, every response 0
-    # (-600 dB, flat steps)
-    ground = ac_ground_nets(board, config) - {drv.net, rcv.net}
     notes: list[str] = []
-    # ---- the nets: from the path's own (signal_nets: through series parts and op-amps) outwards, never across AC
-    # ground (stop): a Pass through part to a supply no longer leads into the regulator behind it
-    start = (signal_nets(board, config, spec.name, set(spec.through), stop=ground) | {drv.net, rcv.net}) - ground
+    # ---- the path's own nets: forward from the driver, backward to this receiver, op-amps only from input to output
+    # (route.route_nets [A81]); a net the signal must pass is never AC ground, whatever its name or pin types (a
+    # battery divider's VBAT_DIV, a gate driver's power_in GNDB on a phase node: shorted, every response 0, audit
+    # 2026-11 E-1), nor are the path's ends
+    path, crossed = route_nets(board, config, drv.net, rcv.net, set(spec.through))
+    if crossed:
+        notes.append(_crossed_note(crossed))
+    if not path:
+        notes.append(f"{receiver} is not reached from {spec.driver} through parts that pass a signal (series parts, "
+                     "Pass through, op-amps from input to output): the circuit is built around both ends")
+    ground = ac_ground_nets(board, config) - path - {drv.net, rcv.net}
+    start = (path | {drv.net, rcv.net}) - ground
     nets: list[str] = []
-    todo = sorted(start)
     pads_on: dict[str, list[Pad]] = {}
     for fp in board.footprints:
         for p in fp.pads:
@@ -240,23 +302,42 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
     amps: dict[str, OpAmpChannel] = {}
     unmodelled: list[str] = []          # op-amps by their pins whose model is 'open': left out, said in a note
     buffer_ins: dict[str, tuple] = {}   # a logic buffer's input on the nets: "U5.1" -> (pad, its model)
-    while todo:
-        net = todo.pop(0)
+    left_out: dict[str, str] = {}       # parts with a pin on the circuit's nets it leaves out: ref -> why
+    not_fitted: list[str] = []
+    ends = {drv.footprint, *(q.footprint for q in (board.find_pin(r) for r in spec.receivers) if q is not None)}
+    # ---- the nets, breadth first from the path's: the path's own and every included op-amp channel's (its feedback
+    # network) first and never cut; other nets (loads, bias branches) after them, up to MAX_NETS in all. The cut
+    # followed the file's order and could drop an op-amp's feedback net or the receiver's (audit 2026-11, E-5: a
+    # gain-10 stage read 76 794, open loop)
+    must = set(start)
+    first, later = sorted(start), []
+    dropped: list[str] = []
+    while first or later:
+        net = first.pop(0) if first else later.pop(0)
         if net in nets or net in ground:
             continue
-        if len(nets) >= MAX_NETS:
-            notes.append(f"the circuit stops at {MAX_NETS} nets ({net} and beyond left out)")
-            break
+        if net not in must and len(nets) >= MAX_NETS:
+            if net not in dropped:
+                dropped.append(net)
+            continue
+        if len(nets) >= 2 * MAX_NETS:       # op-amp chains pulling in ever more must-have nets: a hard stop
+            dropped.append(net)
+            continue
         nets.append(net)
         for p in pads_on.get(net, []):
             fp = fps.get(p.footprint)
             if fp is None:
                 continue
+            if fp.dnp:                      # not fitted: not in the circuit (as bias.at_dc and the shunts have it)
+                if fp.reference not in not_fitted:
+                    not_fitted.append(fp.reference)
+                continue
             m = config.model_for(fp.reference)
             if m is None or m.kind == "open":
-                if (m is not None and not fp.dnp and fp.reference not in unmodelled
-                        and opamp_pin_roles(fp) is not None):
+                if (m is not None and fp.reference not in unmodelled and opamp_pin_roles(fp) is not None):
                     unmodelled.append(fp.reference)
+                elif fp.reference not in ends and fp.reference not in left_out:
+                    left_out[fp.reference] = "no settings entry" if m is None else "model open"
                 continue
             if m.kind == "buffer":         # a logic buffer is not linear: only its input's C_in loads the circuit
                 from ..components.models import buffer_pins
@@ -269,18 +350,51 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
                     pins = [ch.inp, ch.out] + ([ch.inn] if ch.inn is not None else [])
                     if any(q is p for q in pins) and ch.name not in amps:
                         amps[ch.name] = ch
-                        todo += [q.net for q in pins if q.net and q.net not in ground]
+                        for q in pins:
+                            if q.net and q.net not in ground:
+                                must.add(q.net)
+                                first.append(q.net)
                 continue
             if m.kind in PASSIVE and fp.reference not in parts:
-                two = [q for q in fp.pads if q.net]
-                if len({q.net for q in two}) == 2 and len(two) >= 2:
-                    pa = next(q for q in two if q.net == net)
+                # the pads its model joins (model_pads: `pins`, a 4-terminal resistor's force pads), else all; a
+                # passive on more than two nets (a resistor array) is left out with a note, not silently (E-7)
+                two = [q for q in model_pads(fp, m) if q.net]
+                if len({q.net for q in two}) == 2:
+                    pa = next((q for q in two if q.net == net), None)
+                    if pa is None:              # this net's pad is not one the model joins (a Kelvin sense pad)
+                        left_out.setdefault(fp.reference, "its model joins other pads")
+                        continue
                     pb = next(q for q in two if q.net != net)
                     parts[fp.reference] = (m, pa, pb)
                     if pb.net not in ground:
-                        todo.append(pb.net)
+                        later.append(pb.net)
+                else:
+                    left_out.setdefault(fp.reference, f"a {m.kind} on {len({q.net for q in two})} nets: give it "
+                                                      "pins [a, b]")
+    if dropped:
+        shown = ", ".join(dropped[:5]) + (f" and {len(dropped) - 5} more" if len(dropped) > 5 else "")
+        notes.append(f"the circuit stops at {len(nets)} nets: {shown} left out, the parts to them open there (the "
+                     "path's own nets and its op-amps' feedback are all in): the response may be wrong")
     if unmodelled:
         notes.append(unmodelled_note(unmodelled))
+    if not_fitted:
+        notes.append(f"not fitted (DNP), left out: {', '.join(sorted(not_fitted))}")
+    if left_out:
+        items = [f"{r} ({w})" for r, w in sorted(left_out.items())]
+        notes.append("left out of the circuit, open: " + ", ".join(items[:8])
+                     + (f" and {len(items) - 8} more" if len(items) > 8 else "")
+                     + " (a part the signal or a feedback loop needs must have a model: Parts tab)")
+    # ---- the path's driver pin is an op-amp channel's output: the source stands for that channel (both driving one
+    # node fought, the response collapsed by 88 dB, audit 2026-11 E-3)
+    for nm, ch in list(amps.items()):
+        if ch.out.footprint == drv.footprint and ch.out.number == drv.number:
+            del amps[nm]
+            notes.append(f"{nm}: its output is the path's driver, so the source stands for it (its own circuit left "
+                         "out)")
+    open_loop = _open_loops(amps, parts, ground)
+    if open_loop:
+        notes.append(f"{', '.join(open_loop)}: no DC path from the output back to IN− in the circuit (an integrator, "
+                     "or a feedback part missing or 'open'): the DC gain is the open-loop gain")
     # ---- the copper of those nets: nodes joined by pads, vias' layer joins and pours; tracks as lines; vias R + L
     g = copper_graph(board, set(nets))
     parent = list(range(len(g.pos)))
@@ -386,8 +500,7 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
         kind = info[0]
         if kind == "via":
             v, la, lb = info[1], info[2], info[3]
-            zf = via_impedance(abs(zs[la] - zs[lb]) * 1e-3, (v.drill or 0.3) * 1e-3)
-            r_, l_ = zf(0.0).real, zf(1e6).imag / (2 * math.pi * 1e6)
+            r_, l_ = via_piece(v.layers, la, lb, zs, v.drill or 0.3)
             mid = ckt.internal("via")
             ckt.r(name(i), mid, max(r_, 1e-6))
             ckt.l(mid, name(j), l_, f"via {v.net}")
@@ -462,8 +575,12 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
         q = board.find_pin(rx)
         if q is not None and q.net not in ground:
             ckt.c(at(q), ckt.ground, load_pf * 1e-12)
+        if q is not None and q.net not in ground and spec.load_ohms:
+            # the load at every receiver, so each receiver's circuit is the same circuit (only the analysed one's
+            # was loaded: two receivers, two circuits, audit 2026-11 E-10)
+            ckt.r(at(q), ckt.ground, spec.load_ohms)
     out = at(rcv)
-    if spec.load_ohms:
+    if spec.load_ohms and not any((q := board.find_pin(rx)) is not None and q is rcv for rx in spec.receivers):
         ckt.r(out, ckt.ground, spec.load_ohms)
     # nodes no element reaches would make the matrix singular: tie each to ground through 1 TΩ (an open pin's leak)
     for n in list(ckt.nodes):
@@ -477,10 +594,52 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
                                                               is not None else 1.0))
                    for (nm, kind), ch in zip(opamps, amps.values())],
         "in": gnd(drv.net), "out": gnd(rcv.net),
-        # parts marked DNP: kept in the circuit (the design as drawn), named in a note so H(s) can be redone without
-        "dnp": sorted(ref for ref in parts if (fp := board.footprint(ref)) is not None and fp.dnp)}
+        # parts marked DNP: left out of the circuit as built (audit 2026-11, E-11: a DNP part with a model stayed in,
+        # unlike in the DC bias and the shunts), named in a note
+        "dnp": sorted(not_fitted)}
     return AnalogNetwork(ckt, out, nets, opamps, sorted(parts), tracks, notes, node_of, schematic, amp_out, lines,
                          part_nodes, {nm: dict(ch.params) for nm, ch in amps.items()}, path_nets=sorted(start))
+
+
+def via_piece(layers: list, la: str, lb: str, zs: dict, drill: float) -> tuple[float, float]:
+    """(R Ω, L H) of a via's piece between layers la and lb: its share (by length) of the whole barrel's
+    (peec.via_impedance over the via's full span [A3]); each piece's own partial inductance, summed, left out the
+    pieces' mutual inductance (audit 2026-11, E-12: 0.43 for 0.63 nH through four layers)."""
+    from ..solver.peec import via_impedance
+    seg = abs(zs[la] - zs[lb])
+    span = abs(zs[layers[0]] - zs[layers[-1]]) or seg or 1e-3
+    zf = via_impedance(span * 1e-3, drill * 1e-3)
+    share = seg / span
+    return zf(0.0).real * share, zf(1e6).imag / (2 * math.pi * 1e6) * share
+
+
+def _open_loops(amps: dict, parts: dict, ground: set) -> list[str]:
+    """The macromodel op-amp channels whose output has no DC path back to their IN−: through resistors, inductors,
+    ferrites and 0R of the circuit (both ways) and other channels (input to output), never through ground. Such a
+    channel runs at its open-loop gain at DC: a feedback resistor left out (no model, 'open'), or an integrator
+    (audit 2026-11, E-8: a gain-10 stage read 99 504 without a word)."""
+    dc: dict[str, set] = {}
+    for m, pa, pb in parts.values():
+        if m.kind in ("resistor", "inductor", "ferrite", "short") and pa.net and pb.net:
+            dc.setdefault(pa.net, set()).add(pb.net)
+            dc.setdefault(pb.net, set()).add(pa.net)
+    for ch in amps.values():
+        for q in (ch.inp, ch.inn):
+            if q is not None and q.net and ch.out.net:
+                dc.setdefault(q.net, set()).add(ch.out.net)
+    out = []
+    for nm, ch in amps.items():
+        if ch.inn is None or ch.params.get("gain") is not None or not ch.inn.net or ch.inn.net in ground:
+            continue
+        seen, todo = {ch.out.net}, [ch.out.net]
+        while todo:
+            for n in dc.get(todo.pop(), ()):
+                if n not in seen and n not in ground:
+                    seen.add(n)
+                    todo.append(n)
+        if ch.inn.net not in seen:
+            out.append(nm)
+    return out
 
 
 def _seg_t(p, a, b) -> float:

@@ -1613,7 +1613,7 @@ def _amp_circuit(model: "BoardModel", route: Route, main_ref: str, notes: list) 
     None when the route has no op-amp, or one whose input, output or ground pin can't be told (a note says so: the
     path is then one stage). The path is cut at each op-amp: the driver (or the op-amp before) drives the stage, its
     receivers' end is the next op-amp's input (loaded by its input impedance) or the receivers."""
-    from ..components.models import amplifier_channels, buffer_pins
+    from ..components.models import amplifier_units, buffer_pins
     board, config = model.board, model.config
     raw = _stage_routes(route, config)
     if raw is None:
@@ -1629,8 +1629,10 @@ def _amp_circuit(model: "BoardModel", route: Route, main_ref: str, notes: list) 
                 chans = [c for c in buffer_pins(fp, m) if c[0].net in route.nets and c[1].net in route.nets] \
                     if fp is not None else []
                 pads = chans[0] if chans else None
-            else:                           # the op-amp's channel on this route (a quad op-amp: U3A's, not U3B's)
-                chans = [c for c in amplifier_channels(fp, m) if c[0].net in route.nets and c[1].net in route.nets] \
+            else:                           # the op-amp's channel on this route (a quad op-amp: U3A's, not U3B's),
+                # entered at IN+ or IN− (an inverting stage whose IN+ is on a bias net: its signal comes in at IN−)
+                chans = [(p, out) for _, ins, out in amplifier_units(fp, m) for p in ins
+                         if p.net in route.nets and out.net in route.nets and p.net != out.net] \
                     if fp is not None else []
                 pads = chans[0] if chans else None
             ret = return_pad(board, config, pads[0], None) if pads else None
@@ -2131,8 +2133,9 @@ def _bandwidth_and_stability(board: Board, config: Config, spec: NetSpec, receiv
     kinds = dict(net.opamps)
     prev = net.node_of.get(spec.driver)
     for ref in refs:
-        name = next((c for c in net.amp_out if c == ref), None) or next((c for c in net.amp_out
-                                                                          if c.startswith(ref)), None)
+        # the part's channel: U3 itself, else U3A / U3.1, never another part U31 (audit 2026-11, E-9)
+        name = next((c for c in net.amp_out if c == ref), None) or next(
+            (c for c in net.amp_out if c.startswith(ref) and not c[len(ref):len(ref) + 1].isdigit()), None)
         if name is None:
             continue
         node = net.amp_out[name]
