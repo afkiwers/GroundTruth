@@ -1898,7 +1898,7 @@ def test_a_loading_card_stands_in_the_tabs_place_until_the_board_is_read(app, tm
     def loaded():
         got["after"] = (f.loading_card.IsShown(), f.notebook.IsShown(), f.gauge.IsShown())
         got["load"] = list(seen)
-        f.on_simulate()
+        f.run(True)                             # Simulate
 
     def simulated():
         got["sim"] = seen[len(got["load"]):]
@@ -1913,7 +1913,8 @@ def test_a_loading_card_stands_in_the_tabs_place_until_the_board_is_read(app, tm
     assert "Opening GroundTruth…" in titles and f"Loading {path.name}…" in titles, titles
     assert any(s.startswith("building the tabs") for s in steps)
     assert any(s.startswith("reading the board") for s in steps), steps
-    assert any(s.startswith("showing the settings: Signal paths (1 of") for s in steps), steps
+    # the tabs are filled in their load order (MainFrame._loaded: Parts first), one step each
+    assert "showing the settings: Parts (1 of 7)" in steps and "showing the settings: Signal paths (2 of 7)" in steps
     assert got["sim"] == []                     # a run is no board load: the tabs stay
 
 

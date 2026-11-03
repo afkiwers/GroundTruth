@@ -391,8 +391,9 @@ def inductor_dcr(config: Config, spec, ref: str) -> tuple[Optional[float], str, 
     """(the DCR a stage's winding loss uses, where it came from as a suffix for the loss's text, notes). The
     stage's dcr when set; else its inductor's R on the Parts tab (its DCR field, or typed in there), unless that R
     is only the suggested placeholder (components/defaults.placeholder_r): then None, the loss left out. The two
-    are one physical value, so a note says when the stage's dcr and a real R disagree, and when the part keeps the
-    placeholder (its circuit models use that R)."""
+    are one physical value, so a note says when the stage's dcr and a real R disagree. A stage's dcr beside the
+    placeholder gets none: nothing is missing for the losses (these notes are their `missing` list), and the Parts
+    tab marks the placeholder itself."""
     from ..components.defaults import placeholder_r
     from ..components.fields import same
     from ..components.values import format_si
@@ -401,10 +402,7 @@ def inductor_dcr(config: Config, spec, ref: str) -> tuple[Optional[float], str, 
     dummy = m is not None and placeholder_r(m)
     if spec.dcr is not None:
         notes = []
-        if dummy:
-            notes.append(f"{ref}'s R on the Parts tab is the suggested {format_si(r, 'Ω')} placeholder (no DCR field); "
-                         f"{spec.name}'s losses use its dcr {format_si(spec.dcr, 'Ω')}")
-        elif r is not None and not same(r, spec.dcr):
+        if r is not None and not dummy and not same(r, spec.dcr):
             notes.append(f"{spec.name}: dcr {format_si(spec.dcr, 'Ω')} differs from {ref}'s R {format_si(r, 'Ω')} "
                          "(the Parts tab): the losses use dcr")
         return spec.dcr, "", notes

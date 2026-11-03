@@ -47,9 +47,15 @@ def test_a_long_message_scrolls_and_copy_puts_it_on_the_clipboard(app):
         screen = wx.Display(0).GetClientArea().height
         assert dlg.GetSize().height <= screen
         assert dlg.page.GetVirtualSize().height > dlg.page.GetClientSize().height    # the rest is a scroll away
-        assert dlg.on_copy() and dlg.copy.GetLabel() == "Copied"
+        if not dlg.on_copy():
+            # another program held the clipboard all through the tries (a Remote Desktop session's clipboard sync
+            # did, twice, on the user's machine): the dialog says so, and there is nothing to read back
+            assert dlg.copy.GetLabel() == "Clipboard busy"
+            pytest.skip("the clipboard was held by another program")
+        assert dlg.copy.GetLabel() == "Copied"
         data = wx.TextDataObject()
-        assert read_clipboard(data)             # no wx error box if another program holds it a moment
+        if not read_clipboard(data):
+            pytest.skip("the clipboard was held by another program")
         assert data.GetText() == f"groundtruth\n\n{message}"
     finally:
         dlg.Destroy()

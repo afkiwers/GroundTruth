@@ -123,8 +123,8 @@ def test_part_losses_follow_the_operating_point(tmp_path):
 
 def test_the_winding_loss_takes_the_inductors_r_but_never_the_placeholder(tmp_path):
     """The stage's dcr and the inductor's R on the Parts tab are one value. Without a dcr the winding loss takes a
-    real R (a DCR field's, or typed in), never the suggested 50 mΩ placeholder; a note when the two disagree, and
-    when the stage's dcr stands beside the placeholder."""
+    real R (a DCR field's, or typed in), never the suggested 50 mΩ placeholder; a note when the two disagree. The
+    stage's dcr beside the placeholder needs none: nothing is missing (the notes are the losses' `missing` list)."""
     from dataclasses import replace
     from groundtruth.analysis.detect import detect_converters
     from groundtruth.analysis.thermal import part_losses
@@ -153,12 +153,12 @@ def test_the_winding_loss_takes_the_inductors_r_but_never_the_placeholder(tmp_pa
     # a DCR field equal to the placeholder's value is the part's own
     cfg = replace(with_l1(DEFAULT_INDUCTOR_DCR, ["R"]), converters=[replace(spec, dcr=None)])
     assert {r["ref"]: r for r in part_losses(board, cfg, [res])[0]}["L1"]["power_w"] == pytest.approx(i2 * 0.05)
-    # the stage's dcr wins, with a note when L1's R says otherwise or is the placeholder
+    # the stage's dcr wins, with a note when L1's R says otherwise; beside the placeholder: no note
     rows, notes = part_losses(board, replace(with_l1(0.003), converters=[replace(spec, dcr=0.020)]), [res])
     assert {r["ref"]: r for r in rows}["L1"]["power_w"] == pytest.approx(i2 * 0.020)
     assert any("differs" in n and "L1" in n for n in notes)
     notes = part_losses(board, replace(sc.config, converters=[replace(spec, dcr=0.020)]), [res])[1]
-    assert any("placeholder" in n for n in notes)
+    assert not any("L1" in n for n in notes)
     notes = part_losses(board, replace(with_l1(0.020), converters=[replace(spec, dcr=0.020)]), [res])[1]
     assert not any("L1" in n for n in notes)                                    # they agree: nothing to say
 
