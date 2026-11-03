@@ -1971,7 +1971,8 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
     outs = [(f"{spec.name}: receiver / source", net.out_node, lumped.out_node)]
     for name, _kind in net.opamps:              # each op-amp channel's output (not one on AC ground)
         node, lnode = net.amp_out.get(name), lumped.amp_out.get(name)
-        if node in net.circuit.nodes and lnode in lumped.circuit.nodes and node != net.out_node:
+        # only the channels the signal passes (net.on_path): the others are in the circuit for their loading
+        if node in net.circuit.nodes and lnode in lumped.circuit.nodes and node != net.out_node and net.on_path(name):
             outs.append((f"{name}: output", node, lnode))
     out = []
     for title, node, lnode in outs:
@@ -2016,7 +2017,15 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
     kinds = ", ".join(f"{n} ({k})" for n, k in net.opamps)
     notes.insert(0, f"circuit: {len(net.nets)} net(s), {len(net.parts)} part(s), {net.tracks} track segment(s)"
                  + (f", op-amps {kinds}" if kinds else ""))
-    return out, notes, _bandwidth_and_stability(board, config, spec, receiver, net, f, out)
+    # every loop is checked for stability (a bias buffer that rings matters), but the plot shows the path's own
+    # channels: the others' loop gains go into the findings only
+    besides = [n for n, _ in net.opamps if not net.on_path(n)]
+    findings = _bandwidth_and_stability(board, config, spec, receiver, net, f, out)
+    if besides:
+        notes.append(f"in the circuit for their loading, not plotted: {', '.join(besides)} (their outputs and loop "
+                     "gains; a loop of theirs that rings is still flagged)")
+        out = [r for r in out if not (r.quantity == "loop gain" and r.name.split(": ", 1)[0] in besides)]
+    return out, notes, findings
 
 
 def step_share(p: complex, poles: list, zeros: list) -> float:

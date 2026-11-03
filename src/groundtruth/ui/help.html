@@ -252,7 +252,9 @@ in the schematic: see <a href="#siglabels">Labelling a signal path</a>.</p>
   <code>sweep_from</code>, <code>sweep_to</code>, <code>sweep_points</code>). It solves the path's whole circuit
   as Simulate does (see <a href="#analog">Op-amp circuits and the transfer function</a>), without the plane models:
   seconds. The Results tab gets one <b>Bode / poles and zeros</b> view per path (replacing its earlier one): the
-  receiver's voltage per volt of the driver, each op-amp's output and its loop gain, as magnitude and phase, the
+  receiver's voltage per volt of the driver, the output and loop gain of each op-amp channel the signal passes
+  (a quad's other channels, or a bias buffer tied to the path, stay in the circuit for their loading but out of the
+  plot; a note names them, and a loop of theirs that rings is still flagged), as magnitude and phase, the
   poles and zeros, the transfer function written out, and the tiles: <b>gain</b> (at the sweep's start: the DC gain
   when it starts low enough, e.g. 1 Hz for a sensor or ADC input; its −3 dB frequency, the bandwidth; a peak above
   it), <b>phase margin</b> (the op-amps' loops), then the dominant poles. The command line has
@@ -1106,8 +1108,9 @@ Preferences (<b>Vias shown</b>).</p>
   is, its frequency and, for a complex pair, its Q and damping ratio ζ = 1/(2Q); one in the right half-plane is
   said so.
   A signal path: the voltage at the receivers per volt of the driver through its whole circuit (every part and
-  op-amp on its nets, any topology: see <a href="#analog">Op-amp circuits</a>), each op-amp's output, and each
-  op-amp's loop gain with its crossover and phase margin; the transfer function written out above the plot twice:
+  op-amp on its nets, any topology: see <a href="#analog">Op-amp circuits</a>), the output of each op-amp channel
+  on the path, and its loop gain with its crossover and phase margin (channels only loading the path are in the
+  circuit, not the plot); the transfer function written out above the plot twice:
   <b>ideal circuit</b>, in its part names (ideal op-amps, no source resistance, receiver load or tracks: the circuit
   as designed, so a lone series resistor is H(s) = 1 and an op-amp's own poles don't appear; parts marked DNP stay
   in it and its label names them, to redo it without them elsewhere), and <b>full model</b>,

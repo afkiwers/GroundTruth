@@ -190,6 +190,23 @@ class AnalogNetwork:
     lines: list = field(default_factory=list)
     part_nodes: dict = field(default_factory=dict)
     amp_params: dict = field(default_factory=dict)      # op-amp channel -> its model's values (gain, bandwidth ...)
+    # the path's own nets (the signal's: through its series parts and op-amp channels), the circuit around them
+    # beyond: on_path tells the channels the signal passes from those only loading it (a quad's other channels)
+    path_nets: list = field(default_factory=list)
+
+    def on_path(self, name: str) -> bool:
+        """Whether op-amp channel `name` carries the signal: its output and one of its inputs on the path's own nets
+        (U3A from the path's divider to its next stage), not a channel the circuit holds only for its loading (a
+        bias buffer, a quad's other channels tied to the path's nets: the user, 2026-11-03, "why is it showing all
+        the OPAmps (U3:A,B,C,D) I am only looking at U3A"). True for every channel when the path's nets are not
+        known."""
+        if not self.path_nets:
+            return True
+        path = set(self.path_nets)
+        for nm, inp, inn, out, _ in self.schematic.get("opamps", ()):
+            if nm == name:
+                return out in path and (inp in path or inn in path)
+        return True
 
 
 def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, lumped: bool = False,
@@ -463,7 +480,7 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
         # parts marked DNP: kept in the circuit (the design as drawn), named in a note so H(s) can be redone without
         "dnp": sorted(ref for ref in parts if (fp := board.footprint(ref)) is not None and fp.dnp)}
     return AnalogNetwork(ckt, out, nets, opamps, sorted(parts), tracks, notes, node_of, schematic, amp_out, lines,
-                         part_nodes, {nm: dict(ch.params) for nm, ch in amps.items()})
+                         part_nodes, {nm: dict(ch.params) for nm, ch in amps.items()}, path_nets=sorted(start))
 
 
 def _seg_t(p, a, b) -> float:

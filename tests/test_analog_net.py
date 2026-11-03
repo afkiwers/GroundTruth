@@ -300,3 +300,21 @@ def test_a_driver_on_a_supply_type_pin_is_no_ac_ground_and_the_circuit_stops_at_
     h = abs(net.circuit.transfer(np.array([10.0]), net.out_node)[0])
     r = 1 / (1 / 1e3 + 1 / 10e3)
     assert h == pytest.approx(r / (r + 1e3 + 25.0), rel=0.02)      # the driver's 25 Ω in series too
+
+
+def test_a_quad_plots_only_the_channels_on_the_path(tmp_path):
+    """A quad op-amp U5 with three followers; the path U1 → U5A → U6, and channel B's output tied to the path's input
+    net through R9 (a bias buffer, as the user's R168 to U3D, 2026-11-03: "why is it showing all the OPAmps (U3:A,B,C,D)
+    I am only looking at U3A"): the circuit holds U5B for its loading, but the Bode plots U5A's output and loop gain
+    only, and a note names the channels left out of the plot."""
+    from boardgen import quad_follower_board
+    from groundtruth.analysis.simulate import network_responses
+    labels = "amp_in:[2,4,9], amp_inv:[1,5,8], amp_out:[14,6,7]"
+    g = quad_follower_board(labels)
+    g.two_pin("R9", "3k", (20.0, 12.0), "IN_A", "OUT_B", kind="R")
+    spec = NetSpec("IN_A", "U1.1", ["U6.1"], 1e3, 1e-6)
+    board, sc, _ = make(tmp_path, g, "quadbias", nets=(spec,))
+    resp, notes, _ = network_responses(board, sc.config, spec, "U6.1", np.geomspace(10, 1e6, 40))
+    names = [r.name for r in resp]
+    assert "U5A: loop gain" in names and not any(n.startswith(("U5B", "U5C")) for n in names), names
+    assert any("not plotted" in n and "U5B" in n and "U5A" not in n for n in notes), notes
