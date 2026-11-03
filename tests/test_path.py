@@ -594,8 +594,12 @@ def test_detection_runs_a_path_through_an_inverting_opamp_stage(tmp_path):
     assert [p.number for p in amplifier_pins(board.footprint("U3"), sc.config.model_for("U3"))] == ["4", "1"]
 
 
-def test_a_path_through_one_channel_of_a_quad_op_amp_stays_on_that_channel(tmp_path):
-    """A quad op-amp U5 with three followers, labelled one group per channel (the user's GT field, 2026-11-03):
+@pytest.mark.parametrize("quad", [
+    "amp_in:2, amp_inv:1, amp_out:14, amp_in:4, amp_inv:5, amp_out:6, amp_in:9, amp_inv:8, amp_out:7",
+    "amp_in:[2,4,9], amp_inv:[1,5,8], amp_out:[14,6,7]"], ids=["groups", "compact"])
+def test_a_path_through_one_channel_of_a_quad_op_amp_stays_on_that_channel(tmp_path, quad):
+    """A quad op-amp U5 with three followers, labelled one group per channel (the user's GT field, 2026-11-03), or
+    in the compact form, lists by position:
     U5 is an amplifier with channels U5A, U5B, U5C; a path from U2 (IN_B) to U7 (OUT_B) runs through U5B alone, into
     OUT_B and never into channel A's or C's nets; Detect, from labels at its ends, finds the same path; the circuit
     solves the follower to a gain of 1. Before, only the last group (U5C) was read: a path through U5A or U5B
@@ -608,7 +612,6 @@ def test_a_path_through_one_channel_of_a_quad_op_amp_stays_on_that_channel(tmp_p
     from groundtruth.analysis.simulate import simulate
     from groundtruth.components.models import amplifier_channels
     from groundtruth.config.settings import Config, NetSpec
-    quad = "amp_in:2, amp_inv:1, amp_out:14, amp_in:4, amp_inv:5, amp_out:6, amp_in:9, amp_inv:8, amp_out:7"
     spec = NetSpec("IN_B", "U2.1", ["U7.1"], 1e6, 50e-9)
     board, sc, _ = make(tmp_path, quad_follower_board(quad), "quad", nets=(spec,), solve_points=2, max_solves=3)
     cfg = sc.config

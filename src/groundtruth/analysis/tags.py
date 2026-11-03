@@ -19,13 +19,16 @@ An op-amp stage in a signal path (part model `amplifier`, its gain from a Gain f
                                  amp_inv:2 its inverting input where the pin names don't say (analysis/analog_net)
     GT = amp_in:2, amp_inv:1, amp_out:14, amp_in:4, amp_inv:5, amp_out:6
                                  several channels of one part (a quad op-amp), one group each, in order: a group
-                                 starts where a role comes again; the channels are U3A, U3B ... (amp_label_groups).
-                                 Lists (amp_in:[2,4]) are not read: a problem says so, with the groups to write
+                                 starts where a role comes again; the channels are U3A, U3B ... (amp_label_groups)
+    GT = amp_in:[2,4], amp_inv:[1,5], amp_out:[14,6]
+                                 the same channels in lists, by position (_label_lists: the groups after any
+                                 written as groups); amp_inv:[1,-] where a channel has none
 
-A logic buffer in a signal path (part model `buffer`: a Schmitt trigger; its values from its Rise Time, Zout, Cin,
-Threshold Rising / Falling and Hysteresis fields):
+A logic buffer in a signal path (part model `buffer`: a Schmitt trigger, a comparator; its values from its Rise
+Time, Zout, Cin, Threshold Rising / Falling and Hysteresis fields):
 
     GT = buf_in:1, buf_out:6     a channel's input and output pin, in pairs (a dual: buf_in:3, buf_out:4 after it)
+    GT = buf_in:[1,3], buf_out:[6,4]     the same in lists, by position
 
 A converter's dead times (its dead_rise / dead_fall, components/fields.stage_values), on the controller IC (the one
 with the stage's SW pin):
@@ -61,7 +64,7 @@ CONNECTOR_ROLES = ("in", "out")                                          # share
 TAG = re.compile(r"^(conv|hb)([a-z0-9.+]*)_([a-z]+)(?:_([a-z0-9.+]+))?$", re.I)   # conv1_out or conv_out_1
 SIG = re.compile(r"^sig(?:_(drv|rx))?(?::(.+))?$", re.I)                         # sig, sig:9, sig_drv:PA3
 AMP = re.compile(r"^amp_(in|inv|out):(.+)$", re.I)                                # amp_in:3, amp_inv:2, amp_out:OUTA
-AMP_LIST = re.compile(r"amp_(in|inv|out)\s*:\s*\[([^\]]*)\]", re.I)                # amp_in:[2,4,9]: not read (groups)
+LABEL_LIST = re.compile(r"(amp|buf)_(in|inv|out)\s*:\s*\[([^\]]*)\]", re.I)       # amp_in:[2,4,9], buf_out:[13,16]
 BUF = re.compile(r"^buf_(in|out):(.+)$", re.I)                                     # buf_in:1, buf_out:6 (a logic buffer)
 # a controller's dead time (the converter's dead_rise / dead_fall): dead:20ns (every stage it controls, both edges),
 # dead1:20ns (the stage on its SW1 pin), conv1_dead:20ns (the stage labelled conv1); _rise / _fall: one edge only
@@ -136,9 +139,10 @@ HELP = {
         "Gain field or the Parts tab)\n"
         "  amp_inv:2    its inverting input (where the pin names don't say): the circuit around it is solved\n"
         "  amp_in:2, amp_inv:1, amp_out:14, amp_in:4, amp_inv:5, amp_out:6   a dual or quad op-amp: one group per "
-        "channel, in order (U3A, U3B ...); not amp_in:[2,4], amp_out:[14,6]\n"
-        "  buf_in:1, buf_out:6   a logic buffer's (Schmitt trigger's) input and output pin: the path runs through "
-        "it, the stretch after it driven by the buffer's own edge (a dual: buf_in:1, buf_out:6, buf_in:3, buf_out:4)\n"
+        "channel, in order (U3A, U3B ...); or as lists: amp_in:[2,4], amp_inv:[1,5], amp_out:[14,6]\n"
+        "  buf_in:1, buf_out:6   a logic buffer's (Schmitt trigger's, comparator's) input and output pin: the path "
+        "runs through it, the stretch after it driven by the buffer's own edge (a dual: buf_in:1, buf_out:6, "
+        "buf_in:3, buf_out:4, or buf_in:[1,3], buf_out:[6,4])\n"
         "Label the driving pin, each op-amp and the receiving pin; leave the resistors and capacitors between them "
         "unlabelled. Several labels are separated by commas. Then Update PCB from Schematic, Reload board and "
         "Detect…. A name with ADC, SENSE, MON or FB counts as a signal anyway. Help (F1) › Labelling a signal path "
@@ -262,9 +266,7 @@ def tag_text(fp: Footprint) -> str:
 def parse(text: str, ref: str = "") -> tuple[list[Tag], bool, list[str]]:
     """(tags, ignore, problems) of a GT field's value."""
     tags, ignore, problems = [], False, []
-    text, problem = _amp_lists(text or "", ref)
-    if problem:
-        problems.append(problem)
+    text, problems = _label_lists(text or "", ref)     # amp_in:[2,4], amp_out:[14,6]: as groups
     for raw in re.split(r"[,;]", text):
         word = raw.strip().replace(" ", "")
         if not word:
@@ -356,25 +358,51 @@ def stage_ident(board: Board, refs: list[str]) -> str:
     return next((st.ident for st in board_tags(board).of("conv") if want & set(st.refs(*st.roles))), "")
 
 
-def _amp_lists(text: str, ref: str) -> tuple[str, str]:
-    """(the field without its amp label lists, a problem or ""). Lists such as amp_in:[2,4,9], amp_inv:[1,5,8],
-    amp_out:[14,6,7] are not read (the user, 2026-11-03, chose one group per channel: a channel's pins together,
-    an amp_inv that one channel lacks can't shift the others): the problem names the groups to write instead when
-    the lists line up, so the user can copy them."""
-    found = [(m.group(1).lower(), [x.strip() for x in m.group(2).split(",") if x.strip()])
-             for m in AMP_LIST.finditer(text)]
+def _label_lists(text: str, ref: str) -> tuple[str, list[str]]:
+    """(the field with its op-amp and buffer label lists written out as groups, problems). The compact form (the
+    user, 2026-11-03, of a quad op-amp and a quad comparator: "we would want this as compact form too"):
+    amp_in:[2,4,9], amp_inv:[1,5,8], amp_out:[14,6,7] is amp_in:2, amp_inv:1, amp_out:14, amp_in:4 ..., channel
+    by channel by position; buf_in:[11,4], buf_out:[13,16] the same for buffers. The groups go after the field's
+    other labels (so after channels written as groups). Every list of a kind has one entry per channel: lists of
+    different lengths, or without their in or out list, are a problem and not read; `-` marks a channel without
+    amp_inv; a `-` (or nothing) in an in or out list leaves that channel out, with a problem, the others keeping
+    their places."""
+    found = list(LABEL_LIST.finditer(text))
     if not found:
-        return text, ""
-    rest = AMP_LIST.sub("", text)
-    lists = dict(found)
-    n = {len(v) for v in lists.values()}
-    if len(n) == 1 and "in" in lists and "out" in lists:
-        groups = ", ".join(f"amp_{role}:{lists[role][k]}" for k in range(n.pop()) for role in ("in", "inv", "out")
-                           if role in lists)
-        hint = f"write one group per channel: {groups}"
-    else:
-        hint = "write one group per channel, e.g. amp_in:2, amp_inv:1, amp_out:14, amp_in:4, amp_inv:5, amp_out:6"
-    return rest, f"{ref}: GT amp label lists ({', '.join(f'amp_{r}:[…]' for r, _ in found)}) are not read: {hint}"
+        return text, []
+    problems: list[str] = []
+    lists: dict[str, dict[str, list[str]]] = {}
+    for m in found:
+        kind, role = m.group(1).lower(), m.group(2).lower()
+        items = [x.strip().replace(" ", "") for x in m.group(3).split(",")]
+        if kind == "buf" and role == "inv":
+            problems.append(f"{ref}: GT buf_inv:[…]: a buffer channel has only buf_in and buf_out")
+        elif role in lists.setdefault(kind, {}):
+            problems.append(f"{ref}: GT {kind}_{role}:[…] twice: one list per role")
+        else:
+            lists[kind][role] = items
+    words = []
+    for kind, by_role in lists.items():
+        missing = [r for r in ("in", "out") if r not in by_role]
+        if missing:
+            problems.append(f"{ref}: GT {kind} label lists need {' and '.join(f'{kind}_{r}:[…]' for r in missing)} "
+                            "too: they are not read")
+            continue
+        sizes = {r: len(v) for r, v in by_role.items()}
+        if len(set(sizes.values())) > 1:
+            problems.append(f"{ref}: GT {kind} label lists of different lengths "
+                            f"({', '.join(f'{kind}_{r}: {n}' for r, n in sizes.items())}): one entry per channel in "
+                            f"each (- where a channel has no amp_inv); they are not read")
+            continue
+        for k in range(sizes["in"]):
+            if any(by_role[r][k] in ("", "-") for r in ("in", "out")):
+                problems.append(f"{ref}: GT {kind} label lists: channel {k + 1} has no {kind}_in or {kind}_out "
+                                "entry: it is left out")
+                continue
+            words += [f"{kind}_{r}:{by_role[r][k]}" for r in ("in", "inv", "out")
+                      if r in by_role and by_role[r][k] not in ("", "-")]
+    rest = LABEL_LIST.sub("", text)
+    return ", ".join([rest, *words]) if words else rest, problems
 
 
 def amp_label_groups(fp: Footprint) -> list[dict[str, str]]:
