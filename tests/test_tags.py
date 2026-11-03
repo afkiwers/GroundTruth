@@ -214,6 +214,38 @@ def test_op_amp_labels_with_a_missing_pin_or_half_a_pair_are_problems(tmp_path):
         "U2: GT amp_in needs amp_out too: the op-amp stage's input and output pin"]
 
 
+def test_a_quad_op_amps_channels_are_one_group_of_amp_labels_each(tmp_path):
+    """Several op-amp channels of one part (the user's quad, 2026-11-03): one group per channel, in order; a group
+    starts where a role comes again, so one channel's labels may still come in any order. A group without amp_in or
+    amp_out is a problem; lists (amp_in:[2,4,9] ...) are not read, and the problem gives the groups to write."""
+    from boardgen import quad_follower_board
+    from groundtruth.analysis.tags import amp_label_groups, amp_label_pins
+    from groundtruth.adapters.file_source import loads_board
+    quad = "amp_in:2, amp_inv:1, amp_out:14,amp_in:4, amp_inv:5, amp_out:6,amp_in:9, amp_inv:8, amp_out:7"
+    board = loads_board(quad_follower_board(quad).text(), "quad.kicad_pcb")
+    fp = board.footprint("U5")
+    assert amp_label_groups(fp) == [{"in": "2", "inv": "1", "out": "14"}, {"in": "4", "inv": "5", "out": "6"},
+                                    {"in": "9", "inv": "8", "out": "7"}]
+    assert amp_label_pins(fp) == [("2", "14"), ("4", "6"), ("9", "7")]
+    tags = board_tags(board)
+    assert not tags.problems and "op-amp labels on U5 (3 channels)" in tags.summary()
+    # one channel, its labels in another order: still one
+    board = loads_board(quad_follower_board("amp_out:14, amp_inv:1, amp_in:2").text(), "one.kicad_pcb")
+    assert amp_label_pins(board.footprint("U5")) == [("2", "14")]
+    # the second group lacks its output: that channel is left out, and the labels line says so
+    board = loads_board(quad_follower_board("amp_in:2, amp_out:14, amp_in:4, amp_inv:5").text(), "half.kicad_pcb")
+    assert amp_label_pins(board.footprint("U5")) == [("2", "14")]
+    assert board_tags(board).problems == ["U5: GT op-amp channel 2 (amp_in:4) has no amp_out: it is left out (one "
+                                          "group per channel, in order: amp_in, amp_inv, amp_out)"]
+    # lists: not read, the groups to write instead
+    _, _, problems = parse("amp_in:[2,4,9], amp_inv:[1,5,8], amp_out:[14,6,7]", "U5")
+    assert problems == ["U5: GT amp label lists (amp_in:[…], amp_inv:[…], amp_out:[…]) are not read: write one group "
+                        "per channel: amp_in:2, amp_inv:1, amp_out:14, amp_in:4, amp_inv:5, amp_out:6, amp_in:9, "
+                        "amp_inv:8, amp_out:7"]
+    tags, _, problems = parse("amp_in:[2,4], amp_out:[14], sig:3", "U5")
+    assert [t.kind for t in tags] == ["sig"] and "e.g. amp_in:2, amp_inv:1" in problems[0]     # lengths differ
+
+
 def test_labelled_nets_joined_by_a_large_resistor_are_one_path(tmp_path):
     """refboard's ADC input: an op-amp buffer's output (GT sig_drv:1 on U2) through a 4.7 kΩ resistor (no
     signal part by default) to the ADC pin (GT sig_rx:1 on U1) on ADC_I_RAIL_1. One suggestion, named after the

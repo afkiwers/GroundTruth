@@ -109,6 +109,13 @@ def _amp_pads(config: Config, fp):
     return amplifier_pins(fp, config.model_for(fp.reference))
 
 
+def _amp_channels(config: Config, fp, net: Optional[str] = None) -> list:
+    """The (input pad, output pad) channels of a part modelled as an amplifier (on `net` when given: a quad
+    op-amp's channel on a path), or [] (components.models.amplifier_channels)."""
+    from ..components.models import amplifier_channels
+    return amplifier_channels(fp, config.model_for(fp.reference), net)
+
+
 def _buffer_pads(config: Config, fp, net: Optional[str] = None) -> list:
     """The (input pad, output pad) channels of a part modelled as a logic buffer (on `net` when given), or []
     (components.models.buffer_pins)."""
@@ -149,10 +156,10 @@ def signal_nets(board: Board, config: Config, net: str, through=()) -> set[str]:
     while frontier:
         n = frontier.pop()
         for fp in by_net.get(n, []):
-            amp = _amp_pads(config, fp)
+            amp = _amp_channels(config, fp, n)         # an op-amp's channel on this net (a quad: that one)
             chans = _buffer_pads(config, fp, n)        # a logic buffer's channel on this net
-            if amp is not None or chans:               # an op-amp stage or a buffer: from its input's net to its output's
-                pair = amp if amp is not None else chans[0]
+            if amp or chans:                           # an op-amp stage or a buffer: from its input's net to its output's
+                pair = amp[0] if amp else chans[0]
                 if n in (pair[0].net, pair[1].net):
                     for other in (pair[0].net, pair[1].net):
                         if other not in group and other not in refs and other:
@@ -304,9 +311,10 @@ def find_route(board: Board, config: Config, net: str, driver_pin: str, receiver
     # Series parts that pass the signal (0R, termination R, ferrite): pad-to-pad edge.
     for fp in board.footprints:
         amp = _amp_pads(config, fp)
-        chans = [c for c in _buffer_pads(config, fp) if c[0].net in nets and c[1].net in nets]
+        chans = [c for c in (_amp_channels(config, fp) if amp is not None else _buffer_pads(config, fp))
+                 if c[0].net in nets and c[1].net in nets]
         if amp is not None or chans:                  # an op-amp stage or a buffer's channel: input pin to output pin
-            for a, b in ([amp] if amp is not None else chans):
+            for a, b in chans:
                 if a.net in nets and b.net in nets:
                     g.edge(g.node(a.layers[0], a.position), g.node(b.layers[0], b.position),
                            math.dist(a.position, b.position), ("part", fp, a.layers[0]))
@@ -485,12 +493,14 @@ def path_branches(board: Board, config: Config, route: Route) -> list:
     # the net pair each series part spans: a part across the same two nets is in parallel with it (a feedback
     # capacitor across its resistor, a speed-up capacitor across a series resistor)
     spans: dict[frozenset, list[str]] = {}
+    on_route = set(order)
     for ref in route.parts:
         sfp = board.footprint(ref)
         snets = {p.net for p in sfp.pads if p.net} if sfp is not None else set()
-        amp = _amp_pads(config, sfp) if sfp is not None else None
-        if amp is not None:                 # an op-amp stage spans its input's and output's nets: its feedback
-            snets = {amp[0].net, amp[1].net}
+        amp = next((c for c in _amp_channels(config, sfp) if c[0].net in on_route and c[1].net in on_route),
+                   None) if sfp is not None else None
+        if amp is not None:                 # an op-amp stage (its channel on the route) spans its input's and
+            snets = {amp[0].net, amp[1].net}    # output's nets: its feedback
         if len(snets) == 2:
             spans.setdefault(frozenset(snets), []).append(ref)
     found: dict[str, list[str]] = {n: [] for n in order}

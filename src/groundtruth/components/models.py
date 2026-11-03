@@ -368,25 +368,41 @@ def model_pads(fp, model: Optional[ComponentModel]) -> list:
     return [p for p in fp.pads if str(p.number).upper() in want or (p.pin_function or "").upper() in want]
 
 
-def amplifier_pins(fp, model: Optional[ComponentModel]):
-    """(input pad, output pad) of an amplifier: the two `pins` in that order (pad number or pin name), else its GT
-    labels (amp_in:3, amp_out:1), else the one non-inverting input and the one output found by their pin names (a
-    single op-amp: +IN / IN+ / INP and OUT). None when they can't be told (a dual or quad op-amp without labels)."""
+def amplifier_pins(fp, model: Optional[ComponentModel], net: Optional[str] = None):
+    """(input pad, output pad) of an amplifier's channel (amplifier_channels): the first, or with `net` the first
+    with a pad on that net (a quad op-amp's channel on a path). None when there is none."""
+    chans = amplifier_channels(fp, model, net)
+    return chans[0] if chans else None
+
+
+def amplifier_channels(fp, model: Optional[ComponentModel], net: Optional[str] = None) -> list:
+    """An amplifier's op-amp channels as (input pad, output pad) pairs, both on a net: the two `pins` in that order
+    (pad number or pin name), else its GT labels (amp_in / amp_out, one group per channel: a dual or quad op-amp's
+    U3A, U3B ..., tags.amp_label_groups), else the one non-inverting input and the one output found by their pin
+    names (a single op-amp: +IN / IN+ / INP and OUT). With `net`: only the channels with a pad on it. [] when they
+    can't be told (a dual or quad op-amp without labels)."""
     if model is None or model.kind != "amplifier":
-        return None
-    names = list(model.pins[:2]) if len(model.pins) >= 2 else None
+        return []
+    names = [tuple(model.pins[:2])] if len(model.pins) >= 2 else None
     if names is None:
         from ..analysis.tags import amp_label_pins       # GT = amp_in:3, amp_out:1 on the symbol
-        labelled = amp_label_pins(fp)
-        names = list(labelled) if labelled else None
+        names = amp_label_pins(fp) or None
     if names is not None:
         def pad(name):
             """The pad named `name`: by its number first, else by its schematic pin function."""
-            want = name.upper()
+            want = str(name).upper()
             return next((p for p in fp.pads if str(p.number).upper() == want), None) or \
                 next((p for p in fp.pads if (p.pin_function or "").upper() == want), None)
-        a, b = pad(names[0]), pad(names[1])
-        return (a, b) if a is not None and b is not None and a.net and b.net else None
+        pairs = [(pad(a), pad(b)) for a, b in names]
+        pairs = [(a, b) for a, b in pairs if a is not None and b is not None and a.net and b.net]
+        return [(a, b) for a, b in pairs if net is None or net in (a.net, b.net)]
+    pair = _named_pair(fp)
+    return [pair] if pair is not None and (net is None or net in (pair[0].net, pair[1].net)) else []
+
+
+def _named_pair(fp):
+    """(input pad, output pad) of a single op-amp by its pin names (amplifier_channels without pins or labels), None
+    when they don't tell."""
     # no names given: by the schematic pin names, but only when they are unambiguous (one input, one output); else
     # the op-amp by its pin roles (analysis/analog_net.opamp_pin_roles: an unnamed output by its pin type)
     from ..analysis.analog_net import opamp_pin_roles

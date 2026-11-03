@@ -1459,7 +1459,8 @@ whose channels can't be told, an output pin of type passive), do one of these:</
 <li>on the <b>Parts</b> tab, or in the settings file, set its model to <code>amplifier</code>; for a dual or quad
   also its stage's <code>pins</code> (input, then output);</li>
 <li>or give its symbol the GT labels, e.g. <code>GT = amp_in:3, amp_out:1</code> (add <code>amp_inv:4</code> when
-  the inverting input isn't named − / IN−; the second unit of a dual: <code>amp_in:5, amp_out:7</code>), then
+  the inverting input isn't named − / IN−; the second unit of a dual: <code>amp_in:5, amp_out:7</code>; several
+  units: one group each, see <a href="#ampchannels">Several channels of one op-amp</a>), then
   <b>Reload board</b>: see <a href="#labels">GT labels</a>;</li>
 <li>or, for an amplifier IC whose inside doesn't matter (an instrumentation amplifier), a <b>Gain</b> field.</li>
 </ul>
@@ -1725,7 +1726,10 @@ an example in <a href="#siglabels">Labelling a signal path</a>.</p>
 <tr><td><code>sig_drv:5</code> / <code>sig_rx:9</code></td><td>... and this pin drives / receives it (Detect's guess
   is replaced)</td></tr>
 <tr><td><code>amp_in:3, amp_out:1</code></td><td>an op-amp stage's input and output pin (pad number or pin name):
-  the part becomes an <code>amplifier</code> the signal path runs through</td></tr>
+  the part becomes an <code>amplifier</code> the signal path runs through (<code>amp_inv:2</code> its inverting
+  input; a quad: one group per channel, <code>amp_in:2, amp_inv:1, amp_out:14, amp_in:4, amp_inv:5,
+  amp_out:6</code>, not lists like <code>amp_in:[2,4]</code>; see <a href="#ampchannels">Several channels of one
+  op-amp</a>)</td></tr>
 <tr><td><code>buf_in:1, buf_out:6</code></td><td>a logic buffer's (Schmitt trigger's) channel, input and output pin:
   the part becomes a <code>buffer</code> the signal path runs through (a dual: <code>buf_in:1, buf_out:6, buf_in:3,
   buf_out:4</code>); see <a href="#buffers">Logic buffers</a></td></tr>
@@ -1813,6 +1817,23 @@ Parts tab, else the board's Pin defaults…, else the built-in value.</p>
 schematic symbol. For a dual or quad op-amp, name the pins of the stage on the path
 (<code>amp_in:5, amp_out:7</code> for the second unit). Several labels on one part go in the same field, separated
 by commas: a microcontroller with two ADC inputs on two paths gets <code>sig_rx:9, sig_rx:10</code>.</p>
+<p><a name="ampchannels"></a><b>Several channels of one op-amp</b> (a dual or a quad whose units are on different
+paths): write one group per channel, <code>amp_in</code>, <code>amp_inv</code>, <code>amp_out</code>, one group
+after the other in the same GT field. A new channel starts where a role comes again; the channels are named after the
+part and their order, as the schematic names its units. A quad op-amp U3 with three followers:</p>
+<table border="0" cellpadding="3">
+<tr><td>U3A</td><td>+ pin 2, − pin 1, output pin 14</td></tr>
+<tr><td>U3B</td><td>+ pin 4, − pin 5, output pin 6</td></tr>
+<tr><td>U3C</td><td>+ pin 9, − pin 8, output pin 7</td></tr>
+</table>
+<p>gets, on every unit of the symbol (the board's footprint carries one GT field for the whole part):</p>
+<p><code>GT = amp_in:2, amp_inv:1, amp_out:14, amp_in:4, amp_inv:5, amp_out:6, amp_in:9, amp_inv:8, amp_out:7</code></p>
+<p>Each channel is then a stage of its own: a path through U3A's input runs to U3A's output, never into U3B's.
+<code>amp_inv</code> is needed here because the part has four pins named −, so the name can't tell which one is the
+channel's. <b>Lists are not read:</b> <code>amp_in:[2,4,9], amp_inv:[1,5,8], amp_out:[14,6,7]</code> means the same
+channels, but GroundTruth reads only the groups above. The labels line flags such lists and shows the groups to
+write instead, and it flags a group without its <code>amp_in</code> or <code>amp_out</code> (that channel is left
+out).</p>
 <p><b>How Detect turns the labels into a path.</b> It starts at a labelled net and follows 2-pin parts and
 labelled op-amps (input net to output net) to the next labelled net. It never crosses into a ground, a reference
 net or an unlabelled supply. Branches that end at an unlabelled net (a load resistor to ground, a filter capacitor)
@@ -1858,7 +1879,8 @@ the design, so that Detect finds it again later.
 </td></tr></table>
 <p>The line at the bottom of the Converters tab (<b>Labels (GT field)</b>) names the parts that carry signal and
 op-amp labels, and lists as problems a GT word that is not a label (a typing error), a label naming a pin its part
-doesn't have, and an op-amp with <code>amp_in</code> but no <code>amp_out</code> (or the other way round). If a
+doesn't have, an op-amp with <code>amp_in</code> but no <code>amp_out</code> (or the other way round; per channel
+of a dual or quad), and amp label lists (<code>amp_in:[2,4,9]</code>, with the groups to write instead). If a
 labelled path still doesn't appear in Detect…, check that every net of the path is joined to the next by a 2-pin
 part or a labelled op-amp.</p>
 

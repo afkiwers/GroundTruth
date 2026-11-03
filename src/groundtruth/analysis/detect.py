@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from ..components.defaults import ref_prefix, suggest_model
-from ..components.models import ComponentModel, amplifier_pins, buffer_pins, model_nets
+from ..components.models import ComponentModel, amplifier_channels, amplifier_pins, buffer_pins, model_nets
 from ..config.settings import BridgeSpec, Config, ConverterSpec, LegSpec, NetSpec, _natural_key
 from ..core.board import Board, Footprint, Pad
 
@@ -161,8 +161,8 @@ def _group(board: Board, config: Config, net: str, by_net: dict, amps: bool = Tr
         for fp in by_net.get(n, []):
             m = _model(config, fp)
             pins = amplifier_pins(fp, m) if amps and m.kind == "amplifier" else None
-            if pins is not None:
-                nets = [p.net for p in pins] if n in (pins[0].net, pins[1].net) else []
+            if pins is not None:                # its channels on n (a quad op-amp: only those), input and output
+                nets = [p.net for pair in amplifier_channels(fp, m, n) for p in pair]
             elif m.kind == "buffer":
                 nets = [p.net for pair in buffer_pins(fp, m, n) for p in pair] if amps else []
             elif (m.passes_signal() or _into_buffer(board, config, fp, m)) and len(fp.nets()) == 2:
@@ -184,8 +184,7 @@ def _amp_outputs(board: Board, config: Config, group: set[str], by_net: dict) ->
     for n in group:
         for fp in by_net.get(n, []):
             m = _model(config, fp)
-            pins = amplifier_pins(fp, m) if m.kind == "amplifier" else None
-            outs = [pins[1]] if pins is not None else [b for _, b in buffer_pins(fp, m, n)]
+            outs = [b for _, b in (amplifier_channels(fp, m, n) if m.kind == "amplifier" else buffer_pins(fp, m, n))]
             if any(p.net == n for p in outs):
                 out |= _group(board, config, n, by_net, amps=False)
     return out
@@ -349,8 +348,10 @@ def _amplifier_signal(config: Config, driver_net: str, pads: list, fp_of: dict, 
     for ref in sorted({p.footprint for p in pads}):
         fp = fp_of.get(ref)
         m = _model(config, fp) if fp is not None else None
-        pins = amplifier_pins(fp, m) if m is not None else None
-        if pins is None or not driver_net or pins[1].net != driver_net:
+        # the channel whose output drives the net (a quad op-amp: that one)
+        pins = next((c for c in amplifier_channels(fp, m, driver_net) if c[1].net == driver_net), None) \
+            if m is not None and driver_net else None
+        if pins is None:
             continue
         slew = m.params.get("slew")
         bw = m.params.get("bandwidth")
@@ -398,7 +399,8 @@ def _labelled_path(board: Board, config: Config, net: str, marks: dict, by_net: 
             amp = amplifier_pins(fp, _model(config, fp))
             chans = buffer_pins(fp, _model(config, fp), n)
             if amp is not None:
-                nets = [p.net for p in amp]                 # an op-amp: only its input and output nets
+                # an op-amp: only its input and output nets, of the channels on n (a quad's others are other paths)
+                nets = [p.net for pair in amplifier_channels(fp, _model(config, fp), n) for p in pair]
             elif chans:
                 nets = [p.net for p in chans[0]]            # a logic buffer: its channel's input and output net
             elif _model(config, fp).kind == "buffer":
