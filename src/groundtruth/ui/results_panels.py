@@ -749,14 +749,9 @@ class ResultsPanel(wx.Panel):
         if not text:
             self.readout.SetLabel("this view has no transfer function to copy")
             return
-        if wx.TheClipboard.Open():
-            try:
-                wx.TheClipboard.SetData(wx.TextDataObject(text))
-            finally:
-                wx.TheClipboard.Close()
-            self.readout.SetLabel("H(s) copied: plain text and LaTeX")
-        else:
-            self.readout.SetLabel("the clipboard is busy: try again")
+        from .widgets import copy_text
+        self.readout.SetLabel("H(s) copied: plain text and LaTeX" if copy_text(text) else
+                              "the clipboard is busy: try again")
 
     def _show_tiles(self, rr):
         """The view's KPI tiles. The tiles already there show the new figures (Tile.update); only missing ones are

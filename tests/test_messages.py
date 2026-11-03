@@ -4,6 +4,7 @@ import pytest
 import wx
 
 from groundtruth.ui import messages
+from groundtruth.ui.widgets import read_clipboard
 
 
 @pytest.fixture(scope="module")
@@ -48,11 +49,54 @@ def test_a_long_message_scrolls_and_copy_puts_it_on_the_clipboard(app):
         assert dlg.page.GetVirtualSize().height > dlg.page.GetClientSize().height    # the rest is a scroll away
         assert dlg.on_copy() and dlg.copy.GetLabel() == "Copied"
         data = wx.TextDataObject()
-        assert wx.TheClipboard.Open()
-        try:
-            wx.TheClipboard.GetData(data)
-        finally:
-            wx.TheClipboard.Close()
+        assert read_clipboard(data)             # no wx error box if another program holds it a moment
         assert data.GetText() == f"groundtruth\n\n{message}"
     finally:
         dlg.Destroy()
+
+
+def test_a_busy_clipboard_says_so_without_an_error_box(app, monkeypatch):
+    """Another program holding the clipboard (a clipboard manager, Remote Desktop): on Windows wx's Open succeeds
+    and SetData fails, and wx put up a modal error box ("Failed to put data on the clipboard"; the user met it
+    during a test run, 2026-11-03). copy_text tries a few times, logs nothing, closes the clipboard every time and
+    returns False; the dialog's Copy button says "Clipboard busy"."""
+    from groundtruth.ui import widgets
+
+    class Busy:
+        """A clipboard another program holds: it opens, but no data goes in or out."""
+        def __init__(self):
+            self.opened = self.closed = 0
+
+        def Open(self):
+            self.opened += 1
+            wx.LogError("Failed to put data on the clipboard (OpenClipboard Failed)")     # what wx logs
+            return True
+
+        def SetData(self, data):
+            return False
+
+        def GetData(self, data):
+            return False
+
+        def Close(self):
+            self.closed += 1
+    busy = Busy()
+    monkeypatch.setattr(wx, "TheClipboard", busy)
+    monkeypatch.setattr(widgets, "CLIPBOARD_WAIT_S", 0.0)
+    logged = []
+
+    class Catch(wx.Log):
+        """Every wx log message the copy lets through."""
+        def DoLogTextAtLevel(self, level, msg):
+            logged.append(msg)
+    old = wx.Log.SetActiveTarget(Catch())
+    try:
+        assert not widgets.copy_text("x") and not widgets.read_clipboard(wx.TextDataObject())
+        dlg = messages.MessageDialog(None, "Could not simulate", "groundtruth", wx.OK)
+        try:
+            assert not dlg.on_copy() and dlg.copy.GetLabel() == "Clipboard busy"
+        finally:
+            dlg.Destroy()
+    finally:
+        wx.Log.SetActiveTarget(old)
+    assert busy.opened == busy.closed == 3 * widgets.CLIPBOARD_TRIES and logged == []

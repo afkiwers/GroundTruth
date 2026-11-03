@@ -8,6 +8,47 @@ import wx
 from ..components.values import parse_value
 
 
+CLIPBOARD_TRIES = 3          # another program holding the clipboard (a clipboard manager, Remote Desktop) lets
+CLIPBOARD_WAIT_S = 0.03      # go within milliseconds: a few short tries, at most ~0.1 s on the GUI thread
+
+
+def _clipboard(use: Callable[[], bool]) -> bool:
+    """Run `use` (a SetData or GetData) with the clipboard open, a few times while another program holds it; True
+    when it worked. wx's own error box is silenced (wx.LogNull): on Windows Open() succeeds and only SetData /
+    GetData find the clipboard busy ("Failed to put data on the clipboard (error -2147221040: OpenClipboard
+    Failed)"), a modal box the user saw during a test run, 2026-11-03; the caller says so its own way instead."""
+    import time
+    for k in range(CLIPBOARD_TRIES):
+        if k:
+            time.sleep(CLIPBOARD_WAIT_S)
+        with wx.LogNull():
+            if not wx.TheClipboard.Open():
+                continue
+            try:
+                if use():
+                    return True
+            finally:
+                wx.TheClipboard.Close()
+    return False
+
+
+def copy_to_clipboard(make: Callable[[], wx.DataObject]) -> bool:
+    """Put the data make() gives (a TextDataObject, a BitmapDataObject) on the clipboard; False when it stayed busy
+    (no error box: the caller tells the user, "Clipboard busy"). A new object for every try: the clipboard takes
+    the one it is given, and may delete it when SetData fails."""
+    return _clipboard(lambda: bool(wx.TheClipboard.SetData(make())))
+
+
+def copy_text(text: str) -> bool:
+    """Plain text onto the clipboard (copy_to_clipboard)."""
+    return copy_to_clipboard(lambda: wx.TextDataObject(text))
+
+
+def read_clipboard(data: wx.DataObject) -> bool:
+    """Fill `data` from the clipboard; False when it is busy or holds no such data (no error box)."""
+    return _clipboard(lambda: bool(wx.TheClipboard.GetData(data)))
+
+
 def set_lazy_items(combo: wx.ComboBox, items: list[str]):
     """Give an editable combo box a long list (a board's nets) that is filled in only when it drops down.
     Filling a native combo box costs ~0.6 ms per item on Windows: 70 ms per box for a board's 114 nets, and

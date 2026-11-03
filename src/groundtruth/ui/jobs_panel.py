@@ -331,11 +331,13 @@ class ServerJobsPanel(wx.Panel):
     def _copy(self):
         """The selected jobs' details to the clipboard."""
         sel = self.selected()
-        if sel and wx.TheClipboard.Open():
-            try:
-                wx.TheClipboard.SetData(wx.TextDataObject("\n\n".join(details(m) for m in sel)))
-            finally:
-                wx.TheClipboard.Close()
+        if sel:
+            from .widgets import copy_text
+            done = copy_text("\n\n".join(details(m) for m in sel))
+            top = self.GetTopLevelParent()
+            if hasattr(top, "SetStatusText"):
+                top.SetStatusText("job details copied to the clipboard" if done else
+                                  "the clipboard is busy (another program has it open): try again")
 
     def _enable(self):
         """The buttons for what is selected."""

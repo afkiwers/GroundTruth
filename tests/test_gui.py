@@ -12,6 +12,7 @@ wx = pytest.importorskip("wx")
 
 from boardgen import discrete_buck_board, hot_loop_board, layer_change_board, microstrip_board  # noqa: E402
 from conftest import make  # noqa: E402
+from groundtruth.ui.widgets import read_clipboard  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -548,10 +549,9 @@ def test_simulate_lists_the_design_changes_and_one_is_checked_in_simulate(app, c
         got["menu"] = [(label, on) for label, _, on in p.menu_items(p.design[k][1]) if label]
         from groundtruth.ui.fixes_panel import copy_png
         got["copied"] = copy_png(p._png)                 # the schematic onto the clipboard as an image
-        if got["copied"] and wx.TheClipboard.Open():
-            data = wx.BitmapDataObject()
-            got["pasted"] = wx.TheClipboard.GetData(data) and data.GetBitmap().GetWidth()
-            wx.TheClipboard.Close()
+        data = wx.BitmapDataObject()
+        if got["copied"] and read_clipboard(data):          # read back without wx's error box (busy clipboard)
+            got["pasted"] = data.GetBitmap().GetWidth()
         k = next(i for i, (_, o) in enumerate(p.design) if o["kind"] == "snubber")
         p.design_list.Select(k)
         p._design_selected(type("E", (), {"GetIndex": lambda self: k})())
@@ -3576,12 +3576,9 @@ def test_a_routes_bode_view_draws_its_curves_and_poles(app, frame):
     f.results_panel.on_copy_tf()
     text = transfer_clipboard(view)
     assert "H(s) =" in text and "LaTeX:" in text and r"\frac" in text
-    if wx.TheClipboard.Open():
-        try:
-            data = wx.TextDataObject()
-            assert wx.TheClipboard.GetData(data) and data.GetText() == text
-        finally:
-            wx.TheClipboard.Close()
+    data = wx.TextDataObject()
+    if read_clipboard(data):                    # another program may hold it: then nothing to compare
+        assert data.GetText() == text
 
 
 def test_a_selection_is_shown_in_kicad_once_it_settles(app):
