@@ -7,7 +7,8 @@ Losses [A48, A49]: at the hard edge (a buck's rise) the rectifier conducts in re
 the ripple's valley; at the soft edge (its fall), at the peak, only after the current has swung the node across
 (the two FETs' output charge 2·Q_oss): per period I_v·t_hard + I_p·max(t_soft − 2·Q_oss/I_p, 0), which is 2·I·t −
 2·Q_oss when the swing ends within equal dead times; times V_SD·f_sw. The channel conducts the rest of its share
-((1 − D − (t_rise + t_fall)·f_sw)·I²·R); the main switch sweeps out Q_rr at V (Q_rr·V·f_sw). Recovery [Mohan 2003]:
+((1 − D − (t_rise + t_fall)·f_sw)·(I² + ΔI²/12)·R, the inductor's triangle ripple in its mean square [Erickson 2001]
+[A80]); the main switch sweeps out Q_rr at V (Q_rr·V·f_sw). Recovery [Mohan 2003]:
 I_rr = √(2·Q_rr·di/dt), t_rr = √(2·Q_rr/(di/dt)), a triangle of charge Q_rr; its spectrum with the trapezoid against a
 direct numerical Fourier transform of the time waveform; the overshoot I_rr·√(L/C_oss). The controller's GT field
 (dead:20ns, dead1:20ns, conv1_dead:20ns, dead_rise / dead_fall per edge) and the FETs' Vsd / Qrr fields."""
@@ -41,6 +42,13 @@ def _spec(**kw) -> ConverterSpec:
                             "rds_on": R_ON, **kw})
 
 
+def _i2(cfg, i: float = I_OUT) -> float:
+    """The mean square of the inductor current i ± ΔI/2 (a triangle in continuous conduction): i² + ΔI²/12, with
+    ΔI = V_in·D(1−D)/(L·f_sw) at D = ½ and L from L1's model [Erickson 2001] [A80]; the ripple does not follow i."""
+    di = V_IN * 0.5 * 0.5 / (cfg.model_for("L1").get("L") * F_SW)
+    return i ** 2 + di ** 2 / 12
+
+
 def _losses(board, cfg, spec) -> tuple[dict, list]:
     """{ref: W} and the notes of part_losses for one stage alone (its result: D = ½, no DC paths)."""
     from dataclasses import replace
@@ -58,17 +66,19 @@ def board(tmp_path):
 
 def test_dead_time_loss_is_the_closed_form(board):
     """No output charge known (no node swing taken off): Q2 (the rectifier) conducts in reverse for both dead times,
-    at the valley and the peak, whose sum is 2·I: 2·t·f·I·V_SD, plus (1 − D − 2·t·f)·I²·R in its channel; without
-    a dead time the old (1 − D)·I²·R; Q1 unchanged."""
+    at the valley and the peak, whose sum is 2·I: 2·t·f·I·V_SD, plus (1 − D − 2·t·f)·(I² + ΔI²/12)·R in its channel
+    (the ripple's mean square, _i2); without a dead time the old (1 − D)·(I² + ΔI²/12)·R; Q1 unchanged."""
     b, cfg = board
     t, vsd = 20e-9, 1.6
+    i2 = _i2(cfg)
+    assert i2 > I_OUT ** 2                                                  # L1 has its L: the ripple is in
     with_dt, notes = _losses(b, cfg, _spec(dead_time=t, v_sd=vsd))
     dead = 2 * t * F_SW
-    assert with_dt["Q2"] == pytest.approx(dead * I_OUT * vsd + (0.5 - dead) * I_OUT ** 2 * R_ON, rel=1e-12)
+    assert with_dt["Q2"] == pytest.approx(dead * I_OUT * vsd + (0.5 - dead) * i2 * R_ON, rel=1e-12)
     # 2 × 20 ns at 500 kHz is 2 % of the period: 0.02 × 10 A × 1.6 V = 0.32 W, less 2 % of the channel's I²R
-    assert with_dt["Q2"] - 0.5 * I_OUT ** 2 * R_ON == pytest.approx(0.32 - dead * I_OUT ** 2 * R_ON, rel=1e-12)
+    assert with_dt["Q2"] - 0.5 * i2 * R_ON == pytest.approx(0.32 - dead * i2 * R_ON, rel=1e-12)
     none, _ = _losses(b, cfg, _spec(dead_time=0.0, v_sd=vsd))
-    assert none["Q2"] == pytest.approx(0.5 * I_OUT ** 2 * R_ON, rel=1e-12)
+    assert none["Q2"] == pytest.approx(0.5 * i2 * R_ON, rel=1e-12)
     assert none["Q1"] == pytest.approx(with_dt["Q1"], rel=1e-12)
     assert not [n for n in notes if "dead" in n or "v_sd" in n]
 
@@ -76,10 +86,11 @@ def test_dead_time_loss_is_the_closed_form(board):
 def test_the_soft_edge_loses_the_node_swing(board):
     """With Q_oss 44 nC per side the soft edge's (the fall's) current, the ripple's peak, first moves 88 nC: the
     reverse conduction per period is 2·I·t − 88 nC (the ripple cancels), 0.25 W at 20 ns instead of 0.32 W. A fall
-    dead time shorter than the swing leaves only the rise's, at the valley I − ΔI/2 (ΔI = V_in·D(1−D)/(L·f_sw))."""
+    dead time shorter than the swing leaves only the rise's, at the valley I − ΔI/2 (ΔI = V_in·D(1−D)/(L·f_sw)). The
+    channel's share carries the ripple's mean square I² + ΔI²/12 (_i2)."""
     b, cfg = board
     q, vsd, t = 44e-9, 1.6, 20e-9
-    base = (0.5 - 2 * t * F_SW) * I_OUT ** 2 * R_ON                       # the channel's share
+    base = (0.5 - 2 * t * F_SW) * _i2(cfg) * R_ON                         # the channel's share
     got, _ = _losses(b, cfg, _spec(dead_time=t, v_sd=vsd, q_oss=q))
     assert got["Q2"] - base == pytest.approx((2 * I_OUT * t - 2 * q) * F_SW * vsd, rel=1e-12)
     assert got["Q2"] - base == pytest.approx(0.2496, rel=1e-12)
@@ -88,7 +99,7 @@ def test_the_soft_edge_loses_the_node_swing(board):
     assert ripple_pp(b, cfg, _spec(), 0.5, V_IN) == pytest.approx(di)
     short, _ = _losses(b, cfg, _spec(dead_rise=t, dead_fall=5e-9, v_sd=vsd, q_oss=q))
     assert 2 * q / (I_OUT + di / 2) > 5e-9                                  # the swing outlasts the fall's dead time
-    base = (0.5 - 25e-9 * F_SW) * I_OUT ** 2 * R_ON
+    base = (0.5 - 25e-9 * F_SW) * _i2(cfg) * R_ON
     assert short["Q2"] - base == pytest.approx((I_OUT - di / 2) * t * F_SW * vsd, rel=1e-12)
 
 
@@ -110,7 +121,7 @@ def test_capacity_follows_the_load(board):
     """Current capacity's loss quadratic a·s² + b·s + c (fitted at s = 0, 1, 2) gives the dead-time loss at the
     operating point and at twice the load: 2·(s·I)·t·f·V_SD (linear in the load while the ripple's valley stays
     positive; at no load the valley is clamped at zero, so the fit is not exactly linear) plus the channel's
-    (1 − D − 2·t·f)·(s·I)²·R."""
+    (1 − D − 2·t·f)·((s·I)² + ΔI²/12)·R (the ripple ΔI does not follow the load, _i2)."""
     from groundtruth.analysis.thermal import capacity_inputs
     from dataclasses import replace
     b, cfg = board
@@ -121,7 +132,7 @@ def test_capacity_follows_the_load(board):
     dead = 2 * 20e-9 * F_SW
     for s in (1.0, 2.0):
         i = s * I_OUT
-        assert a * s * s + lin * s + c == pytest.approx(dead * i * 1.6 + (0.5 - dead) * i * i * R_ON, rel=1e-9)
+        assert a * s * s + lin * s + c == pytest.approx(dead * i * 1.6 + (0.5 - dead) * _i2(cfg, i) * R_ON, rel=1e-9)
 
 
 def test_defaults_are_said(board):
@@ -130,7 +141,7 @@ def test_defaults_are_said(board):
     b, cfg = board
     got, notes = _losses(b, cfg, _spec())
     dead = 2 * DEFAULT_DEAD_TIME * F_SW
-    assert got["Q2"] == pytest.approx(dead * I_OUT * V_SD_SI + (0.5 - dead) * I_OUT ** 2 * R_ON, rel=1e-12)
+    assert got["Q2"] == pytest.approx(dead * I_OUT * V_SD_SI + (0.5 - dead) * _i2(cfg) * R_ON, rel=1e-12)
     assert any("no dead time for the switch node's rise and fall" in n and "dead:20ns" in n for n in notes)
     assert any("no v_sd" in n and "silicon" in n for n in notes)
     _, one = _losses(b, cfg, _spec(dead_rise=10e-9, v_sd=1.0))
