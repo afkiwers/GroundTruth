@@ -1730,26 +1730,42 @@ def _amplified_route(model: "BoardModel", setup: RouteSetup, freqs, amps, source
         kept = []
         for j, sh in enumerate(shunt_sets[k]):
             if float(np.max(np.abs(q.shunt_i[sh["ref"]]))) >= SHUNT_MIN_SHARE * scale:
-                loops.append((shunt_route(sr, sh), returns[k], sh["ret_pad"]))
+                loops.append((shunt_route(sr, sh), returns[k], sh["ret_pad"], (k, j)))
                 kept.append(j)
         keep_sets.append(set(kept))
-        loops.append((sr, returns[k], returns[k + 1]))
+        loops.append((sr, returns[k], returns[k + 1], None))
     built = {id(setup.fine): [], id(cavity): []}
-    for r, ret0, ret1 in loops:
+    for r, ret0, ret1, shunt in loops:
+        made, failed = {}, ""
         for run in (setup.fine, cavity):
             if run is None:
                 continue
             st = run.build
             n0, n1 = _inject(model, st, ret0), _inject(model, st, ret1)
             if n0 is None or n1 is None:
-                res.error = f"the op-amp path's return pin {(ret1 if n0 else ret0).pin} is not near any plane copper"
-                return True
+                failed = f"its return pin {(ret1 if n0 else ret0).pin} is not near any plane copper"
+                break
             try:
                 chain, sections = make_chain_with_pours(r, st, n0, n1, model.z_phys)
-                built[id(run)].append(RouteExcitation(st.plane, chain, n0, n1, injections=_pour_injections(st, sections)))
+                res.notes += [n for n in r.notes if n not in res.notes]      # a pour stretch simplified
+                made[id(run)] = RouteExcitation(st.plane, chain, n0, n1, injections=_pour_injections(st, sections))
             except SolverError as e:
-                res.error = f"op-amp path: {e}"
-                return True
+                failed = str(e)
+                break
+        if failed and shunt is None:            # a stage's own loop: the path can't be modelled
+            res.error = f"op-amp path: {failed}"
+            return True
+        if failed:
+            # a shunt's loop that can't close in the model (a capacitor to a floating supply: a gate driver's
+            # bootstrap, on the user's phase-voltage path, 2026-11-03) is left out in every model, its weight too
+            # (keep_sets), as _shunt_loops does, rather than losing the path
+            k, j = shunt
+            keep_sets[k].discard(j)
+            res.notes.append(f"shunt {shunt_sets[k][j]['ref']} on the path left out of the loops ({failed}): its "
+                             "current is counted with the next loop")
+            continue
+        for key, exc in made.items():
+            built[key].append(exc)
     for run in (setup.fine, cavity):
         if run is not None:
             *others, main = built[id(run)]
@@ -2368,6 +2384,7 @@ def prepare_route(model: BoardModel, spec: NetSpec, route: Route) -> tuple[Optio
         return None, res, issues
     try:
         chain, sections = make_chain_with_pours(route, st, n_drv, n_rcv, model.z_phys)
+        res.notes += [n for n in route.notes if n not in res.notes]      # a pour stretch simplified
         exc = RouteExcitation(st.plane, chain, n_drv, n_rcv, injections=_pour_injections(st, sections))
     except SolverError:
         res.error = "return pins not connected"
@@ -3004,16 +3021,22 @@ def _chain(route: Route, st: StackBuild, n_drv, n_rcv, z_phys, pours: bool):
                 j += 1
             end = steps[last]
             na, nb = st.node(s.layer, *s.start, s.net, snap), st.node(end.layer, *end.end, s.net, snap)
-            if na is None or nb is None:
-                raise SolverError(f"the route enters or leaves the {s.net} pour where the model has no {s.net} copper")
-            entry, exit_ = P(*s.start, z_phys[s.layer]), P(*end.end, z_phys[end.layer])
-            add(cur, entry)                                  # up to where the route enters the pour,
-            add(entry, at_node(na))                          # into its copper at the grid node,
-            sections.append((na, nb))                        # the pour carries the current from there
-            add(at_node(nb), exit_)                          # to where the route leaves it
-            cur = exit_
-            k = last + 1
-            continue
+            if na is not None and nb is not None:
+                entry, exit_ = P(*s.start, z_phys[s.layer]), P(*end.end, z_phys[end.layer])
+                add(cur, entry)                              # up to where the route enters the pour,
+                add(entry, at_node(na))                      # into its copper at the grid node,
+                sections.append((na, nb))                    # the pour carries the current from there
+                add(at_node(nb), exit_)                      # to where the route leaves it
+                cur = exit_
+                k = last + 1
+                continue
+            # the pour's copper is not in the model where the route enters or leaves it (a neck narrower than the
+            # grid resolves): this stretch along the route's own steps, as without pours, rather than failing the
+            # route (the user's phase-voltage path to its second receiver, 2026-11-03: "no result")
+            note = (f"the {s.net} pour is too narrow for the model's grid where the route enters or leaves it: that "
+                    "stretch is modelled along the route's copper, not spread over the pour")
+            if note not in route.notes:
+                route.notes.append(note)
         if isinstance(s, RouteSegment):
             a, b = P(*s.start, z_phys[s.layer]), P(*s.end, z_phys[s.layer])
             add(cur, a)

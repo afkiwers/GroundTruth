@@ -200,13 +200,17 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
     cache: the cross-section cache (simulate.line_cache) for the tracks' Z0."""
     from .route import copper_graph, signal_nets
     a = config.analysis
-    ground = ac_ground_nets(board, config)
     drv, rcv = board.find_pin(spec.driver), board.find_pin(receiver)
     if drv is None or rcv is None:
         raise ValueError(f"pin {spec.driver if drv is None else receiver!r} not found")
+    # AC ground, but never the path's own ends: a driver pin of type power_in (a gate driver's GNDB on a phase node,
+    # the user's phase-voltage sense path, 2026-11-03) made its net a "supply", the source shorted, every response 0
+    # (-600 dB, flat steps)
+    ground = ac_ground_nets(board, config) - {drv.net, rcv.net}
     notes: list[str] = []
-    # ---- the nets: from the path's own (signal_nets: through series parts and op-amps) outwards
-    start = (signal_nets(board, config, spec.name, set(spec.through)) | {drv.net, rcv.net}) - ground
+    # ---- the nets: from the path's own (signal_nets: through series parts and op-amps) outwards, never across AC
+    # ground (stop): a Pass through part to a supply no longer leads into the regulator behind it
+    start = (signal_nets(board, config, spec.name, set(spec.through), stop=ground) | {drv.net, rcv.net}) - ground
     nets: list[str] = []
     todo = sorted(start)
     pads_on: dict[str, list[Pad]] = {}

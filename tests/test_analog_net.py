@@ -266,3 +266,37 @@ def test_an_opamp_is_known_by_its_pin_names_even_with_an_unnamed_output():
     assert opamp_pin_roles(_opamp_fp(OPA376 + [("6", "", "output", "X")])) is None
     assert suggest_model(_opamp_fp([("1", "+", "passive", "A"), ("2", "-", "passive", "B")], "J1"),
                          fields=False).kind == "open"
+
+
+def _supply_pin_driver_board():
+    """U1.1 drives SIG_IN from a pin of type power_in (a gate driver's GNDB on a phase node, as the user's phase-voltage
+    sense path, 2026-11-03) through R1 1k to OUT (U2.1), R2 1k from OUT to GND: a divider of 1/2. R3 10k from OUT to
+    +5V, and behind +5V a regulator's L1 to SW and C1 from SW to BST, which no signal reaches."""
+    from boardgen import BoardGen
+    g = BoardGen(layers=2, size=(40.0, 20.0))
+    g.ic("U1", (5.0, 10.0), "SIG_IN", gnd_offset=(0.0, 1.0), pintype="power_in", pinfunction="GNDB")
+    g.ic("U2", (35.0, 10.0), "OUT", gnd_offset=(0.0, 1.0), pintype="input")
+    g.two_pin("R1", "1k", (15.0, 10.0), "SIG_IN", "OUT", kind="R")
+    g.two_pin("R2", "1k", (25.0, 12.0), "OUT", "GND", kind="R")
+    g.two_pin("R3", "10k", (25.0, 8.0), "OUT", "+5V", kind="R")
+    g.two_pin("L1", "10u", (25.0, 4.0), "+5V", "SW", kind="R")
+    g.two_pin("C1", "10n", (30.0, 4.0), "SW", "BST", kind="C")
+    for x0, x1, net in ((5.0, 14.5, "SIG_IN"), (15.5, 35.0, "OUT")):
+        g.track((x0, 10.0), (x1, 10.0), net)
+    g.plane("GND", g.cu[-1])
+    return g
+
+
+def test_a_driver_on_a_supply_type_pin_is_no_ac_ground_and_the_circuit_stops_at_rails(tmp_path):
+    """The path's own driver net is never AC ground, though its pin is of type power_in: before, the source was
+    shorted and every response read 0 (-600 dB, flat steps). The circuit stops at +5V even with R3 to it in Pass
+    through: the regulator behind it (L1, C1, SW, BST) is not in it. Gain: R2 ∥ R3 against R1, about 0.476."""
+    from groundtruth.analysis.analog_net import analog_network
+    spec = NetSpec("SIG_IN", "U1.1", ["U2.1"], 1e3, 1e-6, through=["R1", "R3"])
+    board, sc, _ = make(tmp_path, _supply_pin_driver_board(), "gndb", nets=(spec,))
+    net = analog_network(board, sc.config, spec, "U2.1")
+    assert "SIG_IN" in net.nets and not {"SW", "BST", "+5V"} & set(net.nets)
+    assert "L1" not in net.parts and "C1" not in net.parts
+    h = abs(net.circuit.transfer(np.array([10.0]), net.out_node)[0])
+    r = 1 / (1 / 1e3 + 1 / 10e3)
+    assert h == pytest.approx(r / (r + 1e3 + 25.0), rel=0.02)      # the driver's 25 Ω in series too

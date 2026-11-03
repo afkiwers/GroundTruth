@@ -479,3 +479,14 @@ def test_a_toolbar_zoom_keeps_the_maps_clear_of_the_colour_bar(route):
         (lx0, lx1), (ly1, ly0) = maps[0].get_xlim(), maps[0].get_ylim()
         assert lx0 <= x0 + 1e-9 and lx1 >= x1 - 1e-9 and ly0 <= y0 + 1e-9 and ly1 >= y1 - 1e-9   # all of it shown
         assert ly1 > ly0                                                    # y still points down
+
+
+def test_a_long_bode_key_takes_columns_not_one_entry_per_row():
+    """A Bode view of 17 responses (a path through two quad op-amps, the user: "fix formatting"): its legend takes as
+    many columns as the width allows, a few rows, where one entry per row stacked them over the formulas and the
+    plot; the figure's height estimate reserves those rows."""
+    from groundtruth.report.plots import _key_layout
+    labels = [f"U{k}A: output" for k in range(17)] + ["pole", "zero"]
+    ncol, rows = _key_layout(labels, 12.0)
+    assert ncol >= 4 and rows == -(-len(labels) // ncol) and rows <= 5
+    assert _key_layout(["receiver / source", "pole"], 12.0) == (2, 1)            # fits on one row: as before
