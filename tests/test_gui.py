@@ -1918,6 +1918,40 @@ def test_a_loading_card_stands_in_the_tabs_place_until_the_board_is_read(app, tm
     assert got["sim"] == []                     # a run is no board load: the tabs stay
 
 
+def test_the_receiver_pins_filter_as_typed_and_select_all_of_those_shown(app, frame):
+    """The Receiver pins (the user: "add a button to select/deselect all and a filter that filters on type
+    events"): typing narrows the list (every word in the pin, no case), Select all ticks the pins shown and turns
+    into Deselect all; ticks of pins the filter hides are kept; the form reads every tick; several paths selected:
+    greyed, the button too."""
+    from groundtruth.ui.widgets import FilteredCheckList
+    f = frame
+    run_steps(app, f, [])
+    r = f.nets.receivers
+    assert isinstance(r, FilteredCheckList)
+    r.Set(["C4.1", "R168.1", "R2.2", "R4.1", "U3.2", "U1.9"])
+    r.SetCheckedStrings(["U1.9"])
+    r.filter.SetValue("r")                          # a typed letter filters at once (EVT_TEXT)
+    wx.Yield()
+    assert r.list.GetItems() == ["R168.1", "R2.2", "R4.1"] and r.toggle.GetLabel() == "Select all"
+    r._toggle()
+    assert r.GetCheckedStrings() == ["R168.1", "R2.2", "R4.1", "U1.9"]        # U1.9 kept though hidden
+    assert r.toggle.GetLabel() == "Deselect all"
+    assert r.count.GetLabel() == "4 of 6 ticked (3 shown)"     # the user: "show a count of how many ... selected"
+    r.filter.SetValue("r .1")                       # every word: R168.1 and R4.1 (R2.2 has no ".1")
+    wx.Yield()
+    assert r.list.GetItems() == ["R168.1", "R4.1"]
+    r._toggle()                                     # all shown ticked: untick those two only
+    assert r.GetCheckedStrings() == ["R2.2", "U1.9"]
+    r.filter.SetValue("")
+    wx.Yield()
+    assert r.list.GetItems() == r.GetItems() and list(r.list.GetCheckedStrings()) == ["R2.2", "U1.9"]
+    assert r.count.GetLabel() == "2 of 6 ticked"
+    r.Enable(False)
+    assert not r.list.IsEnabled() and not r.toggle.IsEnabled()
+    r.Enable(True)
+    assert r.toggle.IsEnabled()
+
+
 @pytest.mark.parametrize("height", [520, 400])
 def test_every_settings_form_scrolls_and_keeps_its_buttons_in_reach(app, frame, height):
     """A short window (the user: "all settings panes need to be scrollable so if the screen is not big enough the

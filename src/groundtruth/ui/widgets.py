@@ -156,7 +156,8 @@ def section_rows(parent, form: wx.GridBagSizer, sections: list, tips: dict, cell
                 text.SetToolTip(tip)
                 ctrl.SetToolTip(tip)
             # a list or a multi-line text: its label at its top
-            tall = isinstance(ctrl, wx.ListBox) or (isinstance(ctrl, wx.TextCtrl) and ctrl.IsMultiLine())
+            tall = isinstance(ctrl, (wx.ListBox, FilteredCheckList)) or (isinstance(ctrl, wx.TextCtrl) and
+                                                                       ctrl.IsMultiLine())
             form.Add(text, (r, 0), flag=(wx.ALIGN_TOP if tall else wx.ALIGN_CENTER_VERTICAL) | wx.LEFT,
                      border=10)
             form.Add(cells.get(ctrl, ctrl), (r, 1), flag=wx.EXPAND)
@@ -164,6 +165,115 @@ def section_rows(parent, form: wx.GridBagSizer, sections: list, tips: dict, cell
     if r > start and not form.IsColGrowable(1):
         form.AddGrowableCol(1)                   # after the rows: a GridBagSizer has no columns before them
     return r
+
+
+class FilteredCheckList(wx.Panel):
+    """A tick list with a filter and a Select all / Deselect all button (the user, of the Receiver pins: "add a
+    button to select/deselect all and a filter that filters on type events"): the filter narrows the list as it is
+    typed (every word must be in the item, without case: "R2" or "u1 .9"), the button ticks or unticks the items
+    shown, and a count says how many are ticked (the user: "also, show how a count of many signals are selected").
+    The ticks are kept for every item, shown or not: the filter only hides. Read and set like a wx.CheckListBox
+    (Set, GetItems, GetCheckedStrings, SetCheckedStrings)."""
+
+    def __init__(self, parent, height: int = 110, hint: str = "filter, e.g. R2 or U1."):
+        """The filter, the button and the count on one line, the list under them, `height` px tall."""
+        super().__init__(parent)
+        self._items: list[str] = []
+        self._checked: set[str] = set()
+        self.filter = wx.SearchCtrl(self)
+        self.filter.SetDescriptiveText(hint)
+        self.filter.ShowCancelButton(True)
+        self.toggle = wx.Button(self, label="Select all", style=wx.BU_EXACTFIT)
+        self.count = wx.StaticText(self, label="", name="muted")      # "3 of 47 ticked (12 shown)"
+        self.list = wx.CheckListBox(self, size=(-1, height))
+        row = wx.BoxSizer(wx.HORIZONTAL)
+        row.Add(self.filter, 1, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
+        row.Add(self.toggle, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        row.Add(self.count, 0, wx.ALIGN_CENTER_VERTICAL)
+        s = wx.BoxSizer(wx.VERTICAL)
+        s.Add(row, 0, wx.EXPAND | wx.BOTTOM, 3)
+        s.Add(self.list, 1, wx.EXPAND)
+        self.SetSizer(s)
+        self.filter.Bind(wx.EVT_TEXT, lambda e: self._show())
+        self.filter.Bind(wx.EVT_SEARCHCTRL_CANCEL_BTN, lambda e: self.filter.ChangeValue("") or self._show())
+        self.toggle.Bind(wx.EVT_BUTTON, lambda e: self._toggle())
+        self.list.Bind(wx.EVT_CHECKLISTBOX, self._ticked)
+
+    def SetToolTip(self, tip):
+        """The tooltip on the list and the filter (the form's labels set it on the field)."""
+        super().SetToolTip(tip)
+        self.list.SetToolTip(tip)
+
+    def _shown(self) -> list[str]:
+        """The items the filter lets through: every word of it found in the item, without case."""
+        words = self.filter.GetValue().lower().split()
+        return [i for i in self._items if all(w in i.lower() for w in words)]
+
+    def _show(self):
+        """The list again: the items shown, their ticks, and the button's label for them."""
+        shown = self._shown()
+        self.list.Set(shown)
+        self.list.SetCheckedStrings([i for i in shown if i in self._checked])
+        self._label()
+
+    def _label(self):
+        """Select all while some shown item is not ticked, else Deselect all (greyed with none shown); the count of
+        ticked items, and how many the filter shows while it hides some."""
+        shown = self.list.GetItems()
+        self.toggle.SetLabel("Deselect all" if shown and all(i in self._checked for i in shown) else "Select all")
+        self.toggle.Enable(bool(shown) and self.list.IsEnabled())
+        count = f"{len(self._checked)} of {len(self._items)} ticked" if self._items else ""
+        if len(shown) < len(self._items):
+            count += f" ({len(shown)} shown)"
+        if self.count.GetLabel() != count:
+            self.count.SetLabel(count)
+        self.Layout()
+
+    def _toggle(self):
+        """Tick every item shown, or untick them all when they all are ticked (the hidden ones as they were)."""
+        shown = self.list.GetItems()
+        if shown and all(i in self._checked for i in shown):
+            self._checked -= set(shown)
+        else:
+            self._checked |= set(shown)
+        self.list.SetCheckedStrings([i for i in shown if i in self._checked])
+        self._label()
+
+    def _ticked(self, evt):
+        """One item ticked or unticked by hand."""
+        item = self.list.GetString(evt.GetInt())
+        if self.list.IsChecked(evt.GetInt()):
+            self._checked.add(item)
+        else:
+            self._checked.discard(item)
+        self._label()
+
+    def Set(self, items: list[str]):
+        """New items, none ticked (the filter stays)."""
+        self._items = list(items)
+        self._checked = set()
+        self._show()
+
+    def GetItems(self) -> list[str]:
+        """Every item, shown or not."""
+        return list(self._items)
+
+    def GetCheckedStrings(self) -> list[str]:
+        """The ticked items, shown or not, in the list's order."""
+        return [i for i in self._items if i in self._checked]
+
+    def SetCheckedStrings(self, items):
+        """Tick these (and only these) of the items."""
+        self._checked = {i for i in items if i in self._items}
+        self._show()
+
+    def Enable(self, enable: bool = True) -> bool:
+        """The list, the filter and the button together (several paths selected: greyed)."""
+        for w in (self.list, self.filter):
+            w.Enable(enable)
+        changed = super().Enable(enable)
+        self._label()
+        return changed
 
 
 def with_mark(parent, ctrl, on_reset: Optional[Callable[[], None]] = None) -> tuple[wx.BoxSizer, FieldMark]:
