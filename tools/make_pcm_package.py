@@ -3,6 +3,7 @@
     .venv/Scripts/python tools/make_pcm_package.py            # out/dist/groundtruth-<version>-<commit>-pcm.zip
     .venv/Scripts/python tools/make_pcm_package.py --working-tree   # the files on disk (build_package.cmd does this)
     .venv/Scripts/python tools/make_pcm_package.py --status stable --out DIR
+    .venv/Scripts/python tools/make_pcm_package.py --local    # for local testing: no server package, no release key
 
 Layout (dev-docs.kicad.org/en/addons): metadata.json at the root, the plugin directly in plugins/ (plugin.json,
 the entry scripts, icons, requirements.txt, the groundtruth package, the demo project), the 64 px package icon in
@@ -15,6 +16,10 @@ which). --working-tree packs the files as they are on disk ("-dirty" in the name
 except the demo, always from the last commit: the repo's copy is the one the user tries out in KiCad.
 Each build gets a higher version (major.minor from pyproject.toml, an automatic patch number), so the Plugin and
 Content Manager always takes a newer zip as an update.
+
+--local builds the plugin without the compute servers' signed update package: no release key is needed or made
+(a PC without the user's key: the compute servers trust only that one), "-local" in the name. Such a plugin is a
+development copy to remote.release.bundled: it offers no server update, everything else is the same.
 """
 from __future__ import annotations
 
@@ -118,6 +123,9 @@ def main() -> int:
     ap.add_argument("--working-tree", action="store_true",
                     help="pack the files as they are on disk (uncommitted changes included; the demo always from the "
                          "last commit) instead of the last commit")
+    ap.add_argument("--local", action="store_true",
+                    help="for local testing: leave out the compute servers' signed update package, so no release "
+                         "key is needed (or made); the plugin then offers no server update")
     args = ap.parse_args()
     import tomllib
     major_minor = ".".join(tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
@@ -164,16 +172,20 @@ def main() -> int:
     # the server package of this same build, signed with this PC's release key (remote/release.py): the plugin updates
     # the compute servers to its own version with it (Preferences, Compute server); also written to --out, so one
     # build gives both installers with one version
-    from make_server_package import build as build_server
-    from groundtruth.remote import release
-    folder, server_zip, server_sig = build_server(version, tag, files["plugins/version.txt"].decode("utf-8"),
-                                                  args.working_tree)
-    files[f"plugins/{release.UPDATE_DIR}/{release.UPDATE_ZIP}"] = server_zip
-    files[f"plugins/{release.UPDATE_DIR}/{release.UPDATE_SIG}"] = (server_sig + "\n").encode("utf-8")
-    args.out.mkdir(parents=True, exist_ok=True)
-    (args.out / f"{folder}.zip").write_bytes(server_zip)
-    (args.out / f"{folder}.zip.sig").write_text(server_sig + "\n", encoding="utf-8")
-    print(args.out / f"{folder}.zip")
+    if args.local:                  # no server package: nothing to sign, no key touched
+        tag += "-local"
+        files["plugins/version.txt"] = files["plugins/version.txt"].replace(b")", b", local test build)", 1)
+    else:
+        from make_server_package import build as build_server
+        from groundtruth.remote import release
+        folder, server_zip, server_sig = build_server(version, tag, files["plugins/version.txt"].decode("utf-8"),
+                                                      args.working_tree)
+        files[f"plugins/{release.UPDATE_DIR}/{release.UPDATE_ZIP}"] = server_zip
+        files[f"plugins/{release.UPDATE_DIR}/{release.UPDATE_SIG}"] = (server_sig + "\n").encode("utf-8")
+        args.out.mkdir(parents=True, exist_ok=True)
+        (args.out / f"{folder}.zip").write_bytes(server_zip)
+        (args.out / f"{folder}.zip.sig").write_text(server_sig + "\n", encoding="utf-8")
+        print(args.out / f"{folder}.zip")
     metadata = {
         "$schema": "https://go.kicad.org/pcm/schemas/v1",
         "name": "GroundTruth",
