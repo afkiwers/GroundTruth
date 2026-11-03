@@ -1613,7 +1613,7 @@ def _amp_circuit(model: "BoardModel", route: Route, main_ref: str, notes: list) 
     None when the route has no op-amp, or one whose input, output or ground pin can't be told (a note says so: the
     path is then one stage). The path is cut at each op-amp: the driver (or the op-amp before) drives the stage, its
     receivers' end is the next op-amp's input (loaded by its input impedance) or the receivers."""
-    from ..components.models import amplifier_channels, buffer_pins
+    from ..components.models import amplifier_units, buffer_pins
     board, config = model.board, model.config
     raw = _stage_routes(route, config)
     if raw is None:
@@ -1629,8 +1629,10 @@ def _amp_circuit(model: "BoardModel", route: Route, main_ref: str, notes: list) 
                 chans = [c for c in buffer_pins(fp, m) if c[0].net in route.nets and c[1].net in route.nets] \
                     if fp is not None else []
                 pads = chans[0] if chans else None
-            else:                           # the op-amp's channel on this route (a quad op-amp: U3A's, not U3B's)
-                chans = [c for c in amplifier_channels(fp, m) if c[0].net in route.nets and c[1].net in route.nets] \
+            else:                           # the op-amp's channel on this route (a quad op-amp: U3A's, not U3B's),
+                # entered at IN+ or IN− (an inverting stage whose IN+ is on a bias net: its signal comes in at IN−)
+                chans = [(p, out) for _, ins, out in amplifier_units(fp, m) for p in ins
+                         if p.net in route.nets and out.net in route.nets and p.net != out.net] \
                     if fp is not None else []
                 pads = chans[0] if chans else None
             ret = return_pad(board, config, pads[0], None) if pads else None
@@ -1930,7 +1932,6 @@ def sweep_range(spec: NetSpec, harmonics) -> np.ndarray:
 POLE_SPAN = 10.0               # poles and zeros up to this many times the sweep's top are listed and written out
 DOUBLET = 1e-3                 # a pole and a zero this close (relative) cancel in the lists and the written-out
                                # H(s) [A54]
-from .transfer import STEP_MAX as _STEP_MAX  # noqa: E402  (the step note)
 LOOP_LEAD = 60                 # a loop gain's points from near DC to its sweep's start (phase_margin's `lead`)
 
 
@@ -1971,7 +1972,8 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
     outs = [(f"{spec.name}: receiver / source", net.out_node, lumped.out_node)]
     for name, _kind in net.opamps:              # each op-amp channel's output (not one on AC ground)
         node, lnode = net.amp_out.get(name), lumped.amp_out.get(name)
-        if node in net.circuit.nodes and lnode in lumped.circuit.nodes and node != net.out_node:
+        # only the channels the signal passes (net.on_path): the others are in the circuit for their loading
+        if node in net.circuit.nodes and lnode in lumped.circuit.nodes and node != net.out_node and net.on_path(name):
             outs.append((f"{name}: output", node, lnode))
     out = []
     for title, node, lnode in outs:
@@ -1980,10 +1982,9 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
         poles, zeros, n_doublets = cancel_doublets(poles, zeros)
         r = Response(title, spec.name, "voltage gain", np.asarray(f, float), h, keep(poles), keep(zeros), exact=True)
         r.normal = normal_form(poles, zeros, k, f_max=f_max)
-        r.step = _step_of(lumped, lnode, keep(poles), r.normal, f, keep(zeros))
-        if r.step and r.step.get("capped"):
-            r.notes.append(f"step: its ringing is under-resolved (more than {_STEP_MAX:,} steps would be needed for "
-                           "a lightly damped pole over the slowest one's settling): its overshoot may read low")
+        r.step = _step_of(lumped, lnode, poles, r.normal, f, zeros)      # every root: the step is exact (audit M-2)
+        if r.step and r.step.get("note"):
+            r.notes.append(r.step["note"])
         if n_doublets:
             r.notes.append(f"{n_doublets} pole-zero pair(s) within {DOUBLET:.1%} of each other cancelled (doublets: "
                            "a load the output hardly sees)")
@@ -1999,7 +2000,14 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
         # T from near DC (nine decades below the sweep) up to the sweep: its phase unwrapped from DC and its sign
         # there (positive feedback), not only the sweep's (transfer.phase_margin, audit round 7, AA-3)
         f_lead = np.geomspace(max(float(f[0]) * 1e-9, 1e-9), float(f[0]), LOOP_LEAD, endpoint=False)
-        pm = phase_margin(f, t, lead=net.circuit.loop_gain(name, f_lead))
+        # refined on T itself near its lightly damped roots (the lumped circuit's) and between samples that differ
+        # much: a narrow |T| = 1 excursion between two sweep points counts (audit M-3)
+        try:
+            roots = np.concatenate(lumped.circuit.loop_roots(name)) if name in lumped.circuit.opamps else None
+        except (ValueError, np.linalg.LinAlgError):
+            roots = None
+        pm = phase_margin(f, t, lead=net.circuit.loop_gain(name, f_lead), lead_f=f_lead, roots=roots,
+                          fn=lambda x, nm=name: net.circuit.loop_gain(nm, x))
         r.margin = pm
         if pm is None:
             r.notes.append("its loop gain does not fall through 1 in the sweep (sweep higher for the phase margin)")
@@ -2016,7 +2024,15 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
     kinds = ", ".join(f"{n} ({k})" for n, k in net.opamps)
     notes.insert(0, f"circuit: {len(net.nets)} net(s), {len(net.parts)} part(s), {net.tracks} track segment(s)"
                  + (f", op-amps {kinds}" if kinds else ""))
-    return out, notes, _bandwidth_and_stability(board, config, spec, receiver, net, f, out)
+    # every loop is checked for stability (a bias buffer that rings matters), but the plot shows the path's own
+    # channels: the others' loop gains go into the findings only
+    besides = [n for n, _ in net.opamps if not net.on_path(n)]
+    findings = _bandwidth_and_stability(board, config, spec, receiver, net, f, out)
+    if besides:
+        notes.append(f"in the circuit for their loading, not plotted: {', '.join(besides)} (their outputs and loop "
+                     "gains; a loop of theirs that rings is still flagged)")
+        out = [r for r in out if not (r.quantity == "loop gain" and r.name.split(": ", 1)[0] in besides)]
+    return out, notes, findings
 
 
 def step_share(p: complex, poles: list, zeros: list) -> float:
@@ -2028,49 +2044,73 @@ def step_share(p: complex, poles: list, zeros: list) -> float:
     return math.exp(min(lz - lp, 700.0))
 
 
-STEP_SHARE = 1e-3              # a ringing pole whose share of the step is below this is not resolved (_step_of)
+from .transfer import STEP_SHARE  # noqa: E402  (a pole whose share of the step is below it: _step_of)
 
 
 def _step_of(lumped, node: str, poles: list, normal: dict, f: np.ndarray, zeros: Optional[list] = None
              ) -> Optional[dict]:
-    """A response's step response (emi/mna.Circuit.step on the lumped circuit [Gear 1971]): STEP_SPAN time constants
-    of its slowest pole (|σ| of the lowest-frequency pole listed; without one, of the sweep's lowest frequency) in at
-    least STEP_POINTS steps, and STEP_PER_PERIOD per period of the fastest lightly damped pole that shows in it (its
-    step_share at least STEP_SHARE, given the zeros); its figures (transfer.step_metrics) with the DC gain as the
-    final value; a pole in the right half-plane: unstable, no final value. None for a response with a pole at the
-    origin (an integrator: no final value) or when it can't be stepped."""
-    from .transfer import STEP_MAX, STEP_PER_PERIOD, STEP_POINTS, STEP_Q, STEP_SPAN, step_metrics
-    if normal.get("m", 0) < 0:
+    """A response's step response, from its poles, zeros and normal form (k, m: emi/mna.Circuit.poles_zeros, every
+    root, not only the listed ones) in closed form (transfer.exact_step: partial fractions [Ogata 2010]; its figures
+    exact, transfer.exact_step_metrics); where that is ill-conditioned or the zeros are not given, integrated on the
+    lumped circuit (emi/mna.Circuit.step, BDF2 [Gear 1971]) on a graded grid (_bdf2_step). The final value is the DC
+    gain, 0 for a zero at the origin (AC-coupled: H(0) = 0 exactly; audit M-1, the last sample was taken and read an
+    overshoot of 16 million %); a pole in the right half-plane: unstable, no final value. None for a pole at the
+    origin (an integrator: no final value), H ≡ 0, or when it can't be stepped. {"t", "y", "metrics", "capped",
+    "method", "note"}: the note says what the curve or figures lack, for the response's notes."""
+    from .transfer import STEP_MAX, exact_step, exact_step_response
+    m = normal.get("m", 0)
+    k = normal.get("k")
+    if m < 0 or k is None or complex(k) == 0:
         return None
-    # a pole in the right half-plane: the step grows without bound, it has no final value (audit round 7, AA-7: the
-    # DC gain was reported as one); shown over five of its growth times
-    grow = [p.real for p in poles if p.real > 1e-9 * max(abs(p), 1.0)]
-    sig = [abs(p.real) for p in poles if p != 0 and abs(p.real) > 0]
-    tau = 5.0 / max(grow) / STEP_SPAN if grow else (1.0 / min(sig) if sig else 1.0 / (2 * math.pi * float(f[0])))
-    span = STEP_SPAN * tau
-    # resolve the fastest lightly damped pole (Q ≥ STEP_Q) with STEP_PER_PERIOD steps per period: BDF2 at a few
-    # steps per period neither finds the first peak nor keeps the ringing (AA-6: a Q 300 RLC read 25 % overshoot
-    # for 99.5 %); at most STEP_MAX steps (a note says when that is too few)
-    # (a track's GHz resonance in a kHz filter's output hardly shows: its share of the step decides, given the zeros)
-    ring = [abs(p.imag) for p in poles if p.imag != 0 and abs(p) / (-2 * p.real if p.real < 0 else 1e-300) >= STEP_Q
-            and (zeros is None or step_share(p, poles, zeros) >= STEP_SHARE)]
-    n = STEP_POINTS
-    if ring:
-        n = max(n, int(math.ceil(span * max(ring) / (2 * math.pi) * STEP_PER_PERIOD)) + 1)
-    capped = n > STEP_MAX
-    t = np.linspace(0.0, span, min(n, STEP_MAX))
+    ex = exact_step(poles, zeros, k, m) if zeros is not None else None
+    if ex is not None:
+        st = exact_step_response(ex, float(f[0]))
+        if st["capped"]:
+            st["note"] = (f"step: its ringing is drawn under-resolved (more than {STEP_MAX:,} points would be needed "
+                          "over the slowest pole's settling); its figures are exact")
+        return st
+    st = _bdf2_step(lumped, node, poles, k, m, f, zeros)
+    if st and st["capped"]:
+        st["note"] = (f"step: its ringing is under-resolved (more than {STEP_MAX:,} steps would be needed for a "
+                      "lightly damped pole over the slowest one's settling): its overshoot may read low, its rise "
+                      "and settling times are approximate")
+    return st
+
+
+def _bdf2_step(lumped, node: str, poles: list, k, m: int, f: np.ndarray, zeros: Optional[list]) -> Optional[dict]:
+    """_step_of's fallback: the lumped circuit stepped by BDF2 (emi/mna.Circuit.step [Gear 1971]) on a graded grid
+    (transfer.step_grid): STEP_SPAN time constants of the slowest pole that shows in the step (step_share at least
+    STEP_SHARE, given the zeros and m = 0; else every pole), its first steps a twentieth of the fastest such pole's
+    time constant and at most STEP_PER_PERIOD per period of its fastest lightly damped one (Q ≥ STEP_Q). Audit M-2:
+    the window was sized by the slowest pole listed whatever its share, the steps uniform, so a fast rise fell in one
+    or two of them. Five growth times of a pole in the right half-plane (unstable, no final value: audit round 7,
+    AA-7)."""
+    from .transfer import STEP_PER_PERIOD, STEP_POINTS, STEP_Q, STEP_SPAN, step_grid, step_metrics
+    nz = [p for p in poles if p != 0]
+    grow = [p.real for p in nz if p.real > 1e-9 * max(abs(p), 1.0)]
+    shows = [p for p in nz if p.real < 0 and (zeros is None or m != 0 or step_share(p, poles, zeros) >= STEP_SHARE)]
+    if grow:
+        span = 5.0 / max(grow)
+        t = np.linspace(0.0, span, STEP_POINTS)
+        capped = False
+    else:
+        span = STEP_SPAN / (min(abs(p.real) for p in shows) if shows else 2 * math.pi * float(f[0]))
+        fast = max((abs(p) for p in shows), default=STEP_SPAN / span)
+        # (a track's GHz resonance in a kHz filter's output hardly shows: its share of the step decides)
+        ring = [abs(p.imag) for p in shows if p.imag != 0 and abs(p) / (-2 * p.real) >= STEP_Q]
+        h_max = min([span / STEP_POINTS] + [2 * math.pi / w / STEP_PER_PERIOD for w in ring])
+        t, capped = step_grid(span, 1.0 / fast / 20, h_max)
     try:
         y = lumped.circuit.step(node, t)
     except (ValueError, RuntimeError, np.linalg.LinAlgError):
         return None
     if grow:
-        k = int(np.argmax(np.abs(y)))
-        metrics = {"final": None, "peak": float(y[k]), "t_peak": float(t[k]), "rise": None, "overshoot_pct": None,
+        i = int(np.argmax(np.abs(y)))
+        metrics = {"final": None, "peak": float(y[i]), "t_peak": float(t[i]), "rise": None, "overshoot_pct": None,
                    "undershoot_pct": None, "settling": None, "unstable": True}
-        return {"t": t, "y": y, "metrics": metrics, "capped": capped}
-    k = normal.get("k")
-    final = (k.real if isinstance(k, complex) else float(k)) if normal.get("m", 0) == 0 and k is not None else None
-    return {"t": t, "y": y, "metrics": step_metrics(t, y, final), "capped": capped}
+        return {"t": t, "y": y, "metrics": metrics, "capped": capped, "method": "bdf2"}
+    final = complex(k).real if m == 0 else 0.0
+    return {"t": t, "y": y, "metrics": step_metrics(t, y, final), "capped": capped, "method": "bdf2"}
 
 
 def _bandwidth_and_stability(board: Board, config: Config, spec: NetSpec, receiver: str, net, f: np.ndarray,
@@ -2122,8 +2162,9 @@ def _bandwidth_and_stability(board: Board, config: Config, spec: NetSpec, receiv
     kinds = dict(net.opamps)
     prev = net.node_of.get(spec.driver)
     for ref in refs:
-        name = next((c for c in net.amp_out if c == ref), None) or next((c for c in net.amp_out
-                                                                          if c.startswith(ref)), None)
+        # the part's channel: U3 itself, else U3A / U3.1, never another part U31 (audit 2026-11, E-9)
+        name = next((c for c in net.amp_out if c == ref), None) or next(
+            (c for c in net.amp_out if c.startswith(ref) and not c[len(ref):len(ref) + 1].isdigit()), None)
         if name is None:
             continue
         node = net.amp_out[name]

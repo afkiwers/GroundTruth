@@ -225,3 +225,182 @@ def test_the_loop_gain_and_phase_margin_of_followers_and_an_inverting_stage():
     beta = 1e3 / (1e3 + 10e3 + 50.0)
     assert abs(t[0]) == pytest.approx(1e5 * beta / math.hypot(1, 1 / 10.0), rel=1e-6)
     assert phase_margin(f, t)["f_c"] == pytest.approx(1e6 * beta, rel=0.01)
+
+
+# ------------------------------------------------------------------------------- audit phase 2 (solver: M-4 .. M-13)
+def test_bad_values_a_second_source_and_an_unknown_node_are_errors():
+    """Audit M-6: a 0 Ω resistor divided by zero, a negative or NaN value went in silently, a second input source
+    replaced the first (H read 1/3 for a circuit with two), an unknown output node was a bare KeyError: each is now
+    a ValueError naming it; 0 F and 0 H stay allowed (nothing, and a short)."""
+    for bad in (lambda c: c.r("a", "b", 0.0), lambda c: c.r("a", "b", -50.0), lambda c: c.r("a", "b", float("nan")),
+                lambda c: c.c("a", "b", -1e-9), lambda c: c.c("a", "b", float("inf")), lambda c: c.l("a", "b", -1e-6),
+                lambda c: c.vcvs("a", "0", "b", "0", float("nan"))):
+        with pytest.raises(ValueError):
+            bad(Circuit())
+    c = Circuit()
+    c.vsource("a", "0", "V1")
+    with pytest.raises(ValueError, match="second"):
+        c.vsource("b", "0", "V2")
+    c.r("a", "o", 1e3)
+    c.r("o", "0", 1e3)
+    c.c("o", "0", 0.0)
+    c.l("o", "x", 0.0)
+    c.r("x", "0", 1e3)
+    # 1 kΩ into 1 kΩ ∥ 1 kΩ (the 0 H inductor a short to x): 1/3
+    assert c.transfer([1e3], "o")[0] == pytest.approx(1 / 3, rel=1e-12)
+    with pytest.raises(ValueError, match="nope"):
+        c.transfer([1.0], "nope")
+
+
+def test_an_output_the_input_cannot_reach_has_no_poles_and_k_zero():
+    """Audit M-6: an output on a part of the circuit the input does not reach has H ≡ 0; poles_zeros gave noise
+    (poles −1e6, −1e6) and a log(0) RuntimeWarning: now no poles, no zeros, k = 0, without a warning, and the step
+    is None (simulate._step_of)."""
+    import warnings
+    from groundtruth.analysis.simulate import _step_of
+    from groundtruth.analysis.transfer import normal_form
+    c = Circuit()
+    c.vsource("in", "0")
+    c.r("in", "a", 1e3)
+    c.c("a", "0", 1e-9)
+    c.r("o", "0", 1e3)
+    c.c("o", "0", 1e-9)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        p, z, k = c.poles_zeros("o")
+    assert len(p) == 0 and len(z) == 0 and k == 0
+    assert normal_form(p, z, k)["text"] == "H(s) = 0"
+    assert _step_of(None, "o", list(p), normal_form(p, z, k), np.array([1.0, 10.0]), list(z)) is None
+
+
+def _high_q_notch(q, d):
+    """A buffered series-RLC low-pass (f0 1 MHz, Q q) into 50 Ω and a series RLC to ground (its zeros d above f0,
+    the same Q) and its closed form H(s) = H1·H2 [Pozar 2012]: H1 = 1/(1 + sR1C1 + s²LC1), H2 = Z/(50 + Z),
+    Z = R2 + sL + 1/(sC2)."""
+    w0 = TAU * 1e6
+    l1 = 1e-6
+    c1, c2 = 1 / (w0 ** 2 * l1), 1 / ((w0 * (1 + d)) ** 2 * l1)
+    r1, r2 = math.sqrt(l1 / c1) / q, math.sqrt(l1 / c2) / q
+    c = Circuit()
+    c.vsource("in", "0")
+    c.r("in", "a", r1)
+    c.l("a", "b", l1)
+    c.c("b", "0", c1)
+    c.vcvs("c", "0", "b", "0", 1.0)
+    c.r("c", "o", 50.0)
+    c.r("o", "x", r2)
+    c.l("x", "y", l1)
+    c.c("y", "0", c2)
+
+    def closed(s):
+        """The closed form at s."""
+        z = r2 + s * l1 + 1 / (s * c2)
+        return 1 / (1 + s * r1 * c1 + s * s * l1 * c1) * z / (50 + z)
+    return c, closed
+
+
+def test_a_high_q_pole_pair_does_not_cancel_a_zero_pair_beside_it():
+    """Audit M-4: mna._cancel cancelled a pole and a zero within 1e-6 of |p|; a Q 1e6 pole pair took a zero pair
+    9e-7·|p| away with it and |H| rebuilt from the lists missed the circuit's by 6 dB at the resonance. Within 1e-6
+    of max(|Re p|, 1e-4·|p|) it keeps both pairs: |H| from (poles, zeros, k) matches the closed form to 0.01 dB at
+    f0 and half a bandwidth either side."""
+    for q, d in ((1e4, 5e-7), (1e6, 5e-7), (1e6, 9e-7), (1e7, 9e-7)):
+        c, closed = _high_q_notch(q, d)
+        p, z, k = c.poles_zeros("o")
+        assert len(p) == 4 and len(z) == 2, (q, d, len(p), len(z))
+        s = 2j * math.pi * 1e6 * np.array([1 - 0.5 / q, 1.0, 1 + 0.5 / q])
+        rebuilt = k * np.prod([1 - s / zz for zz in z], axis=0) / np.prod([1 - s / pp for pp in p], axis=0)
+        assert np.max(np.abs(20 * np.log10(np.abs(rebuilt / closed(s))))) < 0.01, (q, d)
+
+
+def test_the_poles_are_found_once_for_every_output():
+    """Audit M-13: the poles of (G, −C) are the circuit's, not an output's: a second output's poles_zeros solves
+    only its zeros' eigenproblem (one QZ instead of two) and gives what a fresh circuit gives."""
+    from groundtruth.emi import mna
+
+    def build():
+        """A Sallen-Key with its op-amp's macromodel, two outputs (the op-amp's and the RC node's)."""
+        c = Circuit()
+        c.vsource("in", "0")
+        c.r("in", "a", 10e3)
+        c.r("a", "b", 10e3)
+        c.c("a", "out", 20e-9)
+        c.c("b", "0", 10e-9)
+        c.opamp("U1", "b", "out", "out", OpAmpParams(gbw=1e6, fp2=5e6, r_out=50.0))
+        return c
+    calls = []
+    real = mna._finite_eigs
+
+    def counting(a, b):
+        """_finite_eigs, counted."""
+        calls.append(a.shape)
+        return real(a, b)
+    c = build()
+    mna._finite_eigs = counting
+    try:
+        p1, _, _ = c.poles_zeros("out")
+        n1 = len(calls)
+        p2, z2, k2 = c.poles_zeros("b")
+        n2 = len(calls) - n1
+    finally:
+        mna._finite_eigs = real
+    assert (n1, n2) == (2, 1)
+    p_ref, z_ref, k_ref = build().poles_zeros("b")
+    assert np.allclose(np.sort_complex(p2), np.sort_complex(p_ref)) and np.allclose(z2, z_ref) and k2 == k_ref
+    c.r("out", "0", 1e3)                      # a new element: the poles are found again
+    assert len(c.poles_zeros("out")[0]) == len(p1)
+
+
+def test_a_short_lines_capacitance_is_kept_at_low_frequency():
+    """Audit M-12: Y = [[coth γl, −csch γl], …]/Zc stamped as admittances lost a 1 mm line's shunt capacitance at
+    1 kHz to 7 % (coth − csch of two ~1/γl terms). As its π (shunts tanh(γl/2)/Zc, the series Zc·sinh γl an impedance
+    branch) the open line's input capacitance is l/(Z0·v) to 1e-6 from 1 kHz up [Pozar 2012]; line_y's own matrix
+    is coth/csch to 1e-12 (closed form)."""
+    z0, vp = 50.0, 2e8
+    for length in (1e-3, 1e-2):
+        zc = lambda f: np.full(np.shape(f), z0, complex)                         # noqa: E731
+        gl = lambda f, ln=length: 1j * TAU * np.asarray(f) / vp * ln            # noqa: E731
+        for f in (1e3, 1e5, 1e7):
+            c = Circuit()
+            c.vsource("s", "0")
+            c.r("s", "a", 1e6)
+            c.y2("a", "0", "b", "0", line_y(zc, gl))
+            c.r("b", "0", 1e15)
+            v = c.transfer([f], "a")[0]
+            cin = ((1 - v) / 1e6 / v).imag / (TAU * f)
+            assert cin == pytest.approx(length / (z0 * vp), rel=1e-6), (length, f, cin)
+    # a 0.1 m line through its quarter and half wavelength (0.5 and 1 GHz exactly: the π's shunt tan(θ/2) is
+    # infinite there, the line is stamped by its Y): Zin = Z0·(ZL + Z0·tanh γl)/(Z0 + ZL·tanh γl) through 50 Ω
+    f = np.concatenate([np.geomspace(1e3, 3e9, 60), [5e8, 1e9, 2e9]])
+    for zl in (10.0, 50.0, 200.0, 1e12):
+        c = Circuit()
+        c.vsource("s", "0")
+        c.r("s", "a", 50.0)
+        c.y2("a", "0", "b", "0", line_y(lambda ff: np.full(np.shape(ff), z0, complex),
+                                        lambda ff: 1j * TAU * np.asarray(ff) / vp * 0.1))
+        c.r("b", "0", zl)
+        th = np.tanh(1j * TAU * f / vp * 0.1)
+        zin = z0 * (zl + z0 * th) / (z0 + zl * th)
+        # (1e-5: the open line at its quarter wave, Zin = Z0²/1 TΩ = 2.5 nΩ, H = 5e-11, reads 1.3e-6 off)
+        assert np.max(np.abs(c.transfer(f, "a") / (zin / (50 + zin)) - 1)) < 1e-5, zl
+    f = np.geomspace(1e3, 1e9, 7)
+    x = 1j * TAU * f / vp * 0.05
+    y = line_y(lambda ff: np.full(np.shape(ff), z0, complex), lambda ff: 1j * TAU * np.asarray(ff) / vp * 0.05)(f)
+    assert np.allclose(y[:, 0, 0] * z0, np.cosh(x) / np.sinh(x), rtol=1e-12)
+    assert np.allclose(y[:, 0, 1] * z0, -1 / np.sinh(x), rtol=1e-12)
+
+
+def test_the_loop_roots_of_a_follower_into_a_capacitive_load():
+    """Circuit.loop_roots: a follower (A0 1e5, GBW 10 MHz, second pole 30 MHz) with R_O 100 Ω into 10 nF has
+    T(s) = A(s)/(1 + s·R_O·C_L) [Franco 2015]: poles −2π·100 Hz, −2π·30 MHz and −1/(R_O·C_L) (each once, the
+    op-amp's own stages' also seen in the broken circuit), no finite zeros."""
+    c = Circuit()
+    c.vsource("in", "0")
+    c.c("out", "0", 10e-9)
+    c.opamp("U", "in", "out", "out", OpAmpParams(gbw=10e6, a0=1e5, fp2=30e6, r_out=100.0, r_in=1e16, c_in=0.0))
+    poles, zeros = c.loop_roots("U")
+    want = [-TAU * 100.0, -TAU * 30e6, -1 / (100.0 * 10e-9)]
+    assert len(zeros) == 0 and all(np.isclose(p.imag, 0.0, atol=1e-6 * abs(p)) for p in poles)
+    for w in want:
+        assert np.min(np.abs(poles - w)) <= 1e-6 * abs(w), (w, poles)
+    assert all(np.min(np.abs(np.array(want) - p)) <= 1e-6 * abs(p) for p in poles)

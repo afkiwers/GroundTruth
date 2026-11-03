@@ -153,7 +153,8 @@ def normal_form(poles, zeros, k: complex, f_max: Optional[float] = None) -> dict
         beyond = sum(1 for r in ps + zs if r["f"] > f_max)
         ps, zs = [r for r in ps if r["f"] <= f_max], [r for r in zs if r["f"] <= f_max]
     kk = complex(k)
-    kval = kk.real if abs(kk.imag) <= 1e-6 * max(abs(kk), 1e-300) else kk     # numerical residue: real
+    # a real circuit's K is real: an imaginary part of round-off size is dropped (audit M-10)
+    kval = kk.real if abs(kk.imag) <= 1e-6 * max(abs(kk), 1e-300) else kk
 
     def factor(r, i, kind):
         """One factor's text and LaTeX, its frequency named ω_{kind}{i}."""
@@ -168,13 +169,19 @@ def normal_form(poles, zeros, k: complex, f_max: Optional[float] = None) -> dict
     num = [factor(r, i + 1, "z") for i, r in enumerate(zs[:NORMAL_ROOTS])]
     den = [factor(r, i + 1, "p") for i, r in enumerate(ps[:NORMAL_ROOTS])]
     sm = "" if m == 0 else ("s" if m == 1 else f"s^{m}" if m > 0 else "")
-    ktext = f"{kval:.4g}" if not isinstance(kval, complex) else f"{kval:.3g}"
+    ktext = f"{kval:.4g}" if not isinstance(kval, complex) else f"({kval.real:.3g} {'−' if kval.imag < 0 else '+'} " \
+                                                                  f"{abs(kval.imag):.3g}j)"
     head = " · ".join(x for x in [ktext, sm] + [t for t, _ in num] if x)
-    tail = "".join(t for t, _ in den) + ("" if m >= 0 else ("·s" if m == -1 else f"·s^{-m}"))
-    text = "H(s) = " + head + (f" / [{tail}]" if tail else "")
-    lhead = " ".join(x for x in [ktext.replace("e", r"\times 10^{") + ("}" if "e" in ktext else ""),
-                                 "s" if m == 1 else (f"s^{{{m}}}" if m > 1 else "")] + [l for _, l in num] if x)
-    ltail = " ".join(l for _, l in den) + ("" if m >= 0 else (" s" if m == -1 else f" s^{{{-m}}}"))
+    # the denominator's factors, then the poles at the origin: "(1 + s/ωp1)·s", or "s" alone (an integrator: it read
+    # "[·s]", audit M-10)
+    sden = "" if m >= 0 else ("s" if m == -1 else f"s^{-m}")
+    factors = "".join(t for t, _ in den)
+    tail = "·".join(x for x in (factors, sden) if x)
+    text = "H(s) = " + head + ((f" / [{tail}]" if factors else f" / {tail}") if tail else "")
+    kl = _latex_number(kval)
+    lhead = " ".join(x for x in [kl, "s" if m == 1 else (f"s^{{{m}}}" if m > 1 else "")] + [l for _, l in num] if x)
+    ltail = " ".join(x for x in [" ".join(l for _, l in den), "s" if m == -1 else (f"s^{{{-m}}}" if m < -1 else "")]
+                     if x)
     latex = "H(s) = " + (rf"\frac{{{lhead}}}{{{ltail}}}" if ltail else lhead)
     values = [f"f{kind}{i + 1} = {fmt_hz(r['f'])}" + (f", Q{kind}{i + 1} = {r['q']:.3g}" if r["q"] else "")
               + (" (RHP)" if r["rhp"] else "")
@@ -187,7 +194,6 @@ def normal_form(poles, zeros, k: complex, f_max: Optional[float] = None) -> dict
         text += f";  {more} more above"
     # the LaTeX in pieces, for a drawing that breaks a long H(s) over lines (plots.draw_bode): K, then the
     # numerator's and the denominator's factors (s^m among them)
-    kl = ktext.replace("e", r"\times 10^{") + ("}" if "e" in ktext else "")
     sl = "s" if abs(m) == 1 else f"s^{{{abs(m)}}}"
     pieces = {"k": kl, "num": ([sl] if m > 0 else []) + [l for _, l in num],
               "den": [l for _, l in den] + ([sl] if m < 0 else [])}
@@ -195,27 +201,52 @@ def normal_form(poles, zeros, k: complex, f_max: Optional[float] = None) -> dict
             "latex_parts": pieces}
 
 
+def _latex_number(x) -> str:
+    """A number for LaTeX with four significant digits, its exponent as ×10^{n} ('1.5\\times 10^{-5}'); a complex
+    one as (a + bj), each part so (the old text replaced every 'e' and left a brace open: audit M-10)."""
+    if isinstance(x, complex):
+        sign = "-" if x.imag < 0 else "+"
+        return rf"\left({_latex_number(x.real)} {sign} {_latex_number(abs(x.imag))}\,j\right)"
+    text = f"{x:.4g}"
+    if "e" not in text:
+        return text
+    mant, ex = text.split("e")
+    return rf"{mant}\times 10^{{{int(ex)}}}"
+
+
 SETTLE_BAND = 0.02             # the step response's settling band: ±2 % of its final value [Ogata 2010]
-STEP_SPAN = 12.0               # a step is simulated for this many of its slowest pole's time constants 1/|σ|
+STEP_SPAN = 12.0               # a step is shown for this many of its slowest significant pole's time constants 1/|σ|
 STEP_POINTS = 3000             # time steps of a step response (BDF2: its error ~ (h/τ)², ~1e-5 here), at least
 STEP_PER_PERIOD = 100          # ... this many per period of its fastest lightly damped pole (Q ≥ STEP_Q) [Gear 1971]
 STEP_Q = 1.0                   # (audit round 7, AA-6)
 STEP_MAX = 200_000             # and at most this many (a note says the ringing is then under-resolved)
+STEP_SHARE = 1e-3              # a pole whose share of the step is below this does not size its window or grid
+STEP_CLUSTER = 1e-3            # poles closer than this times |Re p| are one repeated pole in the exact step
+STEP_COND = 1e6                # the exact step's terms may add up to this many times its own size, else BDF2
+STEP_SCAN = 40                 # samples per period (or time constant) when the settling time is searched for
+STEP_SCAN_MAX = 2_000_000      # ... at most this many (beyond: the envelope's bound is reported)
+STEP_SEGMENT = 200             # BDF2's graded grid: steps of each size before the next doubles it
 
 
 def step_metrics(t, y, final: Optional[float] = None) -> dict:
     """A step response's figures [Ogata 2010]: its final value (the DC gain `final` where it is known, else the last
     sample), the 10-90 % rise time, the overshoot and the undershoot (the first move the wrong way: a right-half-plane
     zero) in % of the final value, the peak and its time, and the settling time into ±SETTLE_BAND of the final value
-    (None when it has not settled within the window). Crossing times interpolated linearly between samples. A
-    response without a final value (|final| below 1e-6 of its peak: AC-coupled, a high-pass) gives its peak only."""
+    (None when it has not settled within the window). Crossing times interpolated linearly between samples.
+
+    A response whose final value is 0 (`final` given as 0: a zero at the origin, AC-coupled, H(0) = 0 exactly; or,
+    without `final`, a last sample below 1e-6 of its peak) has no rise or overshoot: its peak, the time of the peak
+    and the time it has decayed into ±SETTLE_BAND of its peak for good ("settling"). Audit M-1: the last sample, e⁻¹²
+    of the peak, was taken as a high-pass's final value and gave an overshoot of 16 million %."""
     t = np.asarray(t, float)
     y = np.asarray(y, float)
     fin = float(final) if final is not None else float(y[-1])
     k = int(np.argmax(np.abs(y)))
     out = {"final": fin, "peak": float(y[k]), "t_peak": float(t[k]), "rise": None, "overshoot_pct": None,
            "undershoot_pct": None, "settling": None}
-    if abs(fin) <= 1e-6 * max(float(np.max(np.abs(y))), 1e-300):
+    if fin == 0.0 or abs(fin) <= 1e-6 * max(float(np.max(np.abs(y))), 1e-300):
+        out["final"] = 0.0 if final is not None else fin
+        out["settling"] = _last_exit(t, np.abs(y), SETTLE_BAND * abs(out["peak"])) if out["peak"] else None
         return out
     u = y / fin                                    # normalised: rises from 0 to 1
     out["overshoot_pct"] = max(float(np.max(u)) - 1.0, 0.0) * 100
@@ -234,20 +265,368 @@ def step_metrics(t, y, final: Optional[float] = None) -> dict:
     first = np.nonzero(np.abs(u) > 0.01)[0]
     if len(first) and u[first[0]] < 0:
         out["undershoot_pct"] = float(-np.min(u[: max(int(np.argmax(u > 0)), 1)])) * 100
-    outside = np.nonzero(np.abs(u - 1.0) > SETTLE_BAND)[0]
-    if not len(outside):
-        out["settling"] = float(t[0])
-    elif outside[-1] < len(t) - 1:
-        i = int(outside[-1])
-        a, b_ = abs(u[i] - 1.0), abs(u[i + 1] - 1.0)
-        out["settling"] = float(t[i] + (a - SETTLE_BAND) / (a - b_) * (t[i + 1] - t[i])) if a != b_ else float(t[i + 1])
+    out["settling"] = _last_exit(t, np.abs(u - 1.0), SETTLE_BAND)
     return out
+
+
+def _last_exit(t: np.ndarray, dev: np.ndarray, band: float) -> Optional[float]:
+    """The time a deviation `dev` (samples at t) is inside `band` for good: its last exit, interpolated linearly
+    between the samples around it; t[0] when it never leaves, None when it is still outside at the last sample."""
+    outside = np.nonzero(dev > band)[0]
+    if not len(outside):
+        return float(t[0])
+    i = int(outside[-1])
+    if i >= len(t) - 1:
+        return None
+    a, b_ = float(dev[i]), float(dev[i + 1])
+    return float(t[i] + (a - band) / (a - b_) * (t[i + 1] - t[i])) if a != b_ else float(t[i + 1])
+
+
+# ------------------------------------------------------------------------------------- the exact step response
+@dataclass
+class ExactStep:
+    """A step response in closed form from a rational H(s)'s poles, zeros and constant [Ogata 2010]: the partial
+    fractions of H(s)/s give y(t) = final + Re Σ_c e^{p_c·t}·Σ_j a_cj·t^j, one term per distinct pole p_c (a repeated
+    pole's polynomial in t up to its multiplicity less one). final = H(0) (0 for a zero at the origin); scale: the
+    largest of |final|, |H(∞)| and |y| over a probe of its time scales (exact_step)."""
+    final: float
+    poles: np.ndarray                     # each distinct pole (a repeated one's cluster centre), rad/s
+    coefs: list                           # each one's a_j, the coefficient of t^j·e^{p·t}
+    scale: float = 1.0
+
+    def __call__(self, t) -> np.ndarray:
+        """y at the times t (s), in chunks of 20000 times (memory: chunk × poles complex numbers)."""
+        t = np.atleast_1d(np.asarray(t, float))
+        y = np.full(t.shape, self.final)
+        simple = [i for i, a in enumerate(self.coefs) if len(a) == 1]
+        p1 = self.poles[simple]
+        a1 = np.array([self.coefs[i][0] for i in simple], complex)
+        for s in range(0, len(t), 20000):
+            tc = t[s:s + 20000]
+            acc = np.exp(np.outer(tc, p1)) @ a1 if len(p1) else np.zeros(len(tc), complex)
+            for i, a in enumerate(self.coefs):
+                if len(a) > 1:                 # a repeated pole: e^{pt}·(a_0 + a_1·t + …)
+                    acc = acc + np.exp(self.poles[i] * tc) * np.polyval(a[::-1], tc)
+            y[s:s + 20000] += acc.real
+        return y
+
+    def amplitudes(self) -> np.ndarray:
+        """Each term's largest size over t ≥ 0 for a decaying pole: Σ_j |a_j|·max_t t^j·e^{σt}, max t^j·e^{σt} =
+        (j/(e·|σ|))^j; at t = 0 (|a_0|) for one that does not decay."""
+        out = []
+        for p, a in zip(self.poles, self.coefs):
+            # the time scale of t^j·e^{σt}'s peak: 1/|σ| when it decays, else 1/|p| (the term's own rate)
+            rate = -p.real if p.real < 0 else abs(p)
+            out.append(sum(abs(c) * (j / (math.e * rate)) ** j if j else abs(c) for j, c in enumerate(a)))
+        return np.array(out)
+
+    def envelope(self, t) -> np.ndarray:
+        """A bound on |y(t) − final|: Σ_c e^{σ_c·t}·Σ_j |a_cj|·t^j (the triangle inequality on the terms)."""
+        t = np.atleast_1d(np.asarray(t, float))
+        e = np.zeros(t.shape)
+        for p, a in zip(self.poles, self.coefs):
+            with np.errstate(over="ignore"):
+                e += np.exp(p.real * t) * np.polyval(np.abs(a)[::-1], t)
+        return e
+
+
+def exact_step(poles, zeros, k, m: int) -> Optional[ExactStep]:
+    """The exact step response of H(s) = k·s^m·Π(1 − s/z)/Π(1 − s/p) (emi/mna.Circuit.poles_zeros' normal form;
+    roots at the origin left out of the lists, m their net count), by partial fractions of H(s)/s [Ogata 2010]. For a
+    pole p of multiplicity μ (poles within STEP_CLUSTER·|Re p| of each other: the QZ splits a repeated pole by
+    ~1e-8·|p|), F(s) = H(s)/s·(s − p)^μ is expanded in a Taylor series about p, its coefficients f_n, and its term is
+    e^{pt}·Σ_n f_n·t^{μ−1−n}/(μ−1−n)!; F's factors at p are summed as logarithms (hundreds of roots stay finite).
+    A simple pole's coefficient is −k·p^m·Π(1 − p/z)/Π_{q≠p}(1 − p/q).
+
+    None (the caller integrates the circuit instead) for a pole at the origin (m < 0: no final value), an improper
+    H (more zeros than poles: impulses), or terms that are ill-conditioned: a cluster of poles not merged whose terms
+    cancel, so that they add up to more than STEP_COND times the response's size, or y(0) ≠ H(∞) beyond 1e-6 of it
+    (the partial-fraction identity, a check of the whole expansion). Audit M-2 / M-8: the step is no longer a time
+    integration on a grid sized by the slowest pole (a fast rise fell in one or two steps: its rise read 92x long)."""
+    if m < 0:
+        return None
+    k = complex(k)
+    if k == 0:
+        return ExactStep(0.0, np.zeros(0, complex), [], 0.0)
+    ps = [complex(p) for p in poles if complex(p) != 0]
+    zs = [complex(z) for z in zeros if complex(z) != 0]
+    if len(ps) - len(zs) - m < 0:
+        return None
+    # the clusters: each pole joins the first cluster within STEP_CLUSTER·max(|Re c|, 1e-9·|c|) of its centre
+    pa, za = np.array(ps, complex), np.array(zs, complex)
+    groups: list = []                    # [indices, sum of the members] per cluster
+    for idx in sorted(range(len(ps)), key=lambda j: (ps[j].real, ps[j].imag)):
+        q = ps[idx]
+        for g in groups:
+            c = g[1] / len(g[0])
+            if abs(q - c) <= STEP_CLUSTER * max(abs(c.real), 1e-9 * abs(c)):
+                g[0].append(idx)
+                g[1] += q
+                break
+        else:
+            groups.append([[idx], q])
+    centres, coefs = [], []
+    with np.errstate(all="ignore"):
+        for members, total in groups:
+            mu = len(members)
+            p = total / mu
+            keep = np.ones(len(pa), bool)
+            keep[members] = False
+            others = pa[keep]
+            # F(p) = k·p^(m−1)·(−p)^μ·Π(1 − p/z)/Π_others(1 − p/q), as a sum of logarithms
+            lead = (np.log(k) + (m - 1) * np.log(p) + mu * np.log(-p)
+                    + np.sum(np.log(1 - p / za)) - np.sum(np.log(1 - p / others)))
+            series = np.zeros(mu, complex)
+            series[0] = 1.0
+            if mu > 1:
+                # (1 + u/p)^(m−1): the binomial series; each zero's (1 − u/(z − p)); each other pole's
+                # 1/(1 − u/(q − p)) = Σ (u/(q − p))^n; all truncated to u^(μ−1)
+                b = np.array([_binom(m - 1, n) / p ** n for n in range(mu)], complex)
+                series = np.convolve(series, b)[:mu]
+                for z in zs:
+                    series = np.convolve(series, [1.0, -1.0 / (z - p)])[:mu]
+                for q in others:
+                    series = np.convolve(series, (1.0 / (q - p)) ** np.arange(mu))[:mu]
+            if not np.isfinite(lead) or lead.real > 700 or not np.all(np.isfinite(series)):
+                return None
+            fn = np.exp(lead) * series
+            centres.append(p)
+            coefs.append(np.array([fn[mu - 1 - j] / math.factorial(j) for j in range(mu)], complex))
+    final = float(k.real) if m == 0 else 0.0
+    ex = ExactStep(final, np.array(centres, complex), coefs)
+    # H(∞): 0 for a strictly proper H, else k·Π(−p)/Π(−z) (equal degrees)
+    h_inf = 0.0
+    if len(ps) - len(zs) - m == 0:
+        h_inf = float((k * np.exp(sum(np.log(-p) for p in ps) - sum(np.log(-z) for z in zs))).real)
+    if len(centres):
+        sig = [abs(p.real) for p in centres if p.real != 0]
+        fast = max(abs(p) for p in centres)
+        slow = 20.0 / min(sig) if sig else 20.0 / fast
+        probe = np.concatenate([[0.0], np.geomspace(1e-3 / fast, max(slow, 2e-3 / fast), 400)])
+        with np.errstate(over="ignore", invalid="ignore"):
+            yp = ex(probe)
+        if not np.all(np.isfinite(yp)):
+            return None
+        scale = max(abs(final), abs(h_inf), float(np.max(np.abs(yp))), 1e-300)
+        if float(np.sum(ex.amplitudes())) > STEP_COND * scale or abs(yp[0] - h_inf) > 1e-6 * scale:
+            return None
+        ex.scale = scale
+    else:
+        ex.scale = max(abs(final), 1e-300)
+    return ex
+
+
+def _binom(a: int, n: int) -> float:
+    """The generalised binomial coefficient C(a, n) = a(a − 1)…(a − n + 1)/n! (a may be negative)."""
+    out = 1.0
+    for i in range(n):
+        out *= (a - i) / (i + 1)
+    return out
+
+
+def exact_step_response(ex: ExactStep, f_low: float) -> dict:
+    """The step response of an exact step (exact_step) as simulate._step_of gives it: {"t", "y", "metrics", "capped",
+    "method": "exact"}. Its window: STEP_SPAN time constants of the slowest pole whose term is at least STEP_SHARE of
+    the response's size (a slow pole that hardly shows does not stretch it: audit M-2), five growth times of an
+    unstable one, else STEP_SPAN periods of the sweep's lowest frequency f_low. Its samples: STEP_POINTS over the
+    window, STEP_POINTS/2 log-spaced from a fiftieth of the fastest significant pole's time constant (a fast rise in
+    a long window), and STEP_PER_PERIOD per period of each lightly damped significant pole for as long as it rings
+    (STEP_SPAN of its own time constants; at most STEP_MAX; beyond, "capped": the curve's ringing is drawn
+    under-resolved, the figures stay exact). The figures: exact_step_metrics."""
+    amp = ex.amplitudes()
+    grow = [p.real for p in ex.poles if p.real > 1e-9 * max(abs(p), 1.0)]
+    sig = [i for i, a in enumerate(amp) if a >= STEP_SHARE * ex.scale]
+    if grow:
+        span = 5.0 / max(grow)
+    elif sig and any(ex.poles[i].real < 0 for i in sig):
+        span = STEP_SPAN / min(abs(ex.poles[i].real) for i in sig if ex.poles[i].real < 0)
+    else:
+        span = STEP_SPAN / (2 * math.pi * f_low)
+    pieces = [np.linspace(0.0, span, STEP_POINTS)]
+    if sig:
+        t_fast = 1.0 / max(abs(ex.poles[i]) for i in sig)
+        if t_fast / 50 < span:
+            pieces.append(np.geomspace(t_fast / 50, span, STEP_POINTS // 2))
+    # each lightly damped significant pole's ringing, STEP_PER_PERIOD points per period while it lasts (STEP_SPAN of
+    # its own time constants: a track's GHz ring in a µs window needs its first nanoseconds only)
+    n = 0
+    for i in sig:
+        p = ex.poles[i]
+        if p.imag > 0 and p.real < 0 and abs(p) / (-2 * p.real) >= STEP_Q:
+            life = min(span, STEP_SPAN / -p.real)
+            need = int(math.ceil(life * p.imag / (2 * math.pi) * STEP_PER_PERIOD)) + 1
+            n = max(n, need)
+            if need > STEP_POINTS // 4:
+                pieces.append(np.linspace(0.0, life, min(need, STEP_MAX)))
+    t = np.unique(np.concatenate(pieces))
+    y = ex(t)
+    if grow:
+        k = int(np.argmax(np.abs(y)))
+        metrics = {"final": None, "peak": float(y[k]), "t_peak": float(t[k]), "rise": None, "overshoot_pct": None,
+                   "undershoot_pct": None, "settling": None, "unstable": True}
+    else:
+        metrics = exact_step_metrics(ex, t, y)
+    return {"t": t, "y": y, "metrics": metrics, "capped": n > STEP_MAX, "method": "exact"}
+
+
+def _refine_extreme(fn, t: np.ndarray, k: int) -> tuple[float, float]:
+    """The largest value of fn near sample k: a bounded scalar search between its neighbours [Brent 1973] (the
+    sample itself when the search finds less). (t, fn(t))."""
+    from scipy.optimize import minimize_scalar
+    lo, hi = float(t[max(k - 1, 0)]), float(t[min(k + 1, len(t) - 1)])
+    best = (float(t[k]), float(fn(float(t[k]))))
+    if hi > lo:
+        r = minimize_scalar(lambda x: -float(fn(x)), bounds=(lo, hi), method="bounded",
+                            options={"xatol": 1e-10 * hi})
+        if -r.fun > best[1]:
+            best = (float(r.x), float(-r.fun))
+    return best
+
+
+def exact_step_metrics(ex: ExactStep, t: np.ndarray, y: np.ndarray) -> dict:
+    """step_metrics' figures from an exact step, each refined on its closed form rather than read off the samples
+    (t, y: its samples, exact_step_response): the peak and the overshoot by a bounded search around their best
+    sample, the 10-90 % crossings by Brent's root finding between the samples around them [Brent 1973], the
+    undershoot as step_metrics finds it then refined, and the settling time exactly (exact_settling): the last exit
+    from ±SETTLE_BAND of the final value (of the peak for a response whose final value is 0), however long after the
+    window that is. Adds "settling_bound": True when only the envelope's bound could be given."""
+    from scipy.optimize import brentq
+    fin = ex.final
+    k = int(np.argmax(np.abs(y)))
+    tp, _ = _refine_extreme(lambda x: abs(ex(x)[0]), t, k)
+    peak = float(ex(tp)[0])
+    out = {"final": fin, "peak": peak, "t_peak": tp, "rise": None, "overshoot_pct": None, "undershoot_pct": None,
+           "settling": None}
+    if fin == 0.0:
+        if peak:
+            out["settling"], bound = exact_settling(ex, SETTLE_BAND * abs(peak), float(t[-1]))
+            if bound:
+                out["settling_bound"] = True
+        return out
+    u = y / fin
+    _, umax = _refine_extreme(lambda x: ex(x)[0] / fin, t, int(np.argmax(u)))
+    out["overshoot_pct"] = max(umax - 1.0, 0.0) * 100
+
+    def cross(level):
+        """The first time y/final reaches `level` (Brent between the samples around it; None: never)."""
+        idx = np.nonzero(u >= level)[0]
+        if not len(idx):
+            return None
+        i = int(idx[0])
+        if i == 0:
+            return float(t[0])
+        return float(brentq(lambda x: ex(x)[0] / fin - level, float(t[i - 1]), float(t[i]), xtol=1e-14 * t[i]))
+    t10, t90 = cross(0.1), cross(0.9)
+    out["rise"] = t90 - t10 if t10 is not None and t90 is not None else None
+    first = np.nonzero(np.abs(u) > 0.01)[0]
+    if len(first) and u[first[0]] < 0:
+        j = int(np.argmin(u[: max(int(np.argmax(u > 0)), 1)]))
+        _, neg = _refine_extreme(lambda x: -ex(x)[0] / fin, t, j)
+        out["undershoot_pct"] = neg * 100
+    out["settling"], bound = exact_settling(ex, SETTLE_BAND * abs(fin), float(t[-1]))
+    if bound:
+        out["settling_bound"] = True
+    return out
+
+
+def exact_settling(ex: ExactStep, band: float, t_hint: float) -> tuple[Optional[float], bool]:
+    """The time an exact step is within ±band of its final value for good, (time, bound). The envelope Σ|terms|
+    bounds |y − final|: after its last crossing of the band, t_E (found on a log grid, then by Brent [Brent 1973]),
+    y cannot leave the band. From t_E backwards, samples STEP_SCAN per period of the fastest term that still counts
+    there (or per time constant) find the last exit, refined by Brent: exact however many periods a high-Q ringing
+    takes (audit M-8: Q 5000 settled in 4 ms instead of 1.24 s on a capped grid). (t_E, True) when the scan ran
+    past STEP_SCAN_MAX samples without finding it; (None, False) for a term that does not decay."""
+    from scipy.optimize import brentq
+    if any(p.real >= 0 for p in ex.poles):
+        return None, False
+    if not len(ex.poles):
+        return 0.0, False
+
+    def dev(x):
+        """|y − final| at the times x."""
+        return np.abs(ex(x) - ex.final)
+    hi = max(t_hint, 1e-300)
+    for _ in range(80):
+        if ex.envelope(hi)[0] <= band:
+            break
+        hi *= 2
+    else:
+        return None, False
+    fast = max(abs(p) for p in ex.poles)
+    grid = np.concatenate([[0.0], np.geomspace(min(1e-3 / fast, hi * 1e-12), hi, 4000)])
+    above = np.nonzero(ex.envelope(grid) > band)[0]
+    if not len(above):
+        return 0.0, False
+    i = int(above[-1])
+    t_e = float(brentq(lambda x: ex.envelope(x)[0] - band, grid[i], grid[i + 1], xtol=1e-14 * grid[i + 1]))
+    # the step of the backward scan: the fastest term still above a thousandth of the band at t_E
+    steps = []
+    for p, a in zip(ex.poles, ex.coefs):
+        if math.exp(p.real * t_e) * float(np.polyval(np.abs(a)[::-1], t_e)) >= 1e-3 * band:
+            steps.append(2 * math.pi / abs(p.imag) if abs(p.imag) > abs(p.real) else 1.0 / abs(p.real))
+    dt = max(min(steps or [t_e]) / STEP_SCAN, t_e / STEP_SCAN_MAX)
+
+    def exit_after(t_out: float, t_in: float) -> float:
+        """The band's crossing between a time outside it and a later one inside (Brent)."""
+        if dev(t_in)[0] >= band:                  # t_E itself, where |y − final| = E = band up to rounding
+            return t_in
+        return float(brentq(lambda x: dev(x)[0] - band, t_out, t_in, xtol=1e-14 * t_in))
+    top, scanned = t_e, 0
+    while top > 0 and scanned < STEP_SCAN_MAX:
+        # T: from `top` backwards (T[0] = top); a sample outside the band, or a sampled peak of |y − final| within
+        # 1 % of it whose refined maximum is outside (the last excursions at the envelope's crossing are short:
+        # between two samples STEP_SCAN per period, a sinusoid's peak reads up to 1 − cos(π/STEP_SCAN) low)
+        ts = top - dt * np.arange(0, 4097)
+        ts = np.append(ts[ts > 0], 0.0) if ts[-1] <= 0 else ts
+        d = dev(ts)
+        out = np.nonzero(d > band)[0]
+        first_out = int(out[0]) if len(out) else len(ts)
+        for i in range(1, min(first_out, len(ts) - 1)):
+            if d[i] > 0.99 * band and d[i] >= d[i - 1] and d[i] >= d[i + 1]:
+                tp, dp = _refine_extreme(lambda x: dev(x)[0], ts[::-1], len(ts) - 1 - i)
+                if dp > band:
+                    return exit_after(tp, float(ts[i - 1])), False
+        if first_out < len(ts):
+            return (exit_after(float(ts[first_out]), float(ts[first_out - 1])) if first_out else float(ts[0])), False
+        if ts[-1] <= 0:                           # back at t = 0 and never outside: inside from the start
+            return 0.0, False
+        top, scanned = float(ts[-2]), scanned + len(ts)    # the last sample again: a peak there is checked next
+    return t_e, True
+
+
+def step_grid(span: float, h0: float, h_max: float) -> tuple[np.ndarray, bool]:
+    """A graded time grid for BDF2 (emi/mna.Circuit.step) from 0 to span: STEP_SEGMENT steps of h0, then each
+    stretch of STEP_SEGMENT steps twice the last one's step (a ratio of 2: BDF2 stays zero-stable below 1 + √2
+    [Hairer 1993, §III.5]) up to h_max, then h_max to the end: the fast start resolved, the slow tail in few steps,
+    one factorisation per stretch. At most STEP_MAX steps: h_max is raised to fit, (grid, capped) says so."""
+    h0 = min(h0, span / STEP_POINTS)
+    h_max = max(h_max, h0)
+    capped = False
+    while True:
+        times, t, h = [0.0], 0.0, h0
+        while t < span and len(times) <= STEP_MAX + 1:
+            for _ in range(STEP_SEGMENT):
+                t = t + h
+                times.append(min(t, span))
+                if t >= span:
+                    break
+            h = min(2 * h, h_max)
+        if len(times) <= STEP_MAX + 1:
+            break
+        h_max, capped = h_max * 2, True
+    grid = np.array(times)
+    # the last step may be a sliver (min(t, span)): drop the point before it when it is very close
+    if len(grid) > 3 and grid[-1] - grid[-2] < 0.25 * (grid[-2] - grid[-3]):
+        grid = np.delete(grid, -2)
+    return grid, capped
 
 
 def fmt_s(x: Optional[float]) -> str:
     """A time with an SI prefix and three significant digits: '2.2 ms', '35.1 µs'; '—' for None."""
     if x is None:
         return "—"
+    if x == 0:
+        return "0 s"
     for unit, k in (("s", 1.0), ("ms", 1e-3), ("µs", 1e-6), ("ns", 1e-9)):
         if abs(x) >= k * 0.9995:
             return f"{x / k:.3g} {unit}"
@@ -255,16 +634,22 @@ def fmt_s(x: Optional[float]) -> str:
 
 
 def step_text(m: dict) -> str:
-    """step_metrics as one line: 'final 0.998, rise 1.62 ms, overshoot 4.3 %, settles (±2 %) in 2.91 ms'."""
+    """step_metrics as one line: 'final 0.998, rise 1.62 ms, overshoot 4.3 %, settles (±2 %) in 2.91 ms'; a response
+    whose final value is 0 (AC-coupled): 'final value 0 (AC-coupled): peak 0.996 at 1.2 µs, decays into ±2 % of the
+    peak in 3.91 ms'."""
     if m.get("unstable"):
         return f"unstable (a pole in the right half-plane): it grows without bound, {m['peak']:.3g} at " \
                f"{fmt_s(m['t_peak'])}"
+    within = "at most " if m.get("settling_bound") else ""
     if m.get("rise") is None and m.get("overshoot_pct") is None:
-        return f"no final value (AC-coupled): peak {m['peak']:.3g} at {fmt_s(m['t_peak'])}"
+        text = f"final value 0 (AC-coupled): peak {m['peak']:.3g} at {fmt_s(m['t_peak'])}"
+        if m.get("settling") is not None:
+            text += f", decays into ±{SETTLE_BAND:.0%} of the peak in {within}{fmt_s(m['settling'])}"
+        return text
     parts = [f"final {m['final']:.4g}", f"rise {fmt_s(m['rise'])}", f"overshoot {m['overshoot_pct']:.1f} %"]
     if m.get("undershoot_pct"):
         parts.append(f"undershoot {m['undershoot_pct']:.1f} %")
-    parts.append(f"settles (±{SETTLE_BAND:.0%}) in {fmt_s(m['settling'])}" if m["settling"] is not None
+    parts.append(f"settles (±{SETTLE_BAND:.0%}) in {within}{fmt_s(m['settling'])}" if m["settling"] is not None
                  else "not settled in the window")
     return ", ".join(parts)
 
@@ -307,43 +692,120 @@ PM_WARN = 45.0                 # degrees: a loop with less phase margin rings (a
 PM_ERROR = 20.0                # to oscillating (an error) [A55]
 
 
-def phase_margin(f, t, lead=None) -> Optional[dict]:
-    """A loop gain's stability margin [Ogata 2010] [Nyquist 1932]: at every frequency where |T| crosses 1
-    (interpolated in log f, |T| in dB linear between the samples) 180° + ∠T; the margin reported is the smallest of
-    them, at its crossover (a resonance in the feedback can lift |T| through 1 again above the first crossover: audit
-    round 7, AA-4, the first alone read 98° for a loop whose margin is 27°).
+PM_STEP_DEG = 20.0             # a refined loop gain's neighbouring samples differ by at most this in phase
+PM_STEP_DB = 6.0               # ... and this in magnitude (phase_margin with `fn`)
+PM_REFINE_MAX = 20000          # samples at most after the refinement
+PM_RES_Q = 0.7                 # a pole or zero of the loop gain with a Q above this is sampled across its resonance
+PM_RES_SPAN = 6.0              # ... over ± this many half-bandwidths f0/2Q, a quarter of one apart
 
-    `lead`: T on a grid from near DC up to the sweep's start (simulate.network_responses), so ∠T is unwrapped from DC
-    (two poles below the sweep's start leave ∠T past −180° there: unwrapped from the sweep's start alone it read
-    +180°, a margin 360° too high) and the sign at DC is known: a loop gain negative at DC with |T| > 1 is positive
-    feedback, T(0) beyond −1 on the Nyquist plot, a closed-loop pole in the right half-plane (the stage latches): pm
-    −180, "positive_feedback" (AA-3: it was given 270°). Without `lead` the sweep's start is taken as DC.
-    {"f_c", "pm", "t_low_db", "crossings": [(f, margin)], "positive_feedback"}; None when |T| starts at or below 1
-    (no loop to speak of) or never crosses 1 in the sweep."""
+
+def phase_margin(f, t, lead=None, fn=None, lead_f=None, roots=None) -> Optional[dict]:
+    """A loop gain's stability margin [Ogata 2010] [Nyquist 1932]: at every frequency where |T| crosses 1, 180° + ∠T;
+    the margin reported is the smallest of them, at its crossover (a resonance in the feedback can lift |T| through
+    1 again above the first crossover: audit round 7, AA-4, the first alone read 98° for a loop whose margin is 27°).
+
+    `lead`: T on a grid from near DC up to the sweep's start (simulate.network_responses; `lead_f` its frequencies),
+    so ∠T is unwrapped from DC (two poles below the sweep's start leave ∠T past −180° there: unwrapped from the
+    sweep's start alone it read +180°, a margin 360° too high) and the sign at DC is known: a loop gain negative at DC
+    with |T| > 1 there is positive feedback, T(0) beyond −1 on the Nyquist plot, a closed-loop pole in the right
+    half-plane (the stage latches): pm −180, "positive_feedback" (AA-3: it was given 270°), whatever |T| is at the
+    sweep's start (audit M-9: a sweep starting above the crossover returned None before the sign was looked at).
+    Without `lead` the sweep's start is taken as DC.
+
+    `fn`: T(f) itself (an array of frequencies in, T out: emi/mna.Circuit.loop_gain). The samples are then refined
+    before anything is read off them (audit M-3: between sweep samples a narrow |T| = 1 excursion was missed and
+    ∠T, unwrapped over a resonance, slipped 360°): points across the resonance of every pole or zero in `roots`
+    (rad/s, emi/mna.Circuit.loop_roots) with a Q above PM_RES_Q, ±PM_RES_SPAN half-bandwidths at a quarter of one,
+    then bisection (in log f) wherever neighbours differ by more than PM_STEP_DEG or PM_STEP_DB; each crossover is
+    then found by Brent's method on log|T(f)| [Brent 1973] and ∠T taken there (its turn the one nearest the unwrapped
+    neighbours'). With `lead_f` the lead's stretch is refined and searched for crossovers too (a crossover below the
+    sweep's start). Without `fn`: linear interpolation in log f and dB between the samples, as before.
+
+    {"f_c", "pm", "t_low_db" (|T| at the sweep's start), "crossings": [(f, margin)], "positive_feedback"}; None when
+    |T| never crosses 1 (no loop to speak of). |T| at DC may be below 1: an integrator's or an AC-coupled feedback's
+    loop gain is 0 at DC and crosses 1 twice, its margin the smaller (the upper crossover's)."""
+    from scipy.optimize import brentq
     f = np.asarray(f, float)
     t = np.asarray(t, complex)
-    mag = 20 * np.log10(np.maximum(np.abs(t), 1e-300))
-    if len(f) < 2 or mag[0] <= 0:
+    if len(f) < 2:
         return None
     lead = np.asarray(lead if lead is not None else [], complex)
-    ph = np.degrees(np.unwrap(np.angle(np.concatenate([lead, t]))))[len(lead):]
-    positive = bool((lead[0] if len(lead) else t[0]).real < 0)
-    if not len(lead) and positive and abs(ph[0]) < 135:
+    t_low_db = float(20 * np.log10(max(abs(t[0]), 1e-300)))
+    t_dc = lead[0] if len(lead) else t[0]
+    positive = bool(t_dc.real < 0 and abs(t_dc) > 1)
+    if not len(lead) and positive and abs(math.degrees(np.angle(t[0]))) < 135:
         positive = False                 # past −90° at the sweep's start without the DC side known: a pole below it
+    with_lead = lead_f is not None and len(lead) == len(lead_f) and len(lead) > 0
+    if with_lead:                        # the lead's stretch is part of the curve searched
+        ff, tt, pre = np.concatenate([np.asarray(lead_f, float), f]), np.concatenate([lead, t]), np.zeros(0, complex)
+    else:
+        ff, tt, pre = f, t, lead
+    if fn is not None:
+        ff, tt = _refine_loop(ff, tt, fn, roots)
+    ph = np.degrees(np.unwrap(np.angle(np.concatenate([pre, tt]))))[len(pre):]
+    mag = 20 * np.log10(np.maximum(np.abs(tt), 1e-300))
     crossings = []
-    for k in np.nonzero(np.sign(mag[1:]) != np.sign(mag[:-1]))[0] + 1:
-        x0, x1 = math.log(f[k - 1]), math.log(f[k])
+    for k in np.nonzero((mag[1:] > 0) != (mag[:-1] > 0))[0] + 1:
+        x0, x1 = math.log(ff[k - 1]), math.log(ff[k])
         u = mag[k - 1] / (mag[k - 1] - mag[k])
         phase = ph[k - 1] + u * (ph[k] - ph[k - 1])
-        crossings.append((math.exp(x0 + u * (x1 - x0)), 180.0 + phase))
+        fc = math.exp(x0 + u * (x1 - x0))
+        if fn is not None:
+            def log_mag(x):
+                """log|T| at f = e^x."""
+                return math.log(max(abs(complex(np.asarray(fn(np.array([math.exp(x)])))[0])), 1e-300))
+            try:
+                fc = math.exp(brentq(log_mag, x0, x1, xtol=1e-13))
+            except ValueError:            # the samples given and fn disagree in sign: keep the interpolation
+                pass
+            ang = math.degrees(np.angle(complex(np.asarray(fn(np.array([fc])))[0])))
+            phase = ang + 360.0 * round((phase - ang) / 360.0)     # the turn of ∠T its neighbours have
+        crossings.append((fc, 180.0 + phase))
     if positive:
         f_c = crossings[0][0] if crossings else float(f[0])
-        return {"f_c": f_c, "pm": -180.0, "t_low_db": float(mag[0]), "crossings": crossings,
-                "positive_feedback": True}
+        return {"f_c": f_c, "pm": -180.0, "t_low_db": t_low_db, "crossings": crossings, "positive_feedback": True}
     if not crossings:
         return None
     f_c, pm = min(crossings, key=lambda c: c[1])
-    return {"f_c": f_c, "pm": pm, "t_low_db": float(mag[0]), "crossings": crossings, "positive_feedback": False}
+    return {"f_c": f_c, "pm": pm, "t_low_db": t_low_db, "crossings": crossings, "positive_feedback": False}
+
+
+def _refine_loop(f: np.ndarray, t: np.ndarray, fn, roots) -> tuple[np.ndarray, np.ndarray]:
+    """A loop gain's samples refined with T = fn(f) (phase_margin): points across each lightly damped root's
+    resonance (f0 ± PM_RES_SPAN·f0/2Q), then geometric midpoints wherever neighbours differ by more than PM_STEP_DEG
+    or PM_STEP_DB, until none does or PM_REFINE_MAX samples. (f, T) sorted."""
+    def evaluate(x):
+        """T at the frequencies x, as complex numbers."""
+        return np.asarray(fn(np.asarray(x, float)), complex).reshape(len(x))
+    extra = []
+    for r in (roots if roots is not None else []):
+        r = complex(r)
+        w = abs(r)
+        if w == 0 or r.imag < 0:
+            continue                     # the origin; a conjugate pair once
+        q = w / (2 * abs(r.real)) if r.real != 0 else 1e12
+        f0 = w / (2 * math.pi)
+        if q < PM_RES_Q or not (f[0] < f0 < f[-1]):
+            continue
+        pts = f0 * (1 + np.linspace(-PM_RES_SPAN, PM_RES_SPAN, 4 * int(2 * PM_RES_SPAN) + 1) / (2 * q))
+        extra.append(pts[(pts > f[0]) & (pts < f[-1])])
+    if extra:
+        x = np.unique(np.concatenate(extra))
+        f, t = np.concatenate([f, x]), np.concatenate([t, evaluate(x)])
+        order = np.argsort(f, kind="stable")
+        f, t = f[order], t[order]
+    for _ in range(40):
+        a = np.maximum(np.abs(t), 1e-300)
+        dphi = np.degrees(np.abs(np.angle(t[1:] / np.where(t[:-1] != 0, t[:-1], 1e-300))))
+        ddb = np.abs(20 * np.log10(a[1:] / a[:-1]))
+        bad = ((dphi > PM_STEP_DEG) | (ddb > PM_STEP_DB)) & (f[1:] > f[:-1] * (1 + 1e-9))
+        room = PM_REFINE_MAX - len(f)
+        if not bad.any() or room <= 0:
+            break
+        idx = np.nonzero(bad)[0][:room]
+        x = np.sqrt(f[idx] * f[idx + 1])
+        f, t = np.insert(f, idx + 1, x), np.insert(t, idx + 1, evaluate(x))
+    return f, t
 
 
 PEAKING_DB = 0.5               # a gain this far above its low-frequency value is reported as peaking
