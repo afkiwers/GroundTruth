@@ -69,6 +69,8 @@ class Route:
     steps: list = field(default_factory=list)       # RouteSegment | RouteVia, in order
     nets: set[str] = field(default_factory=set)     # nets the route passes through
     parts: list[str] = field(default_factory=list)  # series parts on the route
+    notes: list[str] = field(default_factory=list)  # what modelling it had to simplify (simulate._chain), for the
+                                                    # route's result
 
     @property
     def segments(self) -> list[RouteSegment]:
@@ -146,9 +148,11 @@ def _blocking(board: Board, config: Config, nets: set[str], through) -> str:
             "one of them, name it in the net's `through` (Signal paths tab: Pass through)")
 
 
-def signal_nets(board: Board, config: Config, net: str, through=()) -> set[str]:
-    """The net plus every net reachable through series parts that pass signals (and the parts in `through`)."""
-    refs = set(config.reference_nets)
+def signal_nets(board: Board, config: Config, net: str, through=(), stop=()) -> set[str]:
+    """The net plus every net reachable through series parts that pass signals (and the parts in `through`). `stop`:
+    nets never entered nor crossed (a path's circuit stops at AC ground: a part in `through` to a supply led it on
+    into the regulator behind that supply)."""
+    refs = set(config.reference_nets) | set(stop)
     through = set(through)
     group = {net}
     frontier = [net]

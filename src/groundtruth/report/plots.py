@@ -106,6 +106,21 @@ def _adjust(fig: Figure, left: float, right: float, bottom: float, top: float, *
     fig.subplots_adjust(left=x0, right=x1, bottom=y0, top=y1, **kw)
 
 
+def _key_layout(labels: list, width_in: float) -> tuple[int, int]:
+    """(columns, rows) of a legend in a row of its own above a plot `width_in` wide: one row when it fits, else as many
+    columns as the width takes, each as wide as the widest entry. One entry per row (before 2026-11-03) stacked a
+    path's 17 responses into a column over its formulas and its plot (the user, of a path through two quad op-amps:
+    "fix formatting")."""
+    em = FS_TICK / 72
+    key_in = sum(_width_in(l, FS_TICK) for l in labels) + len(labels) * 2.0 * em + \
+        max(len(labels) - 1, 0) * 1.2 * em + 0.15
+    if key_in <= width_in:
+        return len(labels), 1
+    col_in = max(_width_in(l, FS_TICK) for l in labels) + 3.2 * em
+    ncol = max(1, min(len(labels), int(width_in // col_in)))
+    return ncol, -(-len(labels) // ncol)
+
+
 def _title_and_key(ax, title: str, width_in: float, size: float = FS_TITLE) -> float:
     """`title` over the axes and the legend of its labelled artists above the plot, where it hides no data: on the
     title's line, right-aligned, when both fit in width_in (the axes' width), else in a row of its own between the
@@ -124,10 +139,9 @@ def _title_and_key(ax, title: str, width_in: float, size: float = FS_TITLE) -> f
     lines = _wrap(title, width_in, size)
     key_pt = 0.0
     if labels:
-        rows = 1 if key_in <= width_in else len(labels)
+        ncol, rows = _key_layout(labels, width_in)
         key_pt = rows * FS_TICK * 1.5 + 4
-        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=len(labels) if rows == 1 else 1,
-                  borderaxespad=0.2, **style)
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=ncol, borderaxespad=0.2, **style)
     ax.set_title("\n".join(lines), fontsize=size, pad=pad + key_pt)
     return (pad + key_pt) / 72 + _lh(size, len(lines))
 
@@ -1593,11 +1607,16 @@ def bode_height_in(view, w_in: float, default: float) -> float:
     drawing anything (the plugin calls it on the GUI thread): a first-order factor about 0.85 in wide at the
     formulas' size, a quadratic one 1.55 in [A64]."""
     lines = transfer_lines(view)
-    if not lines:
-        return default
     room = max(w_in - 1.2, 1.0)
+    # the legend over the plot: a row per _key_layout row (the curves' names, the pole and zero markers)
+    from ..analysis.transfer import response_label
+    labels = [response_label(r, getattr(view, "owner", "")) for r in getattr(view, "responses", ()) if len(r.f)]
+    key_rows = _key_layout(labels + ["pole", "zero"], room)[1] if labels else 0
+    key_in = max(0, key_rows - 1) * FS_TICK * 1.5 / 72
+    if not lines:
+        return max(default, 0.6 + key_in + 0.45 + BODE_PLOTS_IN) if key_rows > 1 else default
     per_char = 0.55 * FS_TEXT / 72
-    need = 0.6 + 0.45 + BODE_PLOTS_IN                     # title and key, the frequency axis, the plots
+    need = 0.6 + key_in + 0.45 + BODE_PLOTS_IN            # title and key, the frequency axis, the plots
     for label, tex, _plain, vals in lines:
         parts = _long_form(view, label)
         if parts:
