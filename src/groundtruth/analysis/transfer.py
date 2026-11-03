@@ -722,8 +722,8 @@ def phase_margin(f, t, lead=None, fn=None, lead_f=None, roots=None) -> Optional[
     sweep's start). Without `fn`: linear interpolation in log f and dB between the samples, as before.
 
     {"f_c", "pm", "t_low_db" (|T| at the sweep's start), "crossings": [(f, margin)], "positive_feedback"}; None when
-    |T| at DC (the lead's first point, else the sweep's start) is at or below 1 (no loop to speak of) or |T| never
-    crosses 1."""
+    |T| never crosses 1 (no loop to speak of). |T| at DC may be below 1: an integrator's or an AC-coupled feedback's
+    loop gain is 0 at DC and crosses 1 twice, its margin the smaller (the upper crossover's)."""
     from scipy.optimize import brentq
     f = np.asarray(f, float)
     t = np.asarray(t, complex)
@@ -764,7 +764,7 @@ def phase_margin(f, t, lead=None, fn=None, lead_f=None, roots=None) -> Optional[
     if positive:
         f_c = crossings[0][0] if crossings else float(f[0])
         return {"f_c": f_c, "pm": -180.0, "t_low_db": t_low_db, "crossings": crossings, "positive_feedback": True}
-    if abs(t_dc) <= 1 or not crossings:
+    if not crossings:
         return None
     f_c, pm = min(crossings, key=lambda c: c[1])
     return {"f_c": f_c, "pm": pm, "t_low_db": t_low_db, "crossings": crossings, "positive_feedback": False}

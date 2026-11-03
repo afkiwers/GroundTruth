@@ -343,6 +343,29 @@ def test_a_smooth_loops_margin_stays_exact_and_positive_feedback_is_seen_above_i
         assert phase_margin(f, a(f), lead=a(lf)) is None          # no lead_f: the sweep's own stretch only
 
 
+def test_an_integrators_loop_starting_below_one_at_dc_has_its_margin():
+    """An integrator's loop gain T = A(s)·sτ/(1 + sτ) (A = 1e5 / (1 + jf/10 Hz), τ = RC = 1 ms) is 0 at DC, crosses 1
+    upwards near 1.6 mHz and down near 1 MHz: its margin is the upper crossover's, 180° + ∠T there, the crossovers
+    found by Brent on the closed form [Ogata 2010] (phase-2 re-verification: with the lead from 1 nHz, |T(DC)| < 1
+    returned no margin at all, every integrator's stability check gone)."""
+    from scipy.optimize import brentq
+    from groundtruth.analysis.transfer import phase_margin
+
+    def t(fr):
+        """The integrator's loop gain."""
+        s = 2j * math.pi * np.asarray(fr, float)
+        return 1e5 / (1 + s / (2 * math.pi * 10)) * s * 1e-3 / (1 + s * 1e-3)
+    fc = brentq(lambda x: abs(t(np.array([x]))[0]) - 1, 1e3, 1e8)
+    want = 180 + math.degrees(np.angle(t(np.array([fc]))[0]))
+    f = np.geomspace(1.0, 1e9, 300)
+    lf = np.geomspace(1e-9, 1.0, 60, endpoint=False)
+    m = phase_margin(f, t(f), lead=t(lf), lead_f=lf, fn=t)
+    assert m is not None and not m["positive_feedback"]
+    assert m["f_c"] == pytest.approx(fc, rel=1e-9) and m["pm"] == pytest.approx(want, abs=1e-6)
+    assert len(m["crossings"]) == 2
+    assert phase_margin(f, t(f), lead=t(lf))["pm"] == pytest.approx(want, abs=0.05)
+
+
 def test_the_normal_forms_text_for_an_integrator_and_a_complex_k():
     """Audit M-10: an integrator's text read 'H(s) = -1000 / [·s]'; a complex K's LaTeX replaced every 'e' and left
     a brace open. Now 'H(s) = -1000 / s', a factor and the origin's pole '/ [(1 + s/ωp1)·s]', K's exponent as
