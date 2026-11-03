@@ -2572,6 +2572,29 @@ def _m(sol: Solution) -> float:
     return float(np.linalg.norm(sol.m))
 
 
+def route_model_fallback(setups: list) -> list:
+    """The routes whose board-wide model (plane resonances, the emission spectrum) failed at every frequency while
+    their route model solved, set to solve the spectrum's frequencies on the route model instead, as a route without
+    a board-wide model does (cavity None: spectrum_run is the fine run). Before, such a route gave "no result: solver
+    did not converge" (the user's phase-voltage sense path, 2026-11-03: the route model converged at 10 MHz in 65
+    iterations, the board-wide one at none after 1528), though everything but the plane resonances could be had.
+    Returns those setups, to solve again (solve_setups); their notes say what was left out."""
+    out = []
+    for s in setups:
+        cav = getattr(s, "cavity", None)
+        if not isinstance(s, RouteSetup) or cav is None or cav.ok() or not cav.sols or not s.fine.ok():
+            continue
+        planned = sorted(set(cav.planned) | set(cav.sols))
+        s.res.notes.append("the board-wide model (the whole board's planes: their resonances) did not converge at "
+                           "any frequency: the loop and emission figures come from the route model alone (the planes "
+                           "near the route), without plane resonances")
+        s.res.cavity = {}
+        s.cavity = None
+        s.fine.planned = [f for f in planned if f not in s.fine.sols]
+        out.append(s)
+    return out
+
+
 def finish_route(model: BoardModel, setup: RouteSetup) -> RouteResult:
     """Ideal reference, emissions, layer shares, transfers and Tier 2 issues from the solved frequencies."""
     config = model.config
@@ -4028,6 +4051,11 @@ def _simulate(board: Board, config: Config, nets: Optional[list[str]], progress:
     gate0 = (peec.GATE.freed, peec.GATE.waits)
     result.groups = solve_setups(everything, config, ph, rest=finish_cost, free_done=not keep_factorisations,
                                  relief=relief)
+    # a route whose board-wide model failed at every frequency is solved on its route model alone (the spectrum's
+    # frequencies too), rather than giving no result (route_model_fallback)
+    retry = route_model_fallback(setups)
+    if retry:
+        solve_setups(retry, config, None, free_done=not keep_factorisations, relief=relief)
     sc = stats.active()
     if sc is not None:      # what memory made the solves do (memory_notes says it in words)
         sc.info.update({"groups": result.groups, "gate_freed": peec.GATE.freed - gate0[0],
