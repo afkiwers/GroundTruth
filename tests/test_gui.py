@@ -413,6 +413,56 @@ def test_the_conducted_class_choice_follows_the_standard_as_in_webench(app, conv
     assert got["bridge"] == ["(default)", "CLASS A", "CLASS B"]
 
 
+def test_a_dcr_that_differs_from_the_parts_tab_is_flagged_on_both_and_one_field_resets(app, tmp_path):
+    """A stage's Inductor DCR against its inductor's R / DCR on the Parts tab (the user: "when changing the DCR
+    value to something different to the actual parts value, it should flag that somehow"): ! beside the field and
+    ! in the inductor's Schematic cell. A click on the ! takes the Parts tab's value for that field alone and
+    saves it (the user: "a 'reset value from parts table' or so would be good for each field"), and what is
+    typed in another field stays."""
+    from dataclasses import replace
+    from types import SimpleNamespace as NS
+    from groundtruth.analysis.detect import detect_converters
+    from groundtruth.ui import main_frame
+    from groundtruth.ui.parts_panel import PARAM_COL, SCHEMATIC_COL
+    board, sc, path = make(tmp_path, discrete_buck_board(), "dcrgui", nets=())
+    spec = replace(detect_converters(board, sc.config)[0].spec, i_out=3.0, dcr=0.0063)
+    sc.set_converters([spec])
+    l1 = sc.config.model_for("L1")
+    sc.set_component("L1", replace(l1, params=dict(l1.params, R=0.003), from_schematic=[]))
+    sc.save()
+    f = main_frame.MainFrame(main_frame.Session(file_path=str(path)))
+    f.Show()
+    got = {}
+
+    def check():
+        p = f.converters
+        p.list.Select(0)
+        p.on_select(NS(GetIndex=lambda: 0))
+        got["before"] = (p.dcr.GetValue(), p.marks["dcr"].GetLabel(), p.marks["dcr"].GetToolTipText())
+        parts = f.parts
+        parts.load(f.board, f.settings)
+        row = parts.rows.index("L1")
+        got["parts"] = (parts.grid.GetCellValue(row, SCHEMATIC_COL),
+                        parts.grid.GetCellBackgroundColour(row, PARAM_COL["R"]))
+        p.v_out.SetValue("4.2")                   # typed, not yet Updated
+        p.marks["dcr"]._click(NS(Skip=lambda: None))
+        wait_for(app, lambda: p.dcr.GetValue() == "3mΩ")
+        got["after"] = (p.marks["dcr"].GetLabel(), p.v_out.GetValue(), f.settings.config.converters[0].dcr,
+                        f.settings.config.converters[0].v_out)
+    try:
+        run_steps(app, f, [check])
+    finally:
+        close_window(f)
+    from groundtruth.ui import theme
+    value, label, tip = got["before"]
+    assert value == "6.3mΩ" and label == "!" and "L1" in tip and "3mΩ" in tip
+    cell, colour = got["parts"]
+    from groundtruth.ui.parts_panel import _DIFFERS
+    assert "! " in cell and "6.3mΩ" in cell and colour == theme.colour(_DIFFERS[theme.palette().dark])
+    assert got["after"][0] == "◇" and got["after"][1] == "4.2"
+    assert got["after"][2] == pytest.approx(0.003) and got["after"][3] == spec.v_out     # v_out: not yet Updated
+
+
 def test_schematic_fields_fill_the_forms_and_a_value_set_here_is_flagged(app, tmp_path, monkeypatch):
     """The parts' schematic fields (HTTP lib parameters) fill a stage's R_DS(on) and C_oss: ◆ beside a value from
     the schematic, a warning '!' (with both values in its tooltip) beside one typed in that differs; Use schematic
@@ -1849,6 +1899,32 @@ def test_parts_table_fills_the_tab_and_an_edit_updates_its_row_in_place(app, fra
     assert g.IsCellEditControlEnabled() and f.parts.rows.index("U2") == other
     assert f.settings.config.components["U1"].model.kind == "resistor"
     g.DisableCellEditControl()
+
+
+def test_parts_table_calls_an_inductors_r_its_dcr_and_marks_the_placeholder(app, frame):
+    """The R column is an inductor's DCR too (the user: "why is there no DCR for inductors?"), and the suggested
+    50 mΩ says it is a placeholder in the Schematic cell, until a real value replaces it."""
+    import wx.grid as gridlib
+    from groundtruth.ui.parts_panel import PARAM_COL, SCHEMATIC_COL
+    f = frame
+    run_steps(app, f, [])
+    f.notebook.SetSelection(f.notebook.FindPage(f.parts))
+    g = f.parts.grid
+    assert g.GetColLabelValue(PARAM_COL["R"]) == "R / DCR (Ω)"
+    row = f.parts.rows.index("U1")
+
+    def edit(col, text):
+        """Type text into U1's cell, as the user does."""
+        g.SetCellValue(row, col, text)
+        g.GetEventHandler().ProcessEvent(gridlib.GridEvent(g.GetId(), gridlib.wxEVT_GRID_CELL_CHANGED, g, row, col))
+        app.Yield()
+
+    edit(3, "inductor")
+    edit(PARAM_COL["R"], "50m")                 # the suggested value, no DCR field: a placeholder
+    wait_for(app, lambda: "placeholder" in g.GetCellValue(row, SCHEMATIC_COL))
+    edit(PARAM_COL["R"], "3m")                  # the datasheet's
+    wait_for(app, lambda: "placeholder" not in g.GetCellValue(row, SCHEMATIC_COL))
+    assert f.settings.config.components["U1"].model.get("R") == pytest.approx(0.003)
 
 
 def test_parts_table_sorts_by_a_header_click_and_keeps_a_dragged_width(app, frame):

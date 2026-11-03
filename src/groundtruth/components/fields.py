@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from .values import format_si, parse_quantity
 
@@ -508,24 +508,77 @@ def fill_stage(board, config, spec) -> tuple[bool, list[str]]:
     return changed, notes
 
 
-def stage_marks(board, config, spec) -> dict[str, tuple[str, str]]:
-    """{key: (state, explanation)} for a stage's form: state "schematic" (the value comes from the fields),
-    "differs" (set in GroundTruth, the schematic says otherwise) or "" (no field)."""
+class Mark(NamedTuple):
+    """A part parameter's mark in a stage's form (stage_marks). state: "schematic" (the value comes from the
+    fields), "parts" (a converter's DCR equal to its inductor's R / DCR on the Parts tab, or empty and following
+    it), "differs" (set in GroundTruth, its source says otherwise) or "" (no source, or an empty field). tip: the
+    explanation. value: the source's value a reset takes (None: none), origin "schematic" or "parts", label: the
+    reset's text in a menu."""
+    state: str
+    tip: str
+    value: Optional[float] = None
+    origin: str = ""
+    label: str = ""
+
+    @property
+    def resettable(self) -> bool:
+        """Whether a reset would change the field: its source has a value it does not show (differs, or empty)."""
+        return self.value is not None and self.state in ("differs", "")
+
+
+RESET_HINT = "Click the mark, or right-click the field, to take it."
+
+
+def parts_dcr(board, config, spec) -> Optional[tuple[str, float]]:
+    """(the converter's inductor, its R / DCR on the Parts tab) when that R is the part's own: a DCR field's, or
+    typed in there, not the suggested placeholder (defaults.placeholder_r). None otherwise. The stage's dcr and
+    this R are one physical value (thermal.inductor_dcr uses the R when dcr is empty)."""
+    from ..analysis.power import switch_inductor
+    from .defaults import placeholder_r
+    _, inductor = switch_inductor(board, config, spec)
+    m = config.model_for(inductor.reference) if inductor is not None else None
+    if m is None or m.kind not in ("inductor", "ferrite") or m.params.get("R") is None or placeholder_r(m):
+        return None
+    return inductor.reference, float(m.params["R"])
+
+
+def stage_marks(board, config, spec) -> dict[str, Mark]:
+    """{key: Mark} for a stage's form: each part parameter against its schematic field and, for a converter's DCR
+    without a DCR field, against its inductor's R on the Parts tab (the user, 2026-11-03: "when changing the DCR
+    value to something different to the actual parts value, it should flag that somehow"). Each Mark carries the
+    value a reset takes (the user: "a 'reset value from parts table' or so would be good for each field")."""
     from ..config.settings import BridgeSpec
     values, _ = stage_values(board, config, spec)
+    bridge = isinstance(spec, BridgeSpec)
+    parts = None if bridge else parts_dcr(board, config, spec)
     out = {}
-    for key in STAGE_KEYS["bridge" if isinstance(spec, BridgeSpec) else "converter"]:
+    for key in STAGE_KEYS["bridge" if bridge else "converter"]:
         r, cur = values.get(key), getattr(spec, key)
         unit = _KEY_UNITS.get(key, "")
-        if r is None:
-            out[key] = ("", "")
-        elif key in spec.from_schematic or same(cur, r.value):
-            out[key] = ("schematic", f"from the schematic: {r.source}" + (f" ({r.note})" if r.note else ""))
-        elif cur is None:
-            out[key] = ("", "")
+        if r is not None:
+            label = f"Reset to the schematic's {format_si(r.value, unit)} ({r.source})"
+            if key in spec.from_schematic or same(cur, r.value):
+                out[key] = Mark("schematic", f"from the schematic: {r.source}" + (f" ({r.note})" if r.note else ""),
+                                r.value, "schematic", label)
+            elif cur is None:
+                out[key] = Mark("", "", r.value, "schematic", label)
+            else:
+                out[key] = Mark("differs", f"set here: {format_si(cur, unit)}; the schematic says "
+                                           f"{format_si(r.value, unit)} ({r.source}). {RESET_HINT}",
+                                r.value, "schematic", label)
+        elif key == "dcr" and parts is not None:
+            ref, rv = parts
+            where = f"{ref}'s R / DCR on the Parts tab"
+            label = f"Reset to {format_si(rv, unit)} ({where})"
+            if cur is None:
+                out[key] = Mark("parts", f"empty: the losses use {where}, {format_si(rv, unit)}", rv, "parts", label)
+            elif same(cur, rv):
+                out[key] = Mark("parts", f"the same as {where}", rv, "parts", label)
+            else:
+                out[key] = Mark("differs", f"set here: {format_si(cur, unit)}; {where} says {format_si(rv, unit)}. "
+                                           f"The losses use the value set here. {RESET_HINT}", rv, "parts", label)
         else:
-            out[key] = ("differs", f"set here: {format_si(cur, unit)}; the schematic says "
-                                   f"{format_si(r.value, unit)} ({r.source}). Use schematic values takes it.")
+            out[key] = Mark("", "")
     return out
 
 
