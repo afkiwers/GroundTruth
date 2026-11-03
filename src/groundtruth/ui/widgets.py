@@ -99,6 +99,24 @@ class FieldMark(wx.StaticText):
             self.on_reset()
 
 
+def scroll_form(parent) -> wx.ScrolledWindow:
+    """The window a tab's form is built in: it scrolls up and down when the tab is not tall enough, so the form's
+    buttons below it always stay in reach (the user: "all settings panes need to be scrollable so if the screen is
+    not big enough the user can still reach the buttons !!!"). fit_scroll_width sets its size once it is built."""
+    fw = wx.ScrolledWindow(parent, style=wx.VSCROLL)
+    fw.SetScrollRate(0, 12)
+    return fw
+
+
+def fit_scroll_width(fw: wx.ScrolledWindow, min_height: int = 120):
+    """A built scroll_form's minimum size: the form's width plus the scroll bar's (a scrolled window asks for no
+    width of its own, so a wide list beside it would squeeze it), and a short height, so the column it sits in
+    can shrink to the tab and the buttons under it stay visible."""
+    sizer = fw.GetSizer()
+    width = sizer.GetMinSize().width if sizer is not None else -1
+    fw.SetMinSize(wx.Size(width + wx.SystemSettings.GetMetric(wx.SYS_VSCROLL_X) if width > 0 else -1, min_height))
+
+
 def section_form(vgap: int = 5) -> wx.GridBagSizer:
     """The grid a tab's form is laid out in by section_rows: label | field, the sections' titles across both."""
     return wx.GridBagSizer(vgap=vgap, hgap=8)

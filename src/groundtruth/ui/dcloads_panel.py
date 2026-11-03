@@ -17,7 +17,7 @@ from ..components.values import format_si
 from ..config.settings import ConfigError, DcLoadSpec, load_text, parse_load_text
 from .listsel import SelectableRows
 from .pin_complete import complete_field, complete_load_line, pin_table
-from .widgets import button_row, section_form, section_rows
+from .widgets import button_row, fit_scroll_width, scroll_form, section_form, section_rows
 
 FIELD_TIPS = {
     "Name": "A name for this rail, used in the lists, the Results tab and the reports (e.g. VDD rail).",
@@ -217,7 +217,7 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
         self._init_enable("dc_loads")
         self.list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_select)
 
-        fw = wx.Panel(self)
+        fw = scroll_form(self)                  # scrolls when the tab is short: the buttons stay in reach
         form = section_form()
         self.name = wx.TextCtrl(fw)
         self.source = wx.TextCtrl(fw)
@@ -248,7 +248,10 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
             ("Loads", "The pins that draw current from it, how much, and the drop they allow.",
              [("Loads", self.loads), ("Max drop (V)", self.max_drop)])], FIELD_TIPS)
         form.AddGrowableRow(form.GetItemPosition(self.loads).GetRow())     # the loads' box takes the spare height
-        fw.SetSizer(form)
+        inner = wx.BoxSizer(wx.VERTICAL)
+        inner.Add(form, 1, wx.EXPAND | wx.RIGHT, 12)        # room for the scroll bar; the spare height to it
+        fw.SetSizer(inner)
+        fit_scroll_width(fw)
         btns = button_row(self, [("Fill from net…", self.on_fill), ("Add", self.on_add),
                                  ("Update selected", self.on_update), ("Remove selected", self.on_remove)], BUTTON_TIPS)
         about = wx.StaticText(self, label="Simulate solves each rail on the whole board's copper: the drop each load "
