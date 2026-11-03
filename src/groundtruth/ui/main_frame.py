@@ -40,6 +40,7 @@ from .history_panel import HistoryPanel
 from .jobs_panel import ServerJobsPanel
 from .nets_panel import NetsPanel
 from .parts_panel import PartsPanel
+from .loading import LoadingCard
 from .progress import ProgressClock, clock, release_failure
 from .results_panels import ResultsPanel, IssuesPanel
 from .tabbook import SETUP_HUES, TabBook
@@ -603,6 +604,11 @@ class MainFrame(ConfigActions, wx.Frame):
         root.Add(line, 0, wx.EXPAND)
         root.Add(self.notebook.strip, 0, wx.EXPAND)
         root.Add(self.notebook, 1, wx.EXPAND)
+        # while a board loads, a card in the tab pages' place says so (ui/loading.py, _sync_loading): empty tabs
+        # looked as if the settings were lost
+        self.loading_card = LoadingCard(self, self.on_cancel)
+        root.Add(self.loading_card, 1, wx.EXPAND)
+        self._card_on = False
         self.SetSizer(root)
         self._pages = [
             ("nets", "Signal paths", lambda nb: NetsPanel(
@@ -633,6 +639,7 @@ class MainFrame(ConfigActions, wx.Frame):
             ("history", "History", lambda nb: HistoryPanel(nb, on_load=self.load_config_from_run)),
             ("server_jobs", "Server jobs", lambda nb: ServerJobsPanel(nb, self.on_show_job, self.on_cancel_job,
                                                                       self.on_remove_job))]
+        self._pages_total = len(self._pages)    # the loading card's count while they are built
 
         self.status = StatusBar(self)
         self.status.SetFieldsCount(2)
@@ -710,6 +717,7 @@ class MainFrame(ConfigActions, wx.Frame):
                                     on_round=lambda t: wx.CallAfter(self._jobs_synced, t))
         self._tracker.start()
         # the window appears at once; its tabs follow step by step, then the board is read in the background
+        self._sync_loading("building the tabs", 0.0)
         wx.CallAfter(self._build_pages)
 
     def _build_pages(self):
@@ -744,6 +752,8 @@ class MainFrame(ConfigActions, wx.Frame):
         setattr(self, attr, panel)
         self.notebook.AddPage(panel, label, hue=SETUP_HUES.get(attr), gap=attr == "parts")
         if self._pages:
+            done = self._pages_total - len(self._pages)
+            self._sync_loading(f"building the tabs: {label} ({done} of {self._pages_total})", done / self._pages_total)
             wx.CallLater(1, self._build_pages)
         else:
             self._holder.Destroy()
@@ -1090,6 +1100,7 @@ class MainFrame(ConfigActions, wx.Frame):
 
         self.worker = threading.Thread(target=target, name="groundtruth-job", daemon=True)
         self.worker.start()
+        self._sync_loading()                    # a board load: the loading card
         return True
 
     def _panel_job(self, status: str, work: Callable, done: Callable, what: str) -> bool:
@@ -1101,8 +1112,16 @@ class MainFrame(ConfigActions, wx.Frame):
         return self._start(status, work, finished, what=what, cancellable=False)
 
     def _finished(self, done, result, error, what: str, cancelled: bool):
-        """(GUI thread) A job ended: stop the clock, enable the buttons, then show its result with done(result),
-        or say it was cancelled, or show the error (in full with its traceback unless it is an expected kind)."""
+        """(GUI thread) A job ended (_end_job), then the loading card once more: gone, or still there when the job
+        was a board read and its tabs are filled now (no flicker between the two)."""
+        try:
+            self._end_job(done, result, error, what, cancelled)
+        finally:
+            self._sync_loading()
+
+    def _end_job(self, done, result, error, what: str, cancelled: bool):
+        """A job ended: stop the clock, enable the buttons, then show its result with done(result), or say it was
+        cancelled, or show the error (in full with its traceback unless it is an expected kind)."""
         self.worker = None
         self._job_queues = False
         self._solver_interval.leave()
@@ -1167,6 +1186,8 @@ class MainFrame(ConfigActions, wx.Frame):
         buttons with a hoverover text"); Preferences, Help and Cancel stay. A click on Run checks or Simulate no
         longer waits in a queue for the load: it can't be made."""
         free = {self.t_prefs, self.t_help, self.t_cancel}
+        if getattr(self, "loading_card", None) is not None:
+            free.add(self.loading_card.cancel)          # the loading card's Cancel: the top bar's
         why = LOADING if on else ""
 
         def walk(w):
@@ -1192,6 +1213,8 @@ class MainFrame(ConfigActions, wx.Frame):
             self._clock.update(msg, frac)
             self.SetStatusText(self._clock_line())
             self.gauge.SetValue(int(self._clock.frac * 1000))
+            if self._card_on:
+                self._sync_loading()
 
     def _tick_clock(self):
         """Timer, every second while a job runs: the elapsed time and the estimate count on between reports."""
@@ -1199,6 +1222,8 @@ class MainFrame(ConfigActions, wx.Frame):
             line = self._clock_line()
             if line != self.status_text():
                 self.SetStatusText(line)
+            if self._card_on:                   # the card's elapsed time counts on too
+                self._sync_loading()
 
     def _clock_line(self) -> str:
         """The running job's status line, and the run waiting for it (a click during a board load)."""
@@ -1209,6 +1234,41 @@ class MainFrame(ConfigActions, wx.Frame):
         """The window is still being built, filling its tabs, or reading / detecting a board (a queue_runs job)."""
         return (not self.pages_built() or getattr(self, "_tabs_loading", False)
                 or (self._job_queues and self.worker is not None and self.worker.is_alive()))
+
+    def _sync_loading(self, step: Optional[str] = None, frac: Optional[float] = None):
+        """The loading card in the tab pages' place while the window loads (_loading: its tabs being built, the board
+        read, its tabs filled, detection on a new settings file), the tab pages again once it is idle; the card
+        shows the job's line and fraction (or `step` and `frac` for the window's own steps). The status bar's gauge
+        steps aside meanwhile: the card has its own (the user: "rather than having the loading bar at the bottom
+        for loading the PCB, have it as an overlay")."""
+        if not self:
+            return
+        on = self._loading()
+        if on != self._card_on:
+            self._card_on = on
+            self.Freeze()                       # one repaint for the swap
+            try:
+                self.notebook.Show(not on)
+                self.loading_card.Show(on)
+                self.gauge.Show(not on)
+                self.Layout()
+            finally:
+                self.Thaw()
+        if not on:
+            return
+        name = Path(self.board_path or self.session.file_path or "").name
+        if not self.pages_built():
+            title = "Opening GroundTruth…"
+        else:
+            title = f"Loading {name}…" if name else "Loading the board from KiCad…"
+        if step is None:
+            if self.worker is not None and self._clock.running:
+                # a job that reports no fraction (detection): the gauge pulses, once a second (_tick_clock)
+                step, frac = self._clock_line(), (self._clock.frac or -1.0)
+            else:
+                step, frac = self.status_text(), -1.0
+        self.loading_card.show_step(title, step, -1.0 if frac is None else frac,
+                                    self.t_cancel.IsEnabled() and self.worker is not None)
 
     def _queue_if_loading(self, name: str, action: Callable) -> bool:
         """A run clicked while the board is being read: keep `action` to start once the window is idle (the
@@ -1322,11 +1382,14 @@ class MainFrame(ConfigActions, wx.Frame):
                 self._tabs_loading = False
                 return
             if k < len(tabs):
+                self._sync_loading(f"showing the settings: {self.notebook.GetPageText(self.notebook.FindPage(tabs[k]))}"
+                                   f" ({k + 1} of {len(tabs)})", k / len(tabs))
                 tabs[k].load(board, settings)
                 wx.CallLater(1, step, k + 1)
                 return
             self._tabs_loading = False
             then()
+            self._sync_loading()                # gone, unless `then` started detection
         step(0)
 
     def _loaded_rest(self, path, settings, new: bool):

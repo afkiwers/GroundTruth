@@ -1827,6 +1827,46 @@ def test_open_3d_view_builds_the_page_in_the_background_and_opens_it(app, frame,
     assert opened == [page.as_uri()] and "3D view opened" in f.GetStatusBar().GetStatusText(0)
 
 
+def test_a_loading_card_stands_in_the_tabs_place_until_the_board_is_read(app, tmp_path, monkeypatch):
+    """While the window opens and reads the board, a card stands in the tab pages' place (the user: "rather than
+    having the loading bar at the bottom for loading the PCB, have it as an overlay ... it looks like the config is
+    lost"): it names the board and the step, and the status bar's gauge steps aside. Once the tabs are filled, the
+    tab pages are back and the card is gone; a Simulate afterwards (no board load) never shows it."""
+    from groundtruth.ui import loading, main_frame
+    monkeypatch.setattr(wx, "MessageBox", lambda *a, **k: wx.YES)
+    _, _, path = make(tmp_path, layer_change_board(None), "cardgui", solve_points=2)
+    seen = []
+    shown = loading.LoadingCard.show_step
+    monkeypatch.setattr(loading.LoadingCard, "show_step",
+                        lambda self, title, step, frac, can: (seen.append((title, step)),
+                                                              shown(self, title, step, frac, can)))
+    f = main_frame.MainFrame(main_frame.Session(file_path=str(path)))
+    f.Show()
+    at_start = (f.loading_card.IsShown(), f.notebook.IsShown(), f.gauge.IsShown())
+    got = {}
+
+    def loaded():
+        got["after"] = (f.loading_card.IsShown(), f.notebook.IsShown(), f.gauge.IsShown())
+        got["load"] = list(seen)
+        f.on_simulate()
+
+    def simulated():
+        got["sim"] = seen[len(got["load"]):]
+    try:
+        run_steps(app, f, [loaded, simulated])
+    finally:
+        close_window(f)
+    assert at_start == (True, False, False)
+    assert got["after"] == (False, True, True)
+    titles = {t for t, _ in got["load"]}
+    steps = [s for _, s in got["load"]]
+    assert "Opening GroundTruth…" in titles and f"Loading {path.name}…" in titles, titles
+    assert any(s.startswith("building the tabs") for s in steps)
+    assert any(s.startswith("reading the board") for s in steps), steps
+    assert any(s.startswith("showing the settings: Signal paths (1 of") for s in steps), steps
+    assert got["sim"] == []                     # a run is no board load: the tabs stay
+
+
 def test_parts_table_fills_the_tab_and_an_edit_updates_its_row_in_place(app, frame):
     """The columns fill the tab's width (the user: "expand the table across the whole plane"). Changing a part's
     model updates its own row (R becomes editable for a resistor) without rebuilding the table: the rebuild
