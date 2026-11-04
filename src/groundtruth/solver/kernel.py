@@ -62,8 +62,11 @@ def slab_impedance(t, f, sigma):
     with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
         delta = 1.0 / np.sqrt(np.pi * np.maximum(f, 1e-300) * MU0 * sigma)
         x = np.where(f > 0, t / delta, 0.0)
-        u = (1 + 1j) * np.minimum(x, 30.0)              # coth(u) is 1 to double precision beyond
-        exact = u / np.tanh(np.where(x > 0, u, 1.0))
+        # coth(u) is 1 to double precision beyond x = 30, so only its argument is capped, never the factor (1 + j)x
+        # in front: capping that too froze Z at its x = 30 value (35 um copper above ~3 GHz, 70 um above ~0.8 GHz:
+        # 10 % low at 1 GHz in 70 um, 43 % at 10 GHz in 35 um; round-8 audit)
+        u = (1 + 1j) * np.minimum(x, 30.0)
+        exact = (1 + 1j) * x / np.tanh(np.where(x > 0, u, 1.0))
         # thin foil: u coth u = 1 + u²/3 - u⁴/45 with u² = 2j x² (the formula above cancels badly there): the
         # resistance 1 + 4x⁴/45 (skin_thickness's series) and the internal reactance 2x²/3 (omega * mu0 * t / 3)
         series = 1.0 + 4.0 * x ** 4 / 45.0 + 1j * (2.0 * x ** 2 / 3.0)

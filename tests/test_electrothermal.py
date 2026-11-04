@@ -156,6 +156,34 @@ def test_a_growing_change_ends_it_with_the_round_before_kept(buck, monkeypatch):
     assert not info["settled"] and "changed more" in info["stopped"] and info["changes"] == [0.2, 0.9]
 
 
+def test_every_round_heats_the_board_with_its_own_currents_and_settles_on_a_fixed_point(buck):
+    """Each Thermal after a round is solved with that round's DC paths at temperature (its own copies, a new one each
+    round), never with Simulate's 20 °C results, and the loop ends on a fixed point: Thermal of the returned results
+    gives the returned temperatures again (T = T0 + θ·P(T), within the tolerance), above the 20 °C currents' own.
+    Before round 8 the results were swapped by the round before's copies, so from round 2 on Thermal was solved with
+    the 20 °C currents again: the rounds flipped between the two (changes 61 %, 0.21 %, 0.21 %, 0) and "settled" on
+    the 20 °C temperatures (211.47 °C here, 212.82 °C at the fixed point)."""
+    from groundtruth.analysis.thermal import solve_thermal, thermal_inputs
+    board, cfg, stages = buck
+    cfg = _on(cfg, electrothermal_rounds=6, electrothermal_tolerance=1e-4)
+    th0, issues0 = solve_thermal(board, cfg, *thermal_inputs(board, cfg, stages))
+    seen = []
+
+    def solve(results):
+        """Thermal of a round's results, remembering which they were."""
+        seen.append(list(results))
+        return solve_thermal(board, cfg, *thermal_inputs(board, cfg, results))
+    th, _, current = et.couple(board, cfg, stages, th0, issues0, solve)
+    info = th.electrothermal
+    assert info["settled"] and len(seen) >= 2
+    assert all(r is not s for call in seen for r, s in zip(call, stages))        # never the 20 °C results
+    assert all(a is not b for a, b in zip(seen[0], seen[1]))                     # each round its own copies
+    assert all(r is not s for r, s in zip(current, stages))
+    again, _ = solve_thermal(board, cfg, *thermal_inputs(board, cfg, current))
+    assert again.t_max == pytest.approx(th.t_max, abs=0.05)
+    assert th.t_max > th0.t_max + 0.5
+
+
 def test_a_cancel_ends_it(buck):
     """A cancel set before the rounds: the solver's Cancelled, no round made."""
     from groundtruth.analysis.thermal import solve_thermal, thermal_inputs
