@@ -589,8 +589,8 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   outer cells widened the fed region by about half a cell all round (NA-7's bend at 1x: −1.05 % against the sheet
   solve; −0.48 % so, −0.71 % with the old round buffer). The lids' solder bonds and a die's branches stay equal per
   node. The vias' joints (`add_pin`) are not pads and are unchanged: on a plane pair fed at a pad over a via, the
-  port's inductance still moves with the grid's offset (0.4 mm cells: 0.72 / 0.78 / 0.82 nH before, about as
-  much after) because each layer's joint snaps to its own nearest node, so a joint can slant a cell between the
+  port's inductance still moves with the grid's offset (0.4 mm cells: 0.72 / 0.78 / 0.82 nH before, 0.73 / 0.77 /
+  0.79 after) because each layer's joint snaps to its own nearest node, so a joint can slant a cell between the
   layers; joining every layer at the same node removed most of it in a trial (0.80-0.82 nH) — open.
   **A vertical FET's die is spread over its tab** (2026-10-25, branch `tab-spread`, `simulate.die_side`,
   `die_branches`, [A68]; the user, of that view: "the top layer under the fet is black and the vias glow which does
