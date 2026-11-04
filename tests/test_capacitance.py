@@ -9,7 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools" / "dev"))
 from cavity_check import ER, T, plate_pair  # noqa: E402
 
-from boardgen import layer_change_board  # noqa: E402
+from boardgen import layer_change_board, open_part_island_board  # noqa: E402
 from conftest import make  # noqa: E402
 from groundtruth.analysis.simulate import simulate  # noqa: E402
 from groundtruth.config.settings import NetSpec  # noqa: E402
@@ -149,3 +149,38 @@ def test_a_failed_board_wide_model_leaves_the_route_models_result(tmp_path, monk
     assert rr.cavity == {} and rr.cavity_solves == []
     assert len(rr.solves) >= 3 and rr.emissions                 # the spectrum from the route model
     assert any("board-wide model" in n and "did not converge" in n for n in rr.notes)
+
+
+@pytest.mark.parametrize("kind", ["amplifier", "buffer"])
+def test_a_part_without_impedance_does_not_stall_the_board_wide_model(tmp_path, kind):
+    """The cause of the user's phase-voltage sense path failing on its board-wide model (2026-11-03): an op-amp or
+    buffer model with pads on two plane nets was a 1 TΩ branch. Where it was the only link of a piece of copper (a
+    supply pad alone on the coarse grid, beside holes in the planes: no plane capacitance), that piece had no
+    potential reference of its own and its potential hung on 1e-12 S beside the part's ~1e5 S solder joint: below
+    double precision, the Schur complement's LU had a round-off pivot and GMRES stalled at every frequency (here
+    1600 iterations at 1 MHz-1 GHz; on the board 1528). A part without impedance keeps its pads' metal (its lids) but
+    no branch joins its two sides [A83]: the pad is a piece of its own, and the model converges as fast as with U9
+    open (no lids), to the same loop impedance."""
+    from groundtruth.analysis.simulate import BoardModel, prepare_route
+    from groundtruth.components.models import ComponentModel
+    from groundtruth.rules.checks import run_checks
+    board, sc, _ = make(tmp_path, open_part_island_board(patch=False), "island",
+                        nets=(NetSpec("SIG", "U1.1", ["U2.1"], 50e6, 1e-9),), capacitance=True, cavity_max_nodes=3000)
+    loops = {}
+    for model in (ComponentModel(kind, {"gbw": 1e6} if kind == "amplifier" else {}), ComponentModel("open")):
+        cfg = sc.config
+        cfg.components["U9"].model = model
+        bm = BoardModel(board, cfg)
+        (key, route), = run_checks(board, cfg, bm.copper, None).routes.items()
+        setup, res, _ = prepare_route(bm, cfg.nets[0], route)
+        cav = setup.cavity
+        st = cav.exc.stack
+        assert not [b for b in st.branches if b.name == "U9" and b.kind == "part"]     # nothing joins its sides
+        # the lone +12V pad is a piece of copper of its own, with its own potential reference
+        pad = next(p for p in board.footprint("U9").pads if p.net == "+12V")
+        n = st.node_id(cav.build.node("B.Cu", *pad.position, "+12V", 1.5 * cav.build.d))
+        assert np.sum(st.full_label == st.full_label[n]) < 10
+        sols = [cav.exc.solve(f) for f in (1e6, 1e8, 1e9)]
+        assert max(s.iterations for s in sols) < 60, [s.iterations for s in sols]
+        loops[model.kind] = [s.Z_loop for s in sols]
+    assert loops[kind] == pytest.approx(loops["open"], rel=1e-6)     # measured 3e-11: the lids are dead ends

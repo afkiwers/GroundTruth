@@ -556,7 +556,12 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   node of its own, a `peec.LidNode` (numbered after the grid's nodes; as a tuple the cell over the pads' centre, so
   the moment and whatever reads a branch's layer and position keep working), joined to every grid node of its net
   under that side's pads by a `bond` branch; the bonds share the solder joint, 75 µm of SAC305 over the pads' area
-  (9.8 × 10⁻¹² Ω·m²), in parallel. The part's Z(f) + 0.3 nH runs between its two lids (one `part` branch). The
+  (9.8 × 10⁻¹² Ω·m²), in parallel. The part's Z(f) + 0.3 nH runs between its two lids (one `part` branch); a part
+  whose model has no impedance (an op-amp's `amplifier`, a `buffer`) has its lids but no `part` branch
+  (`simulate.part_conducts`, [A83], 2026-11-04): as a 1 TΩ branch it was the only link of a lone supply pad on a
+  coarse board-wide grid (board4's phase-voltage sense path), whose potential then hung on 1e-12 S beside its
+  ~5e5 S solder joint, below double precision: the Schur complement's LU got a round-off pivot (|U_ii| 1e-12 to
+  4.6e6) and GMRES stalled at every frequency (1528 iterations; 21-760 without it, 0.1 MHz-1 GHz). The
   copper then decides where the current hands over: within the transfer length √(r_c / R_sheet) (~0.14 mm in 35 µm
   copper) of where it reaches the pad, falling off across it as a transmission-line contact [Berger 1972]
   (tests/test_pad_bond.py: a 2.1 mm strip bonded over 10 mm with λ = 1 mm reads I(u) within 0.001 of
