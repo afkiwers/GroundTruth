@@ -53,7 +53,9 @@ def show(st: dict, n_models: int):
     sp_ = info.get("sparse")
     if sp_:             # the factorisation backend (solver/sparse.py, since 2026-10-25)
         print(f"  sparse solver: {sp_.get('active')} (chosen {sp_.get('chosen')}, {sp_.get('fallbacks', 0)} fell back to "
-              f"SuperLU)" + "".join(f"; {k} not loaded: {v}" for k, v in (sp_.get("not_loaded") or {}).items()))
+              f"SuperLU" + (f": {sp_['fallback_reason']}" if sp_.get("fallback_reason") else "") + ")"
+              + (f"; {sp_['perturbed_pivots']} pivots perturbed" if sp_.get("perturbed_pivots") else "")
+              + "".join(f"; {k} not loaded: {v}" for k, v in (sp_.get("not_loaded") or {}).items()))
     print("  phases: " + ", ".join(f"{p['phase']} {p['s']:.0f} s ({pct(p['s'], wall).strip()})"
                                    for p in st.get("phases", [])))
     rounds = st.get("rounds", [])

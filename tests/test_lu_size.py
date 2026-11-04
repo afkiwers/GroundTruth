@@ -7,7 +7,14 @@ import pytest
 from boardgen import microstrip_board
 from conftest import make
 from groundtruth.analysis.simulate import simulate
-from groundtruth.solver import peec
+from groundtruth.solver import peec, sparse
+
+
+@pytest.fixture(autouse=True)
+def superlu_only(monkeypatch):
+    """These tests are SuperLU's: where mkl is installed, a Simulate naming no backend would take PARDISO, and the
+    stand-in SuperLU below would never be called (CI has no mkl)."""
+    monkeypatch.setattr(sparse, "DEFAULT", "superlu")
 
 
 def overflow(when):

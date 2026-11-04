@@ -41,6 +41,7 @@ for root in (Path(sys.prefix) / "Library" / "bin", Path(sys.prefix) / "lib", Pat
     if lib: break
 if lib is None:
     print("mkl_rt not found in", sys.prefix); sys.exit(1)
+lib.MKL_Set_Threading_Layer(ctypes.c_int(1))           # sequential, as solver/sparse.py loads it
 lib.pardiso.argtypes = [ctypes.c_void_p] * 16
 n = 4
 a = np.array([4, 1j, 4, 1, 4, 1j, 4], complex)          # upper triangle of a tridiagonal complex symmetric matrix

@@ -12,8 +12,12 @@ typedef struct {
     long n;
 } gt_handle;
 
-/* Factorise; info[0] = status (0 ok, -2 out of memory, else Accelerate's), info[1] = the factor's size in
- * complex entries (its symbolic factorisation's double storage / 16). NULL on failure. */
+/* The status when the shim's own allocation fails: not one of Accelerate's SparseStatus values (0 ok, -1 failed,
+ * -2 singular, -3 internal, -4 parameter, -INT_MAX released). It was -2, which is Accelerate's "singular". */
+#define GT_NO_MEMORY (-1000)
+
+/* Factorise; info[0] = status (0 ok, GT_NO_MEMORY, else Accelerate's SparseStatus), info[1] = the factor's size
+ * in complex entries (its symbolic factorisation's double storage / 16). NULL on failure. */
 void *gt_factor(long n, const long *columnStarts, const int *rowIndices, const double complex *values, long *info) {
     SparseMatrix_Complex_Double A = {
         .structure = {.rowCount = (int)n, .columnCount = (int)n, .columnStarts = (long *)columnStarts,
@@ -22,7 +26,7 @@ void *gt_factor(long n, const long *columnStarts, const int *rowIndices, const d
                       .blockSize = 1},
         .data = (void *)values};
     gt_handle *h = malloc(sizeof(gt_handle));
-    if (!h) { info[0] = -2; return NULL; }
+    if (!h) { info[0] = GT_NO_MEMORY; return NULL; }
     h->n = n;
     h->F = SparseFactor(SparseFactorizationLDLTSBK, A);
     info[0] = (long)h->F.status;

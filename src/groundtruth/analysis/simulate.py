@@ -3496,7 +3496,8 @@ class MemoryRelief:
        when needed);
     2. again, with the run's models (`stacks`; every live one when not given) factorising with diagonal pivots
        only from now on (the least fill; GMRES corrects the weaker preconditioner: the results stand, the solves
-       take more iterations) [A38];
+       take more iterations) [A38]; a faster backend's factorisations stay the backend's (less fill than that
+       already, peec._factorise [A86]);
     3. `on_short(task, error)`: Simulate leaves that frequency unsolved, with a note (as when GMRES does not
        converge: the band_unsolved warning names what it misses); without it the MemoryError is raised.
 
@@ -4056,12 +4057,17 @@ def simulate(board: Board, config: Config, nets: Optional[list[str]] = None,
         config, cap_bias, bias_notes = at_dc(board, config.active(nets))
         stats.mark("capacitor bias")
         # the factorisation backend (solver/sparse.py): the settings' or Preferences' choice, else the process's
+        # default (not whatever an earlier Simulate in this process chose)
         sparse_solver.configure(getattr(config.analysis, "sparse", None))
+        sparse0 = sparse_solver.counts()
         with gpu.use(getattr(config.analysis, "gpu", "auto")) as run:
             result = _simulate(board, config, nets, progress, copper, model, keep_factorisations, part,
                                full if part is not None else None)
     result.solver = run.summary()
     if st is not None:
+        # this run's own fallbacks and perturbed pivots, counted after its solves (solve_setups' entry is the
+        # backend as the solves began)
+        st.info["sparse"] = sparse_solver.report(since=sparse0)
         result.solver["stats"] = st.as_dict()
     result.cap_bias = cap_bias
     result.notes += bias_notes

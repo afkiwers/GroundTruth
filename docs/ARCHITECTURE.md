@@ -920,12 +920,22 @@ M3 of the speed work (docs/SPEED.md 5.3-5.5). `PlaneStack._factorise` hands the 
   gt_accelerate.dylib` (the Mac server's installer builds it as the installing user: the service runs as root and
   could not compile it, Xcode's licence), beside the module, else compiled on first use into ~/Library/Caches.
 - Every backend single-threaded inside a solve (the same bits every run; Apple documents determinism only so), a
-  lock per factorisation (their handles are not safe for concurrent solves); any failure: SuperLU for that
-  factorisation, counted (`sparse.report()` in the run's statistics with the reason a backend did not load).
+  lock per factorisation (their handles are not safe for concurrent solves); a backend that fails on a model's
+  matrix leaves that model to SuperLU (planned as SuperLU's from then on), counted per run with the reason
+  (`sparse.report(since=...)` in the run's statistics, with why a backend did not load and the pivots PARDISO
+  perturbed: a singular S is no error there).
+- PARDISO on MKL's **sequential** threading layer (`MKL_Set_Threading_Layer` before any other call): MKL's default
+  layer loads the mkl wheel's OpenMP runtime, and in a process that had imported PyTorch (gpu.use imports it at
+  every Simulate's start where it is installed) that aborted the process, "OMP: Error #15", exit code 3 (audit
+  round 8).
 - Chosen by `analysis.sparse` (settings file; Preferences' **Sparse solver** per computer; `--sparse`), else
-  `GROUNDTRUTH_SPARSE`, else auto (Accelerate on macOS, PARDISO where mkl loads, else SuperLU).
+  `GROUNDTRUTH_SPARSE`, else auto (Accelerate on macOS, PARDISO where mkl loads, else SuperLU); every Simulate
+  sets it (none named: the default, not an earlier Simulate's choice).
 - Memory planning (`peec.lu_bytes`) with a backend: 0.45x SuperLU's fill estimate before a model's first
-  factorisation, 1.5x the fill as memory (no SuperLU commit growth) [A69]; the measured fill after it.
+  factorisation, 1.5x the fill as memory (no SuperLU commit growth) [A69]; after it the measured fill and at least
+  1.2x the peak the backend reported (PARDISO's peak was up to 1.96x [A69]'s figure) [A86]. When memory is short
+  the backend keeps making the factorisations (its fill is below SuperLU's least; SuperLU took 3.7-10x PARDISO's
+  memory) [A86].
 
 Measured (SPEED.md): refboard at 1x on the laptop with PARDISO, job A 184 -> 153 s, job B 826 -> 718 s, results
 within 1.4e-5 dB; at 8x on the M2 with Accelerate, job B's factorisations 490 -> 97 s, fill 0.27-0.43 of SuperLU's,
