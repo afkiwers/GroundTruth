@@ -268,8 +268,9 @@ def test_NA6_branches_and_a_tee_split_the_current_as_the_sheet_solve_does(tmp_pa
 def test_NA7_a_bend_converges_onto_the_sheet_solve(tmp_path):
     """NA-7: a 0.25 mm track bent through 90° with its arms at ±45° to the grid (staircases on every grid) against
     the sheet solve of the same copper turned by 45°, so the reference's arms lie on its grid (resistance does not
-    depend on the orientation): 57.43 mΩ, h = 0.02 / 0.01 / 0.005 mm agree to 0.02 %. GroundTruth -0.70 / -0.14 %
-    at 1x / 4x: within 1 % and converging."""
+    depend on the orientation): 57.43 mΩ, h = 0.02 / 0.01 / 0.005 mm agree to 0.02 %. GroundTruth -0.48 / -0.13 %
+    at 1x / 4x: within 1 % and converging (-0.70 / -0.14 % before each pad fed its nodes by their cells' share of it,
+    [A88]; -1.05 % at 1x fed evenly over the cells it overlaps)."""
     import adversarial_dc as adv
     import refsolvers
     from shapely import affinity

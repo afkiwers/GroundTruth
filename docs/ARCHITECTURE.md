@@ -307,7 +307,11 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
   - `solve(f, guess=[...])` warm-starts GMRES from a least-squares combination of guess vectors.
     Candidates start from the baseline solution, which saves about a third of the iterations. Across
     frequencies a warm start doesn't help, so it isn't used there.
-- **Kernel cache** (`_kernel_pair`): spectra are reused across solves on the same grid.
+- **Kernel cache** (`_kernel_pair`): spectra are reused across solves on the same grid. A kernel is computed for
+  its key's d and dz (12 significant digits, [A85]), never for the exact bits of whichever model asked first:
+  equal layer gaps come out of `face_gap` one bit apart, and until audit round 8 (G8-1) a model's numbers then
+  depended on what earlier models had left in the cache and what its eviction had dropped (last digits; a
+  repeated or grouped Simulate in one process could differ: `test_a_simulate_does_not_depend_on_the_kernels_cached_before_it`).
 - **Compiled multiply-add** (`solver/_mac.py`, numba): the L_p product's Σ_s K[t,s]·F[s] per frequency pixel
   was N² numpy multiplies and adds, each a pass over memory (9.4 ms per product on the 6-layer route model);
   fused per pixel it is 3.3 ms, bit-identical. Serial on purpose (the solves already run in parallel threads,
@@ -559,7 +563,7 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   (9.8 × 10⁻¹² Ω·m²), in parallel. The part's Z(f) + 0.3 nH runs between its two lids (one `part` branch); a part
   whose model has no impedance (an op-amp's `amplifier`, a `buffer`) has its lids but no `part` branch
   (`simulate.part_conducts`, [A84], 2026-11-04): as a 1 TΩ branch it was the only link of a lone supply pad on a
-  coarse board-wide grid (board4's phase-voltage sense path), whose potential then hung on 1e-12 S beside its
+  coarse board-wide grid (a sense path on a second real board), whose potential then hung on 1e-12 S beside its
   ~5e5 S solder joint, below double precision: the Schur complement's LU got a round-off pivot (|U_ii| 1e-12 to
   4.6e6) and GMRES stalled at every frequency (1528 iterations; 21-760 without it, 0.1 MHz-1 GHz). The
   copper then decides where the current hands over: within the transfer length √(r_c / R_sheet) (~0.14 mm in 35 µm
@@ -575,6 +579,23 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   refboard at 2x, the stages' DC currents together (`tools/dev/pad_density.py --part Q601`, `out/speed/q601_*_2x.json`):
   Q601's drain pad densest 67.7 → 22.5 A/mm² (a sampled corner → the edge the current arrives at, falling to ~0
   across the pad), its drain fingers 59.6 → ≤ 10, the view's peak 66.4 → 57.6 A/mm² (now elsewhere).
+  **Which nodes are under a pad** (2026-11-04, branch `pad-feed`, [A88]; audit round 8, P8-6): those of its net
+  whose cell (the d × d square around the node) overlaps the pad, i.e. within d/2 of its outline in x and y
+  (`simulate.cells_overlap`, `grid_cells_of`; a cell edge exactly on the outline counts on the +x / +y side). With
+  the nodes inside the outline a pad L long spanned L − d between its first and last node on average, L − 2d with its
+  edges on nodes: a perfect terminal over a 10 mm pad shorted 0.916 / 0.958 of its copper at 0.4 mm cells (edges on
+  nodes / half a cell off), now 0.998 at every offset (0.978 → 0.998 at 0.1 mm). The lids, the dies, the terminal
+  sheets and the DC feed (`power._pad_nodes`, which took the pad grown by a round d/2 before) share the rule; a
+  node holds one net's copper, so two pads of two nets closer than a cell never share one. A terminal sheet's
+  branches are as wide as the pads across them (`sheet_widths`, as the copper's strips [A39]): its outer rows are
+  cells the pad covers in part (taken a full pitch wide, a 4 mm terminal conducted as 4.4 mm at 0.4 mm cells). A
+  current fed in at a pin goes to each node by the part of the pin its cell holds (`cell_areas`): fed evenly, the
+  outer cells widened the fed region by about half a cell all round (NA-7's bend at 1x: −1.05 % against the sheet
+  solve; −0.48 % so, −0.71 % with the old round buffer). The lids' solder bonds and a die's branches stay equal per
+  node. The vias' joints (`add_pin`) are not pads and are unchanged: on a plane pair fed at a pad over a via, the
+  port's inductance still moves with the grid's offset (0.4 mm cells: 0.72 / 0.78 / 0.82 nH before, 0.73 / 0.77 /
+  0.79 after) because each layer's joint snaps to its own nearest node, so a joint can slant a cell between the
+  layers; joining every layer at the same node removed most of it in a trial (0.80-0.82 nH) — open.
   **A vertical FET's die is spread over its tab** (2026-10-25, branch `tab-spread`, `simulate.die_side`,
   `die_branches`, [A68]; the user, of that view: "the top layer under the fet is black and the vias glow which does
   not make sense"). With one lid per side the drain tab was one node at one voltage, so the copper under Q601 handed
@@ -589,8 +610,9 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   GT field, the Parts tab's Pins cell or Pin defaults…). `part_pairs` is left for the PDN's ideal source.
   **The terminal as a resistive sheet** (2026-10-26, [A70]; the user, of an inductor's pad dark inside with a bright
   rim: "L501 seems to have an infinitly conductive edge like Q601 had before"): `part_lid(sheet=...)` puts a terminal
-  node above every grid node under the pads (each bonded to its own), joins neighbours by the sheet resistance (one
-  square per pitch) and feeds the part evenly over the terminal (equal branches from the part's node to every
+  node above every grid node under the pads (each bonded to its own), joins neighbours by the sheet resistance (a
+  strip a pitch long and as wide as the pads across it, `sheet_widths` [A88]; one square inside the pads) and feeds
+  the part evenly over the terminal (equal branches from the part's node to every
   terminal node, `ENTRY_SHARE` 1 % of its DC resistance per side, taken off the part's own branch). `terminal_of`: the part fields
   `Terminal Sheet Resistance` (Ω/□) or `Terminal Metal` ("0.15mm bronze": ρ/t), else (and for 0) the perfect
   plate: nothing is assumed, so an uncharacterised part shows its dark pad and sharp rim (the user).
@@ -920,12 +942,22 @@ M3 of the speed work (docs/SPEED.md 5.3-5.5). `PlaneStack._factorise` hands the 
   gt_accelerate.dylib` (the Mac server's installer builds it as the installing user: the service runs as root and
   could not compile it, Xcode's licence), beside the module, else compiled on first use into ~/Library/Caches.
 - Every backend single-threaded inside a solve (the same bits every run; Apple documents determinism only so), a
-  lock per factorisation (their handles are not safe for concurrent solves); any failure: SuperLU for that
-  factorisation, counted (`sparse.report()` in the run's statistics with the reason a backend did not load).
+  lock per factorisation (their handles are not safe for concurrent solves); a backend that fails on a model's
+  matrix leaves that model to SuperLU (planned as SuperLU's from then on), counted per run with the reason
+  (`sparse.report(since=...)` in the run's statistics, with why a backend did not load and the pivots PARDISO
+  perturbed: a singular S is no error there).
+- PARDISO on MKL's **sequential** threading layer (`MKL_Set_Threading_Layer` before any other call): MKL's default
+  layer loads the mkl wheel's OpenMP runtime, and in a process that had imported PyTorch (gpu.use imports it at
+  every Simulate's start where it is installed) that aborted the process, "OMP: Error #15", exit code 3 (audit
+  round 8).
 - Chosen by `analysis.sparse` (settings file; Preferences' **Sparse solver** per computer; `--sparse`), else
-  `GROUNDTRUTH_SPARSE`, else auto (Accelerate on macOS, PARDISO where mkl loads, else SuperLU).
+  `GROUNDTRUTH_SPARSE`, else auto (Accelerate on macOS, PARDISO where mkl loads, else SuperLU); every Simulate
+  sets it (none named: the default, not an earlier Simulate's choice).
 - Memory planning (`peec.lu_bytes`) with a backend: 0.45x SuperLU's fill estimate before a model's first
-  factorisation, 1.5x the fill as memory (no SuperLU commit growth) [A69]; the measured fill after it.
+  factorisation, 1.5x the fill as memory (no SuperLU commit growth) [A69]; after it the measured fill and at least
+  1.2x the peak the backend reported (PARDISO's peak was up to 1.96x [A69]'s figure) [A86]. When memory is short
+  the backend keeps making the factorisations (its fill is below SuperLU's least; SuperLU took 3.7-10x PARDISO's
+  memory) [A86].
 
 Measured (SPEED.md): refboard at 1x on the laptop with PARDISO, job A 184 -> 153 s, job B 826 -> 718 s, results
 within 1.4e-5 dB; at 8x on the M2 with Accelerate, job B's factorisations 490 -> 97 s, fill 0.27-0.43 of SuperLU's,
@@ -1129,8 +1161,10 @@ for a boost; duty = the high-side conduction time). The inductor current is cont
   - Solve rows (`_stage_row`) carry X_ohm; below the capacitors' self-resonance the loop is capacitive and
     L_nH is None (it read −1829 nH at 10 kHz). A stage whose rail is another buck's output (`feeding_stage`)
     says it is cascaded instead of blaming series switches for the missing input path.
-  - Each pad's current is spread evenly over all grid nodes inside its outline (`_pad_nodes`). One node per pad
-    would add a spreading-resistance singularity of about 0.1 mΩ, as much as a whole path.
+  - Each pin's current is spread over the grid nodes of its net whose cell overlaps the pin (`_pad_nodes`,
+    `simulate.grid_cells_of` [A88]: within half a cell of its outline), each by the part of the pin its cell holds
+    (`simulate.cell_areas`; evenly until 2026-11-04). One node per pad would add a spreading-resistance singularity
+    of about 0.1 mΩ, as much as a whole path.
   - R = Re(Σ aₙVₙ) for 1 A. The density is |K|·I/t per layer, with t from the stackup:
     `BoardModel.t_phys` → `StackBuild.t` → `PlaneLayer.thickness`, which until session 3 was always 35 µm. The
     via density is I/(π·drill·25 µm).

@@ -49,7 +49,7 @@ import threading
 import time
 import weakref
 from collections import OrderedDict
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -1331,8 +1331,11 @@ LU_RESIDENT = 2.0                               # ... and keeps at most ~2x it r
 BACKEND_FILL = 0.45                             # a faster backend's fill per unknown against SuperLU's estimate,
                                                 # before its first factorisation (Accelerate on the M2 at 8x: 0.27
                                                 # board-wide, ~0.41 the others; PARDISO at 4x 0.5-0.6) [A69]
-BACKEND_MEMORY = 1.5                            # its memory per byte of fill: no SuperLU commit growth (PARDISO's
-                                                # own peak, Accelerate's measured: <= ~1.5x) [A69]
+BACKEND_MEMORY = 1.5                            # its memory per byte of fill: no SuperLU commit growth (Accelerate's
+                                                # measured: <= ~1.5x) [A69] ...
+BACKEND_PEAK = 1.2                              # ... and at least this times the peak the backend reports (PARDISO:
+                                                # the process took 1.11-1.17x its own count, which itself was up to
+                                                # 1.96x BACKEND_MEMORY x the fill) [A86]
 GATE_SHARE = 0.8                                # of the available memory a factorisation may plan to commit
 GATE_WAIT_S = 1.0                               # a waiting factorisation looks at the memory again this often
 _STACKS: "weakref.WeakSet[PlaneStack]" = weakref.WeakSet()     # every stack alive: their caches can be freed
@@ -1343,11 +1346,18 @@ def lu_bytes(stack: "PlaneStack") -> int:
     so far (`lu_nnz`), else as estimated from its unknowns (FILL_PER_UNKNOWN; fill grows faster than the unknowns
     on finer grids, so the estimate is low at high resolutions until the first one is measured), x 16 bytes x
     lu_commit() [A38] [A67]; with a faster backend (solver/sparse.py) its own fill and memory: BACKEND_FILL,
-    BACKEND_MEMORY [A69]."""
-    backend = _sparse.active() != "superlu"
+    BACKEND_MEMORY [A69], and at least BACKEND_PEAK x the peak the backend reported for this model's largest
+    factorisation (`lu_peak`: PARDISO's ordering and symbolic data grow with the unknowns, not the fill: on
+    refboard's models its peak was 0.99-1.96x BACKEND_MEMORY x the fill, the process's memory 1.11-1.17x its peak
+    [A86]). A model SuperLU factorises in a backend run (the backend failed on its matrix: `lu_superlu`; SuperLU's
+    size limit reached: `lu_fallbacks`) plans as SuperLU."""
+    backend = (_sparse.active() != "superlu" and not getattr(stack, "lu_superlu", False)
+               and not getattr(stack, "lu_fallbacks", 0))
     nnz = getattr(stack, "lu_nnz", 0) or (FILL_PER_UNKNOWN.get(stack.precond_mode, 70) * stack.nb
                                           * (BACKEND_FILL if backend else 1.0))
-    return int(nnz * 16 * (BACKEND_MEMORY if backend else lu_commit()))
+    if not backend:
+        return int(nnz * 16 * lu_commit())
+    return int(max(nnz * 16 * BACKEND_MEMORY, BACKEND_PEAK * getattr(stack, "lu_peak", 0)))
 
 
 def lu_commit() -> float:
@@ -1375,7 +1385,8 @@ def free_factorisations() -> int:
 def low_memory_everywhere(stacks=None) -> int:
     """From now on these stacks (every live one when None) factorise with diagonal pivots only (the least fill
     SuperLU can do: the ordering's own; a preconditioner needs no more, GMRES corrects it): the second rung of
-    simulate.MemoryRelief. How many stacks were switched."""
+    simulate.MemoryRelief. A faster backend (solver/sparse.py) keeps making them: its fill is already less [A86].
+    How many stacks were switched."""
     n = 0
     for st in list(_STACKS if stacks is None else stacks):
         if not getattr(st, "lu_low_memory", False):
@@ -2126,17 +2137,36 @@ class PlaneStack:
             # so do all of them once memory ran short (low_memory_everywhere: the least fill)
             low = bool(getattr(self, "lu_fallbacks", 0) or getattr(self, "lu_low_memory", False))
             thresh = 0.0 if low else LU_PIVOT_THRESHOLD
-            # admitted by the memory gate: room made, or a wait for the others being made, or the least fill
+            lu = None
+            # a faster backend when one is configured and loads (solver/sparse.py: PARDISO, Accelerate), admitted
+            # by the memory gate with its own plan (lu_bytes); also when memory is short (`low`, the gate's
+            # `short`): its fill is already less than SuperLU's least, and it commits no growth. Until audit round
+            # 8 the least-fill rung switched a backend run to SuperLU: on refboard's models 3.7-10x the memory of
+            # PARDISO's peak (SuperLU's 6.5x commit of ~2x the fill), planned at the backend's rate [A86]
+            if not getattr(self, "lu_superlu", False) and not getattr(self, "lu_fallbacks", 0) \
+                    and _sparse.active() != "superlu":
+                t_gate = time.perf_counter()
+                with GATE.admit(lu_bytes(self)):
+                    if c is not None:
+                        c.add(self, gate_wait_s=time.perf_counter() - t_gate)
+                    lu = _sparse.factorise(S)
+                if lu is None:
+                    # the backend failed on this matrix (counted in sparse.fallbacks with its reason): SuperLU makes
+                    # this model's factorisations from now on, planned as SuperLU's (the backend's measured fill and
+                    # peak say nothing about SuperLU's)
+                    self.lu_superlu = True
+                    self.lu_nnz = 0
+                else:
+                    self.lu_peak = max(getattr(self, "lu_peak", 0), int(lu.bytes))
+            # else SuperLU, admitted by the memory gate: room made, or a wait for the others being made, or the least
+            # fill (nothing to admit when the backend made it)
             t_gate = time.perf_counter()
-            with GATE.admit(lu_bytes(self)) as short:
-                if c is not None:
+            with (GATE.admit(lu_bytes(self)) if lu is None else nullcontext(False)) as short:
+                if c is not None and lu is None:
                     c.add(self, gate_wait_s=time.perf_counter() - t_gate)
                 if short and thresh:
                     thresh = 0.0
                     self.lu_memory_fallbacks = getattr(self, "lu_memory_fallbacks", 0) + 1
-                # a faster backend when one is configured and loads (solver/sparse.py: PARDISO, Accelerate),
-                # else None and SuperLU as before; the least-fill retries below stay SuperLU's
-                lu = _sparse.factorise(S) if not low else None
                 try:                    # made (and freed) in a host thread: see _LuHost
                     if lu is None:
                         lu = hosted_splu(S, permc_spec="MMD_AT_PLUS_A", diag_pivot_thresh=thresh,
@@ -2925,11 +2955,29 @@ _KERNEL_CACHE_BYTES = 128 * 2**20   # the cache's spectra at most (oldest out fi
 _KERNEL_LOCK = threading.Lock()
 
 
+KERNEL_DIGITS = 12                  # significant digits of a kernel's d and dz (_kernel_value) [A85]
+
+
+def _kernel_value(v: float) -> float:
+    """A kernel's pitch or layer distance as the kernels are computed and cached for it: v to KERNEL_DIGITS
+    significant digits [A85]."""
+    return float(f"{float(v):.{KERNEL_DIGITS}g}")
+
+
 def _kernel_pair(nx: int, ny: int, d: float, dz: float) -> tuple:
     """(FFT spectrum x, FFT spectrum y, same-position mutual (self inductance at dz = 0), Σ kernel x, Σ kernel y)
     for strips at layer distance dz (~0.2 s for a 231 x 264 route model). Cached up to _KERNEL_CACHE_BYTES:
-    models on the same grid (a stage's own models, a Simulate repeated) reuse them."""
-    key = (nx, ny, round(d, 12), round(dz, 12))
+    models on the same grid (a stage's own models, a Simulate repeated) reuse them.
+
+    Computed for d and dz rounded as the cache key rounds them (_kernel_value), so a kernel depends on its key
+    alone [A85]. Until 2026-11-04 it was computed for the exact d, dz of whichever model asked for the key first:
+    two layer pairs with the same gap differ in the last bit (face_gap: 0.001235 and 0.0012349999999999998 m on a
+    test board), so a model's kernels, and every number after them (95 of a route's 275 by up to 3e-13), depended
+    on what the cache held from earlier models and what its oldest-first eviction had dropped since. A Simulate
+    repeated in one process, or solved in groups, could then differ in the last digits (the test suite's
+    test_models_solved_in_groups_when_memory_is_short_keep_every_number failed so in a full run, never alone)."""
+    d, dz = _kernel_value(d), _kernel_value(dz)
+    key = (nx, ny, d, dz)
     with _KERNEL_LOCK:
         hit = _KERNELS.get(key)
     if hit is None:

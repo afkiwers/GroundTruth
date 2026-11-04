@@ -78,3 +78,29 @@ def test_a_plane_pair_is_mu0_times_its_gap_plus_the_copper_s_own_inductance(line
     assert 0.94 * low < lo < 1.03 * low, (lo, low)
     assert 0.94 * high < hi < 1.03 * high, (hi, high)
     assert hi < lo                                   # the copper's own inductance falls with the skin depth
+
+
+@pytest.mark.parametrize("t_um", [18.0, 35.0, 70.0, 105.0, 210.0])
+def test_the_slab_impedance_is_the_coth_form_at_every_frequency(t_um):
+    """kernel.slab_impedance against the one-face slab written out independently, (1 + j)/(sigma delta) coth((1 + j)
+    t/delta) with coth u = (1 + e^-2u)/(1 - e^-2u) [Ramo 1994], from 1 kHz to 20 GHz: within 1e-5 in both parts (its
+    thin-foil series stops at x^2 in the reactance: 8x^4/315 = 2.5e-6 at t/delta = 0.1), and its high-frequency limit
+    (1 + j)/(sigma delta) (the surface impedance of a half space) at t/delta > 30 within 1e-9. Its
+    argument is capped where coth is 1; before round 8 the factor (1 + j) t/delta in front was capped too, which froze
+    the impedance at its t/delta = 30 value: 70 um copper read 10 % low at 1 GHz, 35 um 43 % low at 10 GHz."""
+    import numpy as np
+    from groundtruth.solver.kernel import slab_impedance
+    t = t_um * 1e-6
+    for f in np.logspace(3, np.log10(2e10), 60):
+        delta = 1 / math.sqrt(math.pi * f * MU0 * SIGMA)
+        u = (1 + 1j) * t / delta
+        if abs(u) < 1e-3:       # the exact form cancels there: its series u coth u = 1 + u^2/3 - u^4/45 + 2u^6/945
+            ref = (1 + u ** 2 / 3 - u ** 4 / 45 + 2 * u ** 6 / 945) / (SIGMA * t)
+        else:
+            ref = u * (1 + np.exp(-2 * u)) / (1 - np.exp(-2 * u)) / (SIGMA * t)
+        z = slab_impedance(t, f, SIGMA)
+        assert abs(z.real / ref.real - 1) < 1e-5, (t_um, f, z, ref)
+        assert abs(z.imag / ref.imag - 1) < 1e-5, (t_um, f, z, ref)
+        if t / delta > 30:
+            surface = (1 + 1j) / (SIGMA * delta)
+            assert abs(z / surface - 1) < 1e-9, (t_um, f, z, surface)

@@ -54,7 +54,7 @@ from ..emi.spectrum import analysis_band, trapezoid_harmonics
 from ..solver.peec import Branch, RouteExcitation, Solution, SolverError, TraceSegment
 from .pins import feed_layers
 from .simulate import (BoardModel, ModelRun, RouteResult, StackBuild, _choose_pitch, _interp_loglog,
-                       add_terminal_vectors, terminal_vectors,
+                       add_terminal_vectors, cell_areas, grid_cells_of, terminal_vectors,
                        _solve_row, _top_plane_pair, band_moments, band_notes, band_top, indicative_text,
                        initial_frequencies, mark_quasi_static, resonance_text, transfers, unsolved_band,
                        unsolved_issue, via_groups)
@@ -1513,28 +1513,18 @@ def _ce101_stage(setup: ConverterSetup, res: ConverterResult, a):
 
 
 def _pad_nodes(st: StackBuild, pad: Pad, side: str) -> list[tuple]:
-    """Every grid node of the pad's net inside its outline, on the layer _pad_node picks; at least the nearest.
-    A DC current fed into one node would add a spreading resistance (a log singularity) of the order of
-    0.1 mΩ per pad: as much as a whole power path."""
-    import shapely
+    """Every grid node of the pad's net whose cell overlaps the pad (simulate.grid_cells_of: within half a cell of
+    its outline [A88]), on the layer _pad_node picks; at least the nearest. A DC current fed into one node would add
+    a spreading resistance (a log singularity) of the order of 0.1 mΩ per pad: as much as a whole power path.
+    The pad grown by a round d/2 until 2026-11-04: the same rule but for its corners, and a node exactly half a cell
+    off the outline was in or out by round-off."""
     from ..geometry.shapes import pad_shape
     n0 = _pad_node(st, pad, side)
     if n0 is None:
         return []
     k = n0[0]
-    g = st.grids[k]
-    poly = pad_shape(pad).buffer(st.d / 2)
-    x0, y0, x1, y1 = poly.bounds
-    i0, i1 = max(int((x0 - g.x0) / g.d) - 1, 0), min(int((x1 - g.x0) / g.d) + 2, g.nx)
-    j0, j1 = max(int((y0 - g.y0) / g.d) - 1, 0), min(int((y1 - g.y0) / g.d) + 2, g.ny)
-    ii, jj = np.meshgrid(np.arange(i0, i1), np.arange(j0, j1), indexing="ij")
-    ii, jj = ii.ravel(), jj.ravel()
-    xs, ys = g.xy(ii, jj)
-    inside = shapely.contains_xy(poly, xs, ys) & g.node[ii, jj]
-    if g.label is not None and g.nets:
-        net_id = g.nets.index(pad.net) if pad.net in g.nets else -1
-        inside &= g.label[ii, jj] == net_id
-    nodes = [(k, int(i), int(j)) for i, j in zip(ii[inside], jj[inside])]
+    ii, jj = grid_cells_of(st.grids[k], pad_shape(pad), pad.net)
+    nodes = [(k, int(i), int(j)) for i, j in zip(ii, jj)]
     return nodes or [n0]
 
 
@@ -1545,6 +1535,14 @@ def _by_pin(pads: list[Pad]) -> dict[str, list[Pad]]:
     for p in pads:
         out.setdefault(p.pin, []).append(p)
     return out
+
+
+def pin_outline(pads: list[Pad]):
+    """A pin's copper as one shape (the union of its pads' outlines, overlaps once), None when a pad has none."""
+    from shapely.ops import unary_union
+    from ..geometry.shapes import pad_shape
+    shapes = [pad_shape(p) for p in pads]
+    return None if any(s is None for s in shapes) else unary_union(shapes)
 
 
 def pin_area(pads: list[Pad]) -> float:
@@ -1573,8 +1571,9 @@ def pad_weights(pads: list[Pad]) -> list[float]:
 
 def _area_shares(st: StackBuild, pads: list[Pad], side: str, total: float) -> list[tuple]:
     """Injections spreading `total` A over the pads' pins by their copper area (pin_area: overlapping pads of one pin
-    count once [A51]) and over each pin's own grid nodes evenly, each node once (a pin is fed over its whole area,
-    like a lead frame). Summed per pad before 2026-10-21: EPC2306's pin 2 (a bar under three tabs) took 42 % of
+    count once [A51]) and over each pin's own grid nodes by the part of the pin each node's cell holds (cell_areas
+    [A88]; evenly before 2026-11-04), each node once (a pin is fed over its whole area, like a lead frame). Summed
+    per pad before 2026-10-21: EPC2306's pin 2 (a bar under three tabs) took 42 % of
     the FET's source current for its 34 % of the copper, the overlap fed twice. A part's side the model solders
     over its pads (st.side_lids: a lumped part's, a tab switch's, simulate.switch_lids [A65]) takes its pins' share
     into its lid instead: the copper then decides where it enters."""
@@ -1597,8 +1596,18 @@ def _area_shares(st: StackBuild, pads: list[Pad], side: str, total: float) -> li
                 raise SolverError(f"{p.pin}: no {p.net} copper at the pad")
             nodes += got
         nodes = list(dict.fromkeys(nodes))          # a node under two of the pin's pads: fed once
-        share = total * areas[pin] / sum(areas.values()) / len(nodes)
-        out += [(n, share) for n in nodes]
+        share = total * areas[pin] / sum(areas.values())
+        # each node by how much of the pin's copper its cell holds (cell_areas [A88]): the nodes are those whose cell
+        # the pin overlaps, and fed evenly the outer ones, cells the pin covers in part, widened the fed region by
+        # about half a cell all round (a 0.25 mm bend's resistance at 1x: -1.05 % against an independent sheet solve
+        # evenly, -0.48 % so; -0.71 % with the round d/2 buffer before). A node without any (the nearest node, for
+        # a pad smaller than a cell between the nodes; an outline missing) takes the pin's current evenly as before
+        xy = np.array([st.xy(n) for n in nodes])
+        outline = pin_outline(ps)
+        w = cell_areas(outline, xy[:, 0], xy[:, 1], st.d) if outline is not None else np.zeros(len(nodes))
+        if not w.sum() > 0:
+            w = np.ones(len(nodes))
+        out += [(n, share * float(x) / float(w.sum())) for n, x in zip(nodes, w) if x > 0]
     merged: dict[tuple, float] = {}
     for n, amps in out:
         merged[n] = merged.get(n, 0.0) + amps

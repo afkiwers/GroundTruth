@@ -5,8 +5,9 @@
 Simulates the chosen nets / power stages twice in one process, analysis.gpu off and then on, and prints the two
 times, where the second run's solves went (and any that fell back to the CPU), and the largest differences between
 the two results (routes, power stages and issues, number by number as tools/dev/result_diff.py does). Expect
-differences at the GMRES tolerance (~1e-5 relative, a few 1e-5 dB) and the same issues. Never writes next to the
-board. On a machine without a GPU, GROUNDTRUTH_GPU_DEVICE=cpu runs the GPU code with PyTorch on the CPU (slower than
+differences at the GMRES tolerance (~1e-5 relative, a few 1e-5 dB) and the same issues. Exits 3 when no solve ran
+on the GPU (all fell back to the CPU: the device's free memory, shared with other processes, was too small). Never
+writes next to the board. On a machine without a GPU, GROUNDTRUTH_GPU_DEVICE=cpu runs the GPU code with PyTorch on the CPU (slower than
 numpy: a check of the code, not of the speed).
 """
 import argparse
@@ -74,8 +75,18 @@ def main() -> int:
         print(f"  {d:10.3g} {kind:3s}  {path}: {a!r} vs {b!r}")
     for m in missing[: args.top]:
         print("  only in one / different text: " + m)
+    # a solve that fell back to the CPU (DeviceTooSmall: the device's free memory, which other processes share)
+    # compares the CPU with itself: say how many did, and claim nothing when none ran on the GPU
+    fell = on.solver.get("gpu_fallbacks") or 0
+    solves = sum(m.get("solves", 0) for m in (on.solver.get("stats") or {}).get("models", []))
+    if solves and fell >= solves:
+        print(f"\nNO SOLVE RAN ON THE GPU ({fell} of {solves} fell back to the CPU): nothing compared; free the "
+              "device's memory (other processes using it) and run again")
+        return 3
     ok = (not db or db[0][0] < 0.01) and not missing
-    print("\nthe GPU gives the CPU's results" if ok else "\nDIFFERENT RESULTS: see above, and keep analysis.gpu off")
+    share = f" ({fell} of {solves} solves fell back to the CPU: those compare the CPU with itself)" if fell else ""
+    print(f"\nthe GPU gives the CPU's results{share}" if ok
+          else "\nDIFFERENT RESULTS: see above, and keep analysis.gpu off")
     return 0 if ok else 2
 
 
