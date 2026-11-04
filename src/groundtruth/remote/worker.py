@@ -100,7 +100,9 @@ def run(kind: str, args: tuple, threads: str = "-", gpu: str = "-", progress=Non
         from ..analysis.thermal_proc import thermal_with_coupling
         board, config, results = args
         return thermal_with_coupling(board, config, results,
-                                     lambda inputs: solve_thermal(board, config, *inputs, progress=progress),
+                                     lambda inputs, mesh_plan=None: solve_thermal(board, config, *inputs,
+                                                                                  progress=progress,
+                                                                                  mesh_plan=mesh_plan),
                                      progress)
     if kind == "capacity":
         from ..analysis.thermal import solve_capacity

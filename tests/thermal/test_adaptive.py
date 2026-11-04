@@ -153,6 +153,43 @@ def test_dielectric_split_is_graded():
                 assert all(b >= a - 1e-12 for a, b in zip(parts[:len(parts) // 2], parts[1:len(parts) // 2 + 1]))
 
 
+def _two_sources(rel_a: float, rel_b: float, groups: float):
+    """plan_refinement on a 25.6 x 12.8 mm two-layer stack (0.4 mm cells, 8 x 4 blocks of 3.2 mm, finest 0.05 mm)
+    heated by two identical 0.05 mm squares of 0.1 W, the same spot in blocks (1, 1) and (1, 6), their powers times
+    1 + rel_a and 1 + rel_b, with a budget of `groups` times one level-0 block group's (a block and its eight
+    neighbours). (leaves, info)."""
+    from groundtruth.thermal.solver.mesh import B, HeatSamples, plan_refinement, slab_count
+    from groundtruth.thermal.solver.raster import Grid
+    from groundtruth.thermal.solver.stack import Layer
+
+    stack = [Layer("F.Cu", "copper", 0.035, 1.565, 1.6, 400.0, 400.0, 3.4e6, "Copper"),
+             Layer("core", "dielectric", 1.53, 0.035, 1.565, 0.3, 0.3, 1.9e6, "FR4"),
+             Layer("B.Cu", "copper", 0.035, 0.0, 0.035, 400.0, 400.0, 3.4e6, "Copper")]
+    grid = Grid(0.0, 0.0, 0.4, 64, 32)
+    p = 0.1 * np.array([1 + rel_a, 1 + rel_b])
+    s = HeatSamples(np.array([4.81, 20.81]), np.array([4.81, 4.81]), np.full(2, 0.05), p)
+    cost0 = B * B * (4 * slab_count(stack, 0.2) - slab_count(stack, 0.4))
+    return plan_refinement(grid, s, 0.3, 0.05, groups * 9 * cost0, stack)
+
+
+def test_equal_errors_rank_alike_so_the_last_bits_do_not_pick_the_mesh():
+    """Two identical heat sources and a budget for one of them: which one is refined does not follow a 1e-9
+    difference in their power either way (ranked in 1 % steps, ties in block order [A90]); before, the larger one
+    was refined, so the mesh flipped with the sign of the difference. The refinement still goes to a source: the
+    one refined sits in its block's children, down to the finest level the budget reaches; with the budget for
+    both, both are refined, alike."""
+    a, info_a = _two_sources(1e-9, -1e-9, 1.5)
+    b, info_b = _two_sources(-1e-9, 1e-9, 1.5)
+    c, _ = _two_sources(0.0, 0.0, 1.5)
+    assert info_a["limited"] and a == b == c
+    assert (1, 1) not in a[0] and (1, 6) in a[0]          # the first in block order refined, the other not
+    both, _ = _two_sources(1e-9, -1e-9, 40.0)
+    assert (1, 1) not in both[0] and (1, 6) not in both[0]
+    finest = max(both)
+    at = [{(bi, bj) for bi, bj in both[finest] if (bi >> finest, bj >> finest) == blk} for blk in ((1, 1), (1, 6))]
+    assert at[0] and {(bi, bj + (5 << finest)) for bi, bj in at[0]} == at[1]    # the same cells around each
+
+
 def test_results_round_trip_with_patches(tmp_path):
     from groundtruth.thermal.solver.results import Results
 

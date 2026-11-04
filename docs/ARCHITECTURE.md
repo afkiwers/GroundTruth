@@ -2570,7 +2570,8 @@ a History tab with a comparison (and the CLI).
   1 + α(T − 20) from the thermal maps (`resistance_scales`; `PlaneStack.set_resistance_scale` multiplies the strips'
   R and the branches' real part in `_impedances` and drops the operator caches, the uniform-strip preconditioner
   shortcut off), solves every kept excitation again, runs `dc_analysis` / `finish_dc_load` on copies of the results
-  (`_hot_stage`, `_hot_load`: Simulate's results untouched) and Thermal again with them, until `change` (the largest
+  (`_hot_stage`, `_hot_load`: Simulate's results untouched) and Thermal again with them (on the first solve's mesh,
+  [A90]), until `change` (the largest
   relative move of a path's loss or a via's share of its path's current) is within the tolerance, the round cap
   (`electrothermal_rounds`, `MAX_ROUNDS` 10) is reached, a round changes more than `DIVERGE` (1.5) times the one
   before (the round before kept), or Cancel; the factors are reset in a `finally`. `ThermalResult.electrothermal`
@@ -2589,6 +2590,15 @@ a History tab with a comparison (and the CLI).
   `heat_scale="linear"`) in the Results list. `solve_thermal` is three steps that the capacity search reuses:
   `_build_model` (mesh plan, Mesh, ThermalModel, the samples' nodes), `_coupled` (the iteration, from any start
   temperature) and `_result` (maps, parts, issues).
+- **The mesh plan is stable** (since branch `thermal-planner`, [A90]): `plan_refinement` refines the block with the
+  largest error estimate first until the budget is spent, and compares the estimates by rank (`err_rank`: whole 1 %
+  steps of the logarithm), equal ranks in level and block order. Before, it compared them exactly, so where the
+  budget ended among blocks of equal error (a uniform track over many blocks, a symmetric layout) their last bits
+  chose: the test buck's coupled heat moved by 1e-9 got 242,388 or 266,388 unknowns and t_max 213.04 or 213.42 °C
+  (audit round 8). The result carries its mesh (`ThermalResult.mesh_plan`: the level-0 grid, the leaf blocks per
+  level, the budget note), and `solve_thermal(mesh_plan=)` solves on it: the electro-thermal rounds use the first
+  solve's (`couple` passes it to `solve(results, mesh_plan)`; the plugin's child gets it with the inputs, a compute
+  server runs the whole coupling itself), so the rounds are one discrete problem with one fixed point.
 - **Memory watchdog** (`thermal_proc._Watchdog`, M3, after PCB Thermal's runner): the parent checks the child every
   0.5 s and kills it with `ThermalMemoryError` (a MemoryError: the window shows the message only) above 60 % of the
   RAM, or when less than 5 % (≥ 0.5 GB) is free while the child holds more than that. It sums the process tree:

@@ -10,7 +10,9 @@ pattern, each sample's heat scaled by ρ(T) (first order, [A15]). With it, round
   2. their summaries (dc_analysis, finish_dc_load: currents, densities, vias, resistance, drop, loss) replace the
      20 °C ones in copies of the results;
   3. if no path's loss and no via's current (as a share of its path's current) moved by more than the tolerance since
-     the round before, the coupling has settled; otherwise Thermal is solved again with the new currents.
+     the round before, the coupling has settled; otherwise Thermal is solved again with the new currents, on the
+     first thermal solve's mesh (`ThermalResult.mesh_plan`): every round solves the same discrete problem, so the
+     fixed point is that mesh's and no round's change is the planner choosing another mesh [A90].
 At most `electrothermal_rounds` rounds (never more than MAX_ROUNDS): the loop always ends. Copper's positive α makes
 it converge (a hotter via sheds current to cooler ones, so the spread narrows) [A50]; a round that changes more than
 the one before (it should not happen) ends it with the round before kept. Simulate's own results are not changed:
@@ -204,10 +206,11 @@ def busiest_vias(cold: list, hot: list, n: int = 12) -> list[dict]:
 
 
 def couple(board: Board, config: Config, converters: list, th, issues: list,
-           solve: Callable[[list], tuple], progress=None, cancel=None) -> tuple:
+           solve: Callable[[list, Optional[dict]], tuple], progress=None, cancel=None) -> tuple:
     """Rounds of DC paths at temperature and Thermal (see the module), from the first thermal solve (`th`,
-    `issues`, of the 20 °C currents). solve(converters) -> (ThermalResult, issues): Thermal of these results (in
-    this process, the thermal child or on the compute server). Returns (th, issues, the results the temperatures
+    `issues`, of the 20 °C currents). solve(converters, mesh_plan) -> (ThermalResult, issues): Thermal of these
+    results on the mesh `mesh_plan` (th's own, solve_thermal's `mesh_plan`; in this process, the thermal child or on
+    the compute server). Returns (th, issues, the results the temperatures
     belong to); th.electrothermal says how the rounds went, th.dc_hot holds the paths at temperature. A cancel
     ends it between solves (thermal's Cancelled)."""
     from ..solver.peec import SolverError
@@ -254,6 +257,7 @@ def couple(board: Board, config: Config, converters: list, th, issues: list,
         info["stopped"] = "the DC model is not Simulate's"
         return th, issues, converters
     current = list(converters)
+    mesh_plan = getattr(th, "mesh_plan", None) or None   # the first solve's mesh, kept for every round [A90]
     before = _state(ok)                          # the 20 °C state, then each round's
     cold = list(ok)
     last_change = None
@@ -289,7 +293,7 @@ def couple(board: Board, config: Config, converters: list, th, issues: list,
                 break
             if _cancelled(cancel):
                 raise Cancelled("cancelled")
-            th_new, issues_new = solve(current)
+            th_new, issues_new = solve(current, mesh_plan)
             if th_new.error:
                 info["stopped"] = f"round {k}'s thermal solve failed ({th_new.error}): the round before kept"
                 break

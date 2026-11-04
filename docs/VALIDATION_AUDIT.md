@@ -681,7 +681,13 @@ pyproject.toml: a PYTHONPATH override does not switch the code under test). In s
   P8-4); thin dielectrics (h < t) +7 % at low frequency, unexplained (P8-5); a via's joints snap per layer, ±3 % of
   a plane-pair port's L at 0.4 mm cells; a failing solve can cost twice the operator products (G8-3); results move by
   up to 6e-7 under memory pressure (diagonal pivots, G8-4); the thermal mesh planner flips refinement on 1e-9 input
-  changes.
+  changes. Fixed since (branch `thermal-planner`, [A90]): the planner ranks its blocks' error estimates in 1 % steps,
+  ties in block order (where the budget ran out among blocks of equal error their last bits chose), and the
+  electro-thermal rounds solve on the first solve's mesh. The test buck's coupled heat moved by 1e-12 to 1e-3
+  (7 levels x 4 seeds): before, 4 of 28 runs got 266,388 unknowns instead of 242,388 and t_max 213.42 instead of
+  213.04 °C (at 1e-10, 1e-9 and 1e-6); now all 28 the same mesh, t_max within 1e-6 K up to 1e-8 and moving linearly
+  with the heat above (±0.06 K at 1e-3); the unperturbed mesh and temperatures identical to before.
+  `test_the_mesh_does_not_follow_the_last_bits_of_the_heat`, `test_equal_errors_rank_alike_so_the_last_bits_do_not_pick_the_mesh`.
 - Refboard (the 6-layer copy, settings from detection): the pad rule moves DC paths' resistances by up to -7 % and
   a buck's hot loop 1.169 → 1.152 nH.
 
