@@ -1031,6 +1031,32 @@ def layer_change_board(stitch_distance: Optional[float], second_plane_net: str =
     return g
 
 
+def open_part_island_board(patch: bool = True) -> BoardGen:
+    """layer_change_board without stitching via, plus a small +12V patch on B.Cu (x 27-31, y 2.5-4.5) over holes in
+    both inner planes, so no plane faces it (no plane-pair capacitance), and a two-pad part U9 on B.Cu from that patch
+    (pad 1) to GND (pad 2, a GND via to the planes beside it). Give U9 a model with no impedance (an op-amp's
+    `amplifier`): the patch is then joined to the rest of the copper by nothing that conducts."""
+    g = BoardGen(layers=4, size=(40.0, 20.0))
+    y = 10.0
+    g.ic("U1", (5.0, y), "SIG")
+    g.ic("U2", (35.0, y), "SIG", layer="B.Cu")
+    g.track((5.0, y), (20.0, y), "SIG", "F.Cu")
+    g.via((20.0, y), "SIG")
+    g.track((20.0, y), (35.0, y), "SIG", "B.Cu")
+    hole = [(26.0, 1.5), (32.0, 1.5), (32.0, 5.5), (26.0, 5.5)]
+    g.plane("GND", "In1.Cu", [hole])
+    g.plane("GND", "In2.Cu", [hole])
+    if patch:
+        g.zone("+12V", "B.Cu", [(27.0, 2.5), (31.0, 2.5), (31.0, 4.5), (27.0, 4.5)])
+    else:       # +12V a plane net by a pour elsewhere; U9's +12V pad alone over the holes
+        g.zone("+12V", "B.Cu", [(2.0, 2.0), (12.0, 2.0), (12.0, 6.0), (2.0, 6.0)])
+    g.ic("U9", (29.0, 3.5), "+12V", layer="B.Cu", gnd_offset=(0.0, 3.5))
+    g.via((29.0, 7.0), "GND")
+    for x, lay in ((5.0, ("F.Cu", "B.Cu")), (35.0, ("F.Cu", "B.Cu"))):
+        g.via((x, y + 1.6), "GND", lay)
+    return g
+
+
 PDN_IC = (20.0, 15.0)
 
 

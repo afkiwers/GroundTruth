@@ -501,7 +501,7 @@ class BoardModel:
             model = config.model_for(fp.reference)
             if model is None or model.kind == "open":
                 continue
-            fpads = [p for p in model_pads(fp, model) if p.net in plane_nets]   # a sensor IC: IP+ / IP- only
+            fpads =[p for p in model_pads(fp, model) if p.net in plane_nets]   # a sensor IC: IP+ / IP- only
             if len({p.net for p in fpads}) != 2:
                 continue
             pa = fpads[0]
@@ -546,7 +546,10 @@ class BoardModel:
             lid_b, bonds_b = part_lid(st, sides[1], fp.reference, snap, bond, sheet, entry, rect=rects[1])
             if lid_a is None or lid_b is None:
                 continue
-            st.branches.append(Branch(lid_a, lid_b, z_part, fp.reference, "part"))
+            if part_conducts(model):
+                st.branches.append(Branch(lid_a, lid_b, z_part, fp.reference, "part"))
+            # (an op-amp or a buffer keeps its pads' metal, the lids and their joints, but nothing joins the two: not
+            # even 1 TΩ, which made a piece of copper joined only by it nearly singular [A84])
             st.branches += bonds_a + bonds_b
             st.side_lids[(fp.reference, pa.net)], st.side_lids[(fp.reference, pb.net)] = lid_a, lid_b
         switch_lids(st, board, config, plane_nets, pin_params, snap)
@@ -968,9 +971,26 @@ def switch_lids(st: StackBuild, board: Board, config: Config, plane_nets: set[st
                     st.side_lids[(el.ref, net)] = lid
 
 
+def part_conducts(model) -> bool:
+    """Whether a part's model is a branch of the copper models: one with an impedance (a short, resistor, capacitor,
+    inductor or ferrite). A part without one (an op-amp's `amplifier`, a `buffer`, a capacitor without capacitance:
+    ComponentModel.impedance is None at every frequency) keeps its pads' metal (its lids, part_lid) but no branch
+    joins its two sides [A84]; an `open` part is left out altogether, as before.
+
+    It used to be a 1 TΩ branch (part_impedance). That carries nothing, but it counts as a connection: a piece of
+    copper joined to the rest by nothing else (a supply pad the coarse board-wide grid leaves alone, with the part's
+    lid) lost its own potential reference (PlaneStack._components), and its potential was set by 1e-12 S beside the
+    lid's ~5e5 S solder joint, below double precision's resolution [Higham 2002]: the Schur complement's LU had a
+    pivot of round-off size (|U_ii| from 1e-12 to 4.6e6), its solves were wrong by 7x, and GMRES stalled at every
+    frequency (board4's phase-voltage sense path: 1528 iterations, residual 0.89 -> 0.75; without the 1 TΩ branches
+    38-169 iterations)."""
+    # impedance() is None for these kinds whatever the frequency (a capacitor's is finite at every f > 0)
+    return model is not None and model.impedance(1.0) is not None
+
+
 def part_impedance(model) -> Callable[[float], complex]:
-    """A part model as a branch impedance: its own impedance (an open part as 1 TΩ) plus the mounting inductance
-    MOUNT_L of its pads and escapes."""
+    """A part model as a branch impedance: its own impedance (an open part as 1 TΩ; the copper models make no branch
+    of such a part, part_conducts) plus the mounting inductance MOUNT_L of its pads and escapes."""
     return lambda f, mdl=model: (mdl.impedance(f) or complex(1e12)) + 2j * math.pi * f * MOUNT_L
 
 
