@@ -610,10 +610,72 @@ class BoardModel:
         return st
 
 
-def pad_nodes(st: StackBuild, pads: list) -> list[tuple]:
-    """The grid nodes of each pad's own net inside its outline, on its first layer in the model (an SMD pad's
-    side; a through-hole pad's first); [] where none is (a pad smaller than a cell between the nodes)."""
+CELL_TIE = 1e-6             # cells_overlap: a cell edge on a shape's outline counts on its +x / +y side (x the pitch)
+
+
+def cells_overlap(poly, xs, ys, d: float) -> np.ndarray:
+    """Which of the grid nodes at (xs, ys) mm have their cell, the d x d mm square centred on the node, overlapping
+    `poly` (a pad, a terminal's rectangle) over an area, not only along its outline: a bool array [A88].
+
+    Each node stands for its cell, so a cell the shape covers in part belongs to it: these are the nodes within
+    half a cell of the shape (round its corners: within d/2 in x and in y). Keeping only the nodes inside the
+    outline (until 2026-11-04) made a pad L long span (N−1)·d ≈ L − d between its first and last node on average,
+    L − 2d when its edges lay on nodes: a pad's contact or a perfect terminal shorted a cell less copper than it
+    covers, and how much less hung on how the grid fell on the pad (audit round 8, P8-6). Over the cells the shape
+    overlaps the span is L on average, exactly L when the pad is a whole number of cells long. A cell edge exactly on
+    the outline (a pad half a cell off the grid) would put a node in or out by round-off: the cells are tested
+    shifted by CELL_TIE·d towards −x and −y, so such a cell counts on the +x / +y side of the shape and not on the
+    −x / −y side, as rounding half up does."""
     import shapely
+    xs, ys = np.asarray(xs, float), np.asarray(ys, float)
+    e = CELL_TIE * d
+    # a node whose centre lies inside the shape: its cell overlaps it, no box test needed
+    hit = shapely.contains_xy(poly, xs - e, ys - e)
+    rest = np.flatnonzero(~hit)
+    if len(rest):
+        h = d / 2
+        cells = shapely.box(xs[rest] - h - e, ys[rest] - h - e, xs[rest] + h - e, ys[rest] + h - e)
+        # an overlap of interiors: the cell and the shape meet, and not only along their outlines
+        hit[rest] = shapely.intersects(cells, poly) & ~shapely.touches(cells, poly)
+    return hit
+
+
+def cell_areas(poly, xs, ys, d: float) -> np.ndarray:
+    """How much of `poly` lies in the cell of each node at (xs, ys) mm, the d x d square centred on it: mm² (0 to
+    d²) [A88]. A pad's current fed in by these shares enters where the pad is: a node whose cell the pad covers in
+    part takes that part, so the fed region is the pad's own, not a half cell wider all round."""
+    import shapely
+    xs, ys = np.asarray(xs, float), np.asarray(ys, float)
+    h = d / 2
+    return shapely.area(shapely.intersection(shapely.box(xs - h, ys - h, xs + h, ys + h), poly))
+
+
+def grid_cells_of(g: Grid, poly, net: Optional[str]) -> tuple[np.ndarray, np.ndarray]:
+    """The (i, j) arrays of `g`'s copper nodes of `net` (any net with a grid without labels) whose cell overlaps
+    `poly` (cells_overlap [A88]). Another net's node is never taken, however near the shape: two pads of different
+    nets closer than a cell keep their own nodes, each node holding one net's copper (peec.Grid.label)."""
+    x0, y0, x1, y1 = poly.bounds
+    i0, i1 = max(int(math.floor((x0 - g.x0) / g.d)) - 1, 0), min(int(math.ceil((x1 - g.x0) / g.d)) + 2, g.nx)
+    j0, j1 = max(int(math.floor((y0 - g.y0) / g.d)) - 1, 0), min(int(math.ceil((y1 - g.y0) / g.d)) + 2, g.ny)
+    if i0 >= i1 or j0 >= j1:
+        return np.zeros(0, int), np.zeros(0, int)
+    ii, jj = np.meshgrid(np.arange(i0, i1), np.arange(j0, j1), indexing="ij")
+    ii, jj = ii.ravel(), jj.ravel()
+    keep = g.node[ii, jj]
+    if g.label is not None and g.nets:
+        keep &= g.label[ii, jj] == (g.nets.index(net) if net in g.nets else -1)
+    ii, jj = ii[keep], jj[keep]
+    if not len(ii):
+        return ii, jj
+    xs, ys = g.xy(ii, jj)
+    inside = cells_overlap(poly, xs, ys, g.d)
+    return ii[inside], jj[inside]
+
+
+def pad_nodes(st: StackBuild, pads: list) -> list[tuple]:
+    """The grid nodes of each pad's own net whose cell overlaps the pad (grid_cells_of: within half a cell of its
+    outline [A88]), on its first layer in the model (an SMD pad's side; a through-hole pad's first); [] where none
+    is (no copper of its net in the cells the pad covers)."""
     from ..geometry.shapes import pad_shape
     out = []
     for p in pads:
@@ -622,19 +684,8 @@ def pad_nodes(st: StackBuild, pads: list) -> list[tuple]:
         if layer is None or poly is None or not p.net:
             continue
         k = st.names.index(layer)
-        g = st.grids[k]
-        x0, y0, x1, y1 = poly.bounds
-        i0, i1 = max(int((x0 - g.x0) / g.d) - 1, 0), min(int((x1 - g.x0) / g.d) + 2, g.nx)
-        j0, j1 = max(int((y0 - g.y0) / g.d) - 1, 0), min(int((y1 - g.y0) / g.d) + 2, g.ny)
-        if i0 >= i1 or j0 >= j1:
-            continue
-        ii, jj = np.meshgrid(np.arange(i0, i1), np.arange(j0, j1), indexing="ij")
-        ii, jj = ii.ravel(), jj.ravel()
-        xs, ys = g.xy(ii, jj)
-        inside = shapely.contains_xy(poly, xs, ys) & g.node[ii, jj]
-        if g.label is not None and g.nets:
-            inside &= g.label[ii, jj] == (g.nets.index(p.net) if p.net in g.nets else -1)
-        out += [(k, int(i), int(j)) for i, j in zip(ii[inside], jj[inside])]
+        ii, jj = grid_cells_of(st.grids[k], poly, p.net)
+        out += [(k, int(i), int(j)) for i, j in zip(ii, jj)]
     return list(dict.fromkeys(out))
 
 
@@ -722,11 +773,11 @@ def terminal_rect(fp, pads: list, metal: tuple):
 
 
 def _in_rect(st: StackBuild, nodes: list, rect) -> list:
-    """The grid nodes inside `rect` (terminal_rect), else the one nearest its centre (a rectangle smaller than a cell
-    between the nodes): never none, so the part keeps its connection."""
-    import shapely
+    """The grid nodes whose cell overlaps `rect` (terminal_rect; cells_overlap, as a pad's nodes [A88]), else the
+    one nearest its centre (no node of `nodes` in the cells it covers): never none, so the part keeps its
+    connection."""
     xy = np.array([st.xy(n) for n in nodes])
-    inside = shapely.contains_xy(rect, xy[:, 0], xy[:, 1])
+    inside = cells_overlap(rect, xy[:, 0], xy[:, 1], st.d)
     if inside.any():
         return [n for n, keep in zip(nodes, inside) if keep]
     c = rect.centroid
@@ -738,7 +789,7 @@ def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optiona
              ) -> tuple[Optional[LidNode], list[Branch]]:
     """One side of a lumped part (its pads of one net): the part's metal on that side as a node of its own (its lid,
     peec.LidNode, over the pads' area-weighted centre) and a `bond` branch from every grid node of their net under
-    the pads (pad_nodes; the nearest node when no node is under a pad smaller than a cell) to the lid. The bonds share
+    the pads (pad_nodes: the cells they overlap [A88]; the nearest node when none is there) to the lid. The bonds share
     the side's solder joint, SOLDER_RHO × its thickness over the pads' area [A65], in parallel (each N times it):
     `bond_um` µm (the part's pin value `bond`, analysis/pins.py; 0 a perfect bond, as BOND_MIN_UM), else SOLDER_UM.
     The metal itself is taken as a perfect conductor: the current hands over where the copper brings it, within the
@@ -746,7 +797,8 @@ def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optiona
 
     `sheet` (Ω per square; terminal_of): the metal is a resistive sheet instead [A70]: a terminal node above every
     grid node under the pads (each soldered to its own with that node's share of the joint), neighbouring terminal
-    nodes joined by `sheet` (a square of metal between two nodes a pitch apart), the part's current entering the
+    nodes joined by `sheet` (a strip of metal a pitch long, as wide as the pads across it: terminal_nodes [A88]),
+    the part's current entering the
     terminal evenly over it: from the lid (returned: the part's branch ends there) to every terminal node, equal
     branches of `entry_r` in all (else one square, `sheet`). A thin terminal (an inductor's clip) then shares a pad
     with the copper under it, as two sheets in parallel, instead of bypassing it from its edge. `fed`: a power
@@ -777,7 +829,7 @@ def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optiona
     r = rc / (max(float(areas.sum()), 1e-3) * 1e-6) * len(nodes)            # N bonds in parallel: the side's joint
     if not sheet or len(nodes) < 2:
         return lid, [Branch(n, lid, (lambda f, r=r: complex(r)), ref, "bond") for n in nodes]
-    top, branches = terminal_nodes(st, nodes, r, sheet, ref)
+    top, branches = terminal_nodes(st, nodes, r, sheet, ref, pads_outline(pads))
     # where the part's element joins the terminal: all of it, or the nodes inside its `metal` rectangle [A78]
     entering = _in_rect(st, nodes, rect) if rect is not None else nodes
     if rect is not None:            # the lid over the rectangle's centre: where the element's current stands (its
@@ -802,22 +854,58 @@ def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optiona
     return lid, branches
 
 
-def terminal_nodes(st: StackBuild, nodes: list, r_bond: float, sheet: float, ref: str
+def pads_outline(pads: list):
+    """The pads' outlines as one shape (their union, overlapping pads of a pin once), None without any."""
+    from ..geometry.shapes import pad_shape
+    shapes = [s for s in (pad_shape(p) for p in pads) if s is not None and not s.is_empty]
+    return unary_union(shapes) if shapes else None
+
+
+def sheet_widths(st: StackBuild, pairs: list, shape) -> np.ndarray:
+    """The width of `shape` (the pads' outline) across each terminal sheet branch, a fraction of the pitch (0 to 1):
+    for a branch from node (k, i, j) to its +x neighbour the length of the line half a pitch beyond the node, across
+    its row's band (y ± d/2), inside the shape; likewise for a +y neighbour [A88]. A terminal's nodes are those whose
+    cell overlaps its pads (pad_nodes), so its outer rows stand for cells the pad covers only in part: taken a full
+    pitch wide, a 4 mm terminal on a 0.4 mm grid whose edges lay on nodes conducted as 4.4 mm (+10 %). Across the
+    branches the widths add up to the shape's own, as the copper's strips' do (peec.Grid.wx: the copper crossing the
+    strip's midpoint line), at every grid offset. The cuts are shifted as cells_overlap's cells (CELL_TIE), so a cut
+    on the shape's outline counts as its nodes do."""
+    import shapely
+    if not pairs:
+        return np.zeros(0)
+    d = st.d
+    h, e = d / 2, CELL_TIE * d
+    ends = np.array([(a[1], a[2], b[1] - a[1]) for a, b in pairs])
+    g = st.grids[pairs[0][0][0]]
+    x, y = g.xy(ends[:, 0], ends[:, 1])
+    x, y = x - e, y - e
+    along_x = ends[:, 2] == 1
+    # the cut through the branch's middle, a pitch long: across y for an x branch, across x for a y branch; both end
+    # at (x + d/2, y + d/2)
+    start = np.stack([np.where(along_x, x + h, x - h), np.where(along_x, y - h, y + h)], 1)
+    cuts = shapely.linestrings(np.stack([start, np.stack([x + h, y + h], 1)], 1))
+    return np.clip(shapely.length(shapely.intersection(cuts, shape)) / d, 0.0, 1.0)
+
+
+def terminal_nodes(st: StackBuild, nodes: list, r_bond: float, sheet: float, ref: str, shape=None
                    ) -> tuple[dict, list[Branch]]:
     """A part's terminal metal as a resistive sheet over the grid nodes `nodes` under its pads [A70]: a terminal node
     (a LidNode) above each, soldered to it by a `bond` branch of r_bond (that node's share of the joint), and
-    neighbouring terminal nodes joined by `sheet` Ω (one square: a strip a pitch long and a pitch wide), each a
-    `sheet` branch from a node to its +x or +y neighbour (terminal_vectors draws their currents).
+    neighbouring terminal nodes joined by `sheet` Ω per square, each a `sheet` branch from a node to its +x or +y
+    neighbour (terminal_vectors draws their currents). A branch is a strip a pitch long and as wide as `shape` (the
+    pads' outline) is across it (sheet_widths [A88]): `sheet` / that width's fraction of the pitch, none where the
+    shape does not reach across; without `shape` every branch a full square.
     ({grid node: its terminal node}, the branches); part_lid and die_branches join the part to the terminal nodes."""
     top = {}
     for n in nodes:
         top[n] = LidNode(n[0], n[1], n[2], st.n_lids)
         st.n_lids += 1
     branches = [Branch(n, top[n], (lambda f, r=r_bond: complex(r)), ref, "bond") for n in nodes]
-    for (k_, i, j), t in top.items():
-        for nb in ((k_, i + 1, j), (k_, i, j + 1)):
-            if nb in top:
-                branches.append(Branch(t, top[nb], (lambda f, R=sheet: complex(R)), ref, "sheet"))
+    pairs = [(n, nb) for n in top for nb in ((n[0], n[1] + 1, n[2]), (n[0], n[1], n[2] + 1)) if nb in top]
+    widths = sheet_widths(st, pairs, shape) if shape is not None else np.ones(len(pairs))
+    for (a, b), w in zip(pairs, widths):
+        if w > 1e-3:                # narrower than a thousandth of the pitch: no metal across (a cut on the outline)
+            branches.append(Branch(top[a], top[b], (lambda f, R=sheet / float(w): complex(R)), ref, "sheet"))
     return top, branches
 
 
@@ -915,7 +1003,7 @@ def die_branches(st: StackBuild, pads: list, lid, ref: str, model, bond_um: Opti
     r_joint = rc / (area * 1e-6) * n                    # one node's share of the tab's joint, as part_lid's bonds
     z = part_impedance(model)
     if sheet and n >= 2:
-        top, bonds = terminal_nodes(st, nodes, r_joint, sheet, ref)
+        top, bonds = terminal_nodes(st, nodes, r_joint, sheet, ref, pads_outline(pads))
         die = _in_rect(st, nodes, rect) if rect is not None else nodes
         m = len(die)
         return bonds + [Branch(top[nd], lid, (lambda f, z=z, m=m, c=less: m * (z(f) - c)), ref, "part")

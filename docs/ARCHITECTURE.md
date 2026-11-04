@@ -579,6 +579,23 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   refboard at 2x, the stages' DC currents together (`tools/dev/pad_density.py --part Q601`, `out/speed/q601_*_2x.json`):
   Q601's drain pad densest 67.7 → 22.5 A/mm² (a sampled corner → the edge the current arrives at, falling to ~0
   across the pad), its drain fingers 59.6 → ≤ 10, the view's peak 66.4 → 57.6 A/mm² (now elsewhere).
+  **Which nodes are under a pad** (2026-11-04, branch `pad-feed`, [A88]; audit round 8, P8-6): those of its net
+  whose cell (the d × d square around the node) overlaps the pad, i.e. within d/2 of its outline in x and y
+  (`simulate.cells_overlap`, `grid_cells_of`; a cell edge exactly on the outline counts on the +x / +y side). With
+  the nodes inside the outline a pad L long spanned L − d between its first and last node on average, L − 2d with its
+  edges on nodes: a perfect terminal over a 10 mm pad shorted 0.916 / 0.958 of its copper at 0.4 mm cells (edges on
+  nodes / half a cell off), now 0.998 at every offset (0.978 → 0.998 at 0.1 mm). The lids, the dies, the terminal
+  sheets and the DC feed (`power._pad_nodes`, which took the pad grown by a round d/2 before) share the rule; a
+  node holds one net's copper, so two pads of two nets closer than a cell never share one. A terminal sheet's
+  branches are as wide as the pads across them (`sheet_widths`, as the copper's strips [A39]): its outer rows are
+  cells the pad covers in part (taken a full pitch wide, a 4 mm terminal conducted as 4.4 mm at 0.4 mm cells). A
+  current fed in at a pin goes to each node by the part of the pin its cell holds (`cell_areas`): fed evenly, the
+  outer cells widened the fed region by about half a cell all round (NA-7's bend at 1x: −1.05 % against the sheet
+  solve; −0.48 % so, −0.71 % with the old round buffer). The lids' solder bonds and a die's branches stay equal per
+  node. The vias' joints (`add_pin`) are not pads and are unchanged: on a plane pair fed at a pad over a via, the
+  port's inductance still moves with the grid's offset (0.4 mm cells: 0.72 / 0.78 / 0.82 nH before, 0.73 / 0.77 /
+  0.79 after) because each layer's joint snaps to its own nearest node, so a joint can slant a cell between the
+  layers; joining every layer at the same node removed most of it in a trial (0.80-0.82 nH) — open.
   **A vertical FET's die is spread over its tab** (2026-10-25, branch `tab-spread`, `simulate.die_side`,
   `die_branches`, [A68]; the user, of that view: "the top layer under the fet is black and the vias glow which does
   not make sense"). With one lid per side the drain tab was one node at one voltage, so the copper under Q601 handed
@@ -593,8 +610,9 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   GT field, the Parts tab's Pins cell or Pin defaults…). `part_pairs` is left for the PDN's ideal source.
   **The terminal as a resistive sheet** (2026-10-26, [A70]; the user, of an inductor's pad dark inside with a bright
   rim: "L501 seems to have an infinitly conductive edge like Q601 had before"): `part_lid(sheet=...)` puts a terminal
-  node above every grid node under the pads (each bonded to its own), joins neighbours by the sheet resistance (one
-  square per pitch) and feeds the part evenly over the terminal (equal branches from the part's node to every
+  node above every grid node under the pads (each bonded to its own), joins neighbours by the sheet resistance (a
+  strip a pitch long and as wide as the pads across it, `sheet_widths` [A88]; one square inside the pads) and feeds
+  the part evenly over the terminal (equal branches from the part's node to every
   terminal node, `ENTRY_SHARE` 1 % of its DC resistance per side, taken off the part's own branch). `terminal_of`: the part fields
   `Terminal Sheet Resistance` (Ω/□) or `Terminal Metal` ("0.15mm bronze": ρ/t), else (and for 0) the perfect
   plate: nothing is assumed, so an uncharacterised part shows its dark pad and sharp rim (the user).
@@ -1143,8 +1161,10 @@ for a boost; duty = the high-side conduction time). The inductor current is cont
   - Solve rows (`_stage_row`) carry X_ohm; below the capacitors' self-resonance the loop is capacitive and
     L_nH is None (it read −1829 nH at 10 kHz). A stage whose rail is another buck's output (`feeding_stage`)
     says it is cascaded instead of blaming series switches for the missing input path.
-  - Each pad's current is spread evenly over all grid nodes inside its outline (`_pad_nodes`). One node per pad
-    would add a spreading-resistance singularity of about 0.1 mΩ, as much as a whole path.
+  - Each pin's current is spread over the grid nodes of its net whose cell overlaps the pin (`_pad_nodes`,
+    `simulate.grid_cells_of` [A88]: within half a cell of its outline), each by the part of the pin its cell holds
+    (`simulate.cell_areas`; evenly until 2026-11-04). One node per pad would add a spreading-resistance singularity
+    of about 0.1 mΩ, as much as a whole path.
   - R = Re(Σ aₙVₙ) for 1 A. The density is |K|·I/t per layer, with t from the stackup:
     `BoardModel.t_phys` → `StackBuild.t` → `PlaneLayer.thickness`, which until session 3 was always 35 µm. The
     via density is I/(π·drill·25 µm).
