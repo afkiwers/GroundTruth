@@ -982,7 +982,7 @@ def part_conducts(model) -> bool:
     lid) lost its own potential reference (PlaneStack._components), and its potential was set by 1e-12 S beside the
     lid's ~5e5 S solder joint, below double precision's resolution [Higham 2002]: the Schur complement's LU had a
     pivot of round-off size (|U_ii| from 1e-12 to 4.6e6), its solves were wrong by 7x, and GMRES stalled at every
-    frequency (board4's phase-voltage sense path: 1528 iterations, residual 0.89 -> 0.75; without the 1 TΩ branches
+    frequency (a sense path on a second real board: 1528 iterations, residual 0.89 -> 0.75; without the 1 TΩ branches
     38-169 iterations)."""
     # impedance() is None for these kinds whatever the frequency (a capacitor's is finite at every f > 0)
     return model is not None and model.impedance(1.0) is not None

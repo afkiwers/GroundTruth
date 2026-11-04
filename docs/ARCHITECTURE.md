@@ -559,7 +559,7 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   (9.8 × 10⁻¹² Ω·m²), in parallel. The part's Z(f) + 0.3 nH runs between its two lids (one `part` branch); a part
   whose model has no impedance (an op-amp's `amplifier`, a `buffer`) has its lids but no `part` branch
   (`simulate.part_conducts`, [A84], 2026-11-04): as a 1 TΩ branch it was the only link of a lone supply pad on a
-  coarse board-wide grid (board4's phase-voltage sense path), whose potential then hung on 1e-12 S beside its
+  coarse board-wide grid (a sense path on a second real board), whose potential then hung on 1e-12 S beside its
   ~5e5 S solder joint, below double precision: the Schur complement's LU got a round-off pivot (|U_ii| 1e-12 to
   4.6e6) and GMRES stalled at every frequency (1528 iterations; 21-760 without it, 0.1 MHz-1 GHz). The
   copper then decides where the current hands over: within the transfer length √(r_c / R_sheet) (~0.14 mm in 35 µm
