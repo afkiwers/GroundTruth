@@ -16,9 +16,12 @@ its SuperLU factorisation as before):
 "auto" (the default) takes Accelerate on macOS and PARDISO where mkl is installed, else SuperLU; GROUNDTRUTH_SPARSE
 or `configure()` (the CLI's --sparse) chooses. Every backend runs single-threaded inside a solve: its results are
 then the same bits on every run (Apple documents determinism only with one thread; PARDISO's threads needed its
-reproducibility mode), and the solver already runs its solves side by side. A backend that fails to load or to
-factorise falls back to SuperLU for that factorisation, counted in `fallbacks` (the run's statistics): never a
-failed solve. Any of them is a preconditioner: GMRES's answer is the same to its tolerance [Saad 2003].
+reproducibility mode), and the solver already runs its solves side by side. A backend that fails to load leaves
+SuperLU; one that fails to factorise a matrix leaves that model to SuperLU (peec plans its memory as SuperLU's
+then), counted in `fallbacks` with the reason (the run's statistics, per run): never a failed solve. A singular S
+is no error for PARDISO (it perturbs the pivot; SuperLU says "exactly singular"): counted in `perturbed`. Any of
+them is a preconditioner: GMRES's answer is the same to its tolerance [Saad 2003] (refboard's clock net at 1x:
+the same GMRES iterations at every frequency with PARDISO and SuperLU, results within 4e-6 dB, audit round 8).
 """
 from __future__ import annotations
 
@@ -34,15 +37,26 @@ import numpy as np
 import scipy.sparse as sp
 
 CHOICES = ("auto", "superlu", "pardiso", "accelerate")
-_choice = [os.environ.get("GROUNDTRUTH_SPARSE", "auto").strip().lower() or "auto"]
+DEFAULT = os.environ.get("GROUNDTRUTH_SPARSE", "auto").strip().lower() or "auto"     # the process's own choice
+if DEFAULT not in CHOICES:              # a mistyped variable: auto (it used to be kept, and meant SuperLU)
+    DEFAULT = "auto"
+_choice = [DEFAULT]
 _LOCK = threading.Lock()
 _LOADED: dict[str, object] = {}          # backend name -> its library, or an Exception why it can't load
 fallbacks = [0]                          # factorisations a backend could not make (SuperLU made them)
+last_fallback = [""]                     # why the latest of them could not be made (the run's statistics)
+perturbed = [0]                          # pivots PARDISO perturbed (a singular or nearly singular S, below)
+_INT32_MAX = 2 ** 31 - 1                 # PARDISO's (and the shim's) row / column indices are 32-bit
+MKL_THREADING_SEQUENTIAL = 1             # mkl_rt's MKL_Set_Threading_Layer value (INTEL 0, SEQUENTIAL 1, ...)
 
 
 def configure(name: Optional[str]):
-    """Choose the backend for this process ("auto", "superlu", "pardiso", "accelerate"; None leaves it)."""
+    """Choose the backend ("auto", "superlu", "pardiso", "accelerate"); None: the process's default (DEFAULT:
+    GROUNDTRUTH_SPARSE, else auto), as config.settings documents analysis.sparse. None used to leave whatever the
+    process chose last: in the plugin a Simulate whose settings and Preferences named no backend ran on the one an
+    earlier Simulate had asked for (audit round 8)."""
     if name is None:
+        _choice[0] = DEFAULT
         return
     name = name.strip().lower()
     if name not in CHOICES:
@@ -93,9 +107,17 @@ def _load_mkl():
         break
     else:
         raise OSError("mkl_rt not found (pip install mkl)")
+    # MKL's sequential threading layer, chosen before any other MKL call: one thread inside a solve (the same bits
+    # every run), and no OpenMP runtime of MKL's own. Its default layer loads the mkl wheel's libiomp5md.dll, and a
+    # process that had imported PyTorch (which brings its own copy; solver/gpu.py imports it at every Simulate's
+    # start where it is installed) aborted there: "OMP: Error #15 ... already initialized", exit code 3, the plugin
+    # or the compute server's worker gone (audit round 8: a GPU machine with tools/install_gpu.py and
+    # tools/install_sparse.py both run) [MKL PARDISO]
+    lib.MKL_Set_Threading_Layer.restype = ctypes.c_int
+    lib.MKL_Set_Threading_Layer(ctypes.c_int(MKL_THREADING_SEQUENTIAL))
     lib.pardiso.argtypes = [ctypes.c_void_p] * 16
     lib.pardiso.restype = None
-    lib.MKL_Set_Num_Threads(ctypes.c_int(1))       # one thread inside a solve: the same bits every run
+    lib.MKL_Set_Num_Threads(ctypes.c_int(1))       # (the sequential layer's own count; kept explicit)
     return lib
 
 
@@ -105,6 +127,8 @@ def _shim_cache() -> Path:
     return base / "GroundTruth"
 
 
+ACCELERATE_NO_MEMORY = -1000            # the shim's status when its own allocation fails (GT_NO_MEMORY there):
+                                        # outside Accelerate's SparseStatus values (0 to -4, and -INT_MAX)
 PREBUILT = [Path("/Library/Application Support/GroundTruth/gt_accelerate.dylib")]   # the server's (built once by
                                         # the user: a root service cannot answer Xcode's licence prompt, 2026-10-25)
 
@@ -125,7 +149,7 @@ def _load_accelerate():
         lib_path = _shim_cache() / f"gt_accelerate_{hashlib.sha256(src.read_bytes()).hexdigest()[:12]}.dylib"
     if not lib_path.exists():
         lib_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = lib_path.with_suffix(".tmp")
+        tmp = lib_path.with_suffix(f".{os.getpid()}.tmp")     # two processes compiling at once: each its own file
         done = subprocess.run(["xcrun", "clang", "-O2", "-dynamiclib", "-o", str(tmp), str(src), "-framework",
                                "Accelerate"], capture_output=True, text=True, timeout=300)
         if done.returncode != 0:
@@ -146,12 +170,13 @@ def _load_accelerate():
 # --------------------------------------------------------------------------- factorisations
 class Factor:
     """A factorisation of S from a backend: solve(rhs) for a vector or an (n, k) block, from any thread (one at a
-    time: the backends' handles are not safe for concurrent solves); `nnz` its stored entries (memory planning,
-    peec.lu_bytes) and `bytes` what the backend reports holding."""
+    time: the backends' handles are not safe for concurrent solves); `nnz` its stored entries and `bytes` what the
+    backend reports it took at its peak (PARDISO's own count; Accelerate's factor size): peec.lu_bytes plans the
+    model's next factorisations with both; `perturbed` the pivots the backend perturbed (PARDISO, else 0)."""
 
-    def __init__(self, backend: str, n: int, nnz: int, nbytes: int, solve, free):
+    def __init__(self, backend: str, n: int, nnz: int, nbytes: int, solve, free, perturbed: int = 0):
         """Wrap a backend's handle: its solve(b) -> x and free() callables."""
-        self.backend, self.n, self.nnz, self.bytes = backend, n, nnz, nbytes
+        self.backend, self.n, self.nnz, self.bytes, self.perturbed = backend, n, nnz, nbytes, perturbed
         self._solve, self._free = solve, free
         self._lock = threading.Lock()
 
@@ -170,10 +195,22 @@ class Factor:
                 pass
 
 
-def report() -> dict:
+def counts() -> tuple[int, int]:
+    """The process's fallback and perturbed-pivot counts so far: a run takes them at its start and hands them to
+    report(since=...), so that its statistics count its own factorisations only."""
+    return fallbacks[0], perturbed[0]
+
+
+def report(since: tuple[int, int] = (0, 0)) -> dict:
     """What the factorisations here use, for a run's statistics: the backend chosen and active, why the chosen one
-    (or auto's) did not load, and how many factorisations fell back to SuperLU."""
-    out = {"chosen": chosen(), "active": active(), "fallbacks": fallbacks[0]}
+    (or auto's) did not load, how many factorisations fell back to SuperLU since `since` (counts() at the run's
+    start) and why the latest did, and how many pivots PARDISO perturbed. (The run's statistics read the process's
+    total before its solves until audit round 8: a fresh process always said 0, a later one an earlier run's.)"""
+    out = {"chosen": chosen(), "active": active(), "fallbacks": fallbacks[0] - since[0]}
+    if out["fallbacks"] and last_fallback[0]:
+        out["fallback_reason"] = last_fallback[0]
+    if perturbed[0] - since[1]:
+        out["perturbed_pivots"] = perturbed[0] - since[1]
     why = {k: str(v)[:300] for k, v in _LOADED.items() if isinstance(v, Exception)}
     if why:
         out["not_loaded"] = why
@@ -182,18 +219,23 @@ def report() -> dict:
 
 def factorise(S) -> Optional[Factor]:
     """S factorised by the active backend, or None for SuperLU (the active one, or a backend that failed on this
-    matrix: counted in `fallbacks`)."""
+    matrix: counted in `fallbacks`, its reason kept in `last_fallback`)."""
     name = active()
     if name == "superlu":
         return None
     try:
-        return _pardiso(S) if name == "pardiso" else _accelerate(S)
+        F = _pardiso(S) if name == "pardiso" else _accelerate(S)
     except MemoryError:
         raise
-    except Exception:               # noqa: BLE001 - this matrix on this backend: SuperLU makes it
+    except Exception as e:          # noqa: BLE001 - this matrix on this backend: SuperLU makes it
         with _LOCK:
             fallbacks[0] += 1
+            last_fallback[0] = f"{name}: {e}"[:300]
         return None
+    if F.perturbed:
+        with _LOCK:
+            perturbed[0] += F.perturbed
+    return F
 
 
 def _upper_csr(S):
@@ -209,6 +251,9 @@ def _pardiso(S) -> Factor:
     lib = _library("pardiso")
     U = _upper_csr(S)
     n = U.shape[0]
+    if U.nnz > _INT32_MAX:
+        # the int32 cast below would wrap silently and PARDISO read out of bounds (a crash, not an error code)
+        raise RuntimeError(f"PARDISO: {U.nnz} entries exceed its 32-bit indices")
     a = np.ascontiguousarray(U.data, dtype=np.complex128)
     ia = np.ascontiguousarray(U.indptr, dtype=np.int32)
     ja = np.ascontiguousarray(U.indices, dtype=np.int32)
@@ -216,7 +261,7 @@ def _pardiso(S) -> Factor:
     iparm = np.zeros(64, dtype=np.int32)
     iparm[0] = 1        # these values, not the defaults
     iparm[1] = 2        # nested dissection (METIS)
-    iparm[7] = 0        # no iterative refinement
+    iparm[7] = 0        # no iterative refinement, except PARDISO's own two steps after perturbed pivots [MKL PARDISO]
     iparm[9] = 8        # pivot perturbation 1e-8
     iparm[17] = -1      # report the factor's entries
     iparm[20] = 1       # Bunch-Kaufman pivoting: 3x faster solves than 1x1 pivots on the inductive models
@@ -249,8 +294,12 @@ def _pardiso(S) -> Factor:
     except BaseException:
         free()
         raise
+    # its peak memory [MKL PARDISO, iparm(15)-(17)]: the symbolic phase's peak, or its permanent memory plus the
+    # numerical factorisation's; the factor's entries in iparm(18), its pivots perturbed by 1e-8 in iparm(14) (a
+    # singular S is not an error here, unlike SuperLU's "exactly singular": counted, report())
     peak_kb = max(int(iparm[14]), int(iparm[15]) + int(iparm[16]))
-    return Factor("pardiso", n, int(iparm[17]), peak_kb * 1024, lambda b: call(33, b), free)
+    nnz = int(iparm[17]) if iparm[17] > 0 else peak_kb * 1024 // 16      # a factor past int32: its memory's size
+    return Factor("pardiso", n, nnz, peak_kb * 1024, lambda b: call(33, b), free, perturbed=int(iparm[13]))
 
 
 def _accelerate(S) -> Factor:
@@ -262,12 +311,21 @@ def _accelerate(S) -> Factor:
     cs = np.ascontiguousarray(U.indptr, dtype=np.int64)
     ri = np.ascontiguousarray(U.indices, dtype=np.int32)
     v = np.ascontiguousarray(U.data, dtype=np.complex128)
+    if U.nnz > _INT32_MAX:
+        raise RuntimeError(f"Accelerate: {U.nnz} entries exceed its 32-bit row indices")
     info = (ctypes.c_long * 2)()
     h = lib.gt_factor(n, cs.ctypes.data, ri.ctypes.data, v.ctypes.data, info)
     if not h:
-        if info[0] == -2:
+        # the shim's own allocation failed: out of memory (the simulate.MemoryRelief ladder takes it). Accelerate's
+        # statuses [Apple Accelerate, SparseStatus] are not: -1 factorisation failed, -2 the matrix is singular
+        # (taken for "out of memory" until audit round 8, which sent a singular S down the memory ladder and left
+        # its frequency "unsolved for memory"), -3 internal, -4 a parameter: SuperLU makes it (and says what it
+        # finds), counted in `fallbacks` with this text
+        if info[0] == ACCELERATE_NO_MEMORY:
             raise MemoryError(f"Accelerate ran out of memory ({n} unknowns)")
-        raise RuntimeError(f"Accelerate factorisation: status {info[0]}")
+        what = {-1: "factorisation failed", -2: "the matrix is singular", -3: "internal error",
+                -4: "parameter error"}.get(int(info[0]), "failed")
+        raise RuntimeError(f"Accelerate factorisation: status {info[0]} ({what})")
 
     def solve(b):
         """Solve in place on a Fortran-ordered complex copy of b."""

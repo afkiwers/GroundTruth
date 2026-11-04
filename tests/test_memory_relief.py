@@ -16,9 +16,16 @@ from boardgen import layer_change_board
 from conftest import make
 from groundtruth.analysis.simulate import MemoryRelief, run_parallel, simulate
 from groundtruth.core import sysmem
-from groundtruth.solver import peec
+from groundtruth.solver import peec, sparse
 
 MALLOC = "SUPERLU_MALLOC fails for buf in intCalloc() at line 173 in file memory.c"
+
+
+@pytest.fixture(autouse=True)
+def superlu_only(monkeypatch):
+    """These tests make SuperLU run short: where mkl is installed, a Simulate naming no backend would take PARDISO
+    and the stand-in SuperLU would never be called (CI has no mkl)."""
+    monkeypatch.setattr(sparse, "DEFAULT", "superlu")
 
 
 @pytest.fixture
