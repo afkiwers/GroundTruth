@@ -2,12 +2,13 @@
 pad_weights, [A51]). The user, of a GND via above an EPC2306's source pin 2 carrying the most: "it doesn't make much
 sense, why it that via carring the most load?": the pin is a bar under three tabs, and summing the primitives gave it
 42 % of the source current for 34 % of the copper."""
+import numpy as np
 import pytest
 
 from boardgen import BoardGen
 from conftest import make
-from groundtruth.analysis.power import _area_shares, _pad_nodes, pad_weights, pin_area
-from groundtruth.analysis.simulate import BoardModel
+from groundtruth.analysis.power import _area_shares, _pad_nodes, pad_weights, pin_area, pin_outline
+from groundtruth.analysis.simulate import BoardModel, cell_areas
 
 
 def _board(tmp_path):
@@ -25,7 +26,8 @@ def _board(tmp_path):
 
 def test_a_pin_drawn_from_overlapping_pads_counts_its_copper_once(tmp_path):
     """pin_area is the union (1.25 mm², not 1.5); pad_weights give each pin its copper, split over its pads by size;
-    _area_shares feeds the two pins 1 : 1 (summing the pads gave 1.5 : 1.25, 55 %), each node once."""
+    _area_shares feeds the two pins 1 : 1 (summing the pads gave 1.5 : 1.25, 55 %), each node once, by its cell's
+    part of the pin."""
     board, sc = _board(tmp_path)
     pads = [p for p in board.pads() if p.pin.startswith("U1.")]
     one = [p for p in pads if p.pin == "U1.1"]
@@ -39,6 +41,11 @@ def test_a_pin_drawn_from_overlapping_pads_counts_its_copper_once(tmp_path):
     assert len(nodes) == len(set(nodes)) and sum(a for _, a in inj) == pytest.approx(1.0)
     at = dict(inj)
     under = {pin: {n for p in ps for n in _pad_nodes(st, p, "F.Cu")} for pin, ps in (("1", one), ("2", two))}
-    assert sum(at[n] for n in under["1"]) == pytest.approx(0.5, rel=1e-9)
-    assert sum(at[n] for n in under["2"]) == pytest.approx(0.5, rel=1e-9)
-    assert len({round(at[n], 15) for n in under["1"]}) == 1           # evenly over pin 1, the overlap not twice
+    assert sum(at.get(n, 0.0) for n in under["1"]) == pytest.approx(0.5, rel=1e-9)
+    assert sum(at.get(n, 0.0) for n in under["2"]) == pytest.approx(0.5, rel=1e-9)
+    # over pin 1 by the part of its copper each node's cell holds (simulate.cell_areas [A88]): the cells hold the
+    # union once (1.25 mm², not the 1.5 of the two pads summed), and each node takes its cell's part of it
+    ones = sorted(under["1"])
+    held = cell_areas(pin_outline(one), *np.array([st.xy(n) for n in ones]).T, st.d)
+    assert held.sum() == pytest.approx(1.25, rel=1e-9)
+    assert [at.get(n, 0.0) for n in ones] == pytest.approx(list(0.5 * held / held.sum()), abs=1e-12)

@@ -640,6 +640,16 @@ def cells_overlap(poly, xs, ys, d: float) -> np.ndarray:
     return hit
 
 
+def cell_areas(poly, xs, ys, d: float) -> np.ndarray:
+    """How much of `poly` lies in the cell of each node at (xs, ys) mm, the d x d square centred on it: mm² (0 to
+    d²) [A88]. A pad's current fed in by these shares enters where the pad is: a node whose cell the pad covers in
+    part takes that part, so the fed region is the pad's own, not a half cell wider all round."""
+    import shapely
+    xs, ys = np.asarray(xs, float), np.asarray(ys, float)
+    h = d / 2
+    return shapely.area(shapely.intersection(shapely.box(xs - h, ys - h, xs + h, ys + h), poly))
+
+
 def grid_cells_of(g: Grid, poly, net: Optional[str]) -> tuple[np.ndarray, np.ndarray]:
     """The (i, j) arrays of `g`'s copper nodes of `net` (any net with a grid without labels) whose cell overlaps
     `poly` (cells_overlap [A88]). Another net's node is never taken, however near the shape: two pads of different
