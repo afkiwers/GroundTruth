@@ -645,6 +645,46 @@ symbolic nodal analysis in its own venv; no SPICE simulator is installed here). 
   measurement conditions), the ADC settings' meaning (AA-11).
 - Refboard: one of 89 capacitors with a curve moved by more than 0.5 V (C515, 55 → 52.5 V); C304 / C342 unchanged.
 
+## Round 8 (2026-11-04, branch `peec-audit`)
+
+An adversarial audit of the field solver's code changed since round 6 (about 3200 lines: the float32 Krylov basis,
+the true-residual stop, memory-planned solve groups, the sparse backends, the plane pairs' face-gap inductance,
+whole-pad soldering, terminal sheets, the electro-thermal coupling). Each confirmed defect has a regression test that
+fails on the code before its fix, checked against an archive of the old source (pytest takes `pythonpath` from
+pyproject.toml: a PYTHONPATH override does not switch the code under test). In short:
+- Fixed:
+  - P8-2 (high): the electro-thermal rounds from the second on re-solved Thermal with Simulate's 20 °C currents and
+    reported the uncoupled result as settled (the test buck at 8 A: 211.47 °C for the fixed point's 212.82 °C);
+    `test_every_round_heats_the_board_with_its_own_currents_and_settles_on_a_fixed_point`.
+  - S8-1 (high): PARDISO aborted any process that had loaded PyTorch ("OMP: Error #15", exit 3: every Simulate on a
+    machine with both `install_gpu.py` and `install_sparse.py`); MKL's sequential threading layer.
+  - P8-1: a plane strip's slab impedance froze past 30 skin depths (-10 % at 70 µm and 1 GHz, -43 % at 35 µm and
+    10 GHz against the coth form).
+  - P8-6: a pad's nodes were those strictly inside it, one cell short on average: a strip with a 10 mm pad read
+    0.92-0.98 of its closed form at 0.1-0.4 mm cells, now 0.998 at any grid offset [A88].
+  - S8-2 to S8-7: PARDISO's memory planned 1.2-2.2x low [A86]; the least-fill rung switched to SuperLU (3.7-10x the
+    memory); a run's backend fallbacks miscounted; an earlier run's backend choice kept; Accelerate's singular status
+    taken for memory (by review, no Mac here); int32 index overflow refused.
+  - G8-1: kernels computed for the first asker's bit-variant of a layer gap and cached under a rounded key: a
+    Simulate's numbers moved by up to 2e-8 with the cache's history (the grouped-solves test's full-suite failure)
+    [A85].
+  - E-series follow-ups of the signal-path audit and a board-wide model that never converged (a 1 TΩ open-part
+    branch as a lone pad's only link [A84]) were merged before this round.
+- Verified: the float32 basis never reports a wrong answer as converged (162 adversarial systems, extreme copper,
+  refboard: iterations equal, errors equal to the float64 basis'); grouping, admission and thread count are
+  bit-identical; PARDISO and SuperLU agree within 4e-6 dB with identical iterations; the GPU path on a real GPU
+  for the first time (a 4 GB laptop RTX 3050, refboard's clock net and first buck stage, every solve on the
+  device): 1879 numbers within 2e-6 dB / 1.4e-6 relative of the CPU's, at 0.56x its speed; two-layer plane pairs within
+  0.3-3.6 % of the closed forms and converging; power balance and symmetry of the pad and terminal models.
+- Limitations, quantified: a plane between two others reads low at high frequency (-6 % at 0.2 mm / 35 µm, -26 % at
+  0.1 mm / 70 µm; +52 % before the face-gap change) and a floating plane does not screen (+5.5 %) (P8-3,
+  P8-4); thin dielectrics (h < t) +7 % at low frequency, unexplained (P8-5); a via's joints snap per layer, ±3 % of
+  a plane-pair port's L at 0.4 mm cells; a failing solve can cost twice the operator products (G8-3); results move by
+  up to 6e-7 under memory pressure (diagonal pivots, G8-4); the thermal mesh planner flips refinement on 1e-9 input
+  changes.
+- Refboard (the 6-layer copy, settings from detection): the pad rule moves DC paths' resistances by up to -7 % and
+  a buck's hot loop 1.169 → 1.152 nH.
+
 ## Remaining risks and unverified items
 - SP-19: above 1 GHz a board-wide resonance's worst margin moves about ±2 dB between the 4x, 8x and 16x grids on
   refboard (converged within 0.8 dB below 1 GHz); the grid note asks for 4x and says so (round 4).
