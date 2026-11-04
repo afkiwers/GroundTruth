@@ -303,6 +303,7 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
     unmodelled: list[str] = []          # op-amps by their pins whose model is 'open': left out, said in a note
     buffer_ins: dict[str, tuple] = {}   # a logic buffer's input on the nets: "U5.1" -> (pad, its model)
     left_out: dict[str, str] = {}       # parts with a pin on the circuit's nets it leaves out: ref -> why
+    arrays: set[str] = set()            # resistor / capacitor arrays taken as isolated elements (array_pairs)
     not_fitted: list[str] = []
     ends = {drv.footprint, *(q.footprint for q in (board.find_pin(r) for r in spec.receivers) if q is not None)}
     # ---- the nets, breadth first from the path's: the path's own and every included op-amp channel's (its feedback
@@ -336,7 +337,8 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
             if m is None or m.kind == "open":
                 if (m is not None and fp.reference not in unmodelled and opamp_pin_roles(fp) is not None):
                     unmodelled.append(fp.reference)
-                elif fp.reference not in ends and fp.reference not in left_out:
+                elif fp.reference not in ends and fp.reference not in left_out and len(fp.nets()) > 1:
+                    # (a part with one net only, a test point, joins nothing: not worth a word)
                     left_out[fp.reference] = "no settings entry" if m is None else "model open"
                 continue
             if m.kind == "buffer":         # a logic buffer is not linear: only its input's C_in loads the circuit
@@ -368,9 +370,21 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
                     parts[fp.reference] = (m, pa, pb)
                     if pb.net not in ground:
                         later.append(pb.net)
+                elif m.kind in ("resistor", "cap") and not m.pins and array_pairs(fp):
+                    # a resistor or capacitor array: one element of its value per pad pair (E-7), each its own
+                    # "RN1:1-8" in the circuit
+                    for a_, b_ in array_pairs(fp):
+                        if p is a_ or p is b_:
+                            pb = b_ if p is a_ else a_
+                            key = f"{fp.reference}:{a_.number}-{b_.number}"
+                            if key not in parts:
+                                parts[key] = (m, p, pb)
+                                arrays.add(fp.reference)
+                                if pb.net not in ground:
+                                    later.append(pb.net)
                 else:
-                    left_out.setdefault(fp.reference, f"a {m.kind} on {len({q.net for q in two})} nets: give it "
-                                                      "pins [a, b]")
+                    left_out.setdefault(fp.reference, f"a {m.kind} on {len({q.net for q in two})} nets, not an "
+                                                      "isolated array: give it pins [a, b]")
     if dropped:
         shown = ", ".join(dropped[:5]) + (f" and {len(dropped) - 5} more" if len(dropped) > 5 else "")
         notes.append(f"the circuit stops at {len(nets)} nets: {shown} left out, the parts to them open there (the "
@@ -379,11 +393,15 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
         notes.append(unmodelled_note(unmodelled))
     if not_fitted:
         notes.append(f"not fitted (DNP), left out: {', '.join(sorted(not_fitted))}")
+    if arrays:
+        notes.append(f"{', '.join(sorted(arrays))}: an array taken as isolated elements of its value, pad k to pad "
+                     "n+1−k (1–8, 2–7 …); a bussed array (a common pin) needs its own model per element")
     if left_out:
         items = [f"{r} ({w})" for r, w in sorted(left_out.items())]
         notes.append("left out of the circuit, open: " + ", ".join(items[:8])
                      + (f" and {len(items) - 8} more" if len(items) > 8 else "")
-                     + " (a part the signal or a feedback loop needs must have a model: Parts tab)")
+                     + " (a part the signal or a feedback loop needs must have a model: Parts tab; an analog switch "
+                       "or a transistor that is on: short or resistor with pins [a, b])")
     # ---- the path's driver pin is an op-amp channel's output: the source stands for that channel (both driving one
     # node fought, the response collapsed by 88 dB, audit 2026-11 E-3)
     for nm, ch in list(amps.items()):
@@ -582,6 +600,17 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
     out = at(rcv)
     if spec.load_ohms and not any((q := board.find_pin(rx)) is not None and q is rcv for rx in spec.receivers):
         ckt.r(out, ckt.ground, spec.load_ohms)
+    # a receiver behind a logic buffer or comparator on the path (an ADC's comparator input): the buffer is not
+    # linear and its output is driven by nothing in the circuit, so the response there is 0 (−600 dB, with nothing
+    # said); the response is the one at the buffer's input instead, a note says so
+    gate = _buffer_before(board, config, spec, drv.net, rcv.net, path, ground)
+    out_net = rcv.net
+    if gate is not None:
+        a_, b_, ref_ = gate
+        out, out_net = at(a_), a_.net
+        notes.append(f"{receiver} is behind the logic buffer / comparator {ref_} ({ref_}.{a_.number} → "
+                     f"{ref_}.{b_.number}), which is not linear: the response is the one at its input, "
+                     f"{ref_}.{a_.number}")
     # nodes no element reaches would make the matrix singular: tie each to ground through 1 TΩ (an open pin's leak)
     for n in list(ckt.nodes):
         ckt.r(n, ckt.ground, 1e12)
@@ -593,12 +622,53 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
                     None if (kind == "macromodel") else float(ch.params.get("gain") if ch.params.get("gain")
                                                               is not None else 1.0))
                    for (nm, kind), ch in zip(opamps, amps.values())],
-        "in": gnd(drv.net), "out": gnd(rcv.net),
+        "in": gnd(drv.net), "out": gnd(out_net),
+        # what the symbolic H(s), the circuit as designed, leaves out (a note says so, symbolic.py)
+        "source_ohms": r_s, "load_ohms": spec.load_ohms or 0.0,
         # parts marked DNP: left out of the circuit as built (audit 2026-11, E-11: a DNP part with a model stayed in,
         # unlike in the DC bias and the shunts), named in a note
         "dnp": sorted(not_fitted)}
     return AnalogNetwork(ckt, out, nets, opamps, sorted(parts), tracks, notes, node_of, schematic, amp_out, lines,
                          part_nodes, {nm: dict(ch.params) for nm, ch in amps.items()}, path_nets=sorted(start))
+
+
+def _buffer_before(board: Board, config: Config, spec: NetSpec, drv_net: str, rcv_net: str, path: set,
+                   ground: set) -> Optional[tuple]:
+    """(input pad, output pad, ref) of the logic buffer or comparator channel the path crosses before its receiver,
+    when the receiver's net is not reached from the driver's without one (route.signal_graph without buffer steps):
+    the first such channel (its input reached linearly, its output on the path), by reference. None otherwise."""
+    from .route import _reach, signal_graph
+    fwd, _ = signal_graph(board, config, set(spec.through))
+
+    def is_buffer(fp) -> bool:
+        """Whether a step's part is modelled as a logic buffer."""
+        m = config.model_for(fp.reference)
+        return m is not None and m.kind == "buffer"
+    linear = {n: {nxt for nxt, steps in outs.items() if any(not is_buffer(fp) for fp, _, _ in steps)}
+              for n, outs in fwd.items()}
+    reach = _reach(linear, drv_net, ground - {drv_net})
+    if rcv_net in reach:
+        return None
+    gates = sorted(((fp.reference, a.number, a, b) for n in reach for nxt, steps in fwd.get(n, {}).items()
+                    for fp, a, b in steps if is_buffer(fp) and (nxt in path or nxt == rcv_net)),
+                   key=lambda g: (g[0], str(g[1])))
+    return (gates[0][2], gates[0][3], gates[0][0]) if gates else None
+
+
+def array_pairs(fp: Footprint) -> list[tuple[Pad, Pad]]:
+    """A resistor or capacitor array's elements as pad pairs, by the isolated arrays' pinout (pad k to pad n+1−k:
+    1–8, 2–7, 3–6, 4–5 of an 8-pad array [A83]): the pads sorted by number, at least four and an even count, every
+    pair on two different nets (a pad on no net leaves its element out). [] when the pads don't fit that."""
+    def key(p):
+        """A pad's number as a sort key: numbers first, by value."""
+        n = str(p.number)
+        return (0, int(n), "") if n.isdigit() else (1, 0, n)
+    pads = sorted(fp.pads, key=key)
+    if len(pads) < 4 or len(pads) % 2:
+        return []
+    pairs = [(pads[k], pads[-1 - k]) for k in range(len(pads) // 2)]
+    out = [(a, b) for a, b in pairs if a.net and b.net]
+    return out if out and all(a.net != b.net for a, b in out) else []
 
 
 def via_piece(layers: list, la: str, lb: str, zs: dict, drill: float) -> tuple[float, float]:

@@ -501,7 +501,7 @@ class BoardModel:
             model = config.model_for(fp.reference)
             if model is None or model.kind == "open":
                 continue
-            fpads = [p for p in model_pads(fp, model) if p.net in plane_nets]   # a sensor IC: IP+ / IP- only
+            fpads =[p for p in model_pads(fp, model) if p.net in plane_nets]   # a sensor IC: IP+ / IP- only
             if len({p.net for p in fpads}) != 2:
                 continue
             pa = fpads[0]
@@ -546,7 +546,10 @@ class BoardModel:
             lid_b, bonds_b = part_lid(st, sides[1], fp.reference, snap, bond, sheet, entry, rect=rects[1])
             if lid_a is None or lid_b is None:
                 continue
-            st.branches.append(Branch(lid_a, lid_b, z_part, fp.reference, "part"))
+            if part_conducts(model):
+                st.branches.append(Branch(lid_a, lid_b, z_part, fp.reference, "part"))
+            # (an op-amp or a buffer keeps its pads' metal, the lids and their joints, but nothing joins the two: not
+            # even 1 TΩ, which made a piece of copper joined only by it nearly singular [A84])
             st.branches += bonds_a + bonds_b
             st.side_lids[(fp.reference, pa.net)], st.side_lids[(fp.reference, pb.net)] = lid_a, lid_b
         switch_lids(st, board, config, plane_nets, pin_params, snap)
@@ -968,9 +971,26 @@ def switch_lids(st: StackBuild, board: Board, config: Config, plane_nets: set[st
                     st.side_lids[(el.ref, net)] = lid
 
 
+def part_conducts(model) -> bool:
+    """Whether a part's model is a branch of the copper models: one with an impedance (a short, resistor, capacitor,
+    inductor or ferrite). A part without one (an op-amp's `amplifier`, a `buffer`, a capacitor without capacitance:
+    ComponentModel.impedance is None at every frequency) keeps its pads' metal (its lids, part_lid) but no branch
+    joins its two sides [A84]; an `open` part is left out altogether, as before.
+
+    It used to be a 1 TΩ branch (part_impedance). That carries nothing, but it counts as a connection: a piece of
+    copper joined to the rest by nothing else (a supply pad the coarse board-wide grid leaves alone, with the part's
+    lid) lost its own potential reference (PlaneStack._components), and its potential was set by 1e-12 S beside the
+    lid's ~5e5 S solder joint, below double precision's resolution [Higham 2002]: the Schur complement's LU had a
+    pivot of round-off size (|U_ii| from 1e-12 to 4.6e6), its solves were wrong by 7x, and GMRES stalled at every
+    frequency (board4's phase-voltage sense path: 1528 iterations, residual 0.89 -> 0.75; without the 1 TΩ branches
+    38-169 iterations)."""
+    # impedance() is None for these kinds whatever the frequency (a capacitor's is finite at every f > 0)
+    return model is not None and model.impedance(1.0) is not None
+
+
 def part_impedance(model) -> Callable[[float], complex]:
-    """A part model as a branch impedance: its own impedance (an open part as 1 TΩ) plus the mounting inductance
-    MOUNT_L of its pads and escapes."""
+    """A part model as a branch impedance: its own impedance (an open part as 1 TΩ; the copper models make no branch
+    of such a part, part_conducts) plus the mounting inductance MOUNT_L of its pads and escapes."""
     return lambda f, mdl=model: (mdl.impedance(f) or complex(1e12)) + 2j * math.pi * f * MOUNT_L
 
 
@@ -1933,6 +1953,9 @@ POLE_SPAN = 10.0               # poles and zeros up to this many times the sweep
 DOUBLET = 1e-3                 # a pole and a zero this close (relative) cancel in the lists and the written-out
                                # H(s) [A54]
 LOOP_LEAD = 60                 # a loop gain's points from near DC to its sweep's start (phase_margin's `lead`)
+LOOP_ROOTS_MAX = 400           # a loop gain's own roots (a dense QZ per op-amp channel) up to this many unknowns
+POLES_EXACT_MAX = 2000         # a path's circuit up to this many unknowns gets exact poles (QZ, O(N³): ~90 s at
+                               # 2000, once per circuit), else fitted
 
 
 def cancel_doublets(poles, zeros) -> tuple[list, list, int]:
@@ -1976,8 +1999,26 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
         if node in net.circuit.nodes and lnode in lumped.circuit.nodes and node != net.out_node and net.on_path(name):
             outs.append((f"{name}: output", node, lnode))
     out = []
+    # a circuit too large for the exact roots (a dense QZ, O(N³): 90 s at 2000 unknowns, ~3 min at 2400): its poles and
+    # zeros fitted to the sweep instead (transfer.fitted_response, vector fitting [Gustavsen 1999]), its step by BDF2
+    # on the lumped circuit (sparse), a note says so (audit 2026-11, M-13)
+    big = lumped.circuit.size > POLES_EXACT_MAX
     for title, node, lnode in outs:
         h = net.circuit.transfer(f, node)
+        if big:
+            from .transfer import fitted_response
+            r = fitted_response(title, spec.name, "voltage gain", np.asarray(f, float), h)
+            r.notes.append(f"the circuit has {lumped.circuit.size} unknowns: its poles and zeros are fitted to the "
+                           f"sweep (the exact solve, O(N³), is kept to {POLES_EXACT_MAX})")
+            s0 = 2j * math.pi * float(f[0])
+            shape = np.prod([1 - s0 / z for z in r.zeros]) / np.prod([1 - s0 / p for p in r.poles]) if r.poles \
+                else 1.0
+            r.normal = normal_form(r.poles, r.zeros, complex(h[0]) / complex(shape), f_max=f_max)
+            r.step = _step_of(lumped, lnode, r.poles, r.normal, f, None)
+            if r.step and r.step.get("note"):
+                r.notes.append(r.step["note"])
+            out.append(r)
+            continue
         poles, zeros, k = lumped.circuit.poles_zeros(lnode)
         poles, zeros, n_doublets = cancel_doublets(poles, zeros)
         r = Response(title, spec.name, "voltage gain", np.asarray(f, float), h, keep(poles), keep(zeros), exact=True)
@@ -2002,8 +2043,12 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
         f_lead = np.geomspace(max(float(f[0]) * 1e-9, 1e-9), float(f[0]), LOOP_LEAD, endpoint=False)
         # refined on T itself near its lightly damped roots (the lumped circuit's) and between samples that differ
         # much: a narrow |T| = 1 excursion between two sweep points counts (audit M-3)
+        # (each channel's roots are a dense QZ of their own: only for a circuit up to LOOP_ROOTS_MAX unknowns, else the
+        # bisection between samples alone, which found every crossover of the audit's resonant-loop fuzz too: eight
+        # op-amp channels of a 1740-unknown circuit took ~8 min, M-13)
         try:
-            roots = np.concatenate(lumped.circuit.loop_roots(name)) if name in lumped.circuit.opamps else None
+            roots = np.concatenate(lumped.circuit.loop_roots(name)) \
+                if name in lumped.circuit.opamps and lumped.circuit.size <= LOOP_ROOTS_MAX else None
         except (ValueError, np.linalg.LinAlgError):
             roots = None
         pm = phase_margin(f, t, lead=net.circuit.loop_gain(name, f_lead), lead_f=f_lead, roots=roots,
