@@ -277,7 +277,11 @@ def couple(board: Board, config: Config, converters: list, th, issues: list,
                 info["stopped"] = (f"round {k} changed more ({moved * 100:.2g} %) than the one before "
                                    f"({last_change * 100:.2g} %): the round before kept")
                 break
-            swap = {id(c): h for c, h in zip(ok, hot)}
+            # each of Simulate's results replaced by this round's copy of it (`cold` keeps them in the order of `ok`
+            # and `hot`). Keyed by the round before's copies instead (`ok`), from round 2 on nothing matched: Thermal
+            # was solved again with the 20 °C currents, the loop flipped between the two and read as settled with
+            # the 20 °C temperatures (round-8 audit)
+            swap = {id(c): h for c, h in zip(cold, hot)}
             current = [swap.get(id(c), c) for c in converters]
             ok, before, last_change = hot, now, moved
             if moved <= tol:            # the currents moved less than the tolerance: the temperatures stand
