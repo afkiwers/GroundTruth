@@ -2925,11 +2925,29 @@ _KERNEL_CACHE_BYTES = 128 * 2**20   # the cache's spectra at most (oldest out fi
 _KERNEL_LOCK = threading.Lock()
 
 
+KERNEL_DIGITS = 12                  # significant digits of a kernel's d and dz (_kernel_value) [A85]
+
+
+def _kernel_value(v: float) -> float:
+    """A kernel's pitch or layer distance as the kernels are computed and cached for it: v to KERNEL_DIGITS
+    significant digits [A85]."""
+    return float(f"{float(v):.{KERNEL_DIGITS}g}")
+
+
 def _kernel_pair(nx: int, ny: int, d: float, dz: float) -> tuple:
     """(FFT spectrum x, FFT spectrum y, same-position mutual (self inductance at dz = 0), Σ kernel x, Σ kernel y)
     for strips at layer distance dz (~0.2 s for a 231 x 264 route model). Cached up to _KERNEL_CACHE_BYTES:
-    models on the same grid (a stage's own models, a Simulate repeated) reuse them."""
-    key = (nx, ny, round(d, 12), round(dz, 12))
+    models on the same grid (a stage's own models, a Simulate repeated) reuse them.
+
+    Computed for d and dz rounded as the cache key rounds them (_kernel_value), so a kernel depends on its key
+    alone [A85]. Until 2026-11-04 it was computed for the exact d, dz of whichever model asked for the key first:
+    two layer pairs with the same gap differ in the last bit (face_gap: 0.001235 and 0.0012349999999999998 m on a
+    test board), so a model's kernels, and every number after them (95 of a route's 275 by up to 3e-13), depended
+    on what the cache held from earlier models and what its oldest-first eviction had dropped since. A Simulate
+    repeated in one process, or solved in groups, could then differ in the last digits (the test suite's
+    test_models_solved_in_groups_when_memory_is_short_keep_every_number failed so in a full run, never alone)."""
+    d, dz = _kernel_value(d), _kernel_value(dz)
+    key = (nx, ny, d, dz)
     with _KERNEL_LOCK:
         hit = _KERNELS.get(key)
     if hit is None:

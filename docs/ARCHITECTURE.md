@@ -307,7 +307,11 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
   - `solve(f, guess=[...])` warm-starts GMRES from a least-squares combination of guess vectors.
     Candidates start from the baseline solution, which saves about a third of the iterations. Across
     frequencies a warm start doesn't help, so it isn't used there.
-- **Kernel cache** (`_kernel_pair`): spectra are reused across solves on the same grid.
+- **Kernel cache** (`_kernel_pair`): spectra are reused across solves on the same grid. A kernel is computed for
+  its key's d and dz (12 significant digits, [A85]), never for the exact bits of whichever model asked first:
+  equal layer gaps come out of `face_gap` one bit apart, and until audit round 8 (G8-1) a model's numbers then
+  depended on what earlier models had left in the cache and what its eviction had dropped (last digits; a
+  repeated or grouped Simulate in one process could differ: `test_a_simulate_does_not_depend_on_the_kernels_cached_before_it`).
 - **Compiled multiply-add** (`solver/_mac.py`, numba): the L_p product's Σ_s K[t,s]·F[s] per frequency pixel
   was N² numpy multiplies and adds, each a pass over memory (9.4 ms per product on the 6-layer route model);
   fused per pixel it is 3.3 ms, bit-identical. Serial on purpose (the solves already run in parallel threads,
