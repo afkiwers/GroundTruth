@@ -229,9 +229,10 @@ def test_a_transistor_modelled_as_a_resistor_spreads_its_die_over_its_wider_side
     assert die_side(N(reference="Q1"), fet, [[pad(0.6, 0.8)], [pad(0.6, 0.8)]], None) is None
 
 
-def _terminal_strip_r(tmp_path, name, metal, d=0.1):
+def _terminal_strip_r(tmp_path, name, metal, d=0.1, offset=0.0):
     """The DC resistance (Ω) of boardgen.terminal_strip_board between its end pads, C1's solder a perfect bond (its
-    pin value bond:0) and its Terminal Metal `metal`."""
+    pin value bond:0) and its Terminal Metal `metal`, on a grid of pitch d (mm) shifted by `offset` of a cell in x
+    and y (0: the pads' edges on grid nodes; 0.5: halfway between)."""
     from boardgen import terminal_strip_board
     from conftest import make
     from groundtruth.analysis import simulate
@@ -241,7 +242,9 @@ def _terminal_strip_r(tmp_path, name, metal, d=0.1):
     # 10 Ω of ESR: the even entry's branches (1 % of it per side) are then large against the sheet and add no shortcut
     sc.set_component("C1", ComponentModel("cap", {"C": 1e-6, "ESR": 10.0}))
     sc.set_component_pins("C1", {"bond": 0.0})
-    st = simulate.BoardModel(board, sc.config).build((2.0, 6.0, 36.0, 18.0), ["F.Cu"], {"PWR", "AUX"}, d, False)
+    x0, y0 = 2.0 - offset * d, 6.0 - offset * d
+    st = simulate.BoardModel(board, sc.config).build((x0, y0, x0 + 34.0, y0 + 12.0), ["F.Cu"], {"PWR", "AUX"}, d,
+                                                     False)
     inj = _area_shares(st, [board.find_pin("U1.1")], "F.Cu", 1.0) + \
         _area_shares(st, [board.find_pin("U2.1")], "F.Cu", -1.0)
     path, _ = dc_path(st, inj, 1.0, "strip")
@@ -263,6 +266,65 @@ def test_a_terminal_sheet_conducts_beside_the_copper_under_it(tmp_path):
     perfect = _terminal_strip_r(tmp_path, "perfect", "0")
     assert base - same == pytest.approx(r_cu / 2 * squares, rel=0.04)
     assert base - perfect == pytest.approx(r_cu * squares, rel=0.04)
+
+
+@pytest.mark.parametrize("offset", [0.0, 0.25, 0.5])
+def test_a_pad_covers_its_whole_length_at_any_grid_offset(tmp_path, offset):
+    """A pad's nodes are those whose cell it overlaps (simulate.cells_overlap [A88]), so a pad a whole number of
+    cells long spans exactly its length between its first and last node, wherever the grid falls on it, and a
+    terminal sheet over it is as wide as the pad. boardgen.terminal_strip_board's 10 mm pad over the 4 mm strip on a
+    0.4 mm grid: a perfect terminal shorts the stretch, −R_cu·L/w; one of the copper's sheet resistance halves it,
+    −(R_cu/2)·L/w (two equal sheets in parallel). With only the nodes inside the outline (before 2026-11-04) the
+    pad spanned L − 2d with its edges on nodes and L − d half a cell off: the perfect terminal read 0.916 and 0.958
+    of the closed form, the sheet 0.867 and 0.957 (audit round 8, P8-6). The rest of the error, 0.2-0.4 %, is the
+    strip's own discretisation (0.998 at 0.1 mm as at 0.4)."""
+    r_cu = _r_sheet_cu()
+    squares = 10.0 / 4.0
+    tag = f"o{int(offset * 100)}"
+    base = _terminal_strip_r(tmp_path, "thin" + tag, f"{1000 * r_cu}ohm", 0.4, offset)
+    same = _terminal_strip_r(tmp_path, "same" + tag, f"{r_cu}ohm", 0.4, offset)
+    perfect = _terminal_strip_r(tmp_path, "perfect" + tag, "0", 0.4, offset)
+    assert base - perfect == pytest.approx(r_cu * squares, rel=0.01)
+    assert base - same == pytest.approx(r_cu / 2 * squares, rel=0.01)
+
+
+@pytest.mark.parametrize("d", [0.2, 0.4, 0.8])
+def test_pads_of_two_nets_closer_than_a_cell_never_share_a_node(tmp_path, d):
+    """Two pads of a part 0.1 mm apart, each on a pour of its own net with the same 0.1 mm gap: a cell half a pitch
+    round either pad's outline overlaps both (cells_overlap [A88]), but a node holds one net's copper
+    (peec.Grid.label), so neither pad, nor the part's lids (part_lid's bonds), nor a current fed in at a pad
+    (power._pad_nodes) takes a node of the other net, at any grid offset: a node in both would short the two nets.
+    Each pad keeps at least one node."""
+    from boardgen import BoardGen
+    from conftest import make
+    from groundtruth.analysis import simulate
+    from groundtruth.analysis.power import _pad_nodes
+    from groundtruth.components.models import ComponentModel
+    g = BoardGen(layers=2, size=(20.0, 20.0))
+    g.zone("A", "F.Cu", [(2.0, 6.0), (9.95, 6.0), (9.95, 14.0), (2.0, 14.0)])
+    g.zone("B", "F.Cu", [(10.05, 6.0), (18.0, 6.0), (18.0, 14.0), (10.05, 14.0)])
+    g.footprint("C1", "1u", "Capacitor_SMD:Fake_0402", (10.0, 10.0), [
+        {"number": 1, "at": (-0.35, 0.0), "net": "A", "size": (0.6, 0.6)},
+        {"number": 2, "at": (0.35, 0.0), "net": "B", "size": (0.6, 0.6)}])
+    board, sc, _ = make(tmp_path, g, f"gap{int(d * 10)}", nets=())
+    sc.set_component("C1", ComponentModel("cap", {"C": 1e-6, "ESR": 0.01}))
+    pa, pb = board.find_pin("C1.1"), board.find_pin("C1.2")
+    for offset in (0.0, 0.125, 0.25, 0.375, 0.5):
+        x0 = y0 = 1.0 - offset * d
+        st = simulate.BoardModel(board, sc.config).build((x0, y0, x0 + 18.0, y0 + 18.0), ["F.Cu"], {"A", "B"}, d,
+                                                         False)
+        grid = st.grids[0]
+        net_at = lambda n: grid.nets[grid.label[n[1], n[2]]]                    # noqa: E731
+        under_a, under_b = simulate.pad_nodes(st, [pa]), simulate.pad_nodes(st, [pb])
+        fed_a, fed_b = _pad_nodes(st, pa, "F.Cu"), _pad_nodes(st, pb, "F.Cu")
+        assert under_a and under_b and fed_a and fed_b, offset
+        assert not set(under_a) & set(under_b) and not set(fed_a) & set(fed_b), offset
+        assert {net_at(n) for n in under_a + fed_a} == {"A"} and {net_at(n) for n in under_b + fed_b} == {"B"}, offset
+        bonded = {}
+        for b in st.branches:
+            if b.kind == "bond" and b.name == "C1":
+                bonded.setdefault(b.b, set()).add(net_at(b.a))
+        assert len(bonded) == 2 and all(len(nets) == 1 for nets in bonded.values()), offset
 
 
 def _r_sheet_cu() -> float:

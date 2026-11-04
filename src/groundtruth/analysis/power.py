@@ -54,7 +54,7 @@ from ..emi.spectrum import analysis_band, trapezoid_harmonics
 from ..solver.peec import Branch, RouteExcitation, Solution, SolverError, TraceSegment
 from .pins import feed_layers
 from .simulate import (BoardModel, ModelRun, RouteResult, StackBuild, _choose_pitch, _interp_loglog,
-                       add_terminal_vectors, terminal_vectors,
+                       add_terminal_vectors, grid_cells_of, terminal_vectors,
                        _solve_row, _top_plane_pair, band_moments, band_notes, band_top, indicative_text,
                        initial_frequencies, mark_quasi_static, resonance_text, transfers, unsolved_band,
                        unsolved_issue, via_groups)
@@ -1513,28 +1513,18 @@ def _ce101_stage(setup: ConverterSetup, res: ConverterResult, a):
 
 
 def _pad_nodes(st: StackBuild, pad: Pad, side: str) -> list[tuple]:
-    """Every grid node of the pad's net inside its outline, on the layer _pad_node picks; at least the nearest.
-    A DC current fed into one node would add a spreading resistance (a log singularity) of the order of
-    0.1 mΩ per pad: as much as a whole power path."""
-    import shapely
+    """Every grid node of the pad's net whose cell overlaps the pad (simulate.grid_cells_of: within half a cell of
+    its outline [A88]), on the layer _pad_node picks; at least the nearest. A DC current fed into one node would add
+    a spreading resistance (a log singularity) of the order of 0.1 mΩ per pad: as much as a whole power path.
+    The pad grown by a round d/2 until 2026-11-04: the same rule but for its corners, and a node exactly half a cell
+    off the outline was in or out by round-off."""
     from ..geometry.shapes import pad_shape
     n0 = _pad_node(st, pad, side)
     if n0 is None:
         return []
     k = n0[0]
-    g = st.grids[k]
-    poly = pad_shape(pad).buffer(st.d / 2)
-    x0, y0, x1, y1 = poly.bounds
-    i0, i1 = max(int((x0 - g.x0) / g.d) - 1, 0), min(int((x1 - g.x0) / g.d) + 2, g.nx)
-    j0, j1 = max(int((y0 - g.y0) / g.d) - 1, 0), min(int((y1 - g.y0) / g.d) + 2, g.ny)
-    ii, jj = np.meshgrid(np.arange(i0, i1), np.arange(j0, j1), indexing="ij")
-    ii, jj = ii.ravel(), jj.ravel()
-    xs, ys = g.xy(ii, jj)
-    inside = shapely.contains_xy(poly, xs, ys) & g.node[ii, jj]
-    if g.label is not None and g.nets:
-        net_id = g.nets.index(pad.net) if pad.net in g.nets else -1
-        inside &= g.label[ii, jj] == net_id
-    nodes = [(k, int(i), int(j)) for i, j in zip(ii[inside], jj[inside])]
+    ii, jj = grid_cells_of(st.grids[k], pad_shape(pad), pad.net)
+    nodes = [(k, int(i), int(j)) for i, j in zip(ii, jj)]
     return nodes or [n0]
 
 
