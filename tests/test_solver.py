@@ -382,6 +382,53 @@ def test_models_solved_in_groups_when_memory_is_short_keep_every_number(tmp_path
         assert together.converters or together.routes[0].cavity_solves
 
 
+def test_a_kernel_depends_on_its_key_not_on_the_cache_history(monkeypatch):
+    """Audit round 8, G8-1 [A85]: two layer pairs with the same gap ask for the kernel with distances one bit apart
+    (face_gap). The kernel the cache gives for them must not depend on which was asked first: it is computed for
+    the key's rounded values. (Computed for the first asker's, a model's numbers depended on what earlier models
+    had left in the cache and its eviction had dropped since.)"""
+    from groundtruth.solver import peec
+    d, dz = 0.235e-3, 0.001235
+    dz_bit = float(np.nextafter(dz, 0.0))                   # 0.0012349999999999998, as face_gap gave it
+    assert dz_bit != dz
+    monkeypatch.setattr(peec, "_KERNELS", {})
+    fresh = peec._kernel_pair(14, 9, d, dz_bit)             # asked first
+    monkeypatch.setattr(peec, "_KERNELS", {})
+    peec._kernel_pair(14, 9, d, dz)                         # the other bit-variant cached first
+    after = peec._kernel_pair(14, 9, d, dz_bit)
+    assert all(np.array_equal(a, b) for a, b in zip(fresh, after))
+
+
+def test_a_simulate_does_not_depend_on_the_kernels_cached_before_it(tmp_path, monkeypatch):
+    """Audit round 8, G8-1: the same Simulate with an empty kernel cache and with one holding, under every key it
+    asks for, a kernel another model left there (its distance one bit away): every number the same. Before the
+    fix this one's numbers moved in the last digits (on the layer-change board 95 of a route's 275, by up to
+    3e-13), and the grouping test above failed in a full test run, where earlier tests fill the cache and its
+    oldest-first eviction drops entries between two Simulates."""
+    import json
+    from groundtruth.solver import peec
+    board, sc, _ = make(tmp_path, microstrip_board(), "m", capacitance=True, solve_points=2, max_solves=2)
+    asked = []
+    pair = peec._kernel_pair
+
+    def recorded(nx, ny, d, dz):
+        """_kernel_pair, every request noted."""
+        asked.append((nx, ny, d, dz))
+        return pair(nx, ny, d, dz)
+    monkeypatch.setattr(peec, "_kernel_pair", recorded)
+
+    def dump(res):
+        return json.dumps([[r.solves, r.cavity_solves, r.emissions, r.worst] for r in res.routes], default=str,
+                          sort_keys=True)
+    monkeypatch.setattr(peec, "_KERNELS", {})
+    clean = dump(simulate(board, sc.config))
+    assert asked
+    monkeypatch.setattr(peec, "_KERNELS", {})
+    for nx, ny, d, dz in set(asked):        # what an earlier model with a distance one bit away left cached
+        pair(nx, ny, d, float(np.nextafter(dz, 1.0)))
+    assert dump(simulate(board, sc.config)) == clean
+
+
 def test_solve_groups_keep_shared_models_together_and_the_board_wide_last():
     """solve_groups: everything in one group when it fits or the free memory is unknown; otherwise whole components
     (runs sharing a stack, or a derived stack's base), packed in order, the board-wide components last."""
