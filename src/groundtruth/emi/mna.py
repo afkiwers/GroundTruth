@@ -40,7 +40,8 @@ CANCEL = 1e-6                   # a pole and a zero this close cancel: relative 
 CANCEL_FLOOR = 1e-4             # ... so a lightly damped pair's own scale counts, not only |p| (audit M-4)
 F_REF = 1e3                     # Hz: s is scaled by 2π·F_REF for the eigenvalue problems
 PI_GL = 0.5                     # a line is stamped as its π below this |γl| (electrically short), else as its Y
-R_BRANCH = 1e-3                 # Ω: a resistor below this is a branch (v_a − v_b − R·i = 0), not a conductance (r)
+R_BRANCH = 1e-5                 # Ω: a resistor below this is a branch (v_a − v_b − R·i = 0), not a conductance (r):
+                                # the floors (a via's 1 µΩ), not a track's milliohms (each branch is one more unknown)
 ORIGIN = 1e-6                   # a root below ORIGIN·2π·F_REF rad/s (1 mHz) is at the origin; the QZ keeps finite roots
 INFINITE = 1e9                  # up to INFINITE·2π·F_REF rad/s (1 THz): fixed bounds, [A82] (audit M-5)
 

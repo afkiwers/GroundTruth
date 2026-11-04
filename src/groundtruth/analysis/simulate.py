@@ -1933,7 +1933,9 @@ POLE_SPAN = 10.0               # poles and zeros up to this many times the sweep
 DOUBLET = 1e-3                 # a pole and a zero this close (relative) cancel in the lists and the written-out
                                # H(s) [A54]
 LOOP_LEAD = 60                 # a loop gain's points from near DC to its sweep's start (phase_margin's `lead`)
-POLES_EXACT_MAX = 1200         # a path's circuit up to this many unknowns gets exact poles (QZ, O(N³)), else fitted
+LOOP_ROOTS_MAX = 400           # a loop gain's own roots (a dense QZ per op-amp channel) up to this many unknowns
+POLES_EXACT_MAX = 2000         # a path's circuit up to this many unknowns gets exact poles (QZ, O(N³): ~90 s at
+                               # 2000, once per circuit), else fitted
 
 
 def cancel_doublets(poles, zeros) -> tuple[list, list, int]:
@@ -1977,7 +1979,7 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
         if node in net.circuit.nodes and lnode in lumped.circuit.nodes and node != net.out_node and net.on_path(name):
             outs.append((f"{name}: output", node, lnode))
     out = []
-    # a circuit too large for the exact roots (a dense QZ, O(N³): 6 s at 1200 unknowns, 90 s at 2400): its poles and
+    # a circuit too large for the exact roots (a dense QZ, O(N³): 90 s at 2000 unknowns, ~3 min at 2400): its poles and
     # zeros fitted to the sweep instead (transfer.fitted_response, vector fitting [Gustavsen 1999]), its step by BDF2
     # on the lumped circuit (sparse), a note says so (audit 2026-11, M-13)
     big = lumped.circuit.size > POLES_EXACT_MAX
@@ -2021,9 +2023,12 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
         f_lead = np.geomspace(max(float(f[0]) * 1e-9, 1e-9), float(f[0]), LOOP_LEAD, endpoint=False)
         # refined on T itself near its lightly damped roots (the lumped circuit's) and between samples that differ
         # much: a narrow |T| = 1 excursion between two sweep points counts (audit M-3)
-        try:                    # (not for a circuit too large for exact roots: bisection alone then, M-13)
+        # (each channel's roots are a dense QZ of their own: only for a circuit up to LOOP_ROOTS_MAX unknowns, else the
+        # bisection between samples alone, which found every crossover of the audit's resonant-loop fuzz too: eight
+        # op-amp channels of a 1740-unknown circuit took ~8 min, M-13)
+        try:
             roots = np.concatenate(lumped.circuit.loop_roots(name)) \
-                if name in lumped.circuit.opamps and not big else None
+                if name in lumped.circuit.opamps and lumped.circuit.size <= LOOP_ROOTS_MAX else None
         except (ValueError, np.linalg.LinAlgError):
             roots = None
         pm = phase_margin(f, t, lead=net.circuit.loop_gain(name, f_lead), lead_f=f_lead, roots=roots,

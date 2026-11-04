@@ -337,7 +337,8 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
             if m is None or m.kind == "open":
                 if (m is not None and fp.reference not in unmodelled and opamp_pin_roles(fp) is not None):
                     unmodelled.append(fp.reference)
-                elif fp.reference not in ends and fp.reference not in left_out:
+                elif fp.reference not in ends and fp.reference not in left_out and len(fp.nets()) > 1:
+                    # (a part with one net only, a test point, joins nothing: not worth a word)
                     left_out[fp.reference] = "no settings entry" if m is None else "model open"
                 continue
             if m.kind == "buffer":         # a logic buffer is not linear: only its input's C_in loads the circuit
@@ -599,6 +600,17 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
     out = at(rcv)
     if spec.load_ohms and not any((q := board.find_pin(rx)) is not None and q is rcv for rx in spec.receivers):
         ckt.r(out, ckt.ground, spec.load_ohms)
+    # a receiver behind a logic buffer or comparator on the path (an ADC's comparator input): the buffer is not
+    # linear and its output is driven by nothing in the circuit, so the response there is 0 (−600 dB, with nothing
+    # said); the response is the one at the buffer's input instead, a note says so
+    gate = _buffer_before(board, config, spec, drv.net, rcv.net, path, ground)
+    out_net = rcv.net
+    if gate is not None:
+        a_, b_, ref_ = gate
+        out, out_net = at(a_), a_.net
+        notes.append(f"{receiver} is behind the logic buffer / comparator {ref_} ({ref_}.{a_.number} → "
+                     f"{ref_}.{b_.number}), which is not linear: the response is the one at its input, "
+                     f"{ref_}.{a_.number}")
     # nodes no element reaches would make the matrix singular: tie each to ground through 1 TΩ (an open pin's leak)
     for n in list(ckt.nodes):
         ckt.r(n, ckt.ground, 1e12)
@@ -610,7 +622,7 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
                     None if (kind == "macromodel") else float(ch.params.get("gain") if ch.params.get("gain")
                                                               is not None else 1.0))
                    for (nm, kind), ch in zip(opamps, amps.values())],
-        "in": gnd(drv.net), "out": gnd(rcv.net),
+        "in": gnd(drv.net), "out": gnd(out_net),
         # what the symbolic H(s), the circuit as designed, leaves out (a note says so, symbolic.py)
         "source_ohms": r_s, "load_ohms": spec.load_ohms or 0.0,
         # parts marked DNP: left out of the circuit as built (audit 2026-11, E-11: a DNP part with a model stayed in,
@@ -618,6 +630,29 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
         "dnp": sorted(not_fitted)}
     return AnalogNetwork(ckt, out, nets, opamps, sorted(parts), tracks, notes, node_of, schematic, amp_out, lines,
                          part_nodes, {nm: dict(ch.params) for nm, ch in amps.items()}, path_nets=sorted(start))
+
+
+def _buffer_before(board: Board, config: Config, spec: NetSpec, drv_net: str, rcv_net: str, path: set,
+                   ground: set) -> Optional[tuple]:
+    """(input pad, output pad, ref) of the logic buffer or comparator channel the path crosses before its receiver,
+    when the receiver's net is not reached from the driver's without one (route.signal_graph without buffer steps):
+    the first such channel (its input reached linearly, its output on the path), by reference. None otherwise."""
+    from .route import _reach, signal_graph
+    fwd, _ = signal_graph(board, config, set(spec.through))
+
+    def is_buffer(fp) -> bool:
+        """Whether a step's part is modelled as a logic buffer."""
+        m = config.model_for(fp.reference)
+        return m is not None and m.kind == "buffer"
+    linear = {n: {nxt for nxt, steps in outs.items() if any(not is_buffer(fp) for fp, _, _ in steps)}
+              for n, outs in fwd.items()}
+    reach = _reach(linear, drv_net, ground - {drv_net})
+    if rcv_net in reach:
+        return None
+    gates = sorted(((fp.reference, a.number, a, b) for n in reach for nxt, steps in fwd.get(n, {}).items()
+                    for fp, a, b in steps if is_buffer(fp) and (nxt in path or nxt == rcv_net)),
+                   key=lambda g: (g[0], str(g[1])))
+    return (gates[0][2], gates[0][3], gates[0][0]) if gates else None
 
 
 def array_pairs(fp: Footprint) -> list[tuple[Pad, Pad]]:

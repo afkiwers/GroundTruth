@@ -709,3 +709,16 @@ def test_a_circuit_too_large_for_exact_roots_gets_fitted_ones(monkeypatch):
     real = [p for p in r.poles if abs(p) < 1e6]
     assert len(real) == 1 and real[0].real == pytest.approx(-1 / rc, rel=0.01)
     assert r.step["metrics"]["rise"] == pytest.approx(math.log(9) * rc, rel=0.02)
+
+
+def test_a_receiver_behind_a_comparator_reads_at_its_input():
+    """A path into an ADC's comparator input: U1.1 → R1 10k → X (C1 10 nF to GND) → buffer U4 → CMP → U2.1. The
+    buffer is not linear and nothing in the circuit drives CMP: the response was 0 (−600 dB) with nothing said; it is
+    the RC's at the buffer's input, 1/(1 + jω(R_s + R1)C1), and a note names the buffer."""
+    parts = [IC("U1", "SIG_IN"), IC("U2", "CMP", "input"), R("R1", "SIG_IN", "X", "10k"), C("C1", "X", "GND", "10n"),
+             BUF("U4", [("X", "CMP")]), REG()]
+    _, _, _, net = network(parts, through=["R1"], models={"C1": ideal_cap(10e-9)}, load_pf=0.0)
+    f = np.array([10.0, 1e3, 1e5])
+    want = 1 / (1 + 1j * TAU * f * (R_S + 10e3) * 10e-9)
+    assert np.abs(h_at(net, f)) == pytest.approx(np.abs(want), rel=1e-3)
+    assert any("behind the logic buffer / comparator U4" in n for n in net.notes)
