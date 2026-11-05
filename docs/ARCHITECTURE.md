@@ -163,10 +163,23 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
   A through-hole pad's pin (`simulate.add_pin`, 2026-10-15; the user, of a big connector pin: "the current density
   around that area looks odd") is joined to each layer by `pin_joints` parallel branches (one per ~1.5 cells of the
   drill's circumference, 1 to PIN_JOINTS_MAX 48) between points on a circle at drill/2 + d/2, each k x the pin's
-  impedance: joined at the one node nearest its centre (add_vertical, still used for vias), the whole current
+  impedance: joined at the one node nearest its centre, the whole current
   entered one cell, a 20.8 A/mm² hot spot at 1 A for a 2 mm pin where the barrel wall carries 4.55 (I/(2π·r·t)).
   tests/test_pins.py: J(r) analytic within 3 % at 3 and 5 mm, the wall peak within 30 % (3.8 / 4.3 / 5.1 at
   0.25 / 0.125 / 0.0625 mm cells). The ▲ markers add a pin's joints per layer pair (`transfers`).
+  Vias are joined the same way.
+  **The joints are one pattern fixed to the grid** (2026-11-05, branch `via-joints`, `simulate.joint_points`,
+  [A89]): the circle is centred on the grid node nearest the hole and each point rounded in whole cells from it,
+  so the pattern depends on drill/d alone; every layer of a model shares the grid's origin and pitch, so a via joins
+  all its layers at the same (i, j). A layer whose copper of the net misses a joint (a pad smaller than the ring, a
+  thermal relief) takes its own copper nearest that point (0.75 cells), else nearest the hole; a layer without the
+  net's copper near the hole is not joined (antipads, a blind or buried via's span). Before, the circle was
+  centred on the hole and each layer snapped each point to its own nearest node: the ring's radius moved with where
+  the via lay in its cell, and a radial plane pair (a coaxial line from a 0.3 mm via to a 10 mm rim, 0.2 mm FR4)
+  read 0.996 / 0.935 / 0.927 of μ0(h+δ)/2π·ln(R/r) at grid offsets 0, ¼, ½ cell at 0.4 mm cells, 0.974 / 1.014 /
+  0.944 at 0.2 mm; now 0.928 / 0.935 / 0.927 and 0.974 / 0.980 / 0.972 (tests/test_via_joints.py). The joints'
+  centre is now the node, up to d/√2 from the hole (as a single joint's always was), and the 1 → 2 joint switch at
+  d = π·drill/2.25 still steps (see A89).
   - KVL per branch: `Z·I − A·V = −jω·ψ`
   - KCL: `Aᵀ·I = J` (+1 A at the receiver return node, −1 A at the driver's)
 - **Where a layer's current flows, and the copper's own inductance** (2026-11-02, branch `plane-pair-inductance`,
@@ -230,6 +243,15 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
   restart is short (its memory budget: 52 on refboard's board-wide model at 4× resolution), and near a
   plane resonance it converges steadily but slowly: that 1.58 GHz solve fell ~2× per cycle and finished in 11
   cycles, where the 8 failed (audit, session 7).
+  The true residual is checked (one product) when the recurrence's first meets the tolerance; a miss halves the
+  recurrence's aim. After `GMRES_CHECK_MISSES` (4) misses in one cycle the recurrence has fallen to an eighth of
+  the tolerance while the true residual stayed above it: the cycle ends there and restarts from that check's
+  answer, whose residual is known [A91]. Before (audit round 8, G8-3), a solve whose products were not exactly
+  repeatable (relative noise ≥ the tolerance) went on halving and checked at almost every iteration: 1584 products
+  for 800 iterations (`test_a_solve_that_cannot_converge_costs_no_more_products_than_before_the_true_residual_stop`;
+  now 88 for 56, unconverged as before). Cycles with fewer misses are unchanged, bit for bit: of 1212 cycles in the
+  solver, power and audit tests' solves, 1204 had none, 7 had one or two and one had three before converging (under
+  the cap); no solve of refboard's nets and stages tested had one.
 - **A solve that still fails** is kept as `None` in its run. The refinement (`next_frequencies`) then closes in
   on the first failure above each solved frequency from below (log-midpoint harmonics, first in line), and
   `unsolved_band` names the band above the last solved frequency when a failure lies there and the limit
@@ -301,7 +323,13 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
     (`test_a_simulate_does_not_depend_on_the_order_its_solves_finish` runs the solves in and against their
     order). The wider window went with it: on refboard no model reached 100 iterations per
     factorisation (route models ~5, the board-wide model 39-79). Checked on the CPU only: the GPU backend's
-    sums may not be in a fixed order.
+    sums may not be in a fixed order. A frequency is keyed by f to 12 significant digits (`PlaneStack.freq_key`)
+    and its system, choice and factorisation are computed for that key [A85]; until 2026-11-05 the key was f to
+    1 mHz and they used the exact f of the first solve that asked, so a solve one bit or 0.4 mHz away got that
+    one's system matrix and counted as a borrow
+    (`test_a_frequency_s_operator_depends_on_its_key_not_on_which_solve_asked_first`). The same holds for the
+    models (`BoardModel.build`: region and pitch to 12 digits, built for those) and the ideal reference model and
+    the cross-section cuts (exact keys).
   - `with_branches()` adds candidate vias or capacitors as a low-rank (Woodbury) update of the base
     factorisation. A full rebuild happens only if the new branches join separate islands.
   - `solve(f, guess=[...])` warm-starts GMRES from a least-squares combination of guess vectors.
@@ -594,8 +622,11 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   solve; −0.48 % so, −0.71 % with the old round buffer). The lids' solder bonds and a die's branches stay equal per
   node. The vias' joints (`add_pin`) are not pads and are unchanged: on a plane pair fed at a pad over a via, the
   port's inductance still moves with the grid's offset (0.4 mm cells: 0.72 / 0.78 / 0.82 nH before, 0.73 / 0.77 /
-  0.79 after) because each layer's joint snaps to its own nearest node, so a joint can slant a cell between the
-  layers; joining every layer at the same node removed most of it in a trial (0.80-0.82 nH) — open.
+  0.79 after). Since branch `via-joints` the joints are one pattern fixed to the grid (`joint_points` [A89], above):
+  that removed the joints' share (a radial plane pair ±3.6 → ±0.4 %), but this line keeps 0.727 / 0.773 / 0.807 nH at
+  0.4 mm cells from its pads, clearance holes and the joints' centre now on the node (±0.3 % at 0.2 mm). The trial
+  that read 0.80-0.82 nH joined the plane at the pad's few nodes, close to a point source (every via at one node:
+  0.82-0.86 nH at five offsets), which reads high and does not converge with the pitch.
   **A vertical FET's die is spread over its tab** (2026-10-25, branch `tab-spread`, `simulate.die_side`,
   `die_branches`, [A68]; the user, of that view: "the top layer under the fet is black and the vias glow which does
   not make sense"). With one lid per side the drain tab was one node at one voltage, so the copper under Q601 handed
@@ -922,7 +953,7 @@ and working set = Task Manager's "Memory", sampled every 50 ms; a census of the 
   every round capped by the largest model of the run (`memory_threads`, now only reported). The Krylov basis is
   single precision (`peec._Basis32Vectors`, `solver/_mac.gs_project`: float32 planes, float64 arithmetic,
   [A66]) for tolerances ≥ `BASIS32_MIN_TOL` 1e-6: half its memory. `_gmres` stops on the true residual as soon as the
-  recurrence meets the tolerance.
+  recurrence meets the tolerance (at most `GMRES_CHECK_MISSES` missed checks per cycle [A91]).
 - **Left** (the next steps): SuperLU's committed slack (~6.5x its fill) dominates the committed peak; only a
   different sparse solver (PARDISO, UMFPACK, a complex-symmetric LDLᵀ) would remove it, a new dependency. The
   working-set peak is mostly the live factorisations' fill (1.4 GB of 3.4 GB on the large board), then the
@@ -1151,7 +1182,7 @@ for a boost; duty = the high-side conduction time). The inductor current is cont
   - Each path lists every via with ≥ 1 % of its current (`dc_summary`), with its IPC-2221 capacity for a 10 K rise
     (`analysis/ipc.via_capacity`, the plating barrel as an internal conductor); `via_overload` fires at
     `rules.via_load_warning` (100 %) / `via_load_error` (150 %) of it. A part's plated hole (a branch named
-    `pad REF.N`) is left out, as in `bridge_rms`: its soldered pin carries the current. `add_vertical(...,
+    `pad REF.N`) is left out, as in `bridge_rms`: its soldered pin carries the current. `add_pin(...,
     filled=True)` gives such a hole (of a part that is not DNP) the resistance of its whole cross-section,
     l/(σπr²), not the plating's l/(σ·2πr·25 µm) (`via_impedance(filled=)`). refboard's XT30 pins read
     113–187 % of the plating's capacity before (audit, session 7).

@@ -27,6 +27,18 @@ def _private_user_folders(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("GROUNDTRUTH_RELEASE_PUB", str(root / "no-trusted-key.pub"))
 
 
+@pytest.fixture(autouse=True)
+def _gpu_auto_keeps_to_the_cpu(monkeypatch):
+    """`analysis.gpu: auto` takes a GPU only if it times faster than the CPU (gpu._speedup), and a GPU and the CPU
+    give results that differ at the solver's tolerance: a test that compares two runs bit for bit then depended on
+    how busy the machine was when auto timed it (a loaded CPU made a slow GPU look fast; audit round 8). A test
+    runs on the CPU unless it asks for a device itself (GROUNDTRUTH_GPU_DEVICE, a patched _speedup, tests/test_gpu.py),
+    and each test probes afresh: a cached probe of an earlier test carries no device into it."""
+    from groundtruth.solver import gpu
+    monkeypatch.setattr(gpu, "_speedup", lambda torch, dev: 0.0)
+    monkeypatch.setattr(gpu, "_probed", {})
+
+
 def make(tmp_path, gen, name="b", nets=(SIG,), capacitance=False, **analysis):
     """Write a generated board + settings into tmp_path; return (board, settings, board path).
 

@@ -52,7 +52,7 @@ from ..emi.spectrum import analysis_band, microstrip, offset_stripline, trapezoi
 from ..geometry.copper import CopperMap, reference_layers
 from ..geometry.shapes import arc_points
 from ..rules.checks import CheckResult, run_checks
-from ..solver.peec import (EPS0, GMRES_FIRST_ROWS, gmres_restart, Branch, Grid, LidNode, PlaneLayer, PlanePair,
+from ..solver.peec import (EPS0, GMRES_FIRST_ROWS, cache_value, gmres_restart, Branch, Grid, LidNode, PlaneLayer, PlanePair,
                            PlaneStack, RouteExcitation, Solution, SolverError, TraceSegment, build_grid,
                            thread_budget, track_impedance, via_impedance)
 from ..solver import gpu, peec, stats
@@ -380,8 +380,18 @@ class BoardModel:
 
     def build(self, bbox, layers: list[str], plane_nets: set[str], d: float, capacitance: bool) -> StackBuild:
         """The model of this region, layers, nets and pitch: built once, then shared (routes over the same region
-        reuse it, and its factorisations)."""
-        key = (tuple(round(v, 3) for v in bbox), tuple(layers), frozenset(plane_nets), round(d, 6), capacitance)
+        reuse it, and its factorisations).
+
+        Keyed by the region and pitch to KERNEL_DIGITS significant digits (peec.cache_value) and built for those
+        values, so a model depends on its key alone [A85]. Until 2026-11-05 the key rounded them to 1 µm and 1 nm
+        while the model was built for the exact values of whichever caller asked first: two callers whose regions
+        or pitches differ by less (a sum of layer thicknesses taken in another order, as face_gap's G8-1) would
+        have got the first one's grid. No caller was found to do so (the callers that share a model compute its
+        region and pitch the same way; the board-wide model's pitch starts at CAVITY_MIN_MM whatever the route's
+        height), but what the cache gives no longer depends on it."""
+        bbox = tuple(cache_value(v) for v in bbox)
+        d = cache_value(d)
+        key = (bbox, tuple(layers), frozenset(plane_nets), d, capacitance)
         hit = self._builds.get(key)
         if hit is None:
             hit = self._builds[key] = self._make_build(bbox, layers, plane_nets, d, capacitance)
@@ -573,11 +583,14 @@ class BoardModel:
 
     def _ideal_stack(self, route: Route, ref_layers: list[str], bbox, d) -> StackBuild:
         """Build (or reuse) the ideal reference model (see ideal_stack); keyed by the region, layers, pitch and
-        the route's geometry on those layers."""
-        keep_segs = tuple((s.layer, tuple(np.round(s.start, 3)), tuple(np.round(s.end, 3)), round(s.width, 3))
+        the route's geometry on those layers, all exact: the model is built from them, so a key rounded coarser
+        than them would hand a second route the first one's model (until 2026-11-05 they were rounded to 1 µm
+        [A85]). The same route asks with the same floats, so the reuse that matters (a fix verification
+        finishing the route again) is kept."""
+        keep_segs = tuple((s.layer, tuple(map(float, s.start)), tuple(map(float, s.end)), float(s.width))
                           for s in route.segments if s.layer in ref_layers and s.start != s.end)
-        vias = tuple(tuple(np.round(v.position, 3)) for v in route.vias)
-        key = (tuple(round(v, 3) for v in bbox), tuple(ref_layers), round(d, 6), keep_segs, vias)
+        vias = tuple(tuple(map(float, v.position)) for v in route.vias)
+        key = (tuple(map(float, bbox)), tuple(ref_layers), float(d), keep_segs, vias)
         hit = self._ideals.get(key)
         if hit is not None:
             return hit
@@ -1125,34 +1138,67 @@ def _column_z(column: Optional[tuple], drill_mm: float, filled: bool, za: float,
     return segment_impedance(length, soldered, drill_mm, g_solder, g_open)
 
 
-def add_pin(st: StackBuild, net: str, pos, span: list[str], drill_mm: float, name: str, snap: float,
-            filled: bool = False, column: Optional[tuple] = None) -> int:
-    """A through-hole pad's pin between consecutive layers, joined to each layer all around its barrel: `k`
-    (pin_joints) parallel branches between points on a circle just outside the drill (its copper ring), each with k
-    times the pin's impedance (together the pin's own). The user, of a big connector pin's map: "the current density
-    around that area looks odd": joined at the one node nearest its centre (add_vertical), the whole pin current
-    entered a layer at one cell on the ring's edge, a point source with a hot spot that is not there. A ring of about
-    one cell (k = 1) keeps the single joint. `column` (pin_column): the pin's own values (material, solder fill)
-    instead of a copper-filled hole."""
+def joint_points(st: StackBuild, pos, drill_mm: float) -> list[tuple[int, int]]:
+    """The grid points (i, j) where a via or pin of `drill_mm` at `pos` (mm) joins its layers: one pattern fixed to
+    the lattice that every layer of the model shares (one origin and pitch, `_make_build`) [A89].
+
+    `pin_joints` points on a circle of radius drill/2 + d/2 around the grid node nearest the hole's centre, each
+    rounded to a node in whole cells: the pattern depends on drill/d alone, so a via joins its planes with the same
+    shape wherever it lies in its cell, and at the same points on every layer; k = 1 is that nearest node. Before
+    2026-11-05 the circle was centred on the hole and each layer snapped each point to its own nearest node of the
+    net: the ring's radius moved with the grid's offset by up to a cell (a radial plane pair's inductance by 7 % at
+    0.4 mm cells, tests/test_via_joints.py). The price: the joints' centre is that node, up to d/√2 from the hole's,
+    as the single joint's always was."""
+    g = st.grids[0]
+    ci, cj = int(round((pos[0] - g.x0) / st.d)), int(round((pos[1] - g.y0) / st.d))
     k = pin_joints(drill_mm, st.d)
     if k <= 1:
-        if column is None:
-            return add_vertical(st, net, pos, span, drill_mm, name, snap, filled)
-        nodes = [n for n in (st.node(l, pos[0], pos[1], net, snap) for l in span if l in st.names) if n]
-        for a, b in zip(nodes, nodes[1:]):
-            st.branches.append(Branch(a, b, _column_z(column, drill_mm, filled, st.z[a[0]], st.z[b[0]]), name,
-                                      "via", drill_mm * 5e-4))
-        return max(len(nodes) - 1, 0)
-    r = drill_mm / 2 + 0.5 * st.d
-    pts = [(pos[0] + r * math.cos(2 * math.pi * m / k), pos[1] + r * math.sin(2 * math.pi * m / k)) for m in range(k)]
-    rows = []                                       # per layer the pin touches: its k joint nodes
+        return [(ci, cj)]
+    r = drill_mm / (2 * st.d) + 0.5                 # the circle's radius in cells
+    out: list[tuple[int, int]] = []
+    for m in range(k):
+        # in whole cells from the node (round() is symmetric about 0: so is the pattern), never from the hole's own
+        # coordinates, whose rounding would move with the offset
+        ij = (ci + int(round(r * math.cos(2 * math.pi * m / k))), cj + int(round(r * math.sin(2 * math.pi * m / k))))
+        if ij not in out:                           # two points on one node: one joint
+            out.append(ij)
+    return out
+
+
+def add_pin(st: StackBuild, net: str, pos, span: list[str], drill_mm: float, name: str, snap: float,
+            filled: bool = False, column: Optional[tuple] = None) -> int:
+    """A via's or through-hole pad's barrel between consecutive layers, joined to each layer all around it: k
+    (joint_points) parallel branches between the same grid points on every layer, each with k times the barrel's
+    impedance (together the barrel's own) [A89]. The user, of a big connector pin's map: "the current density around
+    that area looks odd": joined at the one node nearest its centre, the whole pin current entered a layer at one
+    cell on the ring's edge, a point source with a hot spot that is not there. A ring of about one cell (k = 1)
+    keeps the single joint. A layer without the net's copper at a joint point (a pad smaller than the ring, a
+    thermal relief's gap) takes its own copper nearest that point within 0.75 cells, else the copper nearest the
+    hole's centre within `snap`; a layer with no copper of the net near the hole is not joined (a blind or buried
+    via's span ends there, an antipad). `column` (pin_column): the pin's own values (material, solder fill) instead
+    of a copper-filled hole."""
+    pts = joint_points(st, pos, drill_mm)
+    k = len(pts)
+    rows = []                                       # per layer the barrel joins: its k joint nodes
     for layer in span:
-        if layer not in st.names:
+        li = st.index(layer)
+        if li is None:
             continue
         centre = st.node(layer, pos[0], pos[1], net, snap)
         if centre is None:
-            continue                                # no copper of this net here: the pin does not join this layer
-        rows.append([st.node(layer, x, y, net, 0.75 * st.d) or centre for x, y in pts])
+            continue                                # no copper of this net here: the barrel does not join this layer
+        g = st.grids[li]
+        own = g.nets.index(net) if g.label is not None and net in g.nets else None
+        row = []
+        for i, j in pts:
+            if 0 <= i < g.nx and 0 <= j < g.ny and g.node[i, j] and (own is None or g.label[i, j] == own):
+                row.append((li, i, j))              # the shared point: the same xy as on every other layer
+            elif k == 1:
+                row.append(centre)                  # (the nearest copper of the net, as the shared point would be)
+            else:
+                x, y = g.xy(i, j)
+                row.append(st.node(layer, float(x), float(y), net, 0.75 * st.d) or centre)
+        rows.append(row)
     added = 0
     for a, b in zip(rows, rows[1:]):
         z = _column_z(column, drill_mm, filled, st.z[a[0][0]], st.z[b[0][0]])

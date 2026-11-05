@@ -80,7 +80,8 @@ GMRES_RESTART_MIN = 100     # ... but a restart at least this long: refboard's b
 GMRES_FIRST_ROWS = 16       # basis rows allocated at first; doubled as the iterations need them (_gmres)
 GMRES_EXTRA_CYCLES = 24     # restarts beyond max_cycles while the residual still falls ...
 GMRES_PROGRESS = 0.7        # ... to at most this fraction per restart (stagnation stops at once)
-OPERATOR_CACHE = 2          # per-frequency factorisations kept per stack (4 before: see ARCHITECTURE "Memory")
+GMRES_CHECK_MISSES = 4      # true-residual checks one cycle may miss before it restarts from the last one [A91]
+OPERATOR_CACHE = 2         # per-frequency factorisations kept per stack (4 before: see ARCHITECTURE "Memory")
 PRECOND_REUSE = 0.25        # reuse a factorisation as preconditioner within ±25 % (log ratio) of its frequency
 BORROW_BUDGET = 1.5         # a borrowed preconditioner's GMRES budget: 1.5 x the iterations its source needed at
 BORROW_EXTRA_ITS = 15       # home, plus 15
@@ -2000,23 +2001,29 @@ class PlaneStack:
         (next_round), and kept (`_plan`). It used to be the nearest one cached at that moment, which depended on
         the threads' timing (which solve of a round finished first) and on what OPERATOR_CACHE had evicted; the
         borrow window and budget also used measured seconds. Two runs of the same board differed by up to
-        0.002 dB, and their iteration counts by 20 %. A factorisation that was freed is made again, identically."""
-        key = round(f, 3)
+        0.002 dB, and their iteration counts by 20 %. A factorisation that was freed is made again, identically.
+
+        Everything is computed for the frequency's key (freq_key: f to KERNEL_DIGITS significant digits), the value
+        the operators are cached under [A85]. Until 2026-11-05 the key was f to 1 mHz while the system, the choice
+        and the factorisation used the exact f of whichever solve asked first: a second caller one bit (or up to
+        0.5 mHz) away got the first one's system matrix, and was even counted as borrowing (op.f_lu != f), so
+        its numbers and its borrow budget depended on which of them came first."""
+        key = self.freq_key(f)
         while True:
             with self._lock:
-                if exact or f <= 0:
+                if exact or key <= 0:
                     fkey = self._own(key, exact)
                 else:
                     fkey = self._plan.get(key)
                     if fkey is None:
-                        fkey = self._plan[key] = self._choose(f, key)
+                        fkey = self._plan[key] = self._choose(key, key)
                 m = self._made.get(fkey)
                 if m is None:                   # its own factorisation, decided now
-                    m = self._made[fkey] = _Made(f, fkey[1], self._round)
+                    m = self._made[fkey] = _Made(key, fkey[1], self._round)
                 op = self._ops.get(fkey)
                 if op is not None:
                     self._ops.move_to_end(fkey)
-                    return self._lend(f, key, op, m)
+                    return self._lend(key, op, m)
                 build = self._building.get(fkey)
                 if build is None:
                     build = self._building[fkey] = _Build()
@@ -2027,7 +2034,7 @@ class PlaneStack:
                 _stats.thread_add("wait", time.perf_counter() - t_wait)
             if build.op is not None:
                 with self._lock:
-                    return self._lend(f, key, build.op, m)
+                    return self._lend(key, build.op, m)
         remade = m.f_lu is not None     # made before and freed since (OPERATOR_CACHE, the memory gate): made again
         try:
             op = self._factorise(m.f, m.exact)
@@ -2044,7 +2051,13 @@ class PlaneStack:
                 self._building.pop(fkey, None)
             build.done.set()
         with self._lock:
-            return self._lend(f, key, op, m)
+            return self._lend(key, op, m)
+
+    @staticmethod
+    def freq_key(f: float) -> float:
+        """The frequency (Hz) a solve at f is keyed by and computed for: f to KERNEL_DIGITS significant digits
+        (cache_value; at most 5e-13 relative from f) [A85]."""
+        return cache_value(f)
 
     def _own(self, key: float, exact: bool) -> tuple:
         """The key of this stack's own factorisation at a frequency: on a derived stack an exact one differs (it
@@ -2064,14 +2077,15 @@ class PlaneStack:
                 best = ((d, m.f, m.exact), k)
         return best[1] if best is not None else self._own(key, False)
 
-    def _lend(self, f: float, key: float, op: _Operator, m: _Made) -> _Operator:
-        """The operator at f with the factorisation `op` (record m) as its preconditioner (lock held)."""
-        if round(m.f, 3) == key:
+    def _lend(self, key: float, op: _Operator, m: _Made) -> _Operator:
+        """The operator at the frequency key `key` (freq_key) with the factorisation `op` (record m) as its
+        preconditioner (lock held)."""
+        if m.f == key:
             return op
         view = ("at", key)
         v = self._ops.get(view)
         if v is None or v.src is not m:
-            w, R_strip, z_tail = self._impedances(f)
+            w, R_strip, z_tail = self._impedances(key)
             v = _Operator(w, R_strip, z_tail, op.Dinv, op.solve_S, op.f_lu, src=m)
         self._store(view, v)
         return v
@@ -2307,7 +2321,7 @@ class PlaneStack:
             if np.linalg.norm(r) < 0.9 * bnorm:
                 x0, r0 = m.dev(np.stack(G, axis=1) @ c), m.dev(r)
         # right preconditioning: (K·M⁻¹)·y = r0, x = x0 + M⁻¹·y  -> the Krylov residual is the true residual
-        borrowed = op.f_lu != f
+        borrowed = op.f_lu != self.freq_key(f)      # factorised for another frequency key (operator)
         if times is not None and borrowed:
             times.borrowed += 1
         y, its, ok = _gmres(lambda v: m.matvec(op, m.precond(op, v)), r0, tol, max_cycles=max_cycles, bnorm=bnorm,
@@ -2861,6 +2875,8 @@ def _gmres(op: Callable, b, tol: float, max_cycles: int = 8,
         vec.put(V, 0, r / beta)
         k = 0
         aim = tol * bnorm               # the recurrence's residual at which the true one is checked (lowered on a miss)
+        misses = 0                      # this cycle's true-residual checks that missed the tolerance
+        restarted = False               # the cycle ended at a check (GMRES_CHECK_MISSES): x and r are set already
         for j in range(restart):
             w = op(vec.row(V, j))
             w_norm = vec.norm(w)
@@ -2909,10 +2925,24 @@ def _gmres(op: Callable, b, tol: float, max_cycles: int = 8,
                 rt = b - op(xt)
                 if vec.norm(rt) <= tol * bnorm:
                     return xt, its, True
+                misses += 1
+                if misses >= GMRES_CHECK_MISSES:
+                    # The recurrence has fallen to 2^-(misses-1) of the tolerance (an eighth at the 4th miss) while the true residual stayed
+                    # above it: they differ by most of the tolerance (an operator whose products are not exactly
+                    # repeatable, or a drifted basis [A66]) and halving `aim` again would check at almost every
+                    # iteration (G8-3: 1597 products for 800 iterations). End the cycle here and restart from xt,
+                    # whose residual rt is known: a restart rebuilds the recurrence from the true residual
+                    # [Saad 2003, §6.5], and nothing is lost that the cycle's remaining iterations could still give
+                    # [A91].
+                    x, r = xt, rt
+                    restarted = True
+                    break
                 aim = 0.5 * abs(g[j + 1])
             if j + 1 >= len(V):                # full: twice the rows (at most restart + 1), the written ones copied
                 V = vec.grow(V, min(restart + 1, 2 * len(V)), j + 1)
             vec.put(V, j + 1, w / hn)
+        if restarted:
+            continue
         while k and H[k - 1, k - 1] == 0:    # an all-zero last column (exact breakdown): nothing to add from it
             k -= 1
         # end of a cycle: the least-squares coefficients by back substitution, the update, and the true residual
@@ -2955,13 +2985,21 @@ _KERNEL_CACHE_BYTES = 128 * 2**20   # the cache's spectra at most (oldest out fi
 _KERNEL_LOCK = threading.Lock()
 
 
-KERNEL_DIGITS = 12                  # significant digits of a kernel's d and dz (_kernel_value) [A85]
+KERNEL_DIGITS = 12                  # significant digits of a cached value: a kernel's d and dz (_kernel_value), a
+                                    # stack's frequency key (PlaneStack.freq_key), a model's region and pitch
+                                    # (simulate.BoardModel.build) [A85]
+
+
+def cache_value(v: float) -> float:
+    """v to KERNEL_DIGITS significant digits: the value a cache keyed by a rounded float stores AND computes for, so
+    what it holds depends on its key alone, never on the last bits of whichever caller asked first [A85]."""
+    return float(f"{float(v):.{KERNEL_DIGITS}g}")
 
 
 def _kernel_value(v: float) -> float:
     """A kernel's pitch or layer distance as the kernels are computed and cached for it: v to KERNEL_DIGITS
     significant digits [A85]."""
-    return float(f"{float(v):.{KERNEL_DIGITS}g}")
+    return cache_value(v)
 
 
 def _kernel_pair(nx: int, ny: int, d: float, dz: float) -> tuple:

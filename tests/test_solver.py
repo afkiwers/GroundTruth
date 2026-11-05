@@ -429,6 +429,65 @@ def test_a_simulate_does_not_depend_on_the_kernels_cached_before_it(tmp_path, mo
     assert dump(simulate(board, sc.config)) == clean
 
 
+@pytest.mark.parametrize("near", [float(np.nextafter(100e6, 1e9)), 100e6 + 4e-4])
+def test_a_frequency_s_operator_depends_on_its_key_not_on_which_solve_asked_first(near):
+    """[A85], the frequency key: PlaneStack.operator caches by frequency. Until 2026-11-05 its key was f to 1 mHz
+    while the system matrix was evaluated at the exact f of whichever solve asked first, so a solve one bit (or
+    0.4 mHz) away got the first one's matrix and was counted as borrowing it. Now everything is computed for the
+    key: the solve at `near` gives the same numbers whether 100 MHz was solved before it or not, and is no borrow
+    (one factorisation)."""
+    _, after = microstrip(box(0, 0, 40, 20))
+    after.solve(100e6)
+    late = after.solve(near)
+    assert len(after.stack._made) == 1
+    _, alone = microstrip(box(0, 0, 40, 20))
+    first = alone.solve(near)
+    assert late.Z_loop == first.Z_loop and np.array_equal(late.I_x, first.I_x) and late.iterations == first.iterations
+
+
+def test_a_board_model_depends_on_its_key_not_on_which_caller_built_it_first(tmp_path):
+    """[A85], BoardModel.build: models are cached by their region and pitch, rounded (to 1 µm and 1 nm until
+    2026-11-05) but built for the exact values of the first caller. Two callers one bit apart, in either order, now
+    get the same model: the one for the key's values."""
+    from groundtruth.analysis.simulate import BoardModel
+    board, sc, _ = make(tmp_path, microstrip_board(), "key")
+    bbox, d = (2.0, 4.0, 38.0, 16.0), 0.3
+    bbox_bit = tuple(float(np.nextafter(v, 100.0)) for v in bbox)
+    d_bit = float(np.nextafter(d, 1.0))
+    builds = []
+    for asks in (((bbox, d), (bbox_bit, d_bit)), ((bbox_bit, d_bit), (bbox, d))):
+        model = BoardModel(board, sc.config)
+        layers = model.plane_layers(box(*bbox), set(), {"SIG"})
+        nets = model.plane_nets(box(*bbox), layers, {"SIG"})
+        got = [model.build(b, layers, nets, dd, False) for b, dd in asks]
+        assert got[0] is got[1]                     # one model for both (shared, as before)
+        builds.append(got[0])
+    a, b = builds
+    assert a.d == b.d and a.bbox == b.bbox
+    assert all(ga.x0 == gb.x0 and ga.y0 == gb.y0 and ga.d == gb.d and np.array_equal(ga.node, gb.node)
+               for ga, gb in zip(a.grids, b.grids))
+
+
+def test_a_cross_section_cut_is_made_where_its_caller_asked(tmp_path):
+    """[A85], si.SectionCache._cut: cuts were cached by their place rounded to 0.1 µm and made for whichever caller
+    asked first. Two oblique cuts 0.08 µm apart (the same rounded place; the track's edge 0.1155 mm from the centre
+    rounds to 0.1154 in one, 0.1155 in the other) now get their own copper (equal copper still shares one solve,
+    _key)."""
+    from groundtruth.analysis.si import SectionCache
+    from groundtruth.analysis.simulate import BoardModel
+    board, sc, _ = make(tmp_path, microstrip_board(), "cut")
+    model = BoardModel(board, sc.config)
+    layer = board.copper_layers[0]
+    along = (math.cos(math.radians(30)), math.sin(math.radians(30)))
+    at, near = (20.0, 9.99996), (20.0, 10.00004)
+    shared = SectionCache(board, model.copper)
+    first = shared._cut(at, along, layer, ["SIG"], 0.2)
+    fresh = SectionCache(board, model.copper)
+    own = fresh._cut(near, along, layer, ["SIG"], 0.2)
+    assert own != first                                     # the two places' copper differs
+    assert shared._cut(near, along, layer, ["SIG"], 0.2) == own
+
+
 def test_solve_groups_keep_shared_models_together_and_the_board_wide_last():
     """solve_groups: everything in one group when it fits or the free memory is unknown; otherwise whole components
     (runs sharing a stack, or a derived stack's base), packed in order, the board-wide components last."""

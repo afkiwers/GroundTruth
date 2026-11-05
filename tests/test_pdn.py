@@ -200,7 +200,10 @@ def test_the_pins_fine_model_makes_a_coarse_grid_converge(tmp_path, monkeypatch)
     assert abs(raw[1] / ref[1] - 1) > 0.25                     # the coarse grid alone is far off at 100 MHz
     assert corr[1] == pytest.approx(ref[1], rel=0.05)          # 0.335 against 0.347 ohm
     # and about the same from either budget: 0.3346 / 0.3381 ohm (-3.6 / -2.6 % of the reference) since each pin's
-    # current goes to its nodes by their cells' share of it [A88]; 0.3380 / 0.3369 (-2.4 / -2.8 %) before
-    assert mid[1] == pytest.approx(corr[1], rel=0.015)
+    # current goes to its nodes by their cells' share of it [A88]; 0.3380 / 0.3369 (-2.4 / -2.8 %) before. With the
+    # vias' joints on one pattern fixed to the grid [A89] the 24000-node budget reads 0.3397 ohm (1.5 % above the
+    # 4000-node one's 0.3346, 0.3381 before: nearer the reference, whose 0.347 the finer grid approaches)
+    assert mid[1] == pytest.approx(corr[1], rel=0.02)
+    assert mid[1] == pytest.approx(ref[1], rel=0.05)
     assert corr[0] == pytest.approx(ref[0], rel=0.02) and port["l_correction_nh"] > 0.1
     assert port["local_pitch_mm"] < 0.3
