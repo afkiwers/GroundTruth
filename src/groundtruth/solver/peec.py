@@ -14,7 +14,9 @@ Z = R_s(f) + jω·L_p for the strips (R_s with the skin depth [Ramo 1994] [Dowel
 partial inductances between parallel strips on every pair of layers. On a uniform grid each layer pair's L_p is a
 convolution kernel that only depends on the grid offset and the layer distance Δz, so L_p·I is evaluated with FFTs
 and never formed. Plane-pair capacitance (C = ε0·εr·d²/t per cell, from the stackup, plus dielectric loss ωC·tanδ
-[Pozar 2012]) and the vertical/lumped branches are diagonal in Z.
+[Pozar 2012]) and the vertical/lumped branches are diagonal in Z. A layer with copper above and below it is two
+current sheets, one per face, on its nodes (PlaneStack._faces [A92] [A93]): the pair's slab two-port couples each
+face strip to its twin, so a plane between two others screens one side from the other.
 
 Two objects split the work:
   * PlaneStack - everything that does not depend on the signal route: topology, kernels, and a cache of
@@ -66,7 +68,7 @@ from . import gpu
 from . import sparse as _sparse
 from . import stats as _stats
 from .kernel import (GMD_FLAT, MU0, filament_mutual, leggauss, segment_mutual, segment_vector_potential, skin_thickness,
-                     slab_impedance,
+                     face_sheet_impedance, slab_impedance,
                      strip_kernel, strip_self, strip_self_numeric)
 
 SIGMA_CU = 5.8e7            # S/m, annealed copper at 20 °C [IEC 60028]
@@ -92,6 +94,8 @@ BAND_STRIPS = 4             # ... for a band of at most this many side-by-side s
 ADOPT_FACES = 3             # copper crossing a cell border where its net has no strip: to the nearest strip on that
 ADOPT_CELLS = 2             # border line this many cells along it; a cell's copper without a node: to the nearest node
                             # this many cells away (_exact_copper)
+SCREEN_MIN_NODES = 16       # a layer with copper above AND below it at this many of its own nodes gets a sheet per
+                            # face (PlaneStack._faces [A93]): it screens one side's field from the other
 
 
 def too_large_text(unknowns: int, error) -> str:
@@ -1087,6 +1091,9 @@ class Solution:
     A_cu: Optional[np.ndarray] = None       # (N, nx, ny) the nodes' copper area / d² (the stack's; None: solutions
                                             # pickled before 2026-10-19, whose densities are the strips' mean)
     V_lid: Optional[np.ndarray] = None      # the potentials of the stack's LidNodes (its parts' metal), in order
+    I_twin: Optional[np.ndarray] = None     # (2, pairs): the upper and lower face sheets' strip currents of the
+                                            # stack's split layers (PlaneStack._faces; in its tw_a / tw_b order):
+                                            # I_x / I_y hold each layer's whole current, both faces added
 
     def state_for(self, stack: "PlaneStack") -> np.ndarray:
         """The solver's unknown vector [branch currents; node potentials] of this solution on `stack`, the stack
@@ -1094,7 +1101,15 @@ class Solution:
         the same numbers. Solutions stored it as well before, a copy of what they hold (tools/dev/mem_profile.py)."""
         if self.state is not None:
             return self.state
-        Ib = np.concatenate([self.I_x[tuple(stack.xa.T)], self.I_y[tuple(stack.ya.T)], self.I_cap, self.I_branch])
+        lx, ly = stack.layer_index("x"), stack.layer_index("y")
+        strips = np.concatenate([self.I_x[tuple(lx.T)], self.I_y[tuple(ly.T)]])
+        if len(stack.tw_b):
+            # a split layer's two faces' own currents (I_x / I_y hold their sum: all on the upper face without them)
+            if self.I_twin is not None and self.I_twin.shape[1] == len(stack.tw_b):
+                strips[stack.tw_a], strips[stack.tw_b] = self.I_twin
+            else:
+                strips[stack.tw_b] = 0.0
+        Ib = np.concatenate([strips, self.I_cap, self.I_branch])
         n_lid = stack.n_nodes - stack.n_grid
         lids = self.V_lid if self.V_lid is not None and len(self.V_lid) == n_lid else np.zeros(n_lid, complex)
         return np.concatenate([Ib, np.concatenate([self.V[np.nonzero(stack.node)], lids])[stack.keep]])
@@ -1470,6 +1485,7 @@ class _Operator:
     made: Optional["_Made"] = None  # this stack's record of the factorisation (own operators; None when borrowed)
     src: Optional["_Made"] = None   # a borrowed preconditioner: the record of THIS stack's factorisation it uses
     ref: Optional["_Made"] = None   # a stack derived from a borrowing base: the base's source (budget only)
+    Z12: Optional[np.ndarray] = None  # the split layers' face coupling per strip pair (PlaneStack._twin_z), None
 
     def borrow_budget(self) -> Optional[int]:
         """GMRES iterations a solve with this borrowed preconditioner may take before a factorisation at its own
@@ -1513,15 +1529,18 @@ class PlaneStack:
 
     def __init__(self, layers: list[PlaneLayer], branches: Optional[list[Branch]] = None,
                  capacitance: Optional[list[PlanePair]] = None, sigma: float = SIGMA_CU,
-                 precond: str = "diag"):
+                 precond: str = "diag", screen: bool = True):
         """The stack of `layers` (all on one grid), with lumped `branches` (vias, parts) and the plane pairs'
-        `capacitance`; precond "diag" or "sheet" (see the module docstring). Builds the topology (unknowns,
-        incidence matrix) and the inductance kernels; nothing is factorised until a frequency is solved."""
+        `capacitance`; precond "diag" or "sheet" (see the module docstring). `screen`: a layer with copper on both
+        sides gets a sheet per face (_faces [A93]); False keeps one sheet per layer (a DC model: at DC the faces
+        carry one current). Builds the topology (unknowns, incidence matrix) and the inductance kernels; nothing is
+        factorised until a frequency is solved."""
         if not layers:
             raise SolverError("no plane layers")
         if precond not in ("diag", "sheet"):
             raise ValueError("precond must be 'diag' or 'sheet'")
         self.precond_mode = precond
+        self.screen = screen
         g0 = layers[0].grid
         for l in layers:
             if (l.grid.nx, l.grid.ny, l.grid.d) != (g0.nx, g0.ny, g0.d):
@@ -1547,11 +1566,16 @@ class PlaneStack:
     # ------------------------------------------------------------------ topology
     def _topology(self, branches: list[Branch]):
         """Number the unknowns and build the incidence matrix A (branches x nodes): x strips, y strips, plane-pair
-        capacitances, lumped branches, each from node a to node b (+1 at a, -1 at b)."""
+        capacitances, lumped branches, each from node a to node b (+1 at a, -1 at b). The strips are those of
+        the sheets (_faces): a split layer's two face sheets both join its nodes."""
         node = np.stack([l.grid.node for l in self.layers])
         # a strip exists only where both of its end nodes are copper
-        self.xb = np.stack([l.grid.xb for l in self.layers]) & node[:, :-1, :] & node[:, 1:, :]
-        self.yb = np.stack([l.grid.yb for l in self.layers]) & node[:, :, :-1] & node[:, :, 1:]
+        xb = np.stack([l.grid.xb for l in self.layers]) & node[:, :-1, :] & node[:, 1:, :]
+        yb = np.stack([l.grid.yb for l in self.layers]) & node[:, :, :-1] & node[:, :, 1:]
+        self._faces(node)
+        # the lower face sheets (after the layers' own) have their layer's strips: the same copper, the same nodes
+        self.xb = np.concatenate([xb, xb[self.twin_parent]]) if len(self.twin_parent) else xb
+        self.yb = np.concatenate([yb, yb[self.twin_parent]]) if len(self.twin_parent) else yb
         self.node = node
         self.nid = -np.ones(node.shape, int)            # (layer, i, j) -> node number, -1 off copper
         idx = np.nonzero(node)
@@ -1564,6 +1588,7 @@ class PlaneStack:
         self.xa, self.ya = np.argwhere(self.xb), np.argwhere(self.yb)
         self.nxb, self.nyb = len(self.xa), len(self.ya)
         self.ns = self.nxb + self.nyb
+        self._twins()
         self._widths()
         # Plane-pair capacitance wherever two planes face each other with no copper in between
         cap = []   # rows: (upper k, lower l, i, j, C, tanδ)
@@ -1587,11 +1612,12 @@ class PlaneStack:
         self.nbr = len(self.branches)
         self.nb = self.ns + self.ncap + self.nbr
         cu = self.cap[:, :4].astype(int)
-        self.a_nodes = np.concatenate([self.nid[tuple(self.xa.T)], self.nid[tuple(self.ya.T)],
+        lx, ly = self.layer_index("x"), self.layer_index("y")      # a strip's layer (its sheet's)
+        self.a_nodes = np.concatenate([self.nid[tuple(lx.T)], self.nid[tuple(ly.T)],
                                        self.nid[cu[:, 0], cu[:, 2], cu[:, 3]],
                                        np.array([self.node_id(b.a) for b in self.branches], int)]).astype(int)
-        self.b_nodes = np.concatenate([self.nid[self.xa[:, 0], self.xa[:, 1] + 1, self.xa[:, 2]],
-                                       self.nid[self.ya[:, 0], self.ya[:, 1], self.ya[:, 2] + 1],
+        self.b_nodes = np.concatenate([self.nid[lx[:, 0], lx[:, 1] + 1, lx[:, 2]],
+                                       self.nid[ly[:, 0], ly[:, 1], ly[:, 2] + 1],
                                        self.nid[cu[:, 1], cu[:, 2], cu[:, 3]],
                                        np.array([self.node_id(b.b) for b in self.branches], int)]).astype(int)
         r = np.arange(self.nb)
@@ -1599,6 +1625,80 @@ class PlaneStack:
                                 (np.concatenate([r, r]), np.concatenate([self.a_nodes, self.b_nodes]))),
                                shape=(self.nb, self.n_nodes))
         self._components()
+
+    def _faces(self, node: np.ndarray):
+        """The current sheets: one per layer, and a second one for each layer with copper of other layers both above
+        and below it at SCREEN_MIN_NODES or more of its own nodes (when `screen`) [A93]. Such a layer is split
+        into its two faces: its own sheet stands at its upper face, the twin (numbered after the layers, its layer
+        `twin_parent`) at its lower one, both with all its strips on its nodes. Each face sheet couples to the
+        others from where it is (face_gap: the two faces the copper's thickness apart, free space between them in
+        the kernels), and the pair carries the slab's two-port as two such sheets see it
+        (kernel.face_sheet_impedance [Dowell 1966] [A92]), exact in one dimension at every frequency: at high
+        frequency each face takes only its own side's current and the copper screens one side from the other; at
+        low frequency the field passes through the copper and the two faces act as one conductor. With one sheet
+        per layer a plane between two others had one current for both faces: it could not screen (a plane between
+        two others read up to 26 % low at 30 MHz, a floating plane between a pair 5.5 % high; audit round 8, P8-3 /
+        P8-4).
+
+        Sets n_sheets, sheet_layer (each sheet's layer), twin_parent, and per sheet sheet_z (m: the height its
+        current stands at) and sheet_t (the copper face_gap takes off a gap on each side: a one-sheet layer's
+        thickness, 0 for a face sheet, which already stands at its face)."""
+        N = self.N
+        t = np.array([l.thickness for l in self.layers], float)
+        twins = []
+        if self.screen and N >= 3:
+            for k in range(N):
+                above = np.zeros(node.shape[1:], bool)
+                below = np.zeros(node.shape[1:], bool)
+                for m in range(N):
+                    if self.zs[m] > self.zs[k]:
+                        above |= node[m]
+                    elif self.zs[m] < self.zs[k]:
+                        below |= node[m]
+                if int(np.count_nonzero(node[k] & above & below)) >= SCREEN_MIN_NODES:
+                    twins.append(k)
+        self.twin_parent = np.array(twins, int)
+        self.n_sheets = N + len(twins)
+        self.sheet_layer = np.concatenate([np.arange(N), self.twin_parent]).astype(int)
+        z = np.array(self.zs, float)
+        st = t.copy()
+        z[twins] = self.zs[twins] + 0.5 * t[twins]           # a split layer's own sheet: its upper face
+        st[twins] = 0.0
+        self.sheet_z = np.concatenate([z, self.zs[twins] - 0.5 * t[twins]])    # its twin: the lower face
+        self.sheet_t = np.concatenate([st, np.zeros(len(twins))])
+
+    def _twins(self):
+        """The strip pairs of the split layers' two faces (_faces): `tw_a` (the upper face's strip) and `tw_b` (the
+        lower face's), index arrays into the strips, x pairs then y pairs; `n_layer_strips` (x, y): the strips of
+        the layers' own sheets (the twins' follow them in each orientation). A twin sheet has exactly its layer's
+        strips in the same order (np.argwhere sorts by sheet, then position), so its pairs are two equal runs."""
+        N = self.N
+        a, b = [], []
+        counts = []
+        for xb, lo in ((self.xb, 0), (self.yb, self.nxb)):
+            per = np.count_nonzero(xb.reshape(self.n_sheets, -1), axis=1)
+            start = lo + np.concatenate([[0], np.cumsum(per)[:-1]])
+            counts.append(int(per[:N].sum()))
+            for m, p in enumerate(self.twin_parent):
+                a.append(start[p] + np.arange(per[p]))
+                b.append(start[N + m] + np.arange(per[p]))
+        self.n_layer_strips = tuple(counts)
+        self.tw_a = np.concatenate(a).astype(int) if a else np.zeros(0, int)
+        self.tw_b = np.concatenate(b).astype(int) if b else np.zeros(0, int)
+
+    def layer_index(self, orient: str) -> np.ndarray:
+        """The orientation's strips as (layer, i, j) rows: xa / ya with each sheet replaced by its layer (the same
+        array when no layer is split)."""
+        idx = self.xa if orient == "x" else self.ya
+        if self.n_sheets == self.N:
+            return idx
+        cache = self.__dict__.setdefault("_layer_idx", {})
+        out = cache.get(orient)
+        if out is None:
+            out = idx.copy()
+            out[:, 0] = self.sheet_layer[idx[:, 0]]
+            cache[orient] = out
+        return out
 
     def _widths(self):
         """Strips narrower than the pitch (the grids' wx / wy, ox / oy; full where a grid has none):
@@ -1623,15 +1723,16 @@ class PlaneStack:
                           else np.full(shape, default) for l in self.layers])
             return w[tuple(idx.T)]
         sx, sy = (self.nx - 1, self.ny), (self.nx, self.ny - 1)
-        w = np.concatenate([gather("wx", self.xa, sx, 1.0), gather("wy", self.ya, sy, 1.0)])
+        lx, ly = self.layer_index("x"), self.layer_index("y")      # a face sheet's strips have its layer's copper
+        w = np.concatenate([gather("wx", lx, sx, 1.0), gather("wy", ly, sy, 1.0)])
         ok = w > 0                          # a strip added to a grid after it was built: full width, centred
         self.strip_width = np.where(ok, w, 1.0)
         # the width a strip's resistance and heat take: its border's, with a change of width along the strip in
         # series where the grid has one (Grid.rx / ry, _series_factor [A39]); the inductance keeps the border's
-        rw = np.concatenate([gather("rx", self.xa, sx, 0.0), gather("ry", self.ya, sy, 0.0)])
+        rw = np.concatenate([gather("rx", lx, sx, 0.0), gather("ry", ly, sy, 0.0)])
         self.r_width = np.where(ok & (rw > 0), rw, self.strip_width)
         self.r_uniform = not np.any(self.r_width != 1.0)        # every strip a square's R (the preconditioner)
-        off = np.where(ok, np.concatenate([gather("ox", self.xa, sx, 0.0), gather("oy", self.ya, sy, 0.0)]), 0.0)
+        off = np.where(ok, np.concatenate([gather("ox", lx, sx, 0.0), gather("oy", ly, sy, 0.0)]), 0.0)
         # each node's copper area (Grid.copper_area, a fraction of d²): what a density in the copper is defined
         # over (Solution.node_field(copper=True)), shared by the stack's solutions
         self.A_cu = np.stack([l.grid.copper_area() for l in self.layers]).astype(np.float32)
@@ -1639,15 +1740,15 @@ class PlaneStack:
         if not np.any(self.strip_width != 1.0) and not np.any(self.r_width != 1.0):
             return
         self.W_x, self.W_y = np.ones((self.N, *sx)), np.ones((self.N, *sy))     # per layer (Solution.node_field)
-        self.W_x[tuple(self.xa.T)] = self.r_width[: self.nxb]
-        self.W_y[tuple(self.ya.T)] = self.r_width[self.nxb:]
+        self.W_x[tuple(lx.T)] = self.r_width[: self.nxb]          # (a twin's strips: its layer's widths again)
+        self.W_y[tuple(ly.T)] = self.r_width[self.nxb:]
         # the inductance corrections are for strips narrower than the pitch; one a little wider (a strip that took
         # in its neighbour's sliver, _strip_widths) keeps the full strip's kernels
         narrow = self.strip_width < 1.0
         if not np.any(narrow):
             return
         d = self.d
-        t = np.array([l.thickness for l in self.layers])[np.concatenate([self.xa[:, 0], self.ya[:, 0]])]
+        t = np.array([l.thickness for l in self.layers])[np.concatenate([lx[:, 0], ly[:, 0]])]
         dL = np.zeros(self.ns)
         keys, inv = np.unique(np.round(np.column_stack([self.strip_width[narrow], t[narrow]]), 12), axis=0,
                               return_inverse=True)
@@ -1659,7 +1760,7 @@ class PlaneStack:
         for idx, shape, lo, axis in ((self.xa, sx, 0, 2), (self.ya, sy, self.nxb, 1)):
             if len(idx) == 0:
                 continue
-            at = -np.ones((self.N, *shape), int)
+            at = -np.ones((self.n_sheets, *shape), int)          # per sheet: a face's neighbours on that face
             at[tuple(idx.T)] = lo + np.arange(len(idx))
             n_ax = shape[0] if axis == 2 else shape[1]
             for k in range(-NEAR_AXIAL, NEAR_AXIAL + 1):
@@ -1724,7 +1825,8 @@ class PlaneStack:
         a = np.array([self.node_id(b.a) for b in extra])
         b = np.array([self.node_id(b.b) for b in extra])
         if np.any(self.full_label[a] != self.full_label[b]):   # joins islands: references change
-            return PlaneStack(self.layers, self.branches + extra, self.pairs, self.sigma, self.precond_mode)
+            return PlaneStack(self.layers, self.branches + extra, self.pairs, self.sigma, self.precond_mode,
+                              self.screen)
         # a shallow copy shares the grids, kernels and node numbering; only the branch list, the incidence matrix
         # (new rows) and the caches are its own
         new = copy.copy(self)
@@ -1769,17 +1871,19 @@ class PlaneStack:
 
     # ------------------------------------------------------------------ inductance
     def face_gap(self, s: int, t: int) -> float:
-        """The distance (m) between the faces layers s and t turn to each other: their centres' distance less half
-        of each one's copper (0 for one layer) [A79]."""
+        """The distance (m) between the faces sheets s and t turn to each other (_faces): their heights' distance
+        less half of each one-sheet layer's copper (0 for one sheet) [A79]; a face sheet already stands at its face,
+        so the two faces of a split layer are its copper's thickness apart [A92]."""
         if s == t:
             return 0.0
-        gap = abs(self.zs[s] - self.zs[t]) - 0.5 * (self.layers[s].thickness + self.layers[t].thickness)
+        gap = abs(self.sheet_z[s] - self.sheet_z[t]) - 0.5 * (self.sheet_t[s] + self.sheet_t[t])
         return max(gap, 1e-6)                       # layers that touch (a malformed stackup): 1 um, never 0
 
     def face_z(self, k: int, z: float) -> float:
-        """Layer k's face towards height z (m): its centre moved half its copper towards z [A79]."""
-        t = 0.5 * self.layers[k].thickness
-        return self.zs[k] + (t if z > self.zs[k] else -t)
+        """Sheet k's face towards height z (m): a one-sheet layer's centre moved half its copper towards z [A79], a
+        face sheet's own height."""
+        t = 0.5 * self.sheet_t[k]
+        return self.sheet_z[k] + (t if z > self.sheet_z[k] else -t)
 
     def _kernels(self):
         """The layer-pair kernel spectra, per orientation one real (P0 // 2 + 1, P1 // 2 + 1, N, N) array: a quarter
@@ -1789,7 +1893,7 @@ class PlaneStack:
         and a full (P0, P1, N, N) copy for the compiled loop: 624 bytes per padded pixel for 6 layers, now 72
         (tools/dev/mem_profile.py). Only the distinct pairs (42) made the compiled loop 10-35 % slower (_mac.py)."""
         nx, ny, d = self.nx, self.ny, self.d
-        N = self.N
+        N = self.n_sheets               # one kernel per pair of sheets (a split layer's faces are two: _faces)
         # FFT sizes [Oppenheim 2010]: a linear (not circular) convolution of an n-point array with a 2n-1 point
         # kernel needs at least 2n-1 points; next_fast_len rounds up to a size with small prime factors (fast FFTs)
         self.Px = (next_fast_len(2 * (nx - 1) - 1), next_fast_len(2 * ny - 1))
@@ -1797,11 +1901,11 @@ class PlaneStack:
         Kx = np.empty((self.Px[0] // 2 + 1, self.Px[1] // 2 + 1, N, N))
         Ky = np.empty((self.Py[0] // 2 + 1, self.Py[1] // 2 + 1, N, N))
         self.L_self = _kernel_pair(nx, ny, d, 0.0)[2]
-        centre = np.zeros((self.N, self.N))
-        sum_x = np.zeros((self.N, self.N))
-        sum_y = np.zeros((self.N, self.N))
-        for s in range(self.N):
-            for t in range(s, self.N):
+        centre = np.zeros((N, N))
+        sum_x = np.zeros((N, N))
+        sum_y = np.zeros((N, N))
+        for s in range(N):
+            for t in range(s, N):
                 # mutual inductance depends only on the layers' distance: one kernel per pair, symmetric in s, t.
                 # The distance between the faces the two layers turn to each other, not between the foils'
                 # centres [A79]: at high frequency the current runs on those faces (the copper's own depth is
@@ -1815,26 +1919,79 @@ class PlaneStack:
                 sum_y[s, t] = sum_y[t, s] = sy
         self._kq = {"x": Kx, "y": Ky}
         self.blocks = []
-        if self.precond_mode == "sheet" and self.N > 1:
-            self.B_x = _sheet_blocks(self.L_self, centre, sum_x)
-            self.B_y = _sheet_blocks(self.L_self, centre, sum_y)
+        if self.precond_mode == "sheet" and N > 1:
+            self.B_x = self._sheet_block(centre, sum_x)
+            self.B_y = self._sheet_block(centre, sum_y)
             self._block_layout()
+        elif len(self.twin_parent):
+            # a split layer's two faces at one position are nearly one conductor (their mutual inductance all but
+            # their self, their slab impedances all but equal at low frequency): as two diagonal entries the
+            # preconditioner would take them for two conductors side by side, twice the copper. Each pair is a
+            # 2 x 2 block with their own and mutual partial inductance at the same position (the kernels' centres)
+            B = np.diag(np.full(N, self.L_self))
+            for m, p in enumerate(self.twin_parent):
+                B[p, self.N + m] = B[self.N + m, p] = centre[p, self.N + m]
+            self.B_x = self.B_y = B
+            self._twin_blocks()
+
+    def _sheet_block(self, centre: np.ndarray, sums: np.ndarray) -> np.ndarray:
+        """The 'sheet' preconditioner's per-position block over every sheet (_sheet_blocks): made over the layers
+        alone, as without face sheets (the cavity inductances of the plane pairs), then a split layer's twin takes its
+        layer's row and column, and the two faces keep only the small difference their gap makes, D/2 = (L_self −
+        M_twin) per square at one position (their own partial inductances at zero offset). Made over all sheets the
+        quadratic form spread the cavity inductance badly across two sheets a copper thickness apart: 1.2-1.9 x the
+        iterations of the one-sheet stack at 20-400 MHz on a six-layer board, against 1.1-1.3 x with this."""
+        N = self.N
+        B = _sheet_blocks(self.L_self, centre[:N, :N], sums[:N, :N])
+        if not len(self.twin_parent):
+            return B
+        lay = self.sheet_layer
+        full = B[np.ix_(lay, lay)].copy()
+        for m, p in enumerate(self.twin_parent):
+            tw = N + m
+            gap = max(self.L_self - centre[p, tw], 0.0)         # the faces' own difference mode
+            for j in range(self.n_sheets):
+                if lay[j] == p and j != tw:
+                    full[tw, j] = full[j, tw] = B[p, p] - gap
+        return full
+
+    def _twin_blocks(self):
+        """The 'diag' preconditioner's blocks of a stack with split layers: each pair of a split layer's face strips
+        at one position (tw_a, tw_b) is one block (layers: the two sheets), every other strip stays diagonal."""
+        N = self.N
+        nx_a = self.tw_a < self.nxb
+        for m, p in enumerate(self.twin_parent):
+            mine = self.sheet_of_strip(self.tw_b) == N + m
+            for orient, sel in (("x", nx_a), ("y", ~nx_a)):
+                pick = mine & sel
+                if pick.any():
+                    self.blocks.append((np.column_stack([self.tw_a[pick], self.tw_b[pick]]), [int(p), N + m], orient))
+
+    def sheet_of_strip(self, strips: np.ndarray) -> np.ndarray:
+        """The sheet of each strip (indices into the strips: x strips, then y strips)."""
+        strips = np.asarray(strips, int)
+        out = np.empty(len(strips), int)
+        x = strips < self.nxb
+        out[x] = self.xa[strips[x], 0]
+        out[~x] = self.ya[strips[~x] - self.nxb, 0]
+        return out
 
     def _block_layout(self):
-        """Strips at the same (orientation, i, j) on different layers form one preconditioner block;
-        positions are grouped by which layers are present (a bitmask)."""
+        """Strips at the same (orientation, i, j) on different sheets form one preconditioner block;
+        positions are grouped by which sheets are present (a bitmask)."""
+        S = self.n_sheets
         for idx, mask_arr, off, orient in ((self.xa, self.xb, 0, "x"), (self.ya, self.yb, self.nxb, "y")):
             if len(idx) == 0:
                 continue
             sidx = -np.ones(mask_arr.shape, int)
             sidx[tuple(idx.T)] = off + np.arange(len(idx))
             bits = np.zeros(mask_arr.shape[1:], np.int64)
-            for k in range(self.N):
+            for k in range(S):
                 bits |= mask_arr[k].astype(np.int64) << k
             pos = np.nonzero(bits)
             codes = bits[pos]
             for code in np.unique(codes):
-                layers = [k for k in range(self.N) if code >> k & 1]
+                layers = [k for k in range(S) if code >> k & 1]
                 if len(layers) < 2:
                     continue
                 sel = codes == code
@@ -1842,7 +1999,7 @@ class PlaneStack:
                 self.blocks.append((strips, layers, orient))
 
     def _conv(self, X: np.ndarray, orient: str, times: Optional[_stats.SolveTimes] = None) -> np.ndarray:
-        """Σ_s K[t,s] ⊛ X[s] for every layer t (double precision, see module docstring), on the whole padded FFT
+        """Σ_s K[t,s] ⊛ X[s] for every sheet t (double precision, see module docstring), on the whole padded FFT
         grid: the caller picks its strips out of it. `times`: a solve's time split (solver/stats.py), the FFTs and
         the multiply-add apart."""
         P = self.Px if orient == "x" else self.Py
@@ -1857,9 +2014,9 @@ class PlaneStack:
             mac(self._kq[orient], F, out)
         else:
             tmp = np.empty_like(F[0])
-            for t in range(self.N):
+            for t in range(self.n_sheets):
                 np.multiply(self.kernel(orient, t, 0), F[0], out=out[t])
-                for s in range(1, self.N):
+                for s in range(1, self.n_sheets):
                     np.multiply(self.kernel(orient, t, s), F[s], out=tmp)
                     out[t] += tmp
         if times is None:
@@ -1871,7 +2028,7 @@ class PlaneStack:
         return res
 
     def kernel(self, orient: str, t: int, s: int) -> np.ndarray:
-        """The full (P0, P1) kernel spectrum between layers t and s, unfolded from its stored quadrant (a new
+        """The full (P0, P1) kernel spectrum between sheets t and s, unfolded from its stored quadrant (a new
         array: the numpy fallback of _conv, the GPU backend, tools/dev/solver_bench.py)."""
         Kq, P = (self._kq["x"], self.Px) if orient == "x" else (self._kq["y"], self.Py)
         # pixel i of the full spectrum is quadrant row min(i, P0 - i) (the spectrum is even)
@@ -1881,23 +2038,24 @@ class PlaneStack:
 
     @property
     def Kx(self) -> dict:
-        """{(t, s): the x strips' full kernel spectrum between layers t and s} (built on demand: see kernel)."""
-        return {(t, s): self.kernel("x", t, s) for t in range(self.N) for s in range(self.N)}
+        """{(t, s): the x strips' full kernel spectrum between sheets t and s} (built on demand: see kernel)."""
+        return {(t, s): self.kernel("x", t, s) for t in range(self.n_sheets) for s in range(self.n_sheets)}
 
     @property
     def Ky(self) -> dict:
         """{(t, s): the y strips' full kernel spectrum} (as Kx)."""
-        return {(t, s): self.kernel("y", t, s) for t in range(self.N) for s in range(self.N)}
+        return {(t, s): self.kernel("y", t, s) for t in range(self.n_sheets) for s in range(self.n_sheets)}
 
     def _strip_index(self, orient: str) -> tuple[np.ndarray, np.ndarray]:
-        """Flat indices of the orientation's strips in the (N, nx', ny') current array and in the padded
+        """Flat indices of the orientation's strips in the (n_sheets, nx', ny') current array and in the padded
         convolution result (fancy indexing with three index arrays took ~5 % of an iteration)."""
         cache = self.__dict__.setdefault("_flat", {})
         idx = cache.get(orient)
         if idx is None:
-            a, shape, P = ((self.xa, (self.N, self.nx - 1, self.ny), self.Px) if orient == "x"
-                           else (self.ya, (self.N, self.nx, self.ny - 1), self.Py))
-            idx = (np.ravel_multi_index(tuple(a.T), shape), np.ravel_multi_index(tuple(a.T), (self.N, *P)))
+            S = self.n_sheets
+            a, shape, P = ((self.xa, (S, self.nx - 1, self.ny), self.Px) if orient == "x"
+                           else (self.ya, (S, self.nx, self.ny - 1), self.Py))
+            idx = (np.ravel_multi_index(tuple(a.T), shape), np.ravel_multi_index(tuple(a.T), (S, *P)))
             cache[orient] = idx
         return idx
 
@@ -1905,10 +2063,11 @@ class PlaneStack:
         """L_p · I for the strip currents (length ns). `times`: a solve's time split (solver/stats.py)."""
         t0 = time.perf_counter() if times is not None else 0.0
         out = np.empty(self.ns, complex)
-        for orient, lo, hi, shape in (("x", 0, self.nxb, (self.N, self.nx - 1, self.ny)),
-                                      ("y", self.nxb, self.ns, (self.N, self.nx, self.ny - 1))):
+        S = self.n_sheets
+        for orient, lo, hi, shape in (("x", 0, self.nxb, (S, self.nx - 1, self.ny)),
+                                      ("y", self.nxb, self.ns, (S, self.nx, self.ny - 1))):
             if hi > lo:
-                # scatter the strip currents into a dense (layer, i, j) array (zero where there is no strip),
+                # scatter the strip currents into a dense (sheet, i, j) array (zero where there is no strip),
                 # convolve, gather the result back at the strips
                 into, outof = self._strip_index(orient)
                 X = np.zeros(shape[0] * shape[1] * shape[2], complex)
@@ -1943,8 +2102,14 @@ class PlaneStack:
         zs = np.array([self.surface_impedance(f, l.thickness) for l in self.layers])
         # a square strip's Z is the sheet impedance; one φ of the pitch wide, sheet impedance / φ (φ with a change
         # of width along the strip in series: _widths)
-        R_strip = (np.concatenate([zs[self.xa[:, 0]], zs[self.ya[:, 0]]]) / self.r_width if self.ns
-                   else np.zeros(0, complex))
+        R_strip = (np.concatenate([zs[self.sheet_layer[self.xa[:, 0]]], zs[self.sheet_layer[self.ya[:, 0]]]])
+                   / self.r_width if self.ns else np.zeros(0, complex))
+        if len(self.tw_b):
+            # a split layer's two face strips: each its own impedance of the face pair (kernel.face_sheet_impedance
+            # [A92]); _twin_z gives their coupling
+            z_self = np.asarray(self._face_pair(f)[0])
+            for tw in (self.tw_a, self.tw_b):
+                R_strip[tw] = z_self[self.sheet_layer[self.sheet_of_strip(tw)]] / self.r_width[tw]
         scale = getattr(self, "r_scale", None)            # the copper at its temperature (set_resistance_scale): its
         if scale is not None and self.ns:                 # resistance only, the internal inductance stays
             R_strip = R_strip.real * scale + 1j * R_strip.imag
@@ -1958,6 +2123,25 @@ class PlaneStack:
         if bscale is not None and len(z_br):             # a branch's resistance only (its inductance stays)
             z_br = z_br.real * bscale + 1j * z_br.imag
         return w, R_strip, np.concatenate([z_cap, z_br])
+
+    def _face_pair(self, f: float) -> tuple:
+        """Per layer (z_self, z_mutual) of its two face sheets at f (kernel.face_sheet_impedance [A92]): the slab's
+        two-port as two sheets with the free space between them in the kernels sees it."""
+        return face_sheet_impedance(np.array([l.thickness for l in self.layers]), f, self.sigma)
+
+    def _twin_z(self, f: float) -> Optional[np.ndarray]:
+        """The coupling impedance between the two face strips of each pair (tw_a, tw_b) of the split layers at f,
+        per pair: z_mutual of the face pair per square (_face_pair [Dowell 1966] [A92]), / the strip's width as its
+        own impedance is (_impedances puts z_self on both strips); None without split layers. At the copper's
+        temperature its resistance scales as R_strip's (the real part)."""
+        if not len(self.tw_b):
+            return None
+        z_mut = np.asarray(self._face_pair(f)[1])
+        z12 = z_mut[self.sheet_layer[self.sheet_of_strip(self.tw_b)]] / self.r_width[self.tw_b]
+        scale = getattr(self, "r_scale", None)
+        if scale is not None:
+            z12 = z12.real * scale[self.tw_b] + 1j * z12.imag
+        return z12
 
     def set_resistance_scale(self, strips: Optional[np.ndarray] = None, branches: Optional[np.ndarray] = None):
         """Scale the strips' resistances (`strips`, one factor per strip in the unknowns' order: x strips then y
@@ -2072,7 +2256,7 @@ class PlaneStack:
         v = self._ops.get(view)
         if v is None or v.src is not m:
             w, R_strip, z_tail = self._impedances(f)
-            v = _Operator(w, R_strip, z_tail, op.Dinv, op.solve_S, op.f_lu, src=m)
+            v = _Operator(w, R_strip, z_tail, op.Dinv, op.solve_S, op.f_lu, src=m, Z12=self._twin_z(f))
         self._store(view, v)
         return v
 
@@ -2099,7 +2283,8 @@ class PlaneStack:
         c = _stats._active[0]
         t0 = time.perf_counter()
         w, R_strip, z_tail = self._impedances(f)
-        Dinv = self._preconditioner_admittance(w, R_strip, z_tail)
+        Z12 = self._twin_z(f)
+        Dinv = self._preconditioner_admittance(w, R_strip, z_tail, Z12)
         base = self._base
         f_lu = f
         ref = None
@@ -2191,7 +2376,7 @@ class PlaneStack:
                 dt = time.perf_counter() - t0
                 c.factorised(self, dt, lu.nnz)
                 _stats.thread_add("fact", dt)
-        return _Operator(w, R_strip, z_tail, Dinv, solve_S, f_lu, ref=ref)
+        return _Operator(w, R_strip, z_tail, Dinv, solve_S, f_lu, ref=ref, Z12=Z12)
 
     def _factorise_diagonal(self, S, first: BaseException):
         """S factorised again with diagonal pivots only, after SuperLU gave up on its size: its row and column
@@ -2211,28 +2396,42 @@ class PlaneStack:
             self.lu_too_large = too_large_text(S.shape[0], e)
             raise SolverError(self.lu_too_large) from e
 
-    def _preconditioner_admittance(self, w: float, R_strip: np.ndarray, z_tail: np.ndarray) -> sp.csr_matrix:
+    def _preconditioner_admittance(self, w: float, R_strip: np.ndarray, z_tail: np.ndarray,
+                                   Z12: Optional[np.ndarray] = None) -> sp.csr_matrix:
         """Inverse of the preconditioner's branch impedance: diag(Z), or for 'sheet' per-position layer
-        blocks that keep each plane pair's true sheet (cavity) inductance."""
+        blocks that keep each plane pair's true sheet (cavity) inductance; a split layer's two face strips at a
+        position are always one block, with their slab coupling Z12 (_twin_z)."""
         # each strip with only its own partial self inductance (all mutual coupling dropped), the other branches
         # with their exact impedances
         L_own = self.L_self if self.dL is None else self.L_self + self.dL
         d = np.concatenate([1.0 / (R_strip + 1j * w * L_own), 1.0 / z_tail])
         if not self.blocks:
             return sp.diags(d).tocsr()
+        z12 = None
+        if Z12 is not None:                     # per lower-face strip: its coupling to its upper face
+            z12 = np.zeros(self.ns, complex)
+            z12[self.tw_b] = Z12
         rows, cols, vals = [np.arange(self.nb)], [np.arange(self.nb)], [d]
         in_block = np.zeros(self.nb, bool)
         for strips, layers, orient in self.blocks:
             B = (self.B_x if orient == "x" else self.B_y)[np.ix_(layers, layers)]
             m = len(layers)
+            # the face pairs among the block's sheets: (upper face's column, lower face's column)
+            faces = [(layers.index(int(self.sheet_layer[s])), k) for k, s in enumerate(layers)
+                     if s >= self.N and int(self.sheet_layer[s]) in layers] if z12 is not None else []
             if self.dL is None and getattr(self, "r_uniform", True):   # every strip full width: every position
-                R = np.array([R_strip[strips[0, k]] for k in range(m)])          # alike, one inverse
-                Zi = np.linalg.inv(np.diag(R).astype(complex) + 1j * w * B)
+                R = np.diag([R_strip[strips[0, k]] for k in range(m)]).astype(complex)  # alike, one inverse
+                for ia, ib in faces:
+                    R[ia, ib] = R[ib, ia] = z12[strips[0, ib]]
+                Zi = np.linalg.inv(R + 1j * w * B)
                 Zi = np.broadcast_to(Zi.ravel(), (len(strips), m * m)).ravel()
             else:               # strips not a pitch wide: each position its own R and self inductance
                 Z = np.broadcast_to(1j * w * B, (len(strips), m, m)).copy()
                 Z[:, np.arange(m), np.arange(m)] += R_strip[strips] + (
                     0.0 if self.dL is None else 1j * w * self.dL[strips])
+                for ia, ib in faces:
+                    Z[:, ia, ib] += z12[strips[:, ib]]
+                    Z[:, ib, ia] += z12[strips[:, ib]]
                 Zi = np.linalg.inv(Z).ravel()
             rows.append(np.repeat(strips, m, axis=1).ravel())
             cols.append(np.tile(strips, (1, m)).ravel())
@@ -2361,17 +2560,18 @@ class PlaneStack:
                 continue
             k, i, j = idx[:, 0], idx[:, 1], idx[:, 2]
             centres = np.stack([i * d + (d / 2 if axis == 0 else 0.0), j * d + (d / 2 if axis == 1 else 0.0),
-                                self.zs[k]], axis=1)
+                                self.sheet_z[k]], axis=1)
             acc = np.zeros(len(idx))
-            half = 0.5 * np.array([l.thickness for l in self.layers])[k]
+            half = 0.5 * self.sheet_t[k]            # 0 for a face sheet: it stands at its face (_faces)
             for s in horiz:
                 ab = s.b - s.a
                 L = np.linalg.norm(ab)
                 if abs(ab[axis]) < 1e-15 * L:      # a segment perpendicular to these strips couples nothing
                     continue
-                # each strip at its layer's face towards the segment (as the layer pairs, face_gap [A79])
+                # each strip at its layer's face towards the segment (as the layer pairs, face_gap [A79]); a split
+                # layer's face sheets where they are [A92]
                 zseg = 0.5 * (s.a[2] + s.b[2])
-                centres[:, 2] = self.zs[k] + np.where(zseg > self.zs[k], half, -half)
+                centres[:, 2] = self.sheet_z[k] + np.where(zseg > self.sheet_z[k], half, -half)
                 rho_min = max(0.5 * s.width, 1e-7)
                 a_c = segment_vector_potential(s.a, s.b, centres, rho_min)
                 near = _dist_to_segment(centres, s.a, s.b) < 3 * d + 2 * s.width
@@ -2406,12 +2606,16 @@ class PlaneStack:
             m += 0.5 * s.i * np.cross(s.a, s.b)
         d = self.d
         Ix, Iy = Ib[: self.nxb], Ib[self.nxb: self.ns]
+        # each strip at its sheet's height (a split layer's faces where they are; a one-sheet layer's centre). The
+        # short vertical steps from a node to a face sheet are left out: they add up to nothing (each strip's
+        # step up at one end is a step down at the other), so the loop's sum of I dl, and with it the moment's
+        # independence of the origin, is unchanged
         k, _, j = self.xa.T if self.nxb else (np.zeros(0, int),) * 3
-        z = self.zs[k]
+        z = self.sheet_z[k]
         m[1] += 0.5 * np.sum(z * d * Ix)          # x strip: r × x̂d = (0, z·d, -y·d)
         m[2] += 0.5 * np.sum(-(j * d) * d * Ix)
         k, i, _ = self.ya.T if self.nyb else (np.zeros(0, int),) * 3
-        z = self.zs[k]
+        z = self.sheet_z[k]
         m[0] += 0.5 * np.sum(-z * d * Iy)         # y strip: r × ŷd = (-z·d, 0, x·d)
         m[2] += 0.5 * np.sum((i * d) * d * Iy)
         I_cap = Ib[self.ns: self.ns + self.ncap]
@@ -2521,8 +2725,14 @@ class RouteExcitation:
         Ib, V, its, x = st.solve(f, -1j * w * self.psi, J, guess=guess)
         I_x = np.zeros((st.N, st.nx - 1, st.ny), complex)
         I_y = np.zeros((st.N, st.nx, st.ny - 1), complex)
-        I_x[tuple(st.xa.T)] = Ib[: st.nxb]
-        I_y[tuple(st.ya.T)] = Ib[st.nxb: st.ns]
+        # per layer: a split layer's two faces added (its lower face's strips follow the layers' own: _twins)
+        nx_l, ny_l = st.n_layer_strips
+        lx, ly = st.layer_index("x"), st.layer_index("y")
+        I_x[tuple(lx[:nx_l].T)] = Ib[:nx_l]
+        I_y[tuple(ly[:ny_l].T)] = Ib[st.nxb: st.nxb + ny_l]
+        if len(st.tw_b):
+            I_x[tuple(lx[nx_l:].T)] += Ib[nx_l: st.nxb]
+            I_y[tuple(ly[ny_l:].T)] += Ib[st.nxb + ny_l: st.ns]
         Vg = np.zeros((st.N, st.nx, st.ny), complex)
         Vg[np.nonzero(st.node)] = V[:st.n_grid]                 # the grid's nodes; the parts' lids after them
         # loop impedance: drop along the filaments + Σ J·V over the injections (current enters at +, leaves at -)
@@ -2533,7 +2743,7 @@ class RouteExcitation:
         # Solution.state_for rebuilds it from these when the fix search wants a warm start
         return Solution(f, I_x, I_y, Vg, Ib[st.ns + st.ncap:].copy(), Z, st.moment(self.trace, Ib), its,
                         Ib[st.ns: st.ns + st.ncap].copy(), W_x=st.W_x, W_y=st.W_y, A_cu=getattr(st, "A_cu", None),
-                        V_lid=V[st.n_grid:].copy())
+                        V_lid=V[st.n_grid:].copy(), I_twin=np.stack([Ib[st.tw_a], Ib[st.tw_b]]) if len(st.tw_b) else None)
 
 
 def MultiPlaneProblem(layers: list[PlaneLayer], trace: list[TraceSegment], inject_driver: tuple[int, int, int],
@@ -2761,13 +2971,17 @@ class _HostMath:
 
     def matvec(self, op: _Operator, x: np.ndarray) -> np.ndarray:
         """The system matrix times x = [I; V]: [Z I - A V; A^T I], with Z I = (R + jw L_p) I for the strips (the
-        FFT product) and the diagonal impedances for capacitances and branches."""
+        FFT product; plus the face coupling of split layers) and the diagonal impedances for capacitances and
+        branches."""
         st, t = self.st, self.times
         t0 = time.perf_counter() if t is not None else 0.0
         nb, ns = st.nb, st.ns
         Ib = x[:nb]
         top = np.empty(nb, complex)
         top[:ns] = op.R_strip * Ib[:ns] + 1j * op.w * st.Lp_matvec(Ib[:ns], t)
+        if op.Z12 is not None:      # a split layer's faces: the slab two-port's coupling (PlaneStack._twin_z)
+            top[st.tw_a] += op.Z12 * Ib[st.tw_b]
+            top[st.tw_b] += op.Z12 * Ib[st.tw_a]
         top[ns:] = op.z_tail * Ib[ns:]
         top -= st.Ar @ x[nb:]
         out = np.concatenate([top, st.ArT @ Ib])

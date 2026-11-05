@@ -1939,6 +1939,10 @@ def dc_board_build(model: BoardModel):
         h_mm = min((stk.distance(s, l) for s in comp_layers for l in layers if l != s), default=0.25)
         d = _choose_pitch(h_mm, bbox, len(layers), int(a.max_nodes * DC_BUDGET), a.grid_mm, a.resolution)
         model._dc_board = model.build(bbox, layers, plane_nets, d, False)
+        if model._dc_board._plane is None:
+            # its solves are at DC_F, where a layer's two faces carry one current: one sheet per layer (the face
+            # sheets [A93] would only add unknowns, and a difference mode of almost no impedance)
+            model._dc_board.screen = False
         return model._dc_board
 
 

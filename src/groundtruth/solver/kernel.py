@@ -75,6 +75,83 @@ def slab_impedance(t, f, sigma):
     return complex(out) if out.ndim == 0 else out
 
 
+def slab_two_port(t, f, sigma) -> tuple:
+    """The internal impedances per square (ohm) of a conducting slab t m thick with a magnetic field on both faces
+    (a plane between two others): with H_a, H_b the tangential field just outside its upper and lower face and
+    K_a = −H_a, K_b = H_b (K_a + K_b its whole current), the electric field along the faces is
+
+        E_a = z11 * K_a + z12 * K_b,   E_b = z12 * K_a + z11 * K_b,
+        z11 = (k / sigma) * coth(k t),  z12 = (k / sigma) / sinh(k t),  k = (1 + j) / delta
+
+    from the one-dimensional diffusion equation d²H/dz² = j·ω·μ0·σ·H across the thickness with the two face fields
+    as its boundary values [Dowell 1966] [Ramo 1994] [A92]: the two-port of a conductor of finite thickness, a
+    transmission line of length t [Ferreira 1994]. z11 is the one-face slab (slab_impedance: K_b = 0). Its two
+    modes: the faces' sum zs = z11 + z12 = (k / sigma) * coth(k t / 2) (the slab's own current, the skin effect),
+    their difference zd = z11 − z12 = (k / sigma) * tanh(k t / 2) (a field through the slab, its eddy currents).
+    At low frequency z11 = (1/σt)(1 + j·x²·2/3), z12 = (1/σt)(1 − j·x²/3) (x = t/δ: the current fills the thickness);
+    at high frequency z12 → 0, each face a slab of its own (the copper screens one side from the other).
+    Returns (z11, z12), complex (arrays broadcast)."""
+    t = np.asarray(t, float)
+    zs, zd = _slab_modes(t, f, sigma)
+    z11, z12 = 0.5 * (zs + zd) / (sigma * t), 0.5 * (zs - zd) / (sigma * t)
+    if np.ndim(z11) == 0:
+        return complex(z11), complex(z12)
+    return z11, z12
+
+
+def face_sheet_impedance(t, f, sigma) -> tuple:
+    """The internal impedances per square (ohm) for a slab t m thick whose two faces are modelled as two current
+    sheets t apart with free space between them (peec.PlaneStack._faces): (z_self, z_mutual), each face sheet's
+    own and the two faces' coupling, so that with the sheets' free-space inductance the pair is the slab's exact
+    two-port (slab_two_port) in one dimension [A92].
+
+    The free space between the sheets holds a field the copper does not: the sheets' difference mode (current along
+    one face, back along the other) has the inductance Z_v = j·ω·μ0·t per square there. The two-port's difference
+    mode zd = (k / sigma) * tanh(k t / 2) is what the field across the slab sees in series [Dowell 1966]; with the
+    free space beside it (the field crossing it at the gap's inductance, the face currents' mode in parallel), the
+    mode needs zd' = zd · Z_v / (Z_v − 2 zd), the one value for which Z_v ∥ 2 zd' = 2 zd. The sum mode (the slab's
+    own current, the same on both faces) sees no field between the sheets and keeps zs = (k / sigma) coth(k t / 2).
+    Then z_self = (zs + zd') / 2, z_mutual = (zs − zd') / 2.
+
+    In units of 1/(σt) and u = (1 + j)·t/δ: zs = u·coth(u/2), zd' = u²·tanh(u/2) / (u − 2·tanh(u/2)). At low
+    frequency zd' → 6 (+ j·x²/5, x = t/δ): the difference mode is a resistive loop of 12 squares' resistance per
+    square, the slab's eddy current in a field across it, whose loss σ·ω²·μ0²·H²·t³/12 per area is the thin
+    lamination's [Ferreira 1994]; the field passes through the copper. At high frequency zd' → zd → k/σ: each face a
+    one-face slab (z_self → slab_impedance), z_mutual → 0. Well conditioned at every frequency (the pair's two
+    eigenvalues zs and zd' are 2 and 6 squares' resistance at DC). Returns complex (arrays broadcast)."""
+    t = np.asarray(t, float)
+    zs, zdm = _slab_modes(t, f, sigma, free_space=True)
+    zself, zmut = 0.5 * (zs + zdm) / (sigma * t), 0.5 * (zs - zdm) / (sigma * t)
+    if np.ndim(zself) == 0:
+        return complex(zself), complex(zmut)
+    return zself, zmut
+
+
+def _slab_modes(t, f, sigma, free_space: bool = False) -> tuple:
+    """(zs, zd) of a slab t thick in units of 1/(σt): u·coth(u/2) and u·tanh(u/2), u = (1 + j)·t/δ (slab_two_port);
+    with free_space the difference mode with the free space between two face sheets beside it, u²·tanh(u/2) /
+    (u − 2 tanh(u/2)) (face_sheet_impedance). Thin foils (t/δ < 0.1) by their series: the closed forms cancel there."""
+    t = np.asarray(t, float)
+    f = np.asarray(f, float)
+    with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+        delta = 1.0 / np.sqrt(np.pi * np.maximum(f, 1e-300) * MU0 * sigma)
+        x = np.where(f > 0, t / delta, 0.0)
+        u = (1 + 1j) * x
+        # tanh(u/2) is 1 to double precision beyond t/delta = 60: only its argument is capped, never u itself
+        th = np.tanh(np.where(x > 0, (1 + 1j) * np.minimum(x, 60.0), 1.0) / 2)
+        # series with u² = 2j x², u⁴ = −4 x⁴, u⁶ = −8j x⁶:
+        #   u coth(u/2) = 2 + u²/6 − u⁴/360 + u⁶/15120 = 2 + x⁴/90 + j (x²/3 − x⁶/1890)
+        #   u tanh(u/2) = u²/2 − u⁴/24 + u⁶/240         = x⁴/6 + j (x² − x⁶/30)
+        #   u² tanh(u/2) / (u − 2 tanh(u/2)) = 6 + u²/10 − u⁴/1400 = 6 + x⁴/350 + j x²/5
+        small = x < 0.1
+        zs = np.where(small, 2.0 + x ** 4 / 90.0 + 1j * (x ** 2 / 3.0 - x ** 6 / 1890.0), u / th)
+        if free_space:
+            zd = np.where(small, 6.0 + x ** 4 / 350.0 + 1j * x ** 2 / 5.0, u * u * th / (u - 2.0 * th))
+        else:
+            zd = np.where(small, x ** 4 / 6.0 + 1j * (x ** 2 - x ** 6 / 30.0), u * th)
+    return zs, zd
+
+
 @lru_cache(maxsize=None)
 def leggauss(n: int) -> tuple[np.ndarray, np.ndarray]:
     """Gauss-Legendre nodes and weights [Abramowitz 1964, §25.4] (cached: numpy solves an eigenvalue problem on

@@ -277,6 +277,9 @@ class StackBuild:
         # Resistance, part_lid's `fed`): the current fed in at that side enters them evenly instead of at its lid
         self.side_spread: dict[tuple[str, str], list[LidNode]] = {}
         self._plane: Optional[PlaneStack] = None
+        # a layer with copper on both sides gets a sheet per face (peec.PlaneStack._faces [A93]); a DC model keeps
+        # one sheet per layer (power.dc_board_build: at DC both faces are one conductor)
+        self.screen = True
         # a through-hole pin whose solder does not reach its part's side: the layer its current enters the board on
         # (pins.feed_layer; power._pad_node takes it instead of the part's side)
         self.pin_feed: dict[str, str] = {}
@@ -304,7 +307,7 @@ class StackBuild:
             # Plane-pair cavities need their sheet inductance in the preconditioner (resonances); the
             # inductive fine model converges best with the plain diagonal.
             self._plane = PlaneStack(self.plane_layers(), self.branches, self.pairs,
-                                     precond="sheet" if self.pairs else "diag")
+                                     precond="sheet" if self.pairs else "diag", screen=self.screen)
         return self._plane
 
     def xy(self, node) -> tuple[float, float]:

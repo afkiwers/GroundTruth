@@ -441,6 +441,8 @@ class TorchMath:
         if o is None:
             t, st = self.t, self.st
             o = {"w": float(op.w), "R": self.dev(op.R_strip.astype(complex)), "z": self.dev(op.z_tail)}
+            if op.Z12 is not None:   # a split layer's face coupling (peec.PlaneStack._twin_z)
+                o["Z12"] = self.dev(op.Z12)
             if st.blocks:            # per-position layer blocks: Dinv = Dr + j·Di, two real sparse products
                 o["Dr"] = _csr(t, self.d, op.Dinv.real)
                 o["Di"] = _csr(t, self.d, op.Dinv.imag)
@@ -462,7 +464,7 @@ class TorchMath:
     def Lp(self, I):
         """L_p I on the device (as PlaneStack.Lp_matvec): scatter, FFT, the layer-kernel multiply-add as one einsum
         over the real kernels and the spectra's real/imaginary pairs, inverse FFT, gather."""
-        t, N = self.t, self.st.N
+        t, N = self.t, self.st.n_sheets        # one kernel row per current sheet (peec.PlaneStack._faces)
         out = t.empty(self.st.ns, dtype=t.complex128, device=self.d)
         for o in self.data["orients"]:
             X = t.zeros(o.shape[0] * o.shape[1] * o.shape[2], dtype=t.complex128, device=self.d)
@@ -485,6 +487,10 @@ class TorchMath:
         Ib = x[:nb]
         top = t.empty(nb, dtype=t.complex128, device=self.d)
         top[:ns] = o["R"] * Ib[:ns] + (1j * o["w"]) * self.Lp(Ib[:ns])
+        if "Z12" in o:
+            a, b = self.data["tw_a"], self.data["tw_b"]
+            top[a] += o["Z12"] * Ib[b]
+            top[b] += o["Z12"] * Ib[a]
         top[ns:] = o["z"] * Ib[ns:]
         top -= self._spmv(self.data["Ar"], x[nb:])
         return t.cat([top, self._spmv(self.data["ArT"], Ib)])
@@ -523,8 +529,9 @@ def device_bytes(stack) -> int:
     from .peec import gmres_restart
     pix = sum(int(np.prod(P)) for P, n in ((stack.Px, stack.nxb), (stack.Py, stack.ns - stack.nxb)) if n > 0)
     n = stack.nb + stack.n_nodes
-    kernels = stack.N * stack.N * pix * 8
-    ffts = 3 * stack.N * pix * 16
+    S = getattr(stack, "n_sheets", stack.N)
+    kernels = S * S * pix * 8
+    ffts = 3 * S * pix * 16
     incidence = 2 * (stack.Ar.nnz * 16 + (stack.Ar.shape[0] + stack.Ar.shape[1]) * 8)
     basis = (gmres_restart(n) + 1) * n * 16
     return int(kernels + ffts + incidence + basis + 20 * n * 16)
@@ -563,6 +570,9 @@ def _stack_data(dev: Device, stack) -> dict:
             data["dL"] = t.as_tensor(stack.dL.astype(complex), dtype=t.complex128, device=dev.device)
         if getattr(stack, "M_near", None) is not None:
             data["M_near"] = _csr(t, dev.device, stack.M_near)
+        if len(getattr(stack, "tw_b", ())):
+            data["tw_a"] = t.as_tensor(stack.tw_a, dtype=t.int64, device=dev.device)
+            data["tw_b"] = t.as_tensor(stack.tw_b, dtype=t.int64, device=dev.device)
         cache[key] = data
         return data
 
@@ -571,8 +581,9 @@ def _orients(dev: Device, stack) -> list:
     """The stack's per-orientation device data (_Orient): strip indices and full kernel spectra uploaded."""
     t = dev.torch
     out = []
-    for orient, lo, hi, shape, P in (("x", 0, stack.nxb, (stack.N, stack.nx - 1, stack.ny), stack.Px),
-                                     ("y", stack.nxb, stack.ns, (stack.N, stack.nx, stack.ny - 1), stack.Py)):
+    S = stack.n_sheets
+    for orient, lo, hi, shape, P in (("x", 0, stack.nxb, (S, stack.nx - 1, stack.ny), stack.Px),
+                                     ("y", stack.nxb, stack.ns, (S, stack.nx, stack.ny - 1), stack.Py)):
         if hi <= lo:
             continue
         into, outof = stack._strip_index(orient)
@@ -581,7 +592,7 @@ def _orients(dev: Device, stack) -> list:
         o.lo, o.hi, o.shape, o.P = lo, hi, shape, tuple(P)
         o.into = t.as_tensor(into, dtype=t.int64, device=dev.device)
         o.outof = t.as_tensor(outof, dtype=t.int64, device=dev.device)
-        o.K = t.as_tensor(np.stack([np.stack([K[(a, b)].reshape(-1) for b in range(stack.N)])
-                                    for a in range(stack.N)]), dtype=t.float64, device=dev.device)
+        o.K = t.as_tensor(np.stack([np.stack([K[(a, b)].reshape(-1) for b in range(S)])
+                                    for a in range(S)]), dtype=t.float64, device=dev.device)
         out.append(o)
     return out
