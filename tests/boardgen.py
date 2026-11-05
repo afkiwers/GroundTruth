@@ -1,6 +1,7 @@
 """Write small synthetic KiCad 10 boards for tests (any copper layer count)."""
 from __future__ import annotations
 
+import math
 import uuid as _uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1090,6 +1091,20 @@ def plane_pair_line(length: float, w: float = 10.0, h: float = 0.2) -> tuple:
         g.via((x1 - 1.0, y), "GND")
         refs.append(ref)
     return g, refs
+
+
+def radial_pair(radius: float = 10.0, h: float = 0.2, drill: float = 0.3) -> tuple:
+    """A radial plane pair: two discs of net P (256-gons) `radius` mm round, on F.Cu and B.Cu `h` mm of FR4 apart,
+    joined at their centre by one via of `drill` (its pad 0.3 mm wider). Fed at the rim between the discs, it is a
+    coaxial line from the via's barrel out to the rim. Returns (BoardGen, the centre (x, y) mm)."""
+    c = radius + 3.0
+    g = BoardGen(layers=2, size=(2 * c, 2 * c), dielectrics=[h])
+    disc = [(c + radius * math.cos(2 * math.pi * m / 256), c + radius * math.sin(2 * math.pi * m / 256))
+            for m in range(256)]
+    g.zone("P", "F.Cu", disc)
+    g.zone("P", "B.Cu", disc)
+    g.via((c, c), "P", size=drill + 0.3, drill=drill)
+    return g, (c, c)
 
 
 def pdn_board(caps: Sequence[tuple] = (), source: bool = False, size: Pt = (40.0, 30.0),

@@ -1125,34 +1125,67 @@ def _column_z(column: Optional[tuple], drill_mm: float, filled: bool, za: float,
     return segment_impedance(length, soldered, drill_mm, g_solder, g_open)
 
 
-def add_pin(st: StackBuild, net: str, pos, span: list[str], drill_mm: float, name: str, snap: float,
-            filled: bool = False, column: Optional[tuple] = None) -> int:
-    """A through-hole pad's pin between consecutive layers, joined to each layer all around its barrel: `k`
-    (pin_joints) parallel branches between points on a circle just outside the drill (its copper ring), each with k
-    times the pin's impedance (together the pin's own). The user, of a big connector pin's map: "the current density
-    around that area looks odd": joined at the one node nearest its centre (add_vertical), the whole pin current
-    entered a layer at one cell on the ring's edge, a point source with a hot spot that is not there. A ring of about
-    one cell (k = 1) keeps the single joint. `column` (pin_column): the pin's own values (material, solder fill)
-    instead of a copper-filled hole."""
+def joint_points(st: StackBuild, pos, drill_mm: float) -> list[tuple[int, int]]:
+    """The grid points (i, j) where a via or pin of `drill_mm` at `pos` (mm) joins its layers: one pattern fixed to
+    the lattice that every layer of the model shares (one origin and pitch, `_make_build`) [A89].
+
+    `pin_joints` points on a circle of radius drill/2 + d/2 around the grid node nearest the hole's centre, each
+    rounded to a node in whole cells: the pattern depends on drill/d alone, so a via joins its planes with the same
+    shape wherever it lies in its cell, and at the same points on every layer; k = 1 is that nearest node. Before
+    2026-11-05 the circle was centred on the hole and each layer snapped each point to its own nearest node of the
+    net: the ring's radius moved with the grid's offset by up to a cell (a radial plane pair's inductance by 7 % at
+    0.4 mm cells, tests/test_via_joints.py). The price: the joints' centre is that node, up to d/√2 from the hole's,
+    as the single joint's always was."""
+    g = st.grids[0]
+    ci, cj = int(round((pos[0] - g.x0) / st.d)), int(round((pos[1] - g.y0) / st.d))
     k = pin_joints(drill_mm, st.d)
     if k <= 1:
-        if column is None:
-            return add_vertical(st, net, pos, span, drill_mm, name, snap, filled)
-        nodes = [n for n in (st.node(l, pos[0], pos[1], net, snap) for l in span if l in st.names) if n]
-        for a, b in zip(nodes, nodes[1:]):
-            st.branches.append(Branch(a, b, _column_z(column, drill_mm, filled, st.z[a[0]], st.z[b[0]]), name,
-                                      "via", drill_mm * 5e-4))
-        return max(len(nodes) - 1, 0)
-    r = drill_mm / 2 + 0.5 * st.d
-    pts = [(pos[0] + r * math.cos(2 * math.pi * m / k), pos[1] + r * math.sin(2 * math.pi * m / k)) for m in range(k)]
-    rows = []                                       # per layer the pin touches: its k joint nodes
+        return [(ci, cj)]
+    r = drill_mm / (2 * st.d) + 0.5                 # the circle's radius in cells
+    out: list[tuple[int, int]] = []
+    for m in range(k):
+        # in whole cells from the node (round() is symmetric about 0: so is the pattern), never from the hole's own
+        # coordinates, whose rounding would move with the offset
+        ij = (ci + int(round(r * math.cos(2 * math.pi * m / k))), cj + int(round(r * math.sin(2 * math.pi * m / k))))
+        if ij not in out:                           # two points on one node: one joint
+            out.append(ij)
+    return out
+
+
+def add_pin(st: StackBuild, net: str, pos, span: list[str], drill_mm: float, name: str, snap: float,
+            filled: bool = False, column: Optional[tuple] = None) -> int:
+    """A via's or through-hole pad's barrel between consecutive layers, joined to each layer all around it: k
+    (joint_points) parallel branches between the same grid points on every layer, each with k times the barrel's
+    impedance (together the barrel's own) [A89]. The user, of a big connector pin's map: "the current density around
+    that area looks odd": joined at the one node nearest its centre, the whole pin current entered a layer at one
+    cell on the ring's edge, a point source with a hot spot that is not there. A ring of about one cell (k = 1)
+    keeps the single joint. A layer without the net's copper at a joint point (a pad smaller than the ring, a
+    thermal relief's gap) takes its own copper nearest that point within 0.75 cells, else the copper nearest the
+    hole's centre within `snap`; a layer with no copper of the net near the hole is not joined (a blind or buried
+    via's span ends there, an antipad). `column` (pin_column): the pin's own values (material, solder fill) instead
+    of a copper-filled hole."""
+    pts = joint_points(st, pos, drill_mm)
+    k = len(pts)
+    rows = []                                       # per layer the barrel joins: its k joint nodes
     for layer in span:
-        if layer not in st.names:
+        li = st.index(layer)
+        if li is None:
             continue
         centre = st.node(layer, pos[0], pos[1], net, snap)
         if centre is None:
-            continue                                # no copper of this net here: the pin does not join this layer
-        rows.append([st.node(layer, x, y, net, 0.75 * st.d) or centre for x, y in pts])
+            continue                                # no copper of this net here: the barrel does not join this layer
+        g = st.grids[li]
+        own = g.nets.index(net) if g.label is not None and net in g.nets else None
+        row = []
+        for i, j in pts:
+            if 0 <= i < g.nx and 0 <= j < g.ny and g.node[i, j] and (own is None or g.label[i, j] == own):
+                row.append((li, i, j))              # the shared point: the same xy as on every other layer
+            elif k == 1:
+                row.append(centre)                  # (the nearest copper of the net, as the shared point would be)
+            else:
+                x, y = g.xy(i, j)
+                row.append(st.node(layer, float(x), float(y), net, 0.75 * st.d) or centre)
+        rows.append(row)
     added = 0
     for a, b in zip(rows, rows[1:]):
         z = _column_z(column, drill_mm, filled, st.z[a[0][0]], st.z[b[0][0]])
