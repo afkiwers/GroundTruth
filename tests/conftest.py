@@ -33,10 +33,11 @@ def _gpu_auto_keeps_to_the_cpu(monkeypatch):
     give results that differ at the solver's tolerance: a test that compares two runs bit for bit then depended on
     how busy the machine was when auto timed it (a loaded CPU made a slow GPU look fast; audit round 8). A test
     runs on the CPU unless it asks for a device itself (GROUNDTRUTH_GPU_DEVICE, a patched _speedup, tests/test_gpu.py),
-    and each test probes afresh: a cached probe of an earlier test carries no device into it."""
+    and what a test adds to the probe cache is dropped with it (a device a GPU test patched in must not carry into
+    the next test). The cache itself is not emptied: a probe per test timed the machine again and again."""
     from groundtruth.solver import gpu
     monkeypatch.setattr(gpu, "_speedup", lambda torch, dev: 0.0)
-    monkeypatch.setattr(gpu, "_probed", {})
+    monkeypatch.setattr(gpu, "_probed", dict(gpu._probed))
 
 
 def make(tmp_path, gen, name="b", nets=(SIG,), capacitance=False, **analysis):
