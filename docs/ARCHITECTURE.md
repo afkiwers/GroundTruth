@@ -230,6 +230,15 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
   restart is short (its memory budget: 52 on refboard's board-wide model at 4× resolution), and near a
   plane resonance it converges steadily but slowly: that 1.58 GHz solve fell ~2× per cycle and finished in 11
   cycles, where the 8 failed (audit, session 7).
+  The true residual is checked (one product) when the recurrence's first meets the tolerance; a miss halves the
+  recurrence's aim. After `GMRES_CHECK_MISSES` (4) misses in one cycle the recurrence has fallen to an eighth of
+  the tolerance while the true residual stayed above it: the cycle ends there and restarts from that check's
+  answer, whose residual is known [A91]. Before (audit round 8, G8-3), a solve whose products were not exactly
+  repeatable (relative noise ≥ the tolerance) went on halving and checked at almost every iteration: 1584 products
+  for 800 iterations (`test_a_solve_that_cannot_converge_costs_no_more_products_than_before_the_true_residual_stop`;
+  now 88 for 56, unconverged as before). Cycles with fewer misses are unchanged, bit for bit: of 1212 cycles in the
+  solver, power and audit tests' solves, 1204 had none, 7 had one or two and one had three before converging (under
+  the cap); no solve of refboard's nets and stages tested had one.
 - **A solve that still fails** is kept as `None` in its run. The refinement (`next_frequencies`) then closes in
   on the first failure above each solved frequency from below (log-midpoint harmonics, first in line), and
   `unsolved_band` names the band above the last solved frequency when a failure lies there and the limit
@@ -301,7 +310,13 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
     (`test_a_simulate_does_not_depend_on_the_order_its_solves_finish` runs the solves in and against their
     order). The wider window went with it: on refboard no model reached 100 iterations per
     factorisation (route models ~5, the board-wide model 39-79). Checked on the CPU only: the GPU backend's
-    sums may not be in a fixed order.
+    sums may not be in a fixed order. A frequency is keyed by f to 12 significant digits (`PlaneStack.freq_key`)
+    and its system, choice and factorisation are computed for that key [A85]; until 2026-11-05 the key was f to
+    1 mHz and they used the exact f of the first solve that asked, so a solve one bit or 0.4 mHz away got that
+    one's system matrix and counted as a borrow
+    (`test_a_frequency_s_operator_depends_on_its_key_not_on_which_solve_asked_first`). The same holds for the
+    models (`BoardModel.build`: region and pitch to 12 digits, built for those) and the ideal reference model and
+    the cross-section cuts (exact keys).
   - `with_branches()` adds candidate vias or capacitors as a low-rank (Woodbury) update of the base
     factorisation. A full rebuild happens only if the new branches join separate islands.
   - `solve(f, guess=[...])` warm-starts GMRES from a least-squares combination of guess vectors.
@@ -922,7 +937,7 @@ and working set = Task Manager's "Memory", sampled every 50 ms; a census of the 
   every round capped by the largest model of the run (`memory_threads`, now only reported). The Krylov basis is
   single precision (`peec._Basis32Vectors`, `solver/_mac.gs_project`: float32 planes, float64 arithmetic,
   [A66]) for tolerances ≥ `BASIS32_MIN_TOL` 1e-6: half its memory. `_gmres` stops on the true residual as soon as the
-  recurrence meets the tolerance.
+  recurrence meets the tolerance (at most `GMRES_CHECK_MISSES` missed checks per cycle [A91]).
 - **Left** (the next steps): SuperLU's committed slack (~6.5x its fill) dominates the committed peak; only a
   different sparse solver (PARDISO, UMFPACK, a complex-symmetric LDLᵀ) would remove it, a new dependency. The
   working-set peak is mostly the live factorisations' fill (1.4 GB of 3.4 GB on the large board), then the

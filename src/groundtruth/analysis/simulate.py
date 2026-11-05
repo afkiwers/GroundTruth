@@ -52,7 +52,7 @@ from ..emi.spectrum import analysis_band, microstrip, offset_stripline, trapezoi
 from ..geometry.copper import CopperMap, reference_layers
 from ..geometry.shapes import arc_points
 from ..rules.checks import CheckResult, run_checks
-from ..solver.peec import (EPS0, GMRES_FIRST_ROWS, gmres_restart, Branch, Grid, LidNode, PlaneLayer, PlanePair,
+from ..solver.peec import (EPS0, GMRES_FIRST_ROWS, cache_value, gmres_restart, Branch, Grid, LidNode, PlaneLayer, PlanePair,
                            PlaneStack, RouteExcitation, Solution, SolverError, TraceSegment, build_grid,
                            thread_budget, track_impedance, via_impedance)
 from ..solver import gpu, peec, stats
@@ -380,8 +380,18 @@ class BoardModel:
 
     def build(self, bbox, layers: list[str], plane_nets: set[str], d: float, capacitance: bool) -> StackBuild:
         """The model of this region, layers, nets and pitch: built once, then shared (routes over the same region
-        reuse it, and its factorisations)."""
-        key = (tuple(round(v, 3) for v in bbox), tuple(layers), frozenset(plane_nets), round(d, 6), capacitance)
+        reuse it, and its factorisations).
+
+        Keyed by the region and pitch to KERNEL_DIGITS significant digits (peec.cache_value) and built for those
+        values, so a model depends on its key alone [A85]. Until 2026-11-05 the key rounded them to 1 µm and 1 nm
+        while the model was built for the exact values of whichever caller asked first: two callers whose regions
+        or pitches differ by less (a sum of layer thicknesses taken in another order, as face_gap's G8-1) would
+        have got the first one's grid. No caller was found to do so (the callers that share a model compute its
+        region and pitch the same way; the board-wide model's pitch starts at CAVITY_MIN_MM whatever the route's
+        height), but what the cache gives no longer depends on it."""
+        bbox = tuple(cache_value(v) for v in bbox)
+        d = cache_value(d)
+        key = (bbox, tuple(layers), frozenset(plane_nets), d, capacitance)
         hit = self._builds.get(key)
         if hit is None:
             hit = self._builds[key] = self._make_build(bbox, layers, plane_nets, d, capacitance)
@@ -573,11 +583,14 @@ class BoardModel:
 
     def _ideal_stack(self, route: Route, ref_layers: list[str], bbox, d) -> StackBuild:
         """Build (or reuse) the ideal reference model (see ideal_stack); keyed by the region, layers, pitch and
-        the route's geometry on those layers."""
-        keep_segs = tuple((s.layer, tuple(np.round(s.start, 3)), tuple(np.round(s.end, 3)), round(s.width, 3))
+        the route's geometry on those layers, all exact: the model is built from them, so a key rounded coarser
+        than them would hand a second route the first one's model (until 2026-11-05 they were rounded to 1 µm
+        [A85]). The same route asks with the same floats, so the reuse that matters (a fix verification
+        finishing the route again) is kept."""
+        keep_segs = tuple((s.layer, tuple(map(float, s.start)), tuple(map(float, s.end)), float(s.width))
                           for s in route.segments if s.layer in ref_layers and s.start != s.end)
-        vias = tuple(tuple(np.round(v.position, 3)) for v in route.vias)
-        key = (tuple(round(v, 3) for v in bbox), tuple(ref_layers), round(d, 6), keep_segs, vias)
+        vias = tuple(tuple(map(float, v.position)) for v in route.vias)
+        key = (tuple(map(float, bbox)), tuple(ref_layers), float(d), keep_segs, vias)
         hit = self._ideals.get(key)
         if hit is not None:
             return hit

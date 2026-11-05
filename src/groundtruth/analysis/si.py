@@ -332,8 +332,11 @@ class SectionCache:
         return Section(rects, slabs, box)
 
     def _cut(self, at, along, layer: str, nets: list[str], width: Optional[float]):
-        """cut(), remembered (a prefetch cuts first, the checks then ask again)."""
-        k = (round(at[0], 4), round(at[1], 4), round(along[0], 6), round(along[1], 6), layer, tuple(nets), width)
+        """cut(), remembered (a prefetch cuts first, the checks then ask again). Keyed by the exact place and
+        direction the cut is made for: rounded (to 0.1 µm, as until 2026-11-05) a second caller a few bits away
+        got the first one's cut [A85]. The prefetch and the check ask with the same floats; equal cuts at
+        different places still share their solve (_key)."""
+        k = (float(at[0]), float(at[1]), float(along[0]), float(along[1]), layer, tuple(nets), width)
         if k not in self.cuts:
             self.cuts[k] = self.cut(at, along, layer, nets, width)
         return self.cuts[k]

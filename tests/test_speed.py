@@ -281,6 +281,74 @@ def test_gmres_stops_once_the_true_residual_meets_the_tolerance(monkeypatch):
         assert peec.host_vectors().for_tol(1e-5) is not None
 
 
+def _noisy(D, eps):
+    """D·v plus eps·‖D·v‖ of noise that changes with v (nonlinearly, but the same for the same v): products that are
+    not exactly repeatable, so GMRES's recurrence goes on falling while the true residual stays at ~eps."""
+    def op(v):
+        """The noisy product."""
+        y = D * v
+        u = np.exp(1j * 1e6 * np.real(v))
+        return y + eps * np.linalg.norm(y) * u / np.linalg.norm(u)
+    return op
+
+
+def _counted(fn):
+    """fn and a list whose first entry counts its calls."""
+    n = [0]
+
+    def op(v):
+        """fn, counted."""
+        n[0] += 1
+        return fn(v)
+    return op, n
+
+
+def test_a_solve_that_cannot_converge_costs_no_more_products_than_before_the_true_residual_stop():
+    """Audit round 8, G8-3 [A91]: products with relative noise above the tolerance. The recurrence says "converged"
+    again and again, the true residual never follows. _gmres must not report success, and must not check the true
+    residual at almost every iteration either: before the fix every miss halved the aim, so a cycle checked at every
+    iteration once the recurrence fell faster than 2x per step (1584 products for 800 iterations in the first case here; before the
+    true-residual stop, one per iteration and one per cycle). Now a cycle restarts from its check after
+    GMRES_CHECK_MISSES misses: at most that many extra products per cycle (and the solve ends once the restarts stop gaining)."""
+    rng = np.random.default_rng(5)
+    n = 400
+    D = np.linspace(1.0, 3.0, n) * np.exp(1j * rng.uniform(0, 0.3, n))
+    b = np.ones(n, complex)
+    misses = peec.GMRES_CHECK_MISSES
+    for eps, cycles, extra in ((1e-4, 8, 0), (1e-4, 3, 24), (1e-3, 8, 0)):
+        op, calls = _counted(_noisy(D, eps))
+        x, its, ok = _gmres(op, b, 1e-5, restart=100, max_cycles=cycles, extra_cycles=extra)
+        assert not ok                                        # never "converged" above the tolerance
+        assert np.linalg.norm(op(x) - b) > 1e-5 * np.linalg.norm(b)
+        assert calls[0] <= its + (misses + 1) * (cycles + extra)
+
+
+def test_the_check_budget_changes_nothing_in_a_solve_that_converges(monkeypatch):
+    """GMRES_CHECK_MISSES (G8-3) only ends cycles whose checks keep missing: solves that converge (clean, with the
+    single-precision basis and complex128, one miss on the way from mildly noisy products) take the same
+    iterations, operator products and bit-identical answers with it as with an unbounded budget (the code before);
+    and what converged meets the tolerance on its true residual."""
+    rng = np.random.default_rng(0)
+    D = np.linspace(1.0, 30.0, 3000) * np.exp(1j * rng.uniform(0, 0.3, 3000))
+    b = np.ones(3000, complex)
+    cases = [(lambda v: D * v, 1e-5), (lambda v: D * v, 1e-6), (_noisy(D, 1e-6), 1e-5), (_noisy(D, 2e-6), 1e-5)]
+    for basis32 in (True, False):
+        for fn, tol in cases:
+            runs = []
+            for budget in (None, 10**9):
+                with monkeypatch.context() as m:
+                    if not basis32:
+                        m.setattr(peec, "USE_BASIS32", False)
+                        m.setattr(peec, "_GS", [])
+                    if budget is not None:
+                        m.setattr(peec, "GMRES_CHECK_MISSES", budget, raising=False)
+                    op, calls = _counted(fn)
+                    x, its, ok = _gmres(op, b, tol, restart=60)
+                runs.append((x, its, ok, calls[0]))
+                assert ok and np.linalg.norm(fn(x) - b) <= tol * np.linalg.norm(b)
+            assert runs[0][1:] == runs[1][1:] and np.array_equal(runs[0][0], runs[1][0])
+
+
 def test_a_solve_plans_the_basis_its_model_needs_and_the_platforms_memory(monkeypatch):
     """simulate.basis_rows: the full restart length before a model was solved, the first rows for a DC solve, then
     the doubling steps that hold BASIS_MARGIN x its most iterations; peec.lu_commit: Windows commits 6.5x a
