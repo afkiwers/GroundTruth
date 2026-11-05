@@ -74,7 +74,7 @@ def resistance_scales(st, th) -> tuple[np.ndarray, np.ndarray]:
         g = st.grids[k]
         ii, jj = np.meshgrid(np.arange(g.nx), np.arange(g.ny), indexing="ij")
         t_nodes[k] = _temperatures(th, layer, (g.x0 + ii * g.d).ravel(), (g.y0 + jj * g.d).ravel()).reshape(g.nx, g.ny)
-    xa, ya = plane.xa, plane.ya
+    xa, ya = plane.layer_index("x"), plane.layer_index("y")      # each strip's layer (a face sheet's: its layer's)
     tx = np.array([0.5 * (t_nodes[l][i, j] + t_nodes[l][i + 1, j]) for l, i, j in xa]) if len(xa) else np.zeros(0)
     ty = np.array([0.5 * (t_nodes[l][i, j] + t_nodes[l][i, j + 1]) for l, i, j in ya]) if len(ya) else np.zeros(0)
     strips = 1.0 + COPPER.alpha * (np.concatenate([tx, ty]) - 20.0)

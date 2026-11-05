@@ -681,7 +681,7 @@ pyproject.toml: a PYTHONPATH override does not switch the code under test). In s
   0.3-3.6 % of the closed forms and converging; power balance and symmetry of the pad and terminal models.
 - Limitations, quantified: a plane between two others reads low at high frequency (-6 % at 0.2 mm / 35 µm, -26 % at
   0.1 mm / 70 µm; +52 % before the face-gap change) and a floating plane does not screen (+5.5 %) (P8-3,
-  P8-4); thin dielectrics (h < t) +7 % at low frequency, unexplained (P8-5); a via's joints snap per layer, ±3 % of
+  P8-4: fixed since, branch `plane-screening`, below); thin dielectrics (h < t) +7 % at low frequency (P8-5: explained, below); a via's joints snap per layer, ±3 % of
   a plane-pair port's L at 0.4 mm cells (fixed for the joints since, branch `via-joints` [A89]: one pattern fixed
   to the grid, the same points on every layer; a radial plane pair, the coaxial line from a 0.3 mm via, spread
   ±3.6 % over the grid offsets at 0.4 and 0.2 mm cells and ±2.2 % at 0.1 mm, now ±0.4 % at each, 0.93 / 0.98 / 0.98
@@ -697,6 +697,25 @@ pyproject.toml: a PYTHONPATH override does not switch the code under test). In s
   `test_the_mesh_does_not_follow_the_last_bits_of_the_heat`, `test_equal_errors_rank_alike_so_the_last_bits_do_not_pick_the_mesh`.
 - Refboard (the 6-layer copy, settings from detection): the pad rule moves DC paths' resistances by up to -7 % and
   a buck's hot loop 1.169 → 1.152 nH.
+- Follow-up, branch `plane-screening` (P8-3, P8-4, P8-5; ARCHITECTURE "A plane between two others", REFERENCES A92,
+  A93):
+  - P8-3 / P8-4 fixed: a layer with copper of other layers above and below it is two current sheets, one per face,
+    joined by the slab's one-dimensional two-port [Dowell 1966] [Ferreira 1994] (a sum and a difference mode; the
+    free space between the sheets de-embedded, so the pair is exact in 1D at every frequency). Against the exact slab-
+    stack values at 0.4 / 0.2 / 0.1 mm cells: the middle plane's L'(f)/L'(1 MHz) within 0.7 / 0.2 / 0.1 % from 10 kHz
+    to 100 MHz (before 0.76 at 30 MHz and 0.73 at 100 MHz for 0.1 mm / 70 µm; 0.93 at 100 MHz for 0.2 mm / 35 µm); the
+    floating plane against the same stack without it within 0.7 % (before +4.7 % at 30 MHz, +6.7 % at 100 MHz),
+    1e-3 at 10 kHz. Absolute L' is the 1D exact value plus the strips' edge fringing, +1.1 to +3.3 % converging.
+    tests/test_plane_screening.py fail on the code before (the old archive: the middle plane's trend, the floating
+    plane's ratio, the structure and the two-port).
+  - Cost: the unknowns of a six-layer board's board-wide model +35 % (the factorised matrix unchanged), kernels
+    ×2.8, GMRES iterations ×1.1-1.9 and a solve ×1.3-2.5 at 20-400 MHz; a plane pair and the DC model cost nothing
+    more. On the 6-layer copy at the same frequencies the first net's loop inductance moves −0.9 to −1.2 % and its
+    dipole moment +2.6 to +5.1 %.
+  - P8-5 explained, not a model defect: the +7 % came from the audit's 20 / 40 mm point-fed lines (their ends'
+    difference over a 10 mm width) and a zero-thickness reference; against two uniform plates' exact energy the line
+    reads +8.9 / +2.9 / +1.5 % at 0.4 / 0.2 / 0.1 mm cells (10 mm wide), converging first order; the same cells on
+    40 / 80 mm lines +1.1 %.
 
 ## Remaining risks and unverified items
 - SP-19: above 1 GHz a board-wide resonance's worst margin moves about ±2 dB between the 4x, 8x and 16x grids on

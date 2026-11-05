@@ -201,6 +201,48 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
   plane_pair_check.py (line, --axis, --pitch), kipi_crosscheck.py (both tools on kicad-cli-filled boards; cases
   bare, near4, near_far, radialS[_dD]) and kipi_side.py (KiPI in its own venv). Open: near a feed (a pad beside a
   via) the result moves with the cell size and reads ~0.1 nH above KiPI's 2.5D model.
+- **A plane between two others: one sheet per face** (2026-11-05, branch `plane-screening`, [A92] [A93]; audit
+  round 8, P8-3 / P8-4). With one current sheet per layer a plane with copper on both sides had one current for both
+  faces: it could not screen one side's field from the other. A middle plane returning current on both sides read
+  μ0·(d − t/2 + 1.5δ)/2w per length at high frequency for the exact μ0·(d + δ)/2w (−26 % for 0.1 mm gaps and 70 µm
+  copper); a floating plane between a pair was transparent (+5 % at 30 MHz, +7 % at 100 MHz). Now `PlaneStack._faces`
+  gives each layer with copper of other layers above and below it at ≥ `SCREEN_MIN_NODES` of its nodes a second
+  sheet: the layer's own sheet stands at its upper face, the twin (numbered after the layers, `twin_parent`,
+  `sheet_layer`) at its lower face, both with all of the layer's strips on the layer's nodes (the incidence, KCL, the
+  capacitances and the vias are unchanged; `tw_a` / `tw_b` pair the strips). The kernels are per sheet pair
+  (`face_gap` from `sheet_z` / `sheet_t`: a face sheet stands at its face, so the two faces are the copper's
+  thickness apart with free space between them in the kernels). The pair's impedance is the slab's one-dimensional
+  two-port [Dowell 1966] [Ferreira 1994] as two sheets with that free space between them see it
+  (`kernel.face_sheet_impedance`): the sum mode (the slab's own current) zs = (k/σ)·coth(kt/2), the difference mode
+  zd' = zd·Z_v/(Z_v − 2zd) with zd = (k/σ)·tanh(kt/2) and Z_v = jωμ0t, the one value for which the free space in
+  parallel gives the slab's own 2zd. Each face strip carries (zs + zd')/2 (`_impedances`), the pair (zs − zd')/2
+  between them (`_twin_z`, the operator's `Z12`, added in both matvecs and inside the preconditioner's blocks: in
+  'diag' mode each face pair is a 2 × 2 block, `_twin_blocks`). Exact in one dimension at every frequency: at low
+  frequency the difference mode is a resistive eddy loop (12 squares) and the field passes through the copper; at
+  high frequency zd' → k/σ and each face is a one-face slab, so the copper screens. A plane pair with nothing else
+  costs nothing more (no layer with copper on both sides); the solution's `I_x` / `I_y` add both faces per layer
+  (`I_twin` keeps the lower face's for warm starts). The whole-board DC model keeps one sheet per layer
+  (`StackBuild.screen`, power.dc_board_build: at DC the faces are one conductor). The 'sheet' preconditioner's
+  per-position block is made over the layers as before (`_sheet_block`); a twin takes its layer's row and column,
+  the two faces keeping their own small difference (made over all sheets the quadratic form spread the cavity
+  inductance badly over two sheets a copper thickness apart). Validated: tests/test_plane_screening.py (lines
+  straight on the solver against the exact slab-stack values at 0.4 / 0.2 / 0.1 mm cells: the middle plane's
+  L'(f) / L'(1 MHz) within 0.7 / 0.2 / 0.1 % of the exact ratio from 10 kHz to 100 MHz, was 0.73 at 100 MHz; the
+  floating plane against the same stack without it within 0.7 %, was +6.7 %; the two-port against the coth / csch
+  forms and the identity that makes the sheets exact). **Cost** (a split layer is one more sheet): on a six-layer
+  board (four layers split) the strips 74 k → 124 k and the unknowns 143 k → 193 k on the same nodes (the
+  factorised Schur complement does not grow), the kernels 3.8 → 10.5 MB (sheets²), a board-wide solve 1.1 / 1.3 /
+  1.9 × the GMRES iterations at 20 / 100 / 400 MHz and 1.3-2.5 × the time; a two-layer board and a stack without
+  copper above and below a layer cost nothing more. Open: the iterations at high frequency (what the face sheets'
+  stricter physics does to the local-block preconditioner is not understood beyond that its diagonal variant shows
+  the smaller ratio, 1.07-1.3 ×).
+  - Thin dielectrics (P8-5): the audit's "+7 % at low frequency that does not shrink" for 25 µm of dielectric under
+    35 µm copper was the audit's 20 / 40 mm point-fed lines and its zero-thickness reference, not the model: against
+    the exact energy of two uniform plates (the DC distribution of a long pair) the line (feed spread over the
+    width) reads +8.9 / +2.9 / +1.5 % at 0.4 / 0.2 / 0.1 mm cells for 10 mm wide strips (+5.5 / +2.8 % at 0.2 / 0.1
+    mm for 5 mm), converging with the cells; the point-fed lines read +1.1 % (10 mm) and +1.6 % (5 mm) at 0.2 mm
+    when 40 / 80 mm long, +7 % at 20 / 40 mm (their ends differ and the width is half the length). Sheets at the
+    faces plus the slab's μ0t/3 are exact for the pair at low frequency. tests/test_plane_screening.py.
 - Strip impedance: `R_s(f)` (skin effect, per-layer copper thickness: `kernel.skin_thickness`, the exact AC
   resistance of a slab with its field on one face [Dowell 1966], REFERENCES A2; until 2026-10-19 δ(1 − e^(−t/δ)),
   up to 58 % too resistive at 1-10 MHz in 35 µm copper, ISSUE-16) plus `jω·L_p`. The mutual partial
