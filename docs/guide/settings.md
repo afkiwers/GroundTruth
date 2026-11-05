@@ -10,6 +10,8 @@ analysis: {grid_mm: auto, margin_mm: 10, solve_points: 4, limit_class: B, distan
            planes: auto,                         # auto = all plane layers in the region, nearest = one plane only
            max_nodes: 100000,                    # grid budget of each route model
            plane_capacitance: true,              # board-wide model with plane-pair capacitance from the stackup
+           plane_screening: false,               # a plane between two others as two face sheets (true: right at high
+                                                 # frequency, ~3.5x the board-wide solve time on a multi-layer board)
            cavity_max_nodes: 40000,              # its grid budget (raise for big boards; cost grows ~linearly)
            max_solves: 10,                       # harmonics solved per route (initial + refinement)
            threads: auto, gpu: auto,             # parallel solves (auto: physical cores, at most 4); GPU: auto | on | off
@@ -89,6 +91,7 @@ thermal and what-if keys are listed in their own sections below.
 | `analysis.max_solves` | 10 | Harmonics solved per route in all (the first ones plus refinement near the limit). |
 | `analysis.max_nodes` | 100000 | Grid budget of each route or power-stage model. |
 | `analysis.plane_capacitance` | true | The board-wide model with plane-pair capacitance (displacement current, plane resonances). |
+| `analysis.plane_screening` | false | A plane with other planes on both sides (ground / power / ground) as two face sheets, so it screens one side from the other at high frequency: within 1 % of the exact slab result where one sheet per layer reads 6-26 % low. A board-wide solve on a multi-layer board takes about 3.5 times as long (a six-layer board's clock net: 138 s off, 488 s on). Two-layer boards and the DC models are unchanged. The plugin's Preferences (**Plane screening**, with an (i) button that opens the help) and `groundtruth simulate --plane-screening on\|off` replace it for one computer or one run. |
 | `analysis.cavity_max_nodes` | 40000 | Grid budget of that board-wide model (raise it for big boards; the cost grows about linearly). |
 | `analysis.planes` | `auto` | `auto`: every plane layer in the region; `nearest`: one plane only. |
 | `analysis.limit_class` | `B` | CISPR 32 class `A` or `B` for the radiated estimate. |

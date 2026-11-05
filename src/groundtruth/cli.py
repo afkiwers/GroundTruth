@@ -554,9 +554,11 @@ def _apply_what_if(board, cfg, quiet: bool):
 
 def _solver_options(cfg, args):
     """--gpu overrides analysis.gpu for this run; --sparse chooses the factorisation backend (solver/sparse.py);
-    --resolution sets the models' node factor."""
+    --plane-screening overrides analysis.plane_screening; --resolution sets the models' node factor."""
     if getattr(args, "gpu", None):
         cfg.analysis.gpu = args.gpu
+    if getattr(args, "plane_screening", None):
+        cfg.analysis.plane_screening = args.plane_screening == "on"
     if getattr(args, "sparse", None):
         cfg.analysis.sparse = args.sparse
     if getattr(args, "resolution", None):
@@ -747,6 +749,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="the preconditioner's sparse factorisation: auto takes Apple Accelerate on macOS and "
                              "Intel MKL PARDISO where the mkl package is installed, else SuperLU (default: auto, or "
                              "GROUNDTRUTH_SPARSE)")
+        sp.add_argument("--plane-screening", choices=("on", "off"),
+                        help="a plane between two others as two face sheets, so it screens one side from the other "
+                             "at high frequency: right where the one sheet per layer is 7-27 % off, but a board-wide "
+                             "solve on a multi-layer board takes about 3.5x as long (default: "
+                             "analysis.plane_screening in the settings, off)")
         sp.add_argument("--resolution", type=float, choices=(1, 2, 4, 8, 16, 20, 25), metavar="N",
                         help="every model gets N times the nodes (cells 1/sqrt(N) in size): 1 (default), 2, 4, 8, "
                              "16, 20, 25; memory and time grow about as much")
@@ -1003,6 +1010,7 @@ def cmd_verify(args) -> int:
     sim += ["--settings", str(common)] + (["--thermal"] if verify.needs_thermal(doc) else [])
     sim += ["--refill-zones"] * args.refill_zones + ["--history"] * args.history + ["-v"] * args.verbose
     sim += ["--all-cores"] * args.all_cores + (["--gpu", args.gpu] if args.gpu else [])
+    sim += ["--plane-screening", args.plane_screening] if args.plane_screening else []
     sim += ["--resolution", f"{args.resolution:g}"] if args.resolution else []
     sim_args = build_parser().parse_args(sim)
     sim_args.for_verify = True               # no "FAILED (--fail-on ...)" line of its own: the cases are the verdict

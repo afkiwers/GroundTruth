@@ -19,6 +19,9 @@ FROM_FILE = "From the settings file"
 THREADS = (FROM_FILE, "auto", "1", "2", "4", "8", "16", "32")
 GPU = (FROM_FILE, "auto", "on", "off")
 SPARSE = (FROM_FILE, "auto", "superlu", "pardiso", "accelerate")     # solver/sparse.py's backends
+# a plane between two others as two face sheets (analysis.plane_screening, peec.PlaneStack._faces [A92]): right at high
+# frequency, about 3.5x the board-wide solve time on a multi-layer board; off unless the settings file or this say on
+PLANE_SCREENING = (FROM_FILE, "off", "on")
 QUALITY = (FROM_FILE, "draft", "normal", "fine")
 # the electro-thermal coupling (analysis/electrothermal.py): on or off, its most rounds and its tolerance, each from the
 # settings file (thermal.electrothermal, _rounds, _tolerance) unless set here for this computer
@@ -106,6 +109,8 @@ def overrides(prefs: dict) -> dict:
         out["gpu"] = p["gpu"]
     if p["sparse"] != FROM_FILE:
         out["sparse"] = p["sparse"]
+    if p["plane_screening"] != FROM_FILE:
+        out["plane_screening"] = p["plane_screening"] == "on"
     if p["all_cores"]:
         out["all_cores"] = True
     return out
@@ -213,6 +218,8 @@ def defaults(prefs: dict) -> dict:
             "threads": str(prefs.get("threads")) if str(prefs.get("threads")) in THREADS else FROM_FILE,
             "gpu": prefs.get("gpu") if prefs.get("gpu") in GPU else FROM_FILE,
             "sparse": prefs.get("sparse") if prefs.get("sparse") in SPARSE else FROM_FILE,
+            "plane_screening": prefs.get("plane_screening") if prefs.get("plane_screening") in PLANE_SCREENING
+            else FROM_FILE,
             "all_cores": bool(prefs.get("all_cores", False)),
             "thermal_quality": prefs.get("thermal_quality") if prefs.get("thermal_quality") in QUALITY else FROM_FILE,
             "electrothermal": prefs.get("electrothermal") if prefs.get("electrothermal") in ELECTROTHERMAL
@@ -542,6 +549,28 @@ class PreferencesDialog(wx.Dialog):
             "Windows when it is installed, else SuperLU (always there). The faster ones factorise 10-50x quicker in "
             "less memory; the results are the same to the solver's tolerance. From the settings file: its "
             "analysis.sparse (auto when not set).")
+        # Plane screening: a choice with an info button that opens the help at its section (the user, 2026-11-05:
+        # "make it switchable, default off ... add an info icon that opens the help beside the switch")
+        screening_holder = wx.Panel(self)
+        ss = wx.BoxSizer(wx.HORIZONTAL)
+        self.plane_screening = wx.Choice(screening_holder, choices=list(PLANE_SCREENING))
+        self.plane_screening.SetStringSelection(p["plane_screening"])
+        screening_info = wx.BitmapButton(screening_holder,
+                                         bitmap=wx.ArtProvider.GetBitmap(wx.ART_INFORMATION, wx.ART_BUTTON,
+                                                                         self.FromDIP(wx.Size(16, 16))),
+                                         style=wx.BORDER_NONE)
+        screening_info.SetToolTip("What plane screening does and what it costs (opens the help)")
+        screening_info.Bind(wx.EVT_BUTTON, lambda e: self.open_help("screening"))
+        self.plane_screening_info = screening_info
+        ss.Add(self.plane_screening, 0, wx.ALIGN_CENTER_VERTICAL)
+        ss.Add(screening_info, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, self.FromDIP(6))
+        screening_holder.SetSizer(ss)
+        row(sim, "Plane screening", screening_holder,
+            "a plane with other planes on both sides (ground / power / ground) as two face sheets, so it screens one "
+            "side from the other at high frequency: right where one sheet per layer reads 7-27 % off, but a "
+            "board-wide solve on a multi-layer board takes about 3.5 times as long. Off: the one sheet per layer "
+            "(fast). From the settings file: its analysis.plane_screening (off when not set); the command line's "
+            "--plane-screening replaces it too. Press (i) for the help.")
         # "Use all cores": opt-in, with an info button on what it costs (the user: "make it an opt-in 'use all
         # cores' setting. and add an info icon to explain its potential issues")
         holder = wx.Panel(self)
@@ -823,6 +852,12 @@ class PreferencesDialog(wx.Dialog):
         self.basis_links[key] = [w.GetLabel() for w in out[1:]]
         return out
 
+    def open_help(self, topic: str, anchor: str = ""):
+        """An info button: the help opens at that section (the window that opened the dialog shows it)."""
+        parent = self.GetParent()
+        if hasattr(parent, "show_help"):
+            parent.show_help(topic, anchor)
+
     def open_reference(self, ref: str):
         """A basis link: the help opens at that References entry (the window that opened the dialog shows it)."""
         parent = self.GetParent()
@@ -921,6 +956,7 @@ class PreferencesDialog(wx.Dialog):
                 "threads": self.threads.GetStringSelection(),
                 "gpu": self.gpu.GetStringSelection(),
                 "sparse": self.sparse.GetStringSelection(),
+                "plane_screening": self.plane_screening.GetStringSelection(),
                 "all_cores": self.all_cores.GetValue(),
                 "thermal_quality": self.thermal_quality.GetStringSelection(),
                 "electrothermal": self.electrothermal.GetStringSelection(),

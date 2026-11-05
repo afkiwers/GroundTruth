@@ -401,6 +401,11 @@ class AnalysisSettings:
     ground_reflection: bool = True
     planes: str = "auto"                  # auto = every plane layer in the region, nearest = one plane only
     plane_capacitance: bool = True        # displacement current / cavity resonance between facing planes
+    plane_screening: bool = False         # a plane between two others as two face sheets, so it screens one side from
+                                          # the other at high frequency (peec.PlaneStack._faces [A92]): right to
+                                          # 0.1-0.7 % where the one sheet per layer is 7-27 % off, and a board-wide
+                                          # solve on a multi-layer board takes about 3.5x as long (off: the default);
+                                          # Preferences "Plane screening" and --plane-screening replace it per run
     cavity_max_nodes: int = 40_000        # grid budget of the board-wide plane-capacitance model
     max_solves: int = 10                  # harmonics solved per route (initial + adaptive refinement)
     max_frequency: Optional[float] = None  # Hz: the highest harmonic evaluated (None = auto: the edge's own band,
@@ -728,6 +733,23 @@ def _gpu(v: Any, errors: list[str]) -> str:
         errors.append(f"analysis.gpu must be auto, on or off, not {v!r}")
         return "auto"
     return s
+
+
+def _switch(v: Any, name: str, errors: list[str], default: bool = False) -> bool:
+    """A setting that is on or off: a YAML true / false (a bare on / off is read as one) or the words on, off, yes,
+    no, true, false in any case (a quoted "off" is a string, and bool("off") would be true); anything else is
+    reported in `errors` and taken as `default`."""
+    if v is None:
+        return default
+    if isinstance(v, bool):
+        return v
+    s = str(v).strip().lower()
+    if s in ("on", "yes", "true"):
+        return True
+    if s in ("off", "no", "false"):
+        return False
+    errors.append(f"{name} must be on or off, not {v!r}")
+    return default
 
 
 def _refs(v: Any) -> list[str]:
@@ -1251,6 +1273,7 @@ def config_from_data(data: Any) -> Config:
             ground_reflection=bool(a.get("ground_reflection", True)),
             planes=str(a.get("planes", "auto")),
             plane_capacitance=bool(a.get("plane_capacitance", True)),
+            plane_screening=_switch(a.get("plane_screening"), "analysis.plane_screening", errors),
             cavity_max_nodes=int(a.get("cavity_max_nodes", 40_000)),
             max_solves=int(a.get("max_solves", 10)),
             max_frequency=None if str(a.get("max_frequency", "auto")).lower() == "auto"
@@ -1699,7 +1722,8 @@ class SettingsFile:
         doc["reference_nets"].fa.set_flow_style()
         doc["analysis"] = CommentedMap(grid_mm="auto", margin_mm=10.0, solve_points=4, limit_class="B",
                                        distance_m="auto", ground_reflection=True,
-                                       planes="auto", plane_capacitance=True, cavity_max_nodes=40000, max_solves=10, max_frequency="auto",
+                                       planes="auto", plane_capacitance=True, plane_screening=False,
+                                       cavity_max_nodes=40000, max_solves=10, max_frequency="auto",
                                        driver_ohms=25.0, load_pf=5.0, threads="auto", gpu="auto", conducted="cispr32",
                                        conducted_class="B", via_plating_um=25.0)
         doc["rules"] = CommentedMap(stitch_distance_mm=2.0, decap_distance_mm=5.0, edge_factor=3.0, min_gap_mm=0.1,

@@ -222,7 +222,14 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
   high frequency zd' → k/σ and each face is a one-face slab, so the copper screens. A plane pair with nothing else
   costs nothing more (no layer with copper on both sides); the solution's `I_x` / `I_y` add both faces per layer
   (`I_twin` keeps the lower face's for warm starts). The whole-board DC model keeps one sheet per layer
-  (`StackBuild.screen`, power.dc_board_build: at DC the faces are one conductor). The 'sheet' preconditioner's
+  (`StackBuild.screen`, power.dc_board_build: at DC the faces are one conductor). **A switch, off by default** (the
+  user, 2026-11-05, after the cost below was measured on an idle machine): `analysis.plane_screening` (a bool, `_switch`
+  accepts true / false / on / off / yes / no) in the settings file, replaced for one computer by Preferences
+  "Plane screening" (From the settings file / off / on, `prefs_dialog.overrides`, with an (i) button that opens the
+  help's `screening` section) and for one run by `--plane-screening on|off` (`cli._solver_options`; `verify` passes it
+  on); `BoardModel` sets `StackBuild.screen` from it on the route's model and on the ideal reference (the same model
+  less its tracks), and the report's settings table names it. `PlaneStack` itself still splits unless told not to
+  (`screen=`): the library's physics default is the right one, the analysis's default is the fast one. The 'sheet' preconditioner's
   per-position block is made over the layers as before (`_sheet_block`); a twin takes its layer's row and column,
   the two faces keeping their own small difference (made over all sheets the quadratic form spread the cavity
   inductance badly over two sheets a copper thickness apart). Validated: tests/test_plane_screening.py (lines
@@ -232,7 +239,8 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
   forms and the identity that makes the sheets exact). **Cost** (a split layer is one more sheet): on a six-layer
   board (four layers split) the strips 74 k → 124 k and the unknowns 143 k → 193 k on the same nodes (the
   factorised Schur complement does not grow), the kernels 3.8 → 10.5 MB (sheets²), a board-wide solve 1.1 / 1.3 /
-  1.9 × the GMRES iterations at 20 / 100 / 400 MHz and 1.3-2.5 × the time; a two-layer board and a stack without
+  1.9 × the GMRES iterations at 20 / 100 / 400 MHz and 1.3-2.5 × the time (measured under load by the audit; on an
+  idle machine, a clock net's Simulate on the CPU: 138 s and 933 iterations off, 488 s and 3 054 on, 3.5 ×); a two-layer board and a stack without
   copper above and below a layer cost nothing more. Open: the iterations at high frequency (what the face sheets'
   stricter physics does to the local-block preconditioner is not understood beyond that its diagonal variant shows
   the smaller ratio, 1.07-1.3 ×).

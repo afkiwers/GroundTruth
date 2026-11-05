@@ -11,8 +11,8 @@ from groundtruth.analysis.section import route_section, station_at
 from groundtruth.analysis.simulate import simulate
 
 
-def _run(tmp_path, gen, name):
-    board, sc, _ = make(tmp_path, gen, name, solve_points=1)
+def _run(tmp_path, gen, name, **analysis):
+    board, sc, _ = make(tmp_path, gen, name, solve_points=1, **analysis)
     res = simulate(board, sc.config)
     return board, res, res.routes[0], res.setups[0]
 
@@ -96,11 +96,25 @@ def test_the_section_figure(tmp_path):
     assert f"{via['fraction'] * 100:.0f} %" in [t.get_text() for t in side.texts]
     assert set(fig._gt_section) == {top, side}
     text = section_value(fig._gt_section[side], 8.0)
-    # 91 % before In1.Cu, a plane between two others, was two face sheets [A92] (89 % before [A79]): its lower face now
-    # turns to In2.Cu and takes a share of the return current there (90 %, In2.Cu 7 %)
-    assert text.startswith("s 8.") and "In1.Cu 90 %" in text and "within ±4.7 mm" in text
+    # one sheet per layer (analysis.plane_screening off, the default): 91 % (89 % before [A79])
+    assert text.startswith("s 8.") and "In1.Cu 91 %" in text and "within ±4.7 mm" in text
     draw_section(fig, board, NS(section={}, kind="converter"))
     assert fig.axes[0].texts[0].get_text() == SECTION_NONE
+
+
+def test_the_section_with_plane_screening_on_gives_a_plane_between_two_others_its_second_face(tmp_path):
+    """analysis.plane_screening on (written to the settings file, read back): In1.Cu, a plane between two others, is
+    two face sheets [A92], so its lower face turns to In2.Cu and takes a share of the return current there: In1.Cu
+    90 % and In2.Cu 7 % at s = 8 mm where one sheet per layer gives 91 % and 6 %."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+    from groundtruth.report.plots import draw_section, section_value
+    board, res, rr, _ = _run(tmp_path, layer_change_board(0.8), "screened", plane_screening=True)
+    fig = Figure(figsize=(8, 3.2))
+    FigureCanvasAgg(fig)
+    draw_section(fig, board, rr)
+    text = section_value(fig._gt_section[fig.axes[1]], 8.0)
+    assert text.startswith("s 8.") and "In1.Cu 90 %" in text and "In2.Cu 7 %" in text
 
 
 def test_a_bar_in_the_side_view_points_at_its_via_on_the_board(tmp_path):

@@ -1563,6 +1563,7 @@ def _appendix(config, board=None) -> str:
                      ("Node budget per model", f"{int(a.max_nodes * a.resolution):,}"),
                      ("Plane capacitance", "on" if a.plane_capacitance
                                                                      else "off"),
+                     ("Plane screening", "on" if a.plane_screening else "off"),
                      ("Radiated limit", a.limit_text()),
                      ("Conducted standard", describe(*stage_limit(None, None, a)) if a.conducted != "none"
                       else "none"),

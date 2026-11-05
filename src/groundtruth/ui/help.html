@@ -1632,6 +1632,13 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   installer (<code>install_server.command</code> builds a small helper with Xcode's command line tools; without
   them: SuperLU). <i>From the settings file</i>: its <code>analysis.sparse</code> (auto when not set); the
   command line has <code>--sparse</code>.</td></tr>
+<tr><td valign="top"><b>Plane screening</b></td><td>a plane with other planes on both sides (ground / power /
+  ground) as two face sheets, so it screens one side from the other at high frequency. <i>off</i> (the default) keeps
+  one sheet per layer: fast, but a plane between two others reads 6-26 % low at high frequency. <i>on</i> is right to
+  within 1 % there, and a board-wide solve on a multi-layer board takes about 3.5 times as long. Press the
+  <b>(i)</b> button beside it for <a href="#screening">what it does, what it costs and when to turn it on</a>.
+  <i>From the settings file</i>: its <code>analysis.plane_screening</code> (off when not set); the command line has
+  <code>--plane-screening on|off</code>.</td></tr>
 <tr><td valign="top"><b>All cores</b> (opt-in)</td><td>"Use every core": Solver threads <i>auto</i> uses every
   physical core (not at most 4), and after the first frequencies the refinement solves up to 4 frequencies per net or
   power stage at once while cores would otherwise wait, with its solve budget raised as much. It helps big machines
@@ -2046,6 +2053,40 @@ on, off). In the plugin, <a href="#prefs">Preferences</a> sets the resolution an
   use; under on it waits for it.</li>
 <li>The window never waits for a job: everything slow runs in the background, and <b>Cancel</b> stops it.</li>
 </ul>
+
+<hr><a name="screening"></a><h3>Plane screening: a plane between two others</h3>
+<p>The field solver models each plane layer as one sheet carrying one current. For a plane with other planes on
+both sides (a power plane between two grounds, an inner ground between a signal layer and a power layer) that is
+too little at high frequency: the copper has a different field on each face, and one sheet cannot screen one side
+from the other. Against the exact result for such a stack, one sheet per layer reads <b>6 % low</b> (0.2 mm
+dielectric, 35 µm copper) to <b>26 % low</b> (0.1 mm, 70 µm) at 30 MHz and above, and a floating plane between a pair
+(no net) does not screen at all (+5 %). At low frequency the single sheet is exact.</p>
+<p><b>Plane screening: on</b> splits such a layer into two sheets, one per face, joined through the copper
+thickness by the exact one-dimensional model of a metal slab (a sum and a difference mode). On the test stacks it is
+within 0.1-0.7 % of the exact result from 10 kHz to 100 MHz at 0.4, 0.2 and 0.1 mm cells. Only a layer with other
+layers' copper above <i>and</i> below it over at least 16 of its grid nodes is split; a two-layer board, a plane
+with copper on one side only, and the DC models (where both faces carry one current) are unchanged.</p>
+<p><b>What it costs.</b> A split layer is one more sheet, and the solver's preconditioner needs more iterations with
+it. On a six-layer board (four layers split) a clock net's Simulate took <b>138 s with it off and 488 s on</b> (933
+GMRES iterations against 3 054) on the CPU; the kernels of a board with many split layers take up to 2.8 times the
+memory. Your board's figure depends on how many layers split and on how much of the Simulate is board-wide solving.
+Emission and loop figures also move: on that board the loop inductance changed by 1 % and an emission margin by up
+to a few dB (part of that from where the solver's adaptive frequencies land).</p>
+<p><b>When to turn it on:</b> a stack with a plane between two others where you care about the high-frequency
+loop or emission (above a few tens of MHz): stripline-like inner layers, ground / power / ground. <b>Leave it
+off</b> for quick runs, boards with two layers or with signals over one plane, and when the answer only has to rank
+layouts.</p>
+<p><b>The two ways to set it</b> (a run takes the command line's value, else this computer's Preferences, else the
+settings file's):</p>
+<ul>
+<li><b>In the settings file</b> (travels with the board, so a CI run reproduces it):
+<code>analysis: plane_screening: true</code> (<code>false</code>, the default, when not set). On the command line:
+<code>groundtruth simulate BOARD --plane-screening on</code> (or <code>off</code>) for that run alone.</li>
+<li><b>In Preferences</b> (this computer only): <b>Plane screening</b>, <i>From the settings file</i> (the default),
+<i>off</i> or <i>on</i>. The <b>(i)</b> button beside it opens this section.</li>
+</ul>
+<p>Source and assumptions: <a href="#ref-Dowell-1966">Dowell 1966</a>, <a href="#ref-Ferreira-1994">Ferreira
+1994</a> (the slab's two-port); REFERENCES A92 (the split and its impedance) and A93 (which layers split).</p>
 
 <hr><a name="server"></a><h3>Compute server: set up and run (Server jobs tab)</h3>
 <p>Simulate, Suggest fixes, Check in Simulate, Compare what-if, Thermal and Current capacity can run on a powerful PC

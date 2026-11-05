@@ -31,14 +31,15 @@ REFERENCES = (Path(__file__).resolve().parents[2] / "docs" / "REFERENCES.md",
               Path(__file__).resolve().parents[3] / "docs" / "REFERENCES.md")
 TOPICS = ("workflow", "together", "checks", "nets", "converters", "bridges", "dcloads", "pdn", "si", "safety", "parts",
           "fields", "cbias", "conducted", "issues", "results", "fixes", "history", "efficiency", "hotloop", "thermal", "analog", "prefs", "export", "drawing", "labels",
-          "siglabels", "configs", "settings", "speed", "methods", "limits", "references", "licenses", "server")
+          "siglabels", "configs", "settings", "speed", "screening", "methods", "limits", "references", "licenses",
+          "server")
 # the sidebar's groups, by section; a section not listed goes under "More"
 GROUPS = (("Getting started", ("workflow", "together", "checks")),
           ("The tabs", ("nets", "converters", "bridges", "dcloads", "pdn", "si", "parts", "issues", "results", "fixes",
                         "history")),
           ("Analyses and output", ("fields", "cbias", "conducted", "safety", "efficiency", "hotloop", "thermal", "analog", "prefs", "export", "drawing")),
           ("Labels and settings", ("labels", "siglabels", "configs", "settings")),
-          ("Under the hood", ("speed", "server", "methods", "limits", "references", "licenses")))
+          ("Under the hood", ("speed", "screening", "server", "methods", "limits", "references", "licenses")))
 
 
 def page() -> str:

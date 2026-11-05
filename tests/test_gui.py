@@ -2981,6 +2981,26 @@ def test_use_all_cores_is_an_opt_in_with_its_issues_explained(app, frame, monkey
 
 
 
+def test_plane_screening_is_a_preference_with_an_info_button_that_opens_the_help(app, frame, monkeypatch):
+    """Preferences > Simulation > "Plane screening" (the user, 2026-11-05: "make it switchable, default off ... an info
+    icon that opens the help beside the switch"): From the settings file by default; off / on go into the settings
+    Simulate runs with (analysis.plane_screening); the (i) button beside it opens the help at its section."""
+    from groundtruth.ui.prefs_dialog import FROM_FILE, PreferencesDialog, defaults, overrides
+    opened = []
+    monkeypatch.setattr(frame, "show_help", lambda topic, anchor="": opened.append((topic, anchor)))
+    with PreferencesDialog(frame, defaults({})) as dlg:
+        assert dlg.plane_screening.GetStringSelection() == FROM_FILE
+        assert dlg.plane_screening.GetStrings() == ["From the settings file", "off", "on"]
+        dlg.plane_screening.SetStringSelection("on")
+        v = dlg.values()
+        assert v["plane_screening"] == "on" and overrides(defaults(v))["plane_screening"] is True
+        info = dlg.plane_screening_info
+        assert info.GetParent() is dlg.plane_screening.GetParent()          # beside the switch
+        assert "help" in info.GetToolTipText().lower()
+        info.ProcessEvent(wx.CommandEvent(wx.wxEVT_BUTTON, info.GetId()))
+    assert opened == [("screening", "")]
+
+
 def test_preferences_set_the_capacity_limit(app, frame):
     """Preferences > Thermal > Capacity limit (the user: "expose the thermal capacity limit as setting under
     preferences"): from the settings file by default; a choice becomes thermal.capacity_c for Current capacity."""

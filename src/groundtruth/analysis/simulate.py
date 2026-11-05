@@ -277,9 +277,11 @@ class StackBuild:
         # Resistance, part_lid's `fed`): the current fed in at that side enters them evenly instead of at its lid
         self.side_spread: dict[tuple[str, str], list[LidNode]] = {}
         self._plane: Optional[PlaneStack] = None
-        # a layer with copper on both sides gets a sheet per face (peec.PlaneStack._faces [A93]); a DC model keeps
-        # one sheet per layer (power.dc_board_build: at DC both faces are one conductor)
-        self.screen = True
+        # a layer with copper on both sides gets a sheet per face (peec.PlaneStack._faces [A93]) when
+        # analysis.plane_screening is on (BoardModel sets it on the models it builds; off unless asked: about 3.5x
+        # the board-wide solve time on a six-layer board); a DC model keeps one sheet per layer whatever it says
+        # (power.dc_board_build: at DC both faces are one conductor)
+        self.screen = False
         # a through-hole pin whose solder does not reach its part's side: the layer its current enters the board on
         # (pins.feed_layer; power._pad_node takes it instead of the part's side)
         self.pin_feed: dict[str, str] = {}
@@ -473,6 +475,7 @@ class BoardModel:
         if not grids:
             raise SolverError("no plane copper near the route")
         st = StackBuild(names, grids, self.z_phys, bbox, d, self.t_phys)
+        st.screen = bool(self.config.analysis.plane_screening)
 
         # Vertical branches: stitching vias and through-hole pads of plane nets
         snap = max(1.5 * d, 0.4)
@@ -607,6 +610,7 @@ class BoardModel:
             geom = region.difference(keep_out) if keep_out is not None else region
             grids.append(build_grid({IDEAL_NET: geom}, bbox, d))
         st = StackBuild(list(ref_layers), grids, self.z_phys, bbox, d, self.t_phys)
+        st.screen = bool(self.config.analysis.plane_screening)      # the same model as the route's, less its tracks
         step = max(int(round(IDEAL_STITCH_MM / d)), 1)
         for k in range(len(grids) - 1):
             both = grids[k].node & grids[k + 1].node

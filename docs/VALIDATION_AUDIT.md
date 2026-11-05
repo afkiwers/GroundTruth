@@ -681,7 +681,7 @@ pyproject.toml: a PYTHONPATH override does not switch the code under test). In s
   0.3-3.6 % of the closed forms and converging; power balance and symmetry of the pad and terminal models.
 - Limitations, quantified: a plane between two others reads low at high frequency (-6 % at 0.2 mm / 35 µm, -26 % at
   0.1 mm / 70 µm; +52 % before the face-gap change) and a floating plane does not screen (+5.5 %) (P8-3,
-  P8-4: fixed since, branch `plane-screening`, below); thin dielectrics (h < t) +7 % at low frequency (P8-5: explained, below); a via's joints snap per layer, ±3 % of
+  P8-4: fixed since, branch `plane-screening`, below, as a switch that is off by default: `analysis.plane_screening`, Preferences, `--plane-screening`); thin dielectrics (h < t) +7 % at low frequency (P8-5: explained, below); a via's joints snap per layer, ±3 % of
   a plane-pair port's L at 0.4 mm cells (fixed for the joints since, branch `via-joints` [A89]: one pattern fixed
   to the grid, the same points on every layer; a radial plane pair, the coaxial line from a 0.3 mm via, spread
   ±3.6 % over the grid offsets at 0.4 and 0.2 mm cells and ±2.2 % at 0.1 mm, now ±0.4 % at each, 0.93 / 0.98 / 0.98
