@@ -105,8 +105,8 @@ def test_the_help_explains_the_two_ways_and_the_switch_opens_it():
     assert "screening" in dict(gt_help.GROUPS)["Under the hood"]
     assert '<a name="screening"></a>' in html
     section = html.split('<a name="screening"></a>')[1].split('<a name="server"></a>')[0]
-    for needle in ("analysis: plane_screening: true", "--plane-screening on", "Preferences", "(i)", "138 s",
-                   "488 s", "When to turn it on", "Leave it", "The two ways to set it"):
+    for needle in ("analysis: plane_screening: true", "--plane-screening on", "Preferences", "(i)", "129 s",
+                   "155 s", "When to turn it on", "Leave it", "The two ways to set it"):
         assert needle in section, needle
     row = html.split("<b>Plane screening</b>")[1].split("</tr>")[0]
     assert 'href="#screening"' in row and "analysis.plane_screening" in row and "--plane-screening" in row

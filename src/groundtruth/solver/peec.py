@@ -1779,6 +1779,7 @@ class PlaneStack:
                 steps.append(np.full(int(part.sum()), abs(k)))
         a, b = np.concatenate(rows), np.concatenate(cols)
         if len(a) == 0:
+            self._twin_corrections()
             return
         k = np.concatenate(steps)
         wa, wb = self.strip_width[a], self.strip_width[b]
@@ -1789,6 +1790,29 @@ class PlaneStack:
         dM = dM[np.ravel(inv)]
         M = sp.coo_matrix((dM, (a, b)), shape=(self.ns, self.ns))
         self.M_near = (M + M.T).tocsr()
+        self._twin_corrections()
+
+    def _twin_corrections(self):
+        """The narrow-strip inductance corrections (dL, M_near) between a split layer's two faces [A94]. The
+        corrections are for the copper's shape (a strip narrower than the pitch, its neighbours' offset), the same
+        for the upper and the lower face of one layer: a strip's own correction dL is also the mutual one with its
+        twin (the same copper, a copper thickness apart), a neighbour's dM also couples a strip with the neighbour's
+        twin. Left on the faces alone (each face's own self and neighbours) the faces' difference mode
+        L_aa - L_ab, only the free space between them (~ mu0 t per square, tens of pH per strip), took the
+        corrections whole (tens of pH too): at every pour's edge a negative inductance, which no positive
+        preconditioner can follow (the face sheets' 3x iterations on a six-layer board; tests/test_plane_screening)."""
+        if self.dL is None or not len(self.tw_b):
+            return
+        n = self.ns
+        pairs = np.concatenate([self.tw_a, self.tw_b]), np.concatenate([self.tw_b, self.tw_a])
+        # a strip's correction as the coupling to its twin: entries (a, b) and (b, a)
+        extra = sp.coo_matrix((np.concatenate([self.dL[self.tw_a], self.dL[self.tw_b]]), pairs), shape=(n, n))
+        if self.M_near is not None:
+            # the neighbour pairs of each face, again with the second strip's twin: M @ swap, where the swap
+            # exchanges the two faces' strips (0 elsewhere: a one-sheet layer has no twin)
+            swap = sp.coo_matrix((np.ones(len(pairs[0])), pairs), shape=(n, n)).tocsr()
+            extra = extra + self.M_near @ swap
+        self.M_near = ((self.M_near if self.M_near is not None else 0) + extra).tocsr()
 
     def _components(self):
         """Conductive connectivity (strips, vias, parts) and full connectivity (plus plane capacitance).
@@ -2444,8 +2468,11 @@ class PlaneStack:
                 Z[:, np.arange(m), np.arange(m)] += R_strip[strips] + (
                     0.0 if self.dL is None else 1j * w * self.dL[strips])
                 for ia, ib in faces:
-                    Z[:, ia, ib] += z12[strips[:, ib]]
-                    Z[:, ib, ia] += z12[strips[:, ib]]
+                    cross = z12[strips[:, ib]]
+                    if self.dL is not None:      # a strip's narrow-width correction is also its twin's (_twin_corrections)
+                        cross = cross + 1j * w * self.dL[strips[:, ib]]
+                    Z[:, ia, ib] += cross
+                    Z[:, ib, ia] += cross
                 Zi = np.linalg.inv(Z).ravel()
             rows.append(np.repeat(strips, m, axis=1).ravel())
             cols.append(np.tile(strips, (1, m)).ravel())

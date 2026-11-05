@@ -710,7 +710,17 @@ pyproject.toml: a PYTHONPATH override does not switch the code under test). In s
     plane's ratio, the structure and the two-port).
   - Cost: the unknowns of a six-layer board's board-wide model +35 % (the factorised matrix unchanged), kernels
     ×2.8, GMRES iterations ×1.1-1.9 and a solve ×1.3-2.5 at 20-400 MHz; a plane pair and the DC model cost nothing
-    more. On the 6-layer copy at the same frequencies the first net's loop inductance moves −0.9 to −1.2 % and its
+    more. Since 2026-11-06 (branch `screening-precond`, REFERENCES A94) the iterations are ×1.0-1.2: the face
+    pairs did not share the narrow-strip corrections (`dL`, `M_near`), so at every edge strip their difference
+    inductance L_aa − L_ab (≈ μ0t, 21 pH) took the corrections whole and went negative (−26 pH): the partial
+    inductance matrix was not positive definite, no positive preconditioner followed it. With the corrections
+    between the faces too: a clock net's Simulate on the six-layer copy 155 s and 870 iterations on (was 488 s and
+    3 054), 129 s and 933 off (unchanged); board-wide solves 51 / 52 / 54 iterations at 20 / 60 / 260 MHz (off 49 / 51
+    / 52; was 67 / 100 / 170) and 92 at 1.58 GHz (off 80; was 439). tests/test_plane_screening.py (the difference
+    block 15-25 pH, positive definiteness, the iteration ratio) fail on the code before. The answer moves with the
+    fix (the old matrix was indefinite): on the copy's first net the board-wide loop inductance +0.2 to +0.8 % and
+    its loop resistance −2 % (60 MHz) to −14 % (900 MHz), the reported loop inductance 13.52 → 13.54 nH, emission
+    levels up to 1.5 dB (partly the adaptive frequencies). On the 6-layer copy at the same frequencies the first net's loop inductance moves −0.9 to −1.2 % and its
     dipole moment +2.6 to +5.1 %.
   - P8-5 explained, not a model defect: the +7 % came from the audit's 20 / 40 mm point-fed lines (their ends'
     difference over a 10 mm width) and a zero-thickness reference; against two uniform plates' exact energy the line

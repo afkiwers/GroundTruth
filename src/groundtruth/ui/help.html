@@ -2066,10 +2066,9 @@ thickness by the exact one-dimensional model of a metal slab (a sum and a differ
 within 0.1-0.7 % of the exact result from 10 kHz to 100 MHz at 0.4, 0.2 and 0.1 mm cells. Only a layer with other
 layers' copper above <i>and</i> below it over at least 16 of its grid nodes is split; a two-layer board, a plane
 with copper on one side only, and the DC models (where both faces carry one current) are unchanged.</p>
-<p><b>What it costs.</b> A split layer is one more sheet, and the solver's preconditioner needs more iterations with
-it. On a six-layer board (four layers split) a clock net's Simulate took <b>138 s with it off and 488 s on</b> (933
-GMRES iterations against 3 054) on the CPU, and a <b>whole Simulate</b> of that board's 6 nets and 4 converters
-<b>800 s off and 2 477 s on</b> (8 796 iterations against 22 072: 3.1 times); the kernels of a board with many split layers take up to 2.8 times the
+<p><b>What it costs.</b> A split layer is one more sheet (more unknowns, more memory for the inductance kernels), and each solve
+takes a little longer. On a six-layer board (four layers split) a clock net's Simulate took <b>129 s with it off and 155 s on</b> (933
+GMRES iterations off, 870 on) on the CPU; the kernels of a board with many split layers take up to 2.8 times the
 memory. Your board's figure depends on how many layers split and on how much of the Simulate is board-wide solving.
 Emission and loop figures also move: on that board the loop inductance changed by 1 % and an emission margin by up
 to a few dB (part of that from where the solver's adaptive frequencies land).</p>
