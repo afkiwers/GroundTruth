@@ -163,10 +163,23 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
   A through-hole pad's pin (`simulate.add_pin`, 2026-10-15; the user, of a big connector pin: "the current density
   around that area looks odd") is joined to each layer by `pin_joints` parallel branches (one per ~1.5 cells of the
   drill's circumference, 1 to PIN_JOINTS_MAX 48) between points on a circle at drill/2 + d/2, each k x the pin's
-  impedance: joined at the one node nearest its centre (add_vertical, still used for vias), the whole current
+  impedance: joined at the one node nearest its centre, the whole current
   entered one cell, a 20.8 A/mm² hot spot at 1 A for a 2 mm pin where the barrel wall carries 4.55 (I/(2π·r·t)).
   tests/test_pins.py: J(r) analytic within 3 % at 3 and 5 mm, the wall peak within 30 % (3.8 / 4.3 / 5.1 at
   0.25 / 0.125 / 0.0625 mm cells). The ▲ markers add a pin's joints per layer pair (`transfers`).
+  Vias are joined the same way.
+  **The joints are one pattern fixed to the grid** (2026-11-05, branch `via-joints`, `simulate.joint_points`,
+  [A89]): the circle is centred on the grid node nearest the hole and each point rounded in whole cells from it,
+  so the pattern depends on drill/d alone; every layer of a model shares the grid's origin and pitch, so a via joins
+  all its layers at the same (i, j). A layer whose copper of the net misses a joint (a pad smaller than the ring, a
+  thermal relief) takes its own copper nearest that point (0.75 cells), else nearest the hole; a layer without the
+  net's copper near the hole is not joined (antipads, a blind or buried via's span). Before, the circle was
+  centred on the hole and each layer snapped each point to its own nearest node: the ring's radius moved with where
+  the via lay in its cell, and a radial plane pair (a coaxial line from a 0.3 mm via to a 10 mm rim, 0.2 mm FR4)
+  read 0.996 / 0.935 / 0.927 of μ0(h+δ)/2π·ln(R/r) at grid offsets 0, ¼, ½ cell at 0.4 mm cells, 0.974 / 1.014 /
+  0.944 at 0.2 mm; now 0.928 / 0.935 / 0.927 and 0.974 / 0.980 / 0.972 (tests/test_via_joints.py). The joints'
+  centre is now the node, up to d/√2 from the hole (as a single joint's always was), and the 1 → 2 joint switch at
+  d = π·drill/2.25 still steps (see A89).
   - KVL per branch: `Z·I − A·V = −jω·ψ`
   - KCL: `Aᵀ·I = J` (+1 A at the receiver return node, −1 A at the driver's)
 - **Where a layer's current flows, and the copper's own inductance** (2026-11-02, branch `plane-pair-inductance`,
@@ -594,8 +607,11 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   solve; −0.48 % so, −0.71 % with the old round buffer). The lids' solder bonds and a die's branches stay equal per
   node. The vias' joints (`add_pin`) are not pads and are unchanged: on a plane pair fed at a pad over a via, the
   port's inductance still moves with the grid's offset (0.4 mm cells: 0.72 / 0.78 / 0.82 nH before, 0.73 / 0.77 /
-  0.79 after) because each layer's joint snaps to its own nearest node, so a joint can slant a cell between the
-  layers; joining every layer at the same node removed most of it in a trial (0.80-0.82 nH) — open.
+  0.79 after). Since branch `via-joints` the joints are one pattern fixed to the grid (`joint_points` [A89], above):
+  that removed the joints' share (a radial plane pair ±3.6 → ±0.4 %), but this line keeps 0.727 / 0.773 / 0.807 nH at
+  0.4 mm cells from its pads, clearance holes and the joints' centre now on the node (±0.3 % at 0.2 mm). The trial
+  that read 0.80-0.82 nH joined the plane at the pad's few nodes, close to a point source (every via at one node:
+  0.82-0.86 nH at five offsets), which reads high and does not converge with the pitch.
   **A vertical FET's die is spread over its tab** (2026-10-25, branch `tab-spread`, `simulate.die_side`,
   `die_branches`, [A68]; the user, of that view: "the top layer under the fet is black and the vias glow which does
   not make sense"). With one lid per side the drain tab was one node at one voltage, so the copper under Q601 handed
@@ -1151,7 +1167,7 @@ for a boost; duty = the high-side conduction time). The inductor current is cont
   - Each path lists every via with ≥ 1 % of its current (`dc_summary`), with its IPC-2221 capacity for a 10 K rise
     (`analysis/ipc.via_capacity`, the plating barrel as an internal conductor); `via_overload` fires at
     `rules.via_load_warning` (100 %) / `via_load_error` (150 %) of it. A part's plated hole (a branch named
-    `pad REF.N`) is left out, as in `bridge_rms`: its soldered pin carries the current. `add_vertical(...,
+    `pad REF.N`) is left out, as in `bridge_rms`: its soldered pin carries the current. `add_pin(...,
     filled=True)` gives such a hole (of a part that is not DNP) the resistance of its whole cross-section,
     l/(σπr²), not the plating's l/(σ·2πr·25 µm) (`via_impedance(filled=)`). refboard's XT30 pins read
     113–187 % of the plating's capacity before (audit, session 7).

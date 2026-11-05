@@ -679,7 +679,11 @@ pyproject.toml: a PYTHONPATH override does not switch the code under test). In s
 - Limitations, quantified: a plane between two others reads low at high frequency (-6 % at 0.2 mm / 35 µm, -26 % at
   0.1 mm / 70 µm; +52 % before the face-gap change) and a floating plane does not screen (+5.5 %) (P8-3,
   P8-4); thin dielectrics (h < t) +7 % at low frequency, unexplained (P8-5); a via's joints snap per layer, ±3 % of
-  a plane-pair port's L at 0.4 mm cells; a failing solve can cost twice the operator products (G8-3); results move by
+  a plane-pair port's L at 0.4 mm cells (fixed for the joints since, branch `via-joints` [A89]: one pattern fixed
+  to the grid, the same points on every layer; a radial plane pair, the coaxial line from a 0.3 mm via, spread
+  ±3.6 % over the grid offsets at 0.4 and 0.2 mm cells and ±2.2 % at 0.1 mm, now ±0.4 % at each, 0.93 / 0.98 / 0.98
+  of the closed form; the 20 mm line fed at a pad keeps ±2.5-5 % at 0.4 mm from its pads, clearance holes and the
+  joints' centre now on the node: 0.727 / 0.773 / 0.807 nH, ±0.3 % at 0.2 mm); a failing solve can cost twice the operator products (G8-3); results move by
   up to 6e-7 under memory pressure (diagonal pivots, G8-4); the thermal mesh planner flips refinement on 1e-9 input
   changes.
 - Refboard (the 6-layer copy, settings from detection): the pad rule moves DC paths' resistances by up to -7 % and
