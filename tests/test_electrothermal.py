@@ -156,32 +156,78 @@ def test_a_growing_change_ends_it_with_the_round_before_kept(buck, monkeypatch):
     assert not info["settled"] and "changed more" in info["stopped"] and info["changes"] == [0.2, 0.9]
 
 
-def test_every_round_heats_the_board_with_its_own_currents_and_settles_on_a_fixed_point(buck):
-    """Each Thermal after a round is solved with that round's DC paths at temperature (its own copies, a new one each
-    round), never with Simulate's 20 °C results, and the loop ends on a fixed point: Thermal of the returned results
-    gives the returned temperatures again (T = T0 + θ·P(T), within the tolerance), above the 20 °C currents' own.
-    Before round 8 the results were swapped by the round before's copies, so from round 2 on Thermal was solved with
-    the 20 °C currents again: the rounds flipped between the two (changes 61 %, 0.21 %, 0.21 %, 0) and "settled" on
-    the 20 °C temperatures (211.47 °C here, 212.82 °C at the fixed point)."""
+@pytest.fixture(scope="module")
+def coupled(buck):
+    """The buck's coupling to a tight tolerance (6 rounds, 1e-4), each round's Thermal recorded: (config, the first
+    solve, the coupled result, the results its temperatures belong to, the results and mesh each round's Thermal
+    was given)."""
     from groundtruth.analysis.thermal import solve_thermal, thermal_inputs
     board, cfg, stages = buck
     cfg = _on(cfg, electrothermal_rounds=6, electrothermal_tolerance=1e-4)
     th0, issues0 = solve_thermal(board, cfg, *thermal_inputs(board, cfg, stages))
     seen = []
 
-    def solve(results):
-        """Thermal of a round's results, remembering which they were."""
-        seen.append(list(results))
-        return solve_thermal(board, cfg, *thermal_inputs(board, cfg, results))
+    def solve(results, *plan):
+        """Thermal of a round's results (on the mesh given, if any), remembering which they were."""
+        seen.append((list(results), plan[0] if plan else None))
+        return solve_thermal(board, cfg, *thermal_inputs(board, cfg, results), **({"mesh_plan": plan[0]} if plan
+                                                                                     else {}))
     th, _, current = et.couple(board, cfg, stages, th0, issues0, solve)
+    return cfg, th0, th, current, seen
+
+
+def test_every_round_heats_the_board_with_its_own_currents_and_settles_on_a_fixed_point(buck, coupled):
+    """Each Thermal after a round is solved with that round's DC paths at temperature (its own copies, a new one each
+    round), never with Simulate's 20 °C results, and the loop ends on a fixed point: Thermal of the returned results
+    gives the returned temperatures again (T = T0 + θ·P(T), within the tolerance), above the 20 °C currents' own.
+    Before round 8 the results were swapped by the round before's copies, so from round 2 on Thermal was solved with
+    the 20 °C currents again: the rounds flipped between the two (changes 61 %, 0.21 %, 0.21 %, 0) and "settled" on
+    the 20 °C temperatures (211.47 °C here, 212.82 °C at the fixed point). The fixed point is that of the mesh the
+    rounds solve on (the first solve's [A90]): checked on it, within 0.02 K (the thermal iteration's own stop)."""
+    from groundtruth.analysis.thermal import solve_thermal, thermal_inputs
+    board, _, stages = buck
+    cfg, th0, th, current, seen = coupled
     info = th.electrothermal
     assert info["settled"] and len(seen) >= 2
-    assert all(r is not s for call in seen for r, s in zip(call, stages))        # never the 20 °C results
-    assert all(a is not b for a, b in zip(seen[0], seen[1]))                     # each round its own copies
+    assert all(r is not s for call, _ in seen for r, s in zip(call, stages))     # never the 20 °C results
+    assert all(a is not b for a, b in zip(seen[0][0], seen[1][0]))               # each round its own copies
     assert all(r is not s for r, s in zip(current, stages))
-    again, _ = solve_thermal(board, cfg, *thermal_inputs(board, cfg, current))
-    assert again.t_max == pytest.approx(th.t_max, abs=0.05)
+    assert all(plan == th0.mesh_plan for _, plan in seen) and th.mesh_plan == th0.mesh_plan   # one mesh [A90]
+    again, _ = solve_thermal(board, cfg, *thermal_inputs(board, cfg, current), mesh_plan=th.mesh_plan)
+    assert again.t_max == pytest.approx(th.t_max, abs=0.02)
     assert th.t_max > th0.t_max + 0.5
+
+
+def _perturbed(inputs, rel, seed):
+    """Thermal's inputs (copper heat, part losses, notes) with every sample's and part's heat times 1 + rel·u, u
+    uniform in [-1, 1) (seeded)."""
+    heat, losses, notes = inputs
+    rng = np.random.default_rng(seed)
+    heat = {L: (x, y, d, p * (1 + rel * rng.uniform(-1, 1, len(p)))) for L, (x, y, d, p) in heat.items()}
+    losses = [dict(l, power_w=l["power_w"] * (1 + rel * rng.uniform(-1, 1))) for l in losses]
+    return heat, losses, notes
+
+
+def test_the_mesh_does_not_follow_the_last_bits_of_the_heat(buck, coupled):
+    """Thermal of the coupled results with every heat moved by 1e-9 (12 seeds) plans the same mesh and gives the same
+    temperatures within 1 mK. Before [A90] the planner ranked blocks by their exact error estimates: where its
+    budget ran out among blocks of equal error (to 1e-10), a 1e-9 change picked another one, 242,388 or 266,388
+    unknowns, t_max 213.04 or 213.42 °C (seeds 2 and 11 of 12 here; round 8's fixed-point test passed by luck)."""
+    from groundtruth.analysis.thermal import _build_model, solve_thermal, thermal_inputs
+    board, _, _ = buck
+    cfg, _, _, current, _ = coupled
+    inputs = thermal_inputs(board, cfg, current)
+
+    def cells(heat):
+        """The mesh Thermal plans for this heat: its columns' level and lattice indices, and its unknowns."""
+        m = _build_model(board, cfg, *heat, lambda *a: None, None)
+        return (m.mesh.col_level.tobytes(), m.mesh.col_I.tobytes(), m.mesh.col_J.tobytes(), int(m.th.n))
+    ref = cells(inputs)
+    flipped = [seed for seed in range(12) if cells(_perturbed(inputs, 1e-9, seed)) != ref]
+    assert flipped == []
+    a, _ = solve_thermal(board, cfg, *inputs)
+    b, _ = solve_thermal(board, cfg, *_perturbed(inputs, 1e-9, 2))
+    assert b.mesh["unknowns"] == a.mesh["unknowns"] and b.t_max == pytest.approx(a.t_max, abs=1e-3)
 
 
 def test_a_cancel_ends_it(buck):
@@ -193,7 +239,7 @@ def test_a_cancel_ends_it(buck):
     stop = threading.Event()
     stop.set()
     with pytest.raises(Cancelled):
-        et.couple(board, _on(cfg), stages, th, issues, lambda r: (th, issues), cancel=stop)
+        et.couple(board, _on(cfg), stages, th, issues, lambda r, plan: (th, issues), cancel=stop)
 
 
 def test_the_settings(tmp_path):

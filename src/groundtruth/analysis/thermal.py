@@ -85,6 +85,9 @@ class ThermalResult(RouteResult):
     # the electro-thermal coupling's rounds (analysis/electrothermal.couple; {} when it was off): rounds, settled,
     # changes, the busiest vias at temperature
     electrothermal: dict = field(default_factory=dict)
+    # the thermal mesh it was solved on (solve_thermal: the level-0 grid and the leaf blocks per level); the
+    # electro-thermal rounds solve on the first solve's [A90]
+    mesh_plan: dict = field(default_factory=dict)
 
     def summary(self) -> dict:
         """The result as plain data for the JSON report (the 20 hottest parts; no temperature maps)."""
@@ -633,9 +636,10 @@ def run_thermal(board: Board, config: Config, converters, progress: Optional[Pro
     if config.thermal.electrothermal:           # rounds of DC paths at temperature and Thermal (electrothermal.py)
         from .electrothermal import couple
 
-        def again(results):
-            """Thermal of the results of a round."""
-            return solve_thermal(board, config, *thermal_inputs(board, config, results), progress, cancel)
+        def again(results, mesh_plan):
+            """Thermal of the results of a round, on this mesh (the first solve's)."""
+            return solve_thermal(board, config, *thermal_inputs(board, config, results), progress, cancel,
+                                 mesh_plan=mesh_plan)
         res, issues, _ = couple(board, config, converters, res, issues, again, progress, cancel)
         return res, issues
     return with_dc_at_temperature(res, board, converters), issues
@@ -738,17 +742,20 @@ def thermal_inputs(board: Board, config: Config, converters, progress: Optional[
 
 
 def solve_thermal(board: Board, config: Config, heat: dict, losses: list[dict], notes: Optional[list] = None,
-                  progress: Optional[Progress] = None, cancel=None) -> tuple[ThermalResult, list[Issue]]:
+                  progress: Optional[Progress] = None, cancel=None, mesh_plan: Optional[dict] = None
+                  ) -> tuple[ThermalResult, list[Issue]]:
     """The temperatures for this heat: `heat` per copper layer (x, y, side, W at 20 °C; copper_heat) and `losses`
-    [{"ref", "power_w", "what"}] through the parts' pads."""
+    [{"ref", "power_w", "what"}] through the parts' pads. `mesh_plan`: an earlier solve's `ThermalResult.mesh_plan`
+    to solve on its mesh (the electro-thermal rounds) instead of planning one for this heat [A90]."""
     say = _sayer(progress)
-    m = _build_model(board, config, heat, losses, notes, say, cancel)
+    m = _build_model(board, config, heat, losses, notes, say, cancel, mesh_plan)
     sol = _coupled(m, m.p20, m.Qc, say)
     if sol.error:
         res = _empty(config, sol.error)
-        res.losses, res.notes = losses, list(m.notes)
+        res.losses, res.notes, res.mesh_plan = losses, list(m.notes), m.mesh_plan
         return res, []
     res, issues = _result(board, config, m, sol, losses)
+    res.mesh_plan = m.mesh_plan
     say("thermal: done", 1.0)
     return res, issues
 
@@ -779,6 +786,7 @@ class _Model:
     Qc: np.ndarray                        # the parts' heat per node (W)
     notes: list
     t0: float
+    mesh_plan: dict = field(default_factory=dict)  # the mesh's leaf blocks (`ThermalResult.mesh_plan`)
 
 
 @dataclass
@@ -796,10 +804,12 @@ class _Solution:
     settled: bool = True
 
 
-def _build_model(board: Board, config: Config, heat: dict, losses: list[dict], notes, say, cancel) -> _Model:
+def _build_model(board: Board, config: Config, heat: dict, losses: list[dict], notes, say, cancel,
+                 mesh_plan: Optional[dict] = None) -> _Model:
     """The board's thermal model (PCB Thermal's solver): the stack, the mesh (refined adaptively where the copper
-    heat and the parts' heat enter, within the quality's budget), the conduction / convection / radiation model,
-    the parts' heat per node, and every copper heat sample mapped to its thermal node."""
+    heat and the parts' heat enter, within the quality's budget; or `mesh_plan`'s, a solve's `ThermalResult.mesh_plan`
+    on the same grid), the conduction / convection / radiation model, the parts' heat per node, and every copper heat
+    sample mapped to its thermal node."""
     from ..thermal.adapter import to_thermal_board
     from ..thermal.project import BoardSetup, ComponentPower, Environment, MeshSettings
     from ..thermal.solver.common import Progress as TProgress
@@ -842,19 +852,28 @@ def _build_model(board: Board, config: Config, heat: dict, losses: list[dict], n
             shape = geom.shape if kind == "pad" else geom
             ds = max(plan["dx_fine"] / 2, math.sqrt(shape.area / 1e5))
             samples = samples + shape_samples(shape, c.power * share, ds)
-    leaves = None
-    if plan["adaptive"] and plan["dx_fine"] < grid.dx and len(samples.p):
+    leaves, plan_notes = None, []
+    grid_key = (grid.x0, grid.y0, grid.dx, grid.nx, grid.ny)
+    if mesh_plan is not None and tuple(mesh_plan.get("grid", ())) == grid_key:
+        # the mesh given (the electro-thermal coupling's first solve's): the rounds solve one discrete problem, so
+        # their fixed point is that mesh's and no round's change is a change of mesh [A90]
+        leaves = {int(l): set(map(tuple, v)) for l, v in mesh_plan["leaves"].items()}
+        plan_notes = list(mesh_plan.get("notes", []))
+    elif plan["adaptive"] and plan["dx_fine"] < grid.dx and len(samples.p):
         say("thermal: planning the adaptive mesh", 0.12)
         keep = samples.p > 0.01 * q[3] * K_REF * plan["dx_fine"] * 1e-3
         samples = HeatSamples(samples.x[keep], samples.y[keep], samples.s[keep], samples.p[keep])
         leaves, info = plan_refinement(grid, samples, q[3], plan["dx_fine"], q[5], stack)
         if info["limited"]:
-            model_notes.append(f"the adaptive mesh reached its budget: local temperatures may be off by up to about "
-                               f"{info['remaining_err']:.2g} K (thermal.quality: fine for more detail)")
+            plan_notes.append(f"the adaptive mesh reached its budget: local temperatures may be off by up to about "
+                              f"{info['remaining_err']:.2g} K (thermal.quality: fine for more detail)")
     if leaves is None:
         from ..thermal.solver.mesh import B
         nbx, nby = math.ceil(grid.nx / B), math.ceil(grid.ny / B)
         leaves = {0: {(i, j) for i in range(nby) for j in range(nbx)}}
+    model_notes += plan_notes
+    # the mesh as plain data (sorted: the same mesh gives the same plan), for a later solve to keep it
+    mesh_plan = {"grid": grid_key, "leaves": {l: sorted(v) for l, v in leaves.items()}, "notes": plan_notes}
     say("thermal: building the thermal model", 0.2)
     tp = TProgress(tprogress, cancel)
     mesh = Mesh(tb, stack, grid, leaves, tp)
@@ -872,7 +891,7 @@ def _build_model(board: Board, config: Config, heat: dict, losses: list[dict], n
         layers.append(layer)
     nodes = np.concatenate(nodes) if nodes else np.zeros(0, np.int64)
     p20 = np.concatenate(p20) if p20 else np.zeros(0)
-    return _Model(tc, env, tb, setup, th, mesh, grid, layers, nodes, p20, Qc, model_notes, t0)
+    return _Model(tc, env, tb, setup, th, mesh, grid, layers, nodes, p20, Qc, model_notes, t0, mesh_plan)
 
 
 def _coupled(m: _Model, p20: np.ndarray, Qc: np.ndarray, say=None, T: Optional[np.ndarray] = None) -> _Solution:

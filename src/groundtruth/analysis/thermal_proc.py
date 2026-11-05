@@ -77,11 +77,14 @@ def run_in_process(board, config, converters, progress: Optional[Progress] = Non
         # DC solves running on the laptop between the server's thermal solves: "option 1 please")
         return server.run("thermal_coupled", (board, config, portable_results(converters)), progress)
 
-    def solve(inputs):
-        """One thermal solve of these inputs, on the compute server or in the child."""
+    def solve(inputs, mesh_plan=None):
+        """One thermal solve of these inputs (on this mesh: an electro-thermal round's), on the compute server or in
+        the child. The server's plain "thermal" job never gets a mesh: with the coupling on, a server runs all of it
+        (thermal_coupled, above)."""
         if server is not None:
             return server.run("thermal", (board, config, inputs), progress)
-        (res, issues), peak = _run_child(("solve", board, config, inputs), progress, cancel, poll_s, limits)
+        (res, issues), peak = _run_child(("solve", board, config, (*inputs, mesh_plan)), progress, cancel, poll_s,
+                                         limits)
         if peak:
             res.mesh["memory_mb"] = round(peak)
         return res, issues
@@ -89,9 +92,9 @@ def run_in_process(board, config, converters, progress: Optional[Progress] = Non
 
 
 def thermal_with_coupling(board, config, converters, solve, progress: Optional[Progress] = None, cancel=None):
-    """(ThermalResult, issues) of these results: thermal_inputs (fast), solve(inputs) -> (ThermalResult, issues),
-    then with thermal.electrothermal the rounds of DC paths at temperature, each followed by solve() again
-    (electrothermal.couple), else the DC paths at the solved temperatures (with_dc_at_temperature). The plugin runs
+    """(ThermalResult, issues) of these results: thermal_inputs (fast), solve(inputs, mesh_plan=None) ->
+    (ThermalResult, issues), then with thermal.electrothermal the rounds of DC paths at temperature, each followed by
+    solve() again on the first solve's mesh (electrothermal.couple) [A90], else the DC paths at the solved temperatures (with_dc_at_temperature). The plugin runs
     it with solve in a child process or on the compute server; the server's thermal_coupled job runs all of it."""
     from .thermal import NO_STAGES, _empty, thermal_inputs, with_dc_at_temperature
     inputs = thermal_inputs(board, config, converters, progress)
@@ -103,7 +106,8 @@ def thermal_with_coupling(board, config, converters, solve, progress: Optional[P
         from .electrothermal import couple
         try:
             res, issues, _ = couple(board, config, converters, res, issues,
-                                    lambda results: solve(thermal_inputs(board, config, results)), progress, cancel)
+                                    lambda results, plan: solve(thermal_inputs(board, config, results), plan),
+                                    progress, cancel)
         except Cancelled as e:          # Cancel between the rounds: as a cancelled thermal solve
             raise ThermalCancelled("thermal solve cancelled") from e
         return res, issues
@@ -304,8 +308,8 @@ def main(argv=None) -> int:
     if mode == "capacity":
         result = solve_capacity(board, config, data, progress)
     else:
-        heat, losses, notes = data
-        result = solve_thermal(board, config, heat, losses, notes, progress)
+        heat, losses, notes, *plan = data              # and the mesh to solve on (run_in_process.solve), if any
+        result = solve_thermal(board, config, heat, losses, notes, progress, mesh_plan=plan[0] if plan else None)
     tmp = out.with_suffix(".tmp")
     with open(tmp, "wb") as f:
         pickle.dump(result, f, protocol=pickle.HIGHEST_PROTOCOL)

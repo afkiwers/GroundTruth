@@ -42,6 +42,10 @@ Z_GROWTH = 2.0
 
 K_REF = 0.5  # W/mK, conductance scale that turns misplaced heat into a temperature error estimate
 REFINE_RING = 1  # blocks around the worst one refined with it (plan_refinement)
+# plan_refinement ranks the blocks by their error estimate in steps of 1 % (a block's rank: the whole number of 1 %
+# steps of its error), ties in block order, so errors that differ only in their last bits (a symmetric layout, a
+# uniform track across many blocks, inputs moved by 1e-9) rank alike and the mesh does not depend on them [A90]
+ERR_STEP = 0.01
 W, E, S, N = 0, 1, 2, 3
 DIRS = {W: (0, -1), E: (0, 1), S: (-1, 0), N: (1, 0)}  # (di, dj); row i runs along y
 
@@ -172,6 +176,14 @@ def _covering_level(leaves, l, bi, bj):
     return None
 
 
+def err_rank(err):
+    """A block error's rank (int, or an int array for an array): the whole number of ERR_STEP (1 %) steps of its
+    logarithm, floor(ln e / ln(1 + ERR_STEP)). Errors within a step of each other rank alike unless they straddle a
+    step's edge, which a relative change δ does with a chance of about δ / ERR_STEP (2e-7 at δ = 1e-9) [A90]."""
+    r = np.floor(np.log(np.maximum(err, 1e-300)) / math.log1p(ERR_STEP))
+    return r.astype(np.int64) if isinstance(r, np.ndarray) else int(r)
+
+
 def plan_refinement(grid0: Grid, samples: HeatSamples, tol_k: float, dx_min: float, budget: float,
                     stack: list[Layer]) -> tuple[dict[int, set], dict]:
     """Choose leaf blocks. Returns (leaves by level, info).
@@ -182,6 +194,11 @@ def plan_refinement(grid0: Grid, samples: HeatSamples, tol_k: float, dx_min: flo
     rated by its worst cell. The worst block anywhere, at any level, is refined first
     (with its neighbours, so copper edges and gaps next to the heat are resolved as
     well), until every block is within ``tol_k`` or the extra-unknown ``budget`` is spent.
+
+    Errors are compared by their rank (``err_rank``, 1 % steps), equal ranks in level and block order: the error
+    estimate is a rough number, and where the budget ends among blocks of (nearly) equal error, which of them is
+    refined must not follow their last bits. Before, a 1e-9 change of the heat flipped the refinement there
+    (24,000 unknowns, 0.38 K at the hot spot of the test buck's coupled heat) [A90].
     """
     nbx, nby = math.ceil(grid0.nx / B), math.ceil(grid0.ny / B)
     leaves: dict[int, set] = {0: {(i, j) for i in range(nby) for j in range(nbx)}}
@@ -217,8 +234,9 @@ def plan_refinement(grid0: Grid, samples: HeatSamples, tol_k: float, dx_min: flo
         # conductance K_REF * dx it is a temperature error in K.
         dev = np.bincount(pinv, weights=np.abs(p_fine - mean[pinv])) + (n_sub - nbin) * mean
         err = 0.5 * dev / (K_REF * grid0.dx / 2 ** l * 1e-3)
-        # the worst cell of each block whose error is over the tolerance (sorted by block, max per run of keys)
-        hot = err >= tol_k
+        # the worst cell of each block whose error is over the tolerance (sorted by block, max per run of keys); over
+        # by rank, so an error a last bit off the tolerance does not decide [A90]
+        hot = err_rank(err) >= err_rank(tol_k)
         bkey = ((parent[hot] // nxl) // B) * (nbx << l) + (parent[hot] % nxl) // B
         be: dict[tuple[int, int], float] = {}
         if hot.any():
@@ -254,15 +272,17 @@ def plan_refinement(grid0: Grid, samples: HeatSamples, tol_k: float, dx_min: flo
                 for c in (0, 1):
                     ch = (2 * bi + a, 2 * bj + c)
                     if l + 1 < n_fine and ch in block_err[l + 1]:
-                        heapq.heappush(heap, (-block_err[l + 1][ch], l + 1, ch))
+                        e_ch = block_err[l + 1][ch]
+                        heapq.heappush(heap, (-err_rank(e_ch), l + 1, ch, e_ch))
 
-    # Greedy refinement from a max-heap of block errors (negated: heapq is a min-heap): the worst block and its
+    # Greedy refinement from a max-heap of block error ranks (negated: heapq is a min-heap; equal ranks coarse level
+    # first, then by block index, the error itself only carried for the note) [A90]: the worst block and its
     # eight neighbours are refined; their children's errors join the heap. A block popped that is no longer a
     # leaf (refined meanwhile as someone's neighbour) is skipped. Stops when the budget would be exceeded.
-    heap = [(-e, 0, b) for b, e in block_err[0].items()]
+    heap = [(-err_rank(e), 0, b, e) for b, e in block_err[0].items()]
     heapq.heapify(heap)
     while heap:
-        e, l, b = heapq.heappop(heap)
+        _, l, b, e = heapq.heappop(heap)
         if b not in leaves.get(l, ()):
             continue
         r = REFINE_RING
@@ -270,7 +290,7 @@ def plan_refinement(grid0: Grid, samples: HeatSamples, tol_k: float, dx_min: flo
         group = [g for g in group if g in leaves.get(l, ())]
         if spent + cost[l] * len(group) > budget:
             info["limited"] = True
-            info["remaining_err"] = -e
+            info["remaining_err"] = e
             break
         for g in group:
             refine(l, g)
