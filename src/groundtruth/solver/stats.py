@@ -141,7 +141,11 @@ def _peak_rss() -> Optional[int]:
 
 
 def _swap() -> Optional[tuple[int, int]]:
-    """The machine's swap traffic so far, (bytes in, bytes out); None where psutil can't tell (Windows reports 0)."""
+    """The machine's swap traffic so far, (bytes in, bytes out); None where psutil can't tell. Windows reports 0
+    for both, and its first call takes ~335 ms holding the GIL (a Run-checks job froze the window for 392 ms in
+    gui_probe): not asked there."""
+    if sys.platform == "win32":
+        return None
     ps = _psutil()
     try:
         s = ps.swap_memory() if ps else None

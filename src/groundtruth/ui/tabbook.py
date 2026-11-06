@@ -146,6 +146,9 @@ class TabStrip(wx.Control):
         self._small = self.GetFont().Bold().Scaled(0.85)
         self._hover: Optional[int] = None
         self._widths: Optional[list] = None      # each tab's (label width, badge width) (changed() forgets them)
+        self._gen = 0                           # counts changed() calls: part of the strip bitmap's key
+        self._bitmap = None                     # the strip as last drawn (_paint) and what it was drawn for
+        self._bitmap_key = None
         for evt, fn in ((wx.EVT_PAINT, self._paint), (wx.EVT_LEFT_DOWN, self._left_down),
                         (wx.EVT_MOTION, self._motion), (wx.EVT_LEAVE_WINDOW, lambda e: self._set_hover(None)),
                         (wx.EVT_KEY_DOWN, self._key), (wx.EVT_SET_FOCUS, lambda e: self.Refresh()),
@@ -156,6 +159,7 @@ class TabStrip(wx.Control):
     def changed(self) -> None:
         """A page or a badge was added or changed: measure the tabs again and redraw."""
         self._widths = None
+        self._gen += 1                          # a label may have changed: the strip's bitmap is drawn again
         self.Refresh()
 
     def DoGetBestSize(self):
@@ -238,11 +242,32 @@ class TabStrip(wx.Control):
         self.book.step(step)
 
     def _paint(self, evt):
-        """Draw the strip: the window background, a baseline, every tab (fill with rounded top corners, label,
-        badge, the selected tab's underline), the divider in each group gap and a focus ring on the selected tab.
-        A tab whose badge is 0 has no fill unless selected, only a dashed outline in its colour."""
-        dc = wx.AutoBufferedPaintDC(self)
+        """(EVT_PAINT) Blit the strip's bitmap, drawn anew (_draw) only when something it shows changed. A paint
+        that drew the strip every time made some 100 wx calls, and each one gives the GIL up and waits for it
+        again: beside the solver's threads (switch interval 5 ms, ~16 ms on Windows) one repaint took 220 ms with
+        the window frozen meanwhile (gui_probe, Simulate). The window repaints the strip often (focus, hover,
+        every badge), but what it shows hardly ever changes."""
+        dc = wx.PaintDC(self)
+        w, h = self.GetClientSize()
+        if w <= 0 or h <= 0:
+            return
         pal = theme.palette()
+        key = (w, h, pal, self.book.GetSelection(), self._hover, self.HasFocus(), self._gen,
+               tuple(sorted(self.book.hidden)), tuple(sorted(self.book.gaps)), tuple(self.book.hues),
+               tuple(sorted(self.book.badges.items())))
+        if key != self._bitmap_key or self._bitmap is None:
+            bmp = wx.Bitmap()
+            bmp.CreateWithDIPSize(wx.Size(w, h), self.GetDPIScaleFactor())
+            mem = wx.MemoryDC(bmp)
+            self._draw(mem, pal)
+            mem.SelectObject(wx.NullBitmap)
+            self._bitmap, self._bitmap_key = bmp, key
+        dc.DrawBitmap(self._bitmap, 0, 0)
+
+    def _draw(self, dc, pal):
+        """Draw the strip on `dc`: the window background, a baseline, every tab (fill with rounded top corners,
+        label, badge, the selected tab's underline), the divider in each group gap and a focus ring on the
+        selected tab. A tab whose badge is 0 has no fill unless selected, only a dashed outline in its colour."""
         dc.SetBackground(wx.Brush(theme.colour(pal.bg)))
         dc.Clear()
         gc = wx.GraphicsContext.Create(dc)

@@ -2332,6 +2332,20 @@ automatic recognition more robust"; options weighed:
   the background while `defer()` (the panel's `rendering()`) says a rendered figure is on its way, and
   `_blank_canvases` clears the three figures before the section comes or goes (they are rendered again right
   after). Longest GUI gap in that test 0.675 → 0.197 s.
+  **A paint of an undrawn canvas no longer draws on the GUI thread at all** (gui_probe on the test board, Simulate:
+  a figure's draw inside `_on_paint`, 394 ms): when `defer()` is False too (nothing on its way) the paint shows
+  the background and asks its owner (`undrawn`, the panel's `_canvas_undrawn`) for a background render; only after
+  `PrerenderedCanvas.ASKS` (3) asks with nothing drawn does matplotlib draw the figure there, as before, so a canvas
+  never stays blank. While a render takes longer than `VEIL_DELAY_MS` (250 ms) a card, `RenderVeil` ("Drawing the
+  map…" over a `wx.Gauge` marquee), sits in the middle of each canvas that waits: the bar is the system's own
+  animation (no timer, no Python while it moves), the card is made when the canvas is built (its windows cost a GIL
+  wait per wx call, ~185 ms mid-Simulate) and goes when the figure is swapped in (`_rendered`). The same probe found
+  the tab strip's repaint at 220 ms for a trivial colour helper: ~100 wx calls per paint, each giving the GIL up
+  and waiting for it beside the solver's threads. `TabStrip` now keeps its drawing as a bitmap keyed on everything
+  it shows (size, palette, selection, hover, focus, badges, hidden tabs, `changed()` count) and a repaint is one
+  blit. What is left in that probe: the designed idle `settle_garbage` (200 ms, nobody waiting), a bitmap
+  conversion in `show_rendered`, tab construction, and ~400 ms in `Run checks` with no Python frame (native,
+  open).
 - **The Results tab's page** (`ResultsPanel`, session 6; the user: "make it scrollable and have every graph
   occupy the entire width of the application"). Controls, tiles and the matplotlib toolbar stay at the top (the
   toolbar is made on the canvas's parent, the page, and reparented to the panel); below, a `wx.ScrolledWindow`

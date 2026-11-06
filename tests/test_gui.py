@@ -4203,3 +4203,102 @@ def test_simulate_shows_each_stage_s_efficiency_sweep(app, conv_frame):
     assert "buck  efficiency" in got["names"]
     assert "efficiency" in got["tiles"] and "peak" in got["tiles"] and "loss" in got["tiles"]
     assert "load current (A)" in got["fig"] and "efficiency (%)" in got["fig"] and "loss (W)" in got["fig"]
+
+
+def test_a_paint_of_an_undrawn_canvas_asks_for_a_background_render_and_does_not_draw(app, monkeypatch):
+    """gui_probe saw matplotlib draw a figure inside the canvas' paint handler (394 ms with the window frozen). With
+    its owner's `defer` / `undrawn` set, a paint that finds the canvas not drawn and no render on its way paints the
+    background and asks for a background render. If the owner cannot give one (ASKS asks without a drawn canvas),
+    matplotlib draws the figure here as before: a canvas never stays blank."""
+    from matplotlib.figure import Figure
+    from groundtruth.ui.results_panels import PrerenderedCanvas
+    frame = wx.Frame(None, size=(300, 200))
+    fig = Figure(figsize=(3, 2))
+    fig.add_subplot(111).plot([0, 1], [0, 1])
+    canvas = PrerenderedCanvas(frame, -1, fig)
+    asked, drawn = [], []
+    canvas.defer = lambda: False
+    canvas.undrawn = lambda: asked.append(1)
+    real_draw = canvas.draw
+    monkeypatch.setattr(canvas, "draw", lambda *a, **k: (drawn.append(1), real_draw(*a, **k))[1])
+    try:
+        frame.Show()
+        for _ in range(PrerenderedCanvas.ASKS):
+            canvas._isDrawn = False
+            canvas.Refresh()
+            canvas.Update()
+            wx.Yield()
+        assert len(asked) == PrerenderedCanvas.ASKS and drawn == []          # asked, not drawn
+        canvas._isDrawn = False
+        canvas.Refresh()
+        canvas.Update()
+        wx.Yield()
+        assert drawn and canvas._isDrawn                                      # the owner never answered: drawn here
+        # a render on its way: only the background, nothing asked
+        asked.clear()
+        drawn.clear()
+        canvas.defer = lambda: True
+        canvas._asks = 0
+        canvas._isDrawn = False
+        canvas.Refresh()
+        canvas.Update()
+        wx.Yield()
+        assert asked == [] and drawn == []
+    finally:
+        close_window(frame)
+
+
+def test_the_drawing_card_shows_over_a_canvas_and_goes(app):
+    """canvas.veil(text) puts a card with a moving bar and the text in the middle of the canvas; veil(None) takes it
+    away; it follows the canvas' size."""
+    from matplotlib.figure import Figure
+    from groundtruth.ui.results_panels import PrerenderedCanvas
+    frame = wx.Frame(None, size=(400, 300))
+    canvas = PrerenderedCanvas(frame, -1, Figure(figsize=(3, 2)))
+    try:
+        frame.Show()
+        wx.Yield()
+        canvas.veil(None)                                   # none yet: nothing to hide
+        canvas.veil("Drawing the map…")
+        veil = canvas._veil
+        assert veil.IsShown() and veil.text.GetLabel() == "Drawing the map…"
+        w, h = canvas.GetClientSize()
+        x, y = veil.GetPosition()
+        sw, sh = veil.GetSize()
+        assert abs((x + sw / 2) - w / 2) <= 2 and abs((y + sh / 2) - h / 2) <= 2
+        canvas.veil("Drawing the plot…")
+        assert veil is canvas._veil and veil.text.GetLabel() == "Drawing the plot…"
+        canvas.veil(None)
+        assert not veil.IsShown()
+    finally:
+        close_window(frame)
+
+
+def test_a_slow_render_shows_the_drawing_card_until_the_view_arrives(app, frame, monkeypatch):
+    """A view that takes longer than VEIL_DELAY_MS to render gets the card on the maps' canvas, and loses it when the
+    rendered figure is swapped in; a quick render never shows one."""
+    import time as time_mod
+    from groundtruth.report import plots
+    from groundtruth.ui import results_panels
+    f = frame
+    run_steps(app, f, [lambda: f.run(True) and None])
+    rp = f.results_panel
+    monkeypatch.setattr(results_panels, "VEIL_DELAY_MS", 50)
+    real = plots.draw_heatmap
+
+    def slow(*a, **k):
+        """The real map after a second."""
+        time_mod.sleep(1.0)
+        return real(*a, **k)
+    monkeypatch.setattr(plots, "draw_heatmap", slow)
+    rp.redraw()
+    wait_for(app, lambda: rp.canvas._veil is not None and rp.canvas._veil.IsShown(), timeout=15)
+    wait_for(app, lambda: not rp.rendering(), timeout=30)
+    assert not rp.canvas._veil.IsShown()
+    shown = []
+    monkeypatch.setattr(plots, "draw_heatmap", real)
+    monkeypatch.setattr(results_panels, "VEIL_DELAY_MS", 5000)               # a quick render is done long before this
+    rp.canvas.veil = lambda text, orig=rp.canvas.veil: (shown.append(text), orig(text))[1]
+    rp.redraw()
+    wait_for(app, lambda: not rp.rendering(), timeout=30)
+    assert shown == [None] or all(t is None for t in shown)

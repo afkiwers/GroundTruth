@@ -251,12 +251,88 @@ def _drop_width(choice: wx.Choice, items: list[str]):
         pass
 
 
+class RenderVeil(wx.Panel):
+    """A small card in the middle of a canvas, "Drawing the map…" over a moving bar, for the time a figure is being
+    rendered in the background: a big map takes seconds, and a blank or stale canvas looks like a hang. The bar is
+    the system's own marquee (wx.Gauge.Pulse), animated by the OS: no timer and no Python code runs while it
+    moves, so it costs the GUI thread nothing beside a busy solver."""
+
+    def __init__(self, canvas: "PrerenderedCanvas"):
+        """The veil of `canvas`, hidden; it keeps itself centred on it."""
+        # made far off the canvas: a window's border paints the moment it is created, and at the canvas' corner
+        # it left that rectangle behind
+        super().__init__(canvas, pos=wx.Point(-5000, -5000), style=wx.BORDER_SIMPLE)
+        pal = theme.palette()
+        self.SetBackgroundColour(theme.colour(pal.card))
+        self.text = wx.StaticText(self, label="Drawing…")
+        self.text.SetForegroundColour(theme.colour(pal.text))
+        self.text.SetFont(self.text.GetFont().Bold())
+        self.gauge = wx.Gauge(self, range=100, size=(220, 8))
+        box = wx.BoxSizer(wx.VERTICAL)
+        box.Add(self.text, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.BOTTOM, 8)
+        box.Add(self.gauge, 0, wx.EXPAND)
+        outer = wx.BoxSizer(wx.VERTICAL)
+        outer.Add(box, 1, wx.EXPAND | wx.ALL, 16)
+        self.SetSizer(outer)
+        self.Fit()
+        canvas.Bind(wx.EVT_SIZE, self._canvas_resized)
+        self.Hide()
+
+    def _canvas_resized(self, evt):
+        """(the canvas' EVT_SIZE) Stay in the middle; matplotlib's own handler still runs."""
+        evt.Skip()
+        self.centre()
+
+    def centre(self):
+        """In the middle of the canvas."""
+        w, h = self.GetParent().GetClientSize()
+        sw, sh = self.GetSize()
+        self.SetPosition(wx.Point(max((w - sw) // 2, 0), max((h - sh) // 2, 0)))
+
+    def show(self, text: str):
+        """Appear (or change the text) with the bar moving."""
+        if self.text.GetLabel() != text:
+            self.text.SetLabel(text)
+            self.Fit()
+            self.Layout()
+        self.centre()                       # in place before it shows: it would leave its first spot's pixels behind
+        if not self.IsShown():
+            self.Show()
+            self.Raise()
+            self.gauge.Pulse()
+            self.Refresh()
+            self.Update()                   # painted now, label included (a window shown into a busy loop may not be)
+
+
 class PrerenderedCanvas(FigureCanvasWxAgg):
     """A matplotlib wx canvas that can show a figure rendered in another thread without rendering it again on
-    the GUI thread. matplotlib's own redraws (toolbar zoom and pan, resizing) still render here."""
+    the GUI thread. matplotlib's own redraws (toolbar zoom and pan, resizing) still render here, unless its owner
+    set `defer` and `undrawn`: then a paint that finds the canvas not drawn shows the background and asks for a
+    background render (a figure's draw was 394 ms on the GUI thread in gui_probe)."""
 
     defer = None                # callable: True while a figure rendered in the background is on its way
+    undrawn = None              # callable: a paint found the canvas not drawn and nothing on its way (ask for it)
     page = None                 # the scrolled window it sits on (the Results tab): the wheel scrolls that
+    ASKS = 3                    # undrawn paints answered with a request before matplotlib draws it here after all
+    _asks = 0
+    _veil = None
+
+    def prepare_veil(self):
+        """Make the (hidden) card now. Its windows cost a GIL wait per wx call, ~185 ms in the middle of a Simulate
+        (gui_probe), so the owner makes it where nothing runs, when the canvas is built."""
+        if self._veil is None:
+            self._veil = RenderVeil(self)
+            self.Refresh(eraseBackground=False)
+
+    def veil(self, text: Optional[str]):
+        """Show the "drawing" card over the canvas with `text` (None: take it away)."""
+        if text is None:
+            if self._veil is not None and self._veil.IsShown():
+                self._veil.Hide()
+                self.Refresh(eraseBackground=False)         # the canvas paints over where the card was
+        else:
+            self.prepare_veil()
+            self._veil.show(text)
 
     def _on_mouse_wheel(self, event):
         """On the Results tab's scrolling page the wheel scrolls the page: the maps fill its first screen, so a
@@ -276,12 +352,27 @@ class PrerenderedCanvas(FigureCanvasWxAgg):
         matplotlib's one class-wide lock (Figure._render_lock): while the background thread rendered a view, the
         window waited for it (0.68 s in test_jobs_run_off_the_gui_thread once the cross-section's canvas came and
         went). With a rendered figure on its way, only the background is painted; it arrives with its pixels."""
-        if not self._isDrawn and self.defer is not None and self.defer():
+        if not self._isDrawn and self.defer is not None:
+            if self.defer():
+                self._asks = 0
+            elif self.undrawn is not None and self._asks < self.ASKS:
+                # nothing on its way: ask the owner for a background render (a few times: if it cannot give one,
+                # e.g. there is no view yet, the next paint draws the figure here as before)
+                self._asks += 1
+                wx.CallAfter(self._ask_for_render)
+            else:
+                super()._on_paint(event)
+                return
             dc = wx.PaintDC(self)
             dc.SetBackground(wx.Brush(self.GetBackgroundColour()))
             dc.Clear()
             return
         super()._on_paint(event)
+
+    def _ask_for_render(self):
+        """(after a paint) The owner renders the view in the background, if it has one."""
+        if self and self.undrawn is not None:
+            self.undrawn()
 
     def show_rendered(self, fig: Figure, agg: FigureCanvasAgg) -> bool:
         """Swap in `fig`, rendered by the offscreen `agg` at this canvas's pixel size, reusing its pixels. Uses
@@ -299,6 +390,7 @@ class PrerenderedCanvas(FigureCanvasWxAgg):
             self.renderer, self._lastKey = agg.renderer, agg._lastKey
             self.bitmap = self._create_bitmap()
             self._isDrawn = True
+            self._asks = 0
             self.Refresh(eraseBackground=False)
             self.reused = getattr(self, "reused", 0) + 1
             return True
@@ -315,6 +407,7 @@ def views_dir() -> Path:
     return Path.home() / ".cache" / "groundtruth" / "views"
 
 
+VEIL_DELAY_MS = 250         # a render this slow shows the "Drawing…" card over its canvas (RenderVeil)
 ZOOM_STEP = 1.25            # one wheel notch zooms in or out this much, about the point under the mouse
 FOCUS_MM = 6.0              # the busiest via's tile zooms the maps to a square this wide around it
 DENSITY_TILES = ("current density", "RMS current density")   # tiles a click zooms to their hot spot (focus_hot)
@@ -728,12 +821,15 @@ class ResultsPanel(wx.Panel):
             plots.Add(c, 0, wx.EXPAND | wx.BOTTOM, 6)
             c.SetMinSize((150, h))                      # heights set per view (_fit_page); widths follow the page
             c.defer = self.rendering
+            c.undrawn = self._canvas_undrawn
             c.page = self.page
+            c.prepare_veil()
         self.page.SetSizer(plots)
         self.canvas3.Hide()                             # until a route's view is shown
         self.SetSizer(s)
         self._page_size = (0, 0)
         self._resize_pending = False
+        self._veil_call = None              # the pending wx.CallLater of _arm_veils
         self.page.Bind(wx.EVT_SIZE, self._page_resized)
         self.Bind(wx.EVT_SIZE, lambda e: (e.Skip(), self.Refresh()))   # drawn buttons repaint after a re-wrap
 
@@ -933,6 +1029,8 @@ class ResultsPanel(wx.Panel):
         else:
             self.window = win
         win.canvas.defer = self.rendering
+        win.canvas.undrawn = self._canvas_undrawn
+        win.canvas.prepare_veil()
         win.toolbar.on_home = self.reset_zoom
         win.on_resized = self.redraw
         win.canvas.mpl_connect("motion_notify_event", self._hover)
@@ -1220,6 +1318,7 @@ class ResultsPanel(wx.Panel):
         sizes = [(c.figure.dpi, c.get_width_height(physical=True)) for c, _ in views]
         self._asked += 1
         asked = self._asked
+        self._arm_veils()
 
         pal = theme.palette()                   # plain data: safe to use in the render thread
 
@@ -1235,6 +1334,34 @@ class ResultsPanel(wx.Panel):
                 done.append((canvas, fig, agg))
             wx.CallAfter(self._rendered, asked, done)
         self._renderer.submit(render)
+
+    def _canvas_undrawn(self):
+        """(a canvas painted undrawn with no render on its way) Render the view in the background if there is one."""
+        if self and self.current() is not None and not self.rendering():
+            self.redraw()
+
+    def _arm_veils(self):
+        """A render was asked for: if it is still not on screen 0.25 s later, a "Drawing…" card with a moving bar
+        appears on each canvas that waits for it (a quick render never shows one: no flicker). The card goes in
+        `_rendered`. wx.CallLater like HeatmapWindow's resize wait: its callback checks the panel is still alive."""
+        if self._veil_call is None or not self._veil_call.IsRunning():
+            self._veil_call = wx.CallLater(VEIL_DELAY_MS, self._show_veils)
+
+    def _show_veils(self):
+        """(after VEIL_DELAY_MS) The cards, if the view is still being drawn."""
+        if not self or not self.rendering():
+            return
+        for c, text in ((self.canvas, "Drawing the map…"), (self.canvas3, "Drawing the plot…"),
+                        (self.canvas2, "Drawing the plot…")):
+            if c.IsShownOnScreen():
+                c.veil(text)
+        for w in self._windows():
+            w.canvas.veil("Drawing the map…")
+
+    def _hide_veils(self):
+        """The view is on screen (or could not be drawn): no cards."""
+        for c in (self.canvas, self.canvas3, self.canvas2, *(w.canvas for w in self._windows())):
+            c.veil(None)
 
     def _rendered(self, asked: int, done):
         """(GUI thread) Rendered figures arrived: swap them into their canvases, unless a newer request was made
@@ -1254,11 +1381,14 @@ class ResultsPanel(wx.Panel):
                 w.fig = fig
                 w.toolbar.update()
         self._shown = asked
+        if not self.rendering():
+            self._hide_veils()
 
     def _render_failed(self, e: Exception):
         """A view could not be drawn: say so in the summary line (and stop waiting for it)."""
         if self:
             self._shown = self._asked
+            self._hide_veils()
             self.metrics.SetLabel(f"could not draw this view: {e}")
 
     def _blank_canvases(self):
@@ -1321,6 +1451,7 @@ class ResultsPanel(wx.Panel):
         if self.current() is None or self._resize_pending:
             return
         self._resize_pending = True
+        self._arm_veils()
         wx.CallAfter(self._after_resize)
 
     def _after_resize(self):
