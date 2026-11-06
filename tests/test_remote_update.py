@@ -355,11 +355,12 @@ def test_the_preferences_list_and_an_update_followed(tmp_path):
     assert not done and "rolled back" in text and "3 s" in text        # the older failure (at 1.0) was not this one
 
 
-def test_end_to_end_the_service_updates_itself(tmp_path, monkeypatch):
+def test_end_to_end_the_service_updates_itself(tmp_path, monkeypatch, request):
     """The service's runner (run_server.py) with a real server, on this machine's libraries: an older install (another
     code: one file more) takes a signed newer package built from this tree; the server ends, the runner installs it
     with the package's own installer and starts the new server, which answers with this plugin's code; the old
     program is kept as app.prev."""
+    import faulthandler
     import socket
     import sysconfig
     import psutil
@@ -368,6 +369,12 @@ def test_end_to_end_the_service_updates_itself(tmp_path, monkeypatch):
     from groundtruth.remote.protocol import code_id
     from groundtruth.ui import server_updates as su
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "builder"))           # the release key of this test
+    # Bounded: the client waits up to 600 s for a transfer, and one stuck call under load once made this test run
+    # 1954 s (2026-11-06; 12 s alone). A stall now fails within 120 s per call, and after 300 s every thread's stack
+    # goes to stderr (once; cancelled when the test ends) to show where it sat.
+    monkeypatch.setattr("groundtruth.remote.client.TRANSFER_TIMEOUT_S", 120.0)
+    faulthandler.dump_traceback_later(300, exit=False)
+    request.addfinalizer(faulthandler.cancel_dump_traceback_later)
     root = tmp_path / "srv"
     paths = server_setup.layout(root)
     shutil.copytree(ROOT / "src" / "groundtruth", paths["app"] / "groundtruth",

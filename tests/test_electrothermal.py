@@ -212,7 +212,11 @@ def test_the_mesh_does_not_follow_the_last_bits_of_the_heat(buck, coupled):
     """Thermal of the coupled results with every heat moved by 1e-9 (12 seeds) plans the same mesh and gives the same
     temperatures within 1 mK. Before [A90] the planner ranked blocks by their exact error estimates: where its
     budget ran out among blocks of equal error (to 1e-10), a 1e-9 change picked another one, 242,388 or 266,388
-    unknowns, t_max 213.04 or 213.42 °C (seeds 2 and 11 of 12 here; round 8's fixed-point test passed by luck)."""
+    unknowns, t_max 213.04 or 213.42 °C (seeds 2 and 11 of 12 here; round 8's fixed-point test passed by luck).
+    This whole-board check is the probabilistic layer: this board's errors only tie where its heat is symmetric, so it
+    can pass on the old code too (it did on 2026-11-06). The deterministic guard is
+    tests/thermal/test_adaptive.py::test_equal_errors_rank_alike_so_the_last_bits_do_not_pick_the_mesh, which builds
+    the tie and fails on the old ranking."""
     from groundtruth.analysis.thermal import _build_model, solve_thermal, thermal_inputs
     board, _, _ = buck
     cfg, _, _, current, _ = coupled

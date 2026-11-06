@@ -192,18 +192,19 @@ def test_the_pins_fine_model_makes_a_coarse_grid_converge(tmp_path, monkeypatch)
         f, z = np.log(port["f"]), np.log(port["z_ohm"])
         return [float(np.exp(np.interp(np.log(x), f, z))) for x in (1e6, 1e8)], port
     # the reference on 60000 nodes: since vias join the planes around their barrel (add_pin, from ~0.3 mm cells
-    # for these 0.3 mm drills [A79]) 24000 nodes (0.388 ohm at 100 MHz, one joint) no longer is one (0.347 ohm)
+    # for these 0.3 mm drills [A79]) 24000 nodes no longer is one
     ref, _ = z_at("fine", 60000, False)
     raw, _ = z_at("raw", 4000, False)
     corr, port = z_at("corr", 4000, True)
     mid, _ = z_at("mid", 24000, True)
-    assert abs(raw[1] / ref[1] - 1) > 0.25                     # the coarse grid alone is far off at 100 MHz
-    assert corr[1] == pytest.approx(ref[1], rel=0.05)          # 0.335 against 0.347 ohm
-    # and about the same from either budget: 0.3346 / 0.3381 ohm (-3.6 / -2.6 % of the reference) since each pin's
-    # current goes to its nodes by their cells' share of it [A88]; 0.3380 / 0.3369 (-2.4 / -2.8 %) before. With the
-    # vias' joints on one pattern fixed to the grid [A89] the 24000-node budget reads 0.3397 ohm (1.5 % above the
-    # 4000-node one's 0.3346, 0.3381 before: nearer the reference, whose 0.347 the finer grid approaches)
-    assert mid[1] == pytest.approx(corr[1], rel=0.02)
+    assert abs(raw[1] / ref[1] - 1) > 0.25                     # the coarse grid alone is far off at 100 MHz (-39 %)
+    # at 100 MHz (ohm): reference 0.3319, coarse grid alone 0.2028, corrected 4000 nodes 0.3387 (+2.1 %), corrected
+    # 24000 nodes 0.3401 (+2.5 %, 0.4 % above the 4000-node one). Each pin's current goes to its nodes by their cells'
+    # share of it [A88] and its joints are bilinear weights round the barrel, the same on every grid [A95]: the two
+    # budgets agree to well under 1 %, which is what the correction is for; the 2 % above the reference is the
+    # reference's own residue
+    assert corr[1] == pytest.approx(ref[1], rel=0.05)
+    assert mid[1] == pytest.approx(corr[1], rel=0.01)
     assert mid[1] == pytest.approx(ref[1], rel=0.05)
     assert corr[0] == pytest.approx(ref[0], rel=0.02) and port["l_correction_nh"] > 0.1
     assert port["local_pitch_mm"] < 0.3
