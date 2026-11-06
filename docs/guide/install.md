@@ -21,7 +21,7 @@ Then close every KiCad window and start KiCad again. On the first start KiCad bu
 `groundtruth` needs Python 3.11 or newer, and neither KiCad nor a display. GroundTruth is not on PyPI: install a release's wheel, which carries the release's number (`groundtruth --version`):
 
 ```sh
-pip install "groundtruth-pcb @ https://github.com/afkiwers/GroundTruth/releases/download/0.1.42593/groundtruth_pcb-0.1.42593-py3-none-any.whl"
+pip install "groundtruth-pcb @ https://github.com/afkiwers/GroundTruth/releases/download/0.1.44625/groundtruth_pcb-0.1.44625-py3-none-any.whl"
 ```
 
 `simulate --thermal`, `--capacity` and a thermal criterion of `verify` need the `thermal` extra (numba, pyamg, psutil): `pip install "groundtruth-pcb[thermal] @ <the wheel's URL>"`. The newest code between releases: `pip install "groundtruth-pcb @ git+https://github.com/afkiwers/GroundTruth.git@main"`. Don't `pip install groundtruth`: that name on PyPI belongs to an unrelated project. For pipelines see [CI](ci.md).

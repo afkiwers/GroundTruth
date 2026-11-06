@@ -28,7 +28,7 @@ variables:
   # GroundTruth is not on PyPI: each release has a wheel with its number (https://github.com/afkiwers/GroundTruth/
   # releases). Pin one, so every pipeline runs the same analysis code and a new GroundTruth arrives only when you
   # change the number. The newest code between releases: "git+https://github.com/afkiwers/GroundTruth.git@main".
-  GROUNDTRUTH_VERSION: "0.1.42593"
+  GROUNDTRUTH_VERSION: "0.1.44625"
   GROUNDTRUTH_URL: "https://github.com/afkiwers/GroundTruth/releases/download/${GROUNDTRUTH_VERSION}/groundtruth_pcb-${GROUNDTRUTH_VERSION}-py3-none-any.whl"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
