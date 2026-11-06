@@ -8,6 +8,7 @@ with the copper's own inductance as the plane pair's (h + delta at 100 MHz [A79]
 snapped each point of a circle centred on the hole to its own nearest node: at 0.4 mm cells the line read 0.996,
 0.935 and 0.927 of the closed form at grid offsets 0, 1/4 and 1/2 cell, at 0.2 mm 0.974, 1.014 and 0.944."""
 import math
+import sys
 
 import numpy as np
 import pytest
@@ -60,10 +61,11 @@ def test_a_radial_plane_pair_is_the_coaxial_line_wherever_the_via_lies_in_its_ce
 
 
 def test_the_joint_pattern_is_fixed_to_the_grid_and_shared_by_every_layer(tmp_path):
-    """joint_points: the same shape (in cells from the node nearest the hole) wherever the hole lies in its cell; on a
-    four-layer stack every barrel segment joins the same (i, j) on both its layers, k segments per layer pair; on a
-    layer whose copper there is only the via's pad (smaller than the ring), the joints fall back to that pad's own
-    nodes."""
+    """joint_weights [A95]: the same shape and weights (in cells from the node nearest the hole) wherever the hole
+    lies in its cell, summing to 1; on a four-layer stack every barrel segment joins the same (i, j) on both its
+    layers, one branch per joint node and layer pair, and the segment's branches in parallel are the barrel's own
+    impedance; on a layer whose copper there is only the via's pad (smaller than the ring), the joints fall back to
+    that pad's own nodes."""
     g = BoardGen(layers=4, size=(20.0, 20.0), dielectrics=[0.2, 0.2, 0.2])
     for layer in ("F.Cu", "In1.Cu", "In2.Cu"):
         g.plane("P", layer)
@@ -75,15 +77,20 @@ def test_the_joint_pattern_is_fixed_to_the_grid_and_shared_by_every_layer(tmp_pa
         st = model.build((1.0 - offset * 0.2, 1.0 - offset * 0.2, 19.0, 19.0), ["F.Cu", "In1.Cu", "In2.Cu", "B.Cu"],
                          {"P"}, 0.2, False)
         g0 = st.grids[0]
-        pts = sim.joint_points(st, (10.0, 10.0), 1.0)
+        joints = sim.joint_weights(st, (10.0, 10.0), 1.0)
+        pts = [(i, j) for i, j, _ in joints]
         ci, cj = int(round((10.0 - g0.x0) / st.d)), int(round((10.0 - g0.y0) / st.d))
-        shapes.add(tuple(sorted((i - ci, j - cj) for i, j in pts)))
-        assert len(pts) == sim.pin_joints(1.0, 0.2) == 10
+        shapes.add(tuple((i - ci, j - cj, round(w, 9)) for i, j, w in joints))
+        assert sum(w for _, _, w in joints) == pytest.approx(1.0)
+        assert len(pts) >= sim.pin_joints(1.0, 0.2) == 10
         vias = [b for b in st.branches if b.kind == "via"]
         planes = [b for b in vias if b.b[0] <= 2]                 # F.Cu - In1 and In1 - In2: planes on both ends
         assert len(planes) == 2 * len(pts)
         assert all(b.a[1:] == b.b[1:] for b in planes)            # the same xy on both layers
         assert {b.a[1:] for b in planes} == set(pts)
+        first = [b for b in planes if b.a[0] == 0]
+        barrel = sim.via_impedance(abs(st.z[0] - st.z[1]), 1.0e-3)(1e8)
+        assert sum(1 / b.z(1e8) for b in first) == pytest.approx(1 / barrel)
         pad = [b for b in vias if b.b[0] == 3]                    # In2 - B.Cu: B.Cu has only the 1.1 mm pad's copper
         assert len(pad) == len(pts)
         assert {b.a[1:] for b in pad} == set(pts)
@@ -91,3 +98,17 @@ def test_the_joint_pattern_is_fixed_to_the_grid_and_shared_by_every_layer(tmp_pa
         assert {b.b[1:] for b in pad} != set(pts)                 # fallen back onto the pad's own nodes ...
         assert all(math.dist(st.xy(b.b), (10.0, 10.0)) < 0.55 + 0.2 for b in pad)     # ... within a cell of it
     assert len(shapes) == 1
+
+
+def test_the_line_has_no_step_where_a_via_gains_a_joint(tmp_path, monkeypatch):
+    """[A95] At 0.4 mm cells the radial line read 1.085 of the closed form for a 0.28 mm via and 0.928 for a 0.30 mm one
+    (drill/d 0.70 -> 0.75, where the rounded joints went from one to two): a 15 % step. Joints spread over the
+    nodes round them by bilinear weights change smoothly: 0.951 / 0.950 here, and 0.93-0.96 from drill/d 0.5 to 1.25."""
+    got = []
+    for drill in (0.24, 0.28, 0.30, 0.36):
+        monkeypatch.setattr(sys.modules[__name__], "DRILL", drill)
+        L, ref = _line(tmp_path, 0.4, 0.0)
+        assert 0.90 * ref < L < 1.03 * ref, (drill, L / ref)
+        got.append(L / ref)
+    assert max(got) / min(got) < 1.03, got
+    assert abs(got[1] - got[2]) < 0.01, got                     # across the old 1 -> 2 joint switch

@@ -686,7 +686,7 @@ pyproject.toml: a PYTHONPATH override does not switch the code under test). In s
   to the grid, the same points on every layer; a radial plane pair, the coaxial line from a 0.3 mm via, spread
   ±3.6 % over the grid offsets at 0.4 and 0.2 mm cells and ±2.2 % at 0.1 mm, now ±0.4 % at each, 0.93 / 0.98 / 0.98
   of the closed form; the 20 mm line fed at a pad keeps ±2.5-5 % at 0.4 mm from its pads, clearance holes and the
-  joints' centre now on the node: 0.727 / 0.773 / 0.807 nH, ±0.3 % at 0.2 mm); a failing solve could cost twice the operator products (G8-3, fixed since, branch `gmres-hygiene`: a cycle restarts after 4 missed true-residual checks [A91]; 88 products for 56 iterations where it took 1584 for 800, converging solves unchanged); results move by
+  joints' centre now on the node: 0.727 / 0.773 / 0.807 nH, ±0.3 % at 0.2 mm); the rounded joints still stepped 15 % where a ring gained its second joint (drill/d 0.70 -> 0.75), fixed since, branch `via-joint-weights` [A95]: bilinear weights over the nodes round the barrel, 0.93-0.96 of the closed form from drill/d 0.5 to 1.25 at 0.4 mm cells, 0.99-1.02 at 0.2 mm; a failing solve could cost twice the operator products (G8-3, fixed since, branch `gmres-hygiene`: a cycle restarts after 4 missed true-residual checks [A91]; 88 products for 56 iterations where it took 1584 for 800, converging solves unchanged); results move by
   up to 6e-7 under memory pressure (diagonal pivots, G8-4); the thermal mesh planner flips refinement on 1e-9 input
   changes. Fixed since (branch `thermal-planner`, [A90]): the planner ranks its blocks' error estimates in 1 % steps,
   ties in block order (where the budget ran out among blocks of equal error their last bits chose), and the
