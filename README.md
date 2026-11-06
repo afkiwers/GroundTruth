@@ -20,9 +20,53 @@ On the same board model it also analyses:
 - **DC loads, power integrity, safety and signal integrity**: the drop each load sees, each IC's supply impedance,
   clearances and part ratings, impedance, skew and crosstalk ([Other analyses](docs/guide/analyses.md)).
 
-It comes as a **KiCad plugin** (the window below, with heatmaps, markers drawn on the board and an HTML report) and
+It comes as a **KiCad plugin** (the window shown under [The plugin](#the-plugin), with heatmaps, markers drawn on the board and an HTML report) and
 as the **`groundtruth` command line** for CI, which needs neither KiCad nor a display. Both use the same analysis core
 and the same settings file, and give the same results.
+
+## Install
+
+**The KiCad plugin.** In KiCad, enable the API (**Preferences → Plugins → Enable KiCad API**, restart KiCad). Then
+**Tools → Plugin and Content Manager → Manage… → Add** the repository
+`https://afkiwers.github.io/GroundTruth/repository.json`, select it and install **GroundTruth**; new releases show up
+as updates. Each [release](https://github.com/afkiwers/GroundTruth/releases) also has the package as a zip for
+**Install from File…**. On the first start KiCad builds the plugin's Python environment (a few minutes); the button
+**Analyse return paths** then appears in the PCB editor's top toolbar. The plugin has a fair few dependencies, so it can
+take a couple of KiCad restarts before the buttons show.
+
+**The command line.** Python 3.11 or newer; install a release's wheel (GroundTruth is not on PyPI):
+
+```sh
+pip install "groundtruth-pcb @ https://github.com/afkiwers/GroundTruth/releases/download/0.1.42593/groundtruth_pcb-0.1.42593-py3-none-any.whl"
+```
+
+More, including the development setup, GPU acceleration and where everything is on disk: [Installing](docs/guide/install.md).
+
+**Optional speed-ups** (once per computer, KiCad closed; the installers are in the installed plugin's `tools`
+folder): the **faster sparse solver** on Windows, `install_sparse.cmd` (Intel MKL PARDISO, ~250 MB; a Mac has Apple
+Accelerate built in), and **GPU** support for an NVIDIA or AMD card, `install_gpu.py` / `install_gpu_amd.cmd`
+(PyTorch, ~2.5 GB). Both only change the speed. Steps: [Installing, Optional speed-ups](docs/guide/install.md#optional-speed-ups).
+
+## Quick start
+
+In KiCad: open the board in the PCB editor and click **Analyse return paths**.
+
+1. **Review** what GroundTruth found on the coloured tabs (orange rows): a net's driver and receivers and its timing,
+   a converter's switches and operating point, a bridge's motor. Fill in what the board can't tell, press **Mark
+   reviewed**.
+2. **Run checks**: the rule checks; the Issues tab lists what they find.
+3. **Simulate**: the field solver on everything ticked; the Results tab shows the maps and margins.
+4. **Fix**: click an issue to see it in KiCad, let **Suggest fixes** propose vias and capacitors, try them as what-if
+   edits.
+
+The plugin folder has a demo board to try this on (`demo\README.txt`). On the command line:
+
+```sh
+groundtruth init board.kicad_pcb                 # the settings file, with every part's suggested model
+groundtruth detect board.kicad_pcb --write       # nets, power stages and motor bridges to analyse (review them)
+groundtruth check board.kicad_pcb                # the rule checks (seconds)
+groundtruth simulate board.kicad_pcb --format html --out-dir report   # the field solver, an HTML report
+```
 
 ## The plugin
 
@@ -86,51 +130,6 @@ switch-node edge, a snubber, an input filter, a common-mode budget. Each is pred
 whole analysis again on a copy of the board, with its margins, overshoot and extra loss, the parts to buy and a
 circuit (here an input π-filter and its corner frequency). **History** keeps every Simulate to compare; **Export
 report…** writes the results as one HTML page. The plugin's own **Help** (F1) explains each tab.
-
-## Install
-
-**The KiCad plugin.** In KiCad, enable the API (**Preferences → Plugins → Enable KiCad API**, restart KiCad). Then
-**Tools → Plugin and Content Manager → Manage… → Add** the repository
-`https://afkiwers.github.io/GroundTruth/repository.json`, select it and install **GroundTruth**; new releases show up
-as updates. Each [release](https://github.com/afkiwers/GroundTruth/releases) also has the package as a zip for
-**Install from File…**. On the first start KiCad builds the plugin's Python environment (a few minutes); the button
-**Analyse return paths** then appears in the PCB editor's top toolbar. The plugin has a fair few dependencies, so it can
-take a couple of KiCad restarts before the buttons show.
-
-**The command line.** Python 3.11 or newer; install a release's wheel (GroundTruth is not on PyPI):
-
-```sh
-pip install "groundtruth-pcb @ https://github.com/afkiwers/GroundTruth/releases/download/0.1.42593/groundtruth_pcb-0.1.42593-py3-none-any.whl"
-```
-
-More, including the development setup, GPU acceleration and where everything is on disk: [Installing](docs/guide/install.md).
-
-**Optional speed-ups** (once per computer, KiCad closed; the installers are in the installed plugin's `tools`
-folder): the **faster sparse solver** on Windows, `install_sparse.cmd` (Intel MKL PARDISO, ~250 MB; a Mac has Apple
-Accelerate built in), and **GPU** support for an NVIDIA or AMD card, `install_gpu.py` / `install_gpu_amd.cmd`
-(PyTorch, ~2.5 GB). Both only change the speed. Steps: [Installing, Optional speed-ups](docs/guide/install.md#optional-speed-ups).
-
-
-## Quick start
-
-In KiCad: open the board in the PCB editor and click **Analyse return paths**.
-
-1. **Review** what GroundTruth found on the coloured tabs (orange rows): a net's driver and receivers and its timing,
-   a converter's switches and operating point, a bridge's motor. Fill in what the board can't tell, press **Mark
-   reviewed**.
-2. **Run checks**: the rule checks; the Issues tab lists what they find.
-3. **Simulate**: the field solver on everything ticked; the Results tab shows the maps and margins.
-4. **Fix**: click an issue to see it in KiCad, let **Suggest fixes** propose vias and capacitors, try them as what-if
-   edits.
-
-The plugin folder has a demo board to try this on (`demo\README.txt`). On the command line:
-
-```sh
-groundtruth init board.kicad_pcb                 # the settings file, with every part's suggested model
-groundtruth detect board.kicad_pcb --write       # nets, power stages and motor bridges to analyse (review them)
-groundtruth check board.kicad_pcb                # the rule checks (seconds)
-groundtruth simulate board.kicad_pcb --format html --out-dir report   # the field solver, an HTML report
-```
 
 ## Part parameters for your parts database
 
