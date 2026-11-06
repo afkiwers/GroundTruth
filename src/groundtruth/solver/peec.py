@@ -988,6 +988,7 @@ class Branch:
     kind: str = "part"        # part | via | track (a bridge: Grid.bridges) | bond (a solder joint: LidNode) |
                               # sheet (a part's terminal metal between two of its nodes)
     radius: float = 1.5e-4    # via barrel radius (m), for its coupling to the signal via
+    weight: float = 1.0       # a via joint's share of its barrel's current (simulate.joint_weights): the segment's centre
 
 
 class LidNode(tuple):

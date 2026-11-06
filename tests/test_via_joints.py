@@ -82,6 +82,9 @@ def test_the_joint_pattern_is_fixed_to_the_grid_and_shared_by_every_layer(tmp_pa
         ci, cj = int(round((10.0 - g0.x0) / st.d)), int(round((10.0 - g0.y0) / st.d))
         shapes.add(tuple((i - ci, j - cj, round(w, 9)) for i, j, w in joints))
         assert sum(w for _, _, w in joints) == pytest.approx(1.0)
+        centre = next(c for c in sim.via_groups(st, st.plane.branches) if not c[1].startswith("pad "))
+        wx = sum(w * st.xy((0, i, j))[0] for i, j, w in joints)       # the joints' mean, weighted by their shares
+        assert centre[3] == pytest.approx(wx, abs=1e-9) and math.dist(centre[3:5], (10.0, 10.0)) < st.d
         assert len(pts) >= sim.pin_joints(1.0, 0.2) == 10
         vias = [b for b in st.branches if b.kind == "via"]
         planes = [b for b in vias if b.b[0] <= 2]                 # F.Cu - In1 and In1 - In2: planes on both ends

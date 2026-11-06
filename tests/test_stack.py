@@ -188,8 +188,10 @@ def test_a_wider_gap_couples_less(victims_run):
     _, far = victims_run["8"]
     reset, hall = ("net", "logic:NRST"), ("net", "logic:HALL_U")
     assert far[reset]["peak"] < near[reset]["peak"]
-    # the residue behind the plane is grid-level (about 2 pH either way, 0.76e-3 to 2.2e-3 nH with the via joints of
-    # [A89] and [A95]): the same order as the reset's mutual inductance, not asked to be below it
+    # the residue behind the plane is a few pH and rests on how the small vias join their planes: with a small via
+    # a single point source ([A89]) 0.76 / 0.89 / 0.64e-3 nH at 1x / 2x / 4x, spread over its node and the ones round
+    # it ([A95], the coaxial line's better fit) 2.2 / 2.3 / 1.5e-3; the old joints put back for the small vias alone
+    # give 0.77e-3, for the big ones alone 2.1e-3. The same order as the reset's 2.1e-3, so not asked to be below it
     assert near[hall]["m_nh"] < 2.0 * near[reset]["m_nh"]
     c5, c8 = near[("injected", "logic:NRST")]["c_pf"], far[("injected", "logic:NRST")]["c_pf"]
     assert c8 / c5 == pytest.approx(5.0 / 8.0, rel=0.02)

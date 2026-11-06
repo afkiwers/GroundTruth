@@ -1211,7 +1211,7 @@ def add_pin(st: StackBuild, net: str, pos, span: list[str], drill_mm: float, nam
     for a, b in zip(rows, rows[1:]):
         z = _column_z(column, drill_mm, filled, st.z[a[0][0]], st.z[b[0][0]])
         for na, nb, (_, _, wgt) in zip(a, b, joints):
-            st.branches.append(Branch(na, nb, (lambda f, z=z, wgt=wgt: z(f) / wgt), name, "via", drill_mm * 5e-4))
+            st.branches.append(Branch(na, nb, (lambda f, z=z, wgt=wgt: z(f) / wgt), name, "via", drill_mm * 5e-4, wgt))
             added += 1
     return added
 
@@ -1220,22 +1220,24 @@ def via_groups(st: StackBuild, branches) -> list[tuple]:
     """Every via or pin barrel segment of `branches` as one: [(branch indices, name, radius m, x mm, y mm, layer
     index a, layer index b)]. add_pin joins a via to each layer at k points around its barrel, k parallel branches
     with the via's name between the same two layers: their currents add, and the segment sits at the joints' mean
-    (the via's centre; one joint: its node). Reports, Thermal and the DC models count vias through this, so a via
+    weighted by their shares of the current [A95] (the via's centre; one joint: its node). Reports, Thermal and the DC models count vias through this, so a via
     is one via however many joints it has."""
     groups: dict[tuple, list] = {}
     for k, b in enumerate(branches):
         if b.kind != "via":
             continue
         x, y = st.xy(b.a)
+        w = float(b.weight)
         g = groups.get((b.name, b.a[0], b.b[0]))
         if g is None:
-            groups[(b.name, b.a[0], b.b[0])] = [[k], float(b.radius), x, y]
+            groups[(b.name, b.a[0], b.b[0])] = [[k], float(b.radius), w * x, w * y, w]
         else:
             g[0].append(k)
-            g[2] += x
-            g[3] += y
-    return [(tuple(ix), name, r, sx / len(ix), sy / len(ix), a, b)
-            for (name, a, b), (ix, r, sx, sy) in groups.items()]
+            g[2] += w * x
+            g[3] += w * y
+            g[4] += w
+    return [(tuple(ix), name, r, sx / sw, sy / sw, a, b)
+            for (name, a, b), (ix, r, sx, sy, sw) in groups.items()]
 
 
 def vertical_branches(st: StackBuild, net: str, pos, span: list[str], drill_mm: float, name: str) -> list[Branch]:
