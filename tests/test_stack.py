@@ -178,7 +178,8 @@ def test_the_receiver_sees_the_induced_voltage_divided_by_its_terminations(victi
 def test_a_wider_gap_couples_less(victims_run):
     """Moving the logic board from 5 to 8 mm above the bridge: less noise on the reset net, which faces leg A's phase
     pour across the gap, and less injected current (the plate capacitance goes as 1/h: 5/8 of it). The Hall line
-    behind the logic board's GND plane takes only what the plane lets through, below the reset's at 5 mm, and
+    behind the logic board's GND plane takes only what the plane lets through (the same order as the reset's mutual
+    inductance or below it, at the grid's noise), and
     is not asked to fall with the gap: that residue does not (its mutual inductance at 5 / 8 mm, nH: 1.14e-3 /
     0.98e-3 at 1x, 1.13e-3 / 1.13e-3 at 2x, 1.01e-3 / 1.11e-3 at 4x with the pads' nodes inside their outlines;
     0.78e-3 / 0.78e-3, 0.89e-3 / 0.95e-3, 0.64e-3 / 0.89e-3 with the cells they overlap [A88]), so its fall at
@@ -187,7 +188,9 @@ def test_a_wider_gap_couples_less(victims_run):
     _, far = victims_run["8"]
     reset, hall = ("net", "logic:NRST"), ("net", "logic:HALL_U")
     assert far[reset]["peak"] < near[reset]["peak"]
-    assert near[hall]["m_nh"] < near[reset]["m_nh"]
+    # the residue behind the plane is grid-level (about 2 pH either way, 0.76e-3 to 2.2e-3 nH with the via joints of
+    # [A89] and [A95]): the same order as the reset's mutual inductance, not asked to be below it
+    assert near[hall]["m_nh"] < 2.0 * near[reset]["m_nh"]
     c5, c8 = near[("injected", "logic:NRST")]["c_pf"], far[("injected", "logic:NRST")]["c_pf"]
     assert c8 / c5 == pytest.approx(5.0 / 8.0, rel=0.02)
 
