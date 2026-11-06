@@ -23,9 +23,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PLUGIN_ID = "io.github.afkiwers.groundtruth"
-# the identifier before 2026-10-31 (KiCad's add-on guidelines: the namespace is the GitHub account that hosts it); a
-# copy under it would show every button twice beside the new one
-OLD_IDS = ("io.github.iwers.groundtruth",)
+# identifiers this plugin has retired (remove_old deletes this tool's copies under them: one under an old identifier
+# would show every button twice beside the current one). None now: the one before 2026-10-31 is gone from the code,
+# docs/guide/install.md tells anyone who still has it how to remove it. Never put PLUGIN_ID here: that would delete
+# the install.
+OLD_IDS: tuple = ()
 MIN_MAJOR = 10
 
 
