@@ -120,3 +120,24 @@ def test_no_collector_outside_a_run_and_the_outer_one_inside():
             assert inner is outer and stats.active() is outer
         assert stats.active() is outer
     assert stats.active() is None
+
+
+def test_windows_is_not_asked_for_its_swap_traffic(monkeypatch):
+    """psutil's swap_memory on Windows reports 0 / 0 and its first call took ~335 ms holding the GIL: a Run-checks
+    job's collector froze the plugin window for 392 ms (gui_probe). On Windows `_swap` is None without calling it,
+    and the run's statistics say so (swap figures None) instead of a measured zero."""
+    from groundtruth.solver import stats
+    asked = []
+
+    class Psutil:
+        """A psutil that notes being asked."""
+
+        @staticmethod
+        def swap_memory():
+            asked.append(1)
+            raise AssertionError("asked")
+    monkeypatch.setattr(stats, "_psutil", lambda: Psutil)
+    monkeypatch.setattr(stats.sys, "platform", "win32")
+    assert stats._swap() is None and asked == []
+    monkeypatch.setattr(stats.sys, "platform", "linux")
+    assert stats._swap() is None and asked == [1]       # elsewhere it asks (the error is swallowed: None)
