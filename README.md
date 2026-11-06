@@ -60,14 +60,31 @@ takes back a change.
 
 ![The Results tab after Simulate](docs/images/plugin-results.png)
 
-**Results.** The return current in each plane layer as a heatmap with current arrows, the vias that carry it between
-layers, a cross-section along the route and the emission spectrum against its limit. **Draw contours / arrows on
-board** puts them into KiCad.
+**Results.** The return current in each plane layer as a heatmap with current arrows, and the vias that carry it
+between layers. **Markers ▾** picks what is drawn over the map, **Draw on board ▾** puts the contours, the arrows or the
+hot loop into KiCad, **Open 3D view** opens the board in your browser, and **Further analysis ▾** adds the thermal
+solve, the current capacity of a stage and a sharper (finer) map.
+
+![A power stage's hot loop](docs/images/plugin-hotloop.png)
+
+A **power stage** gets its own views: here a buck's hot loop in two layers, with the busiest via, the loop inductance,
+the switch-node ringing, the input capacitors' share and the radiated and conducted margins in the tiles above it.
+
+![The cross-section and the emission spectrum](docs/images/plugin-results-plots.png)
+
+Scrolling down, the **cross-section** shows each plane layer's share of the return current along the route (red:
+carrying the return, blue: flowing the other way) and the **emission spectrum** against its limit.
 
 ![The Issues tab](docs/images/plugin-issues.png)
 
-**Issues.** Every finding with its severity; a click selects, highlights and zooms to it in KiCad. **Fixes** proposes
-stitching vias and capacitors, predicts and verifies them; **History** keeps every Simulate to compare; **Export
+**Issues.** Every finding with its severity; a click selects, highlights and zooms to it in KiCad.
+
+![The Fixes tab with a proposed input filter](docs/images/plugin-fixes.png)
+
+**Fixes** proposes stitching vias and capacitors for a route, and **design changes** for a power stage: a slower
+switch-node edge, a snubber, an input filter, a common-mode budget. Each is predicted, then verified by running the
+whole analysis again on a copy of the board, with its margins, overshoot and extra loss, the parts to buy and a
+circuit (here an input π-filter and its corner frequency). **History** keeps every Simulate to compare; **Export
 report…** writes the results as one HTML page. The plugin's own **Help** (F1) explains each tab.
 
 ## Install
