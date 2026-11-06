@@ -222,3 +222,67 @@ def test_a_thin_dielectric_pair_converges_to_the_dc_distribution_with_the_cell_s
         excess.append(per[1e4] / exact - 1)
     assert 0.0 < excess[0] < 0.11 and 0.0 < excess[1] < 0.045, excess
     assert excess[1] < 0.5 * excess[0] + 0.01, excess
+
+
+def _six_planes(screen, d=2.0):
+    """A six-plane stack (GND / VDD alternating, 35 um copper, 0.1 / 0.535 / 0.1 / 0.535 / 0.1 mm of dielectric: the
+    usual six-layer build-up) 24 x 16 mm at `d` mm cells, its plane pairs' capacitance, VDD shorted to GND at one end
+    and fed at the other: (PlaneStack, RouteExcitation). The cells' edge strips are narrower than the pitch (the grid
+    is cut at the board's edge), the case that makes the face pairs' corrections matter (_twin_corrections)."""
+    from shapely.geometry import box
+    from groundtruth.solver import peec
+    names = ["GND", "VDD", "GND", "VDD", "GND", "VDD"]
+    gaps = [0.1, 0.535, 0.1, 0.535, 0.1]
+    t, length, width = 0.035, 24.0, 16.0
+    bbox = (0.0, 0.0, length, width)
+    layers, z = [], 0.0
+    for k, net in enumerate(names):
+        if k:
+            z -= (t + gaps[k - 1]) * 1e-3
+        layers.append(peec.PlaneLayer(net, z, peec.build_grid({net: box(0.0, 0.0, length, width)}, bbox, d, sub=4), t * 1e-3))
+    nx, ny = layers[0].grid.nx, layers[0].grid.ny
+    vdd = [k for k, n in enumerate(names) if n == "VDD"]
+    gnd = [k for k, n in enumerate(names) if n == "GND"]
+    short = lambda f: 1e-9 + 0j  # noqa: E731
+    br = [peec.Branch((vdd[0], nx - 1, j), (k, nx - 1, j), short) for j in range(ny) for k in gnd]
+    br += [peec.Branch((vdd[0], 0, j), (k, 0, j), short) for j in range(ny) for k in vdd[1:]]
+    br += [peec.Branch((gnd[0], 0, j), (k, 0, j), short) for j in range(ny) for k in gnd[1:]]
+    pairs = [peec.PlanePair(k, k + 1, 8.854e-12 * 4.3 / (gaps[k] * 1e-3), 0.02) for k in range(5) if names[k] != names[k + 1]]
+    st = peec.PlaneStack(layers, br, capacitance=pairs, precond="sheet", **({} if screen else {"screen": False}))
+    inj = [((vdd[0], 0, j), 1.0 / ny) for j in range(ny)] + [((gnd[0], 0, j), -1.0 / ny) for j in range(ny)]
+    return st, peec.RouteExcitation(st, [], injections=inj)
+
+
+def test_the_face_pairs_difference_inductance_stays_positive_beside_narrow_strips():
+    """A split layer's two faces share the copper, so the narrow-strip corrections (a strip's own dL, its neighbours'
+    M_near [A4]) apply between the faces as within them [A94]. Left on each face alone, the difference mode
+    L_aa - L_ab (the free space between the faces, ~ mu0 t = 44 pH per square) took the corrections whole at every
+    edge strip: it went negative (-26 pH of 21 pH on this stack), and the partial inductance matrix with it
+    (not positive definite; GMRES's iterations x 2-4 with the 'sheet' preconditioner). Now the difference block is
+    positive definite at its free-space value (19-22 pH), the whole matrix positive definite."""
+    st, _ = _six_planes(True)
+    assert len(st.tw_b) and st.dL is not None and np.any(st.dL != 0)
+    ns = st.ns
+    L = np.zeros((ns, ns))
+    for i in range(ns):
+        e = np.zeros(ns, complex)
+        e[i] = 1.0
+        L[:, i] = st.Lp_matvec(e).real
+    a, b = st.tw_a, st.tw_b
+    assert abs(L - L.T).max() < 1e-12 * abs(L).max()
+    diff = 0.5 * (L[np.ix_(a, a)] + L[np.ix_(b, b)] - L[np.ix_(a, b)] - L[np.ix_(b, a)])
+    w = np.linalg.eigvalsh(diff)
+    assert 15e-12 < w.min() and w.max() < 25e-12, (w.min(), w.max())      # mu0 t / 2 per face: 22 pH
+    assert np.linalg.eigvalsh(L).min() > 0.0
+
+
+def test_a_split_stack_needs_about_the_iterations_of_the_unsplit_one():
+    """The 'sheet' preconditioner on the six-plane stack with and without face sheets: 15 / 19 / 23 iterations
+    at 20 / 100 / 400 MHz unsplit, 16 / 21 / 25 split (20 / 44 / 87 before the faces shared the narrow-strip
+    corrections, 1.3 / 2.3 / 3.8 x): within 1.3 x, as the target of the preconditioner work was."""
+    split, exc_s = _six_planes(True)
+    plain, exc_p = _six_planes(False)
+    assert split.n_sheets == 10 and plain.n_sheets == 6
+    for f in (2e7, 1e8, 4e8):
+        s, p = exc_s.solve(f), exc_p.solve(f)
+        assert s.iterations <= 1.3 * p.iterations + 1, (f, s.iterations, p.iterations)

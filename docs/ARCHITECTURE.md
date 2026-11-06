@@ -238,12 +238,37 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
   floating plane against the same stack without it within 0.7 %, was +6.7 %; the two-port against the coth / csch
   forms and the identity that makes the sheets exact). **Cost** (a split layer is one more sheet): on a six-layer
   board (four layers split) the strips 74 k → 124 k and the unknowns 143 k → 193 k on the same nodes (the
-  factorised Schur complement does not grow), the kernels 3.8 → 10.5 MB (sheets²), a board-wide solve 1.1 / 1.3 /
+  factorised Schur complement does not grow), the kernels 3.8 → 10.5 MB (sheets²), a board-wide solve (as first
+  built, before [A94]) 1.1 / 1.3 /
   1.9 × the GMRES iterations at 20 / 100 / 400 MHz and 1.3-2.5 × the time (measured under load by the audit; on an
-  idle machine, a clock net's Simulate on the CPU: 138 s and 933 iterations off, 488 s and 3 054 on, 3.5 ×); a two-layer board and a stack without
-  copper above and below a layer cost nothing more. Open: the iterations at high frequency (what the face sheets'
-  stricter physics does to the local-block preconditioner is not understood beyond that its diagonal variant shows
-  the smaller ratio, 1.07-1.3 ×).
+  idle machine, a clock net's Simulate on the CPU: 138 s and 933 iterations off, 488 s and 3 054 on, 3.5 ×; since
+  2026-11-06, [A94] below: 155 s and 870 on, 1.1 ×); a two-layer board and a stack without
+  copper above and below a layer cost nothing more.
+  **Why the face sheets cost iterations, and the fix** (2026-11-06, branch `screening-precond`, [A94]). Not the
+  preconditioner's blocks: the partial inductance matrix of the split stack was not positive definite. The
+  narrow-strip corrections of [A4] (`dL`, a strip's own change; `M_near`, its side-by-side neighbours') were built
+  per sheet, so a face got them for itself and its own neighbours but not between the two faces, though both
+  faces are the same copper. The faces' difference mode L_aa − L_ab is only the free space between them (≈ μ0t, 21
+  pH per strip for 35 µm copper at 2 mm cells), and at every edge strip (a grid cut at a pour's edge: every real
+  board) it took the whole `dL` and `M_near` (tens of pH): −26 pH, a negative inductance, and the matrix's
+  smallest eigenvalue −29 pH. A preconditioner that is positive (the 'sheet' block, the 'diag' 2 × 2 block) cannot
+  follow a negative mode; the spectrum of M⁻¹A on a six-plane test stack (dense, 24 × 16 mm, 2 mm cells) had 1 041
+  eigenvalues farther than 0.1 from 1 (466 unsplit) and real parts down to −0.5, the difference-mode block M_vv⁻¹A_vv
+  alone −0.49 … 2.5; GMRES needed 1.3 / 2.3 / 3.8 × the iterations of the unsplit stack at 20 / 100 / 400 MHz. Now
+  `PlaneStack._twin_corrections` adds the cross terms (a strip's `dL` as its coupling to its twin, each neighbour's
+  change also to the neighbour's twin: `M_near @ swap`) and the preconditioner's face block takes the same `dL`:
+  L_aa − L_ab is 19-22 pH everywhere, the matrix positive definite, the split stack needs 1.07 / 1.1 / 1.1 × the
+  iterations (16 / 21 / 25 against 15 / 19 / 23 on the test stack; 51-99 per board-wide solve on the six-layer copy
+  against 67-525). This is a model correction, not only a speed-up: the converged answer moves where a split layer
+  has narrow strips. On the six-layer copy's first net, at the same ten frequencies of its board-wide model: the loop
+  inductance +0.2 to +0.8 % (14.18 → 14.23 nH at 20 MHz, 14.37 → 14.46 at 820 MHz) and the loop resistance −0.1 % at
+  20 MHz, −2 % at 60, −8 % at 260, −10 to −14 % at 660-900 MHz (the old, indefinite matrix had spurious loss in the
+  edge strips' difference modes); near the 1 GHz plane-pair resonance the values differ by 10-20 % (a resonance moves
+  with any change of inductance); the net's reported loop inductance 13.52 → 13.54 nH, its emission levels by up to
+  1.5 dB (part of that is the adaptive frequencies landing elsewhere). The 'sheet' block over the layers (`_sheet_block`)
+  needed no change; the earlier attempts (dropping Z12, an eigenvalue floor, expanding to twins) were treating the
+  symptom. tests/test_plane_screening.py: the difference block's 15-25 pH, the matrix's positive definiteness, the
+  iteration ratio (both fail on the code before).
   - Thin dielectrics (P8-5): the audit's "+7 % at low frequency that does not shrink" for 25 µm of dielectric under
     35 µm copper was the audit's 20 / 40 mm point-fed lines and its zero-thickness reference, not the model: against
     the exact energy of two uniform plates (the DC distribution of a long pair) the line (feed spread over the
