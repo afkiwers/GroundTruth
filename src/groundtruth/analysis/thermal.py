@@ -260,7 +260,9 @@ def _via_segments(stages, bridges=()) -> list[dict]:
                         s["sq"][c.net] = s["sq"].get(c.net, 0.0) + float(cur[k]) ** 2
     for b in bridges:
         for x, y, la, lb, r, ms in (getattr(b, "rms", None) or {}).get("via_heat", ()):
-            s = seg(("bridge", b.net, round(x, 4), round(y, 4), la, lb), x, y, la, lb, r)
+            # a via's joints share one position but not one R (simulate.joint_weights: a node's branch is the barrel's
+            # impedance over its weight): one source per joint, so each keeps its own R_k x mean square [A95]
+            s = seg(("bridge", b.net, round(x, 4), round(y, 4), la, lb, float(f"{r:.9g}")), x, y, la, lb, r)
             s["sq"][b.net] = s["sq"].get(b.net, 0.0) + float(ms)
     return list(segs.values())
 

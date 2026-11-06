@@ -178,8 +178,14 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
   the via lay in its cell, and a radial plane pair (a coaxial line from a 0.3 mm via to a 10 mm rim, 0.2 mm FR4)
   read 0.996 / 0.935 / 0.927 of μ0(h+δ)/2π·ln(R/r) at grid offsets 0, ¼, ½ cell at 0.4 mm cells, 0.974 / 1.014 /
   0.944 at 0.2 mm; now 0.928 / 0.935 / 0.927 and 0.974 / 0.980 / 0.972 (tests/test_via_joints.py). The joints'
-  centre is now the node, up to d/√2 from the hole (as a single joint's always was), and the 1 → 2 joint switch at
-  d = π·drill/2.25 still steps (see A89).
+  centre is now the node, up to d/√2 from the hole (as a single joint's always was).
+  **The joints are weights, not rounded points** (2026-11-06, branch `via-joint-weights`, `simulate.joint_weights`,
+  [A95]): the rounded points still jumped where the ring gained a joint (the radial line read 1.085 of the closed
+  form for a 0.28 mm via and 0.928 for 0.30 mm at 0.4 mm cells). The barrel is now max(8, k) points round a circle
+  of radius drill/2 about the same node, each shared over the four nodes round it by bilinear weights (a node's
+  branch is the barrel's impedance over its weight), so the current's spread changes continuously with the via's
+  size: 0.93-0.96 of the closed form from drill/d 0.5 to 1.25 at 0.4 mm cells, 0.99-1.02 at 0.2 mm, the same at every
+  grid offset (under 0.1 %).
   - KVL per branch: `Z·I − A·V = −jω·ψ`
   - KCL: `Aᵀ·I = J` (+1 A at the receiver return node, −1 A at the driver's)
 - **Where a layer's current flows, and the copper's own inductance** (2026-11-02, branch `plane-pair-inductance`,
@@ -697,7 +703,7 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   solve; −0.48 % so, −0.71 % with the old round buffer). The lids' solder bonds and a die's branches stay equal per
   node. The vias' joints (`add_pin`) are not pads and are unchanged: on a plane pair fed at a pad over a via, the
   port's inductance still moves with the grid's offset (0.4 mm cells: 0.72 / 0.78 / 0.82 nH before, 0.73 / 0.77 /
-  0.79 after). Since branch `via-joints` the joints are one pattern fixed to the grid (`joint_points` [A89], above):
+  0.79 after). Since branch `via-joints` the joints are one pattern fixed to the grid (`joint_weights` [A89] [A95], above):
   that removed the joints' share (a radial plane pair ±3.6 → ±0.4 %), but this line keeps 0.727 / 0.773 / 0.807 nH at
   0.4 mm cells from its pads, clearance holes and the joints' centre now on the node (±0.3 % at 0.2 mm). The trial
   that read 0.80-0.82 nH joined the plane at the pad's few nodes, close to a point source (every via at one node:

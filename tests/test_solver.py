@@ -339,7 +339,7 @@ def test_parallel_solves_are_capped_by_the_free_memory():
 def test_models_solved_in_groups_when_memory_is_short_keep_every_number(tmp_path, monkeypatch):
     """With too little free memory for every model's factorisations at once, Simulate solves the models in groups,
     one after the other (solve_groups): the route and power-stage models first, the board-wide one last. Models
-    shared by several runs stay in one group, so every number is the same as solving them together: a route with
+    shared by several runs stay in one group, so every number is the same (to ~1e-6: the pivots) as solving them together: a route with
     plane capacitance (route model + board-wide), and two power stages (their own models with the conducted band
     refined, DC paths, the shared board-wide model)."""
     import json
@@ -368,6 +368,25 @@ def test_models_solved_in_groups_when_memory_is_short_keep_every_number(tmp_path
     def dump(res):
         return json.dumps([[r.solves, r.cavity_solves, r.emissions, r.worst] for r in res.routes]
                           + [timeless(c.summary()) for c in res.converters], default=str, sort_keys=True)
+    def assert_same_numbers(a, b, path="result"):
+        """Equal structure, equal text and counts, and every float within 2e-6 relative (2e-5 dB for levels): when memory is short the
+        factorisations take diagonal pivots (a different preconditioner), so the converged numbers differ by up to
+        ~6e-7 (audit round 8, G8-4), not bit for bit."""
+        if isinstance(a, dict):
+            assert a.keys() == b.keys(), path
+            for k in a:
+                assert_same_numbers(a[k], b[k], f"{path}.{k}")
+        elif isinstance(a, list):
+            assert len(a) == len(b), path
+            for i, (x, y) in enumerate(zip(a, b)):
+                assert_same_numbers(x, y, f"{path}[{i}]")
+        elif isinstance(a, float) and isinstance(b, float):
+            if path.endswith(("_db", "_dbuv")):                 # levels in dB cross zero: an absolute bound
+                assert abs(a - b) <= 2e-5, (path, a, b)
+            else:
+                assert abs(a - b) <= 2e-6 * max(abs(a), abs(b)) + 1e-300, (path, a, b)
+        else:
+            assert a == b, (path, a, b)
     for b, config in ((board, sc.config), (buck_board, bsc.config)):
         # plenty of memory: one group (the real free memory varies; a loaded machine split it in two in the suite)
         monkeypatch.setattr(sysmem, "available_bytes", lambda: 1 << 40)
@@ -378,7 +397,7 @@ def test_models_solved_in_groups_when_memory_is_short_keep_every_number(tmp_path
         grouped = simulate(b, config)
         monkeypatch.undo()
         assert grouped.groups >= 2
-        assert dump(grouped) == dump(together)
+        assert_same_numbers(json.loads(dump(grouped)), json.loads(dump(together)))
         assert together.converters or together.routes[0].cavity_solves
 
 

@@ -1116,6 +1116,8 @@ def add_vertical(st: StackBuild, net: str, pos, span: list[str], drill_mm: float
     return added
 
 
+RING_POINTS = 8                 # the fewest points a barrel's circle has (joint_weights)
+WEIGHT_MIN = 0.01               # a joint node's smallest share of the barrel's current
 PIN_JOINTS_MAX = 48         # a through-hole pin's joints to each layer, around its barrel, at most (about 1.5 cells apart)
 
 
@@ -1145,48 +1147,49 @@ def _column_z(column: Optional[tuple], drill_mm: float, filled: bool, za: float,
     return segment_impedance(length, soldered, drill_mm, g_solder, g_open)
 
 
-def joint_points(st: StackBuild, pos, drill_mm: float) -> list[tuple[int, int]]:
-    """The grid points (i, j) where a via or pin of `drill_mm` at `pos` (mm) joins its layers: one pattern fixed to
-    the lattice that every layer of the model shares (one origin and pitch, `_make_build`) [A89].
+def joint_weights(st: StackBuild, pos, drill_mm: float) -> list[tuple[int, int, float]]:
+    """The joints of a via or pin at `pos` as (i, j, weight): its barrel's current spread over the grid nodes round
+    the hole, weights summing to 1, the same nodes on every layer (one origin and pitch, `_make_build`) [A95].
 
-    `pin_joints` points on a circle of radius drill/2 + d/2 around the grid node nearest the hole's centre, each
-    rounded to a node in whole cells: the pattern depends on drill/d alone, so a via joins its planes with the same
-    shape wherever it lies in its cell, and at the same points on every layer; k = 1 is that nearest node. Before
-    2026-11-05 the circle was centred on the hole and each layer snapped each point to its own nearest node of the
-    net: the ring's radius moved with the grid's offset by up to a cell (a radial plane pair's inductance by 7 % at
-    0.4 mm cells, tests/test_via_joints.py). The price: the joints' centre is that node, up to d/√2 from the hole's,
-    as the single joint's always was."""
+    The barrel is `pin_joints` (at least RING_POINTS) points evenly round a circle of radius drill/2, each shared
+    over the four nodes round it by bilinear weights, so the weights move continuously with the hole's position and
+    size: the centre of the spread current is the hole's own and the ring's radius is the barrel's. (Joints rounded
+    to whole cells, as before 2026-11-06, jumped when the ring gained a joint: a radial plane pair's inductance by
+    15 % between drill/d 0.70 and 0.75 at 0.4 mm cells.) Weights below WEIGHT_MIN are dropped and the rest scaled
+    to sum to 1."""
     g = st.grids[0]
-    ci, cj = int(round((pos[0] - g.x0) / st.d)), int(round((pos[1] - g.y0) / st.d))
-    k = pin_joints(drill_mm, st.d)
-    if k <= 1:
-        return [(ci, cj)]
-    r = drill_mm / (2 * st.d) + 0.5                 # the circle's radius in cells
-    out: list[tuple[int, int]] = []
+    k = max(RING_POINTS, pin_joints(drill_mm, st.d))
+    w: dict[tuple[int, int], float] = {}
+    ci, cj = int(round((pos[0] - g.x0) / st.d)), int(round((pos[1] - g.y0) / st.d))      # the nearest node
+    rho = drill_mm / (2 * st.d)                                 # the circle's radius in cells
     for m in range(k):
-        # in whole cells from the node (round() is symmetric about 0: so is the pattern), never from the hole's own
-        # coordinates, whose rounding would move with the offset
-        ij = (ci + int(round(r * math.cos(2 * math.pi * m / k))), cj + int(round(r * math.sin(2 * math.pi * m / k))))
-        if ij not in out:                           # two points on one node: one joint
-            out.append(ij)
-    return out
+        fi = ci + rho * math.cos(2 * math.pi * m / k)           # in cells from that node
+        fj = cj + rho * math.sin(2 * math.pi * m / k)
+        i0, j0 = int(math.floor(fi)), int(math.floor(fj))
+        ti, tj = fi - i0, fj - j0
+        for di, dj, a in ((0, 0, (1 - ti) * (1 - tj)), (1, 0, ti * (1 - tj)), (0, 1, (1 - ti) * tj), (1, 1, ti * tj)):
+            w[(i0 + di, j0 + dj)] = w.get((i0 + di, j0 + dj), 0.0) + a / k
+    keep = {ij: a for ij, a in w.items() if a >= WEIGHT_MIN}
+    tot = sum(keep.values())
+    return [(i, j, a / tot) for (i, j), a in sorted(keep.items())]
 
 
 def add_pin(st: StackBuild, net: str, pos, span: list[str], drill_mm: float, name: str, snap: float,
             filled: bool = False, column: Optional[tuple] = None) -> int:
-    """A via's or through-hole pad's barrel between consecutive layers, joined to each layer all around it: k
-    (joint_points) parallel branches between the same grid points on every layer, each with k times the barrel's
-    impedance (together the barrel's own) [A89]. The user, of a big connector pin's map: "the current density around
+    """A via's or through-hole pad's barrel between consecutive layers, joined to each layer all around it: one
+    branch per joint node (joint_weights) between the same grid points on every layer, each with the barrel's
+    impedance over the node's share of the current (together the barrel's own) [A89] [A95]. The user, of a big connector pin's map: "the current density around
     that area looks odd": joined at the one node nearest its centre, the whole pin current entered a layer at one
-    cell on the ring's edge, a point source with a hot spot that is not there. A ring of about one cell (k = 1)
-    keeps the single joint. A layer without the net's copper at a joint point (a pad smaller than the ring, a
+    cell on the ring's edge, a point source with a hot spot that is not there. A ring smaller than a cell is a smear
+    over the four nodes round it. A layer without the net's copper at a joint point (a pad smaller than the ring, a
     thermal relief's gap) takes its own copper nearest that point within 0.75 cells, else the copper nearest the
     hole's centre within `snap`; a layer with no copper of the net near the hole is not joined (a blind or buried
     via's span ends there, an antipad). `column` (pin_column): the pin's own values (material, solder fill) instead
     of a copper-filled hole."""
-    pts = joint_points(st, pos, drill_mm)
+    joints = joint_weights(st, pos, drill_mm)
+    pts = [(i, j) for i, j, _ in joints]
     k = len(pts)
-    rows = []                                       # per layer the barrel joins: its k joint nodes
+    rows = []                                       # per layer the barrel joins: its joint nodes
     for layer in span:
         li = st.index(layer)
         if li is None:
@@ -1200,8 +1203,6 @@ def add_pin(st: StackBuild, net: str, pos, span: list[str], drill_mm: float, nam
         for i, j in pts:
             if 0 <= i < g.nx and 0 <= j < g.ny and g.node[i, j] and (own is None or g.label[i, j] == own):
                 row.append((li, i, j))              # the shared point: the same xy as on every other layer
-            elif k == 1:
-                row.append(centre)                  # (the nearest copper of the net, as the shared point would be)
             else:
                 x, y = g.xy(i, j)
                 row.append(st.node(layer, float(x), float(y), net, 0.75 * st.d) or centre)
@@ -1209,8 +1210,8 @@ def add_pin(st: StackBuild, net: str, pos, span: list[str], drill_mm: float, nam
     added = 0
     for a, b in zip(rows, rows[1:]):
         z = _column_z(column, drill_mm, filled, st.z[a[0][0]], st.z[b[0][0]])
-        for na, nb in zip(a, b):
-            st.branches.append(Branch(na, nb, (lambda f, z=z, k=k: k * z(f)), name, "via", drill_mm * 5e-4))
+        for na, nb, (_, _, wgt) in zip(a, b, joints):
+            st.branches.append(Branch(na, nb, (lambda f, z=z, wgt=wgt: z(f) / wgt), name, "via", drill_mm * 5e-4, wgt))
             added += 1
     return added
 
@@ -1219,22 +1220,24 @@ def via_groups(st: StackBuild, branches) -> list[tuple]:
     """Every via or pin barrel segment of `branches` as one: [(branch indices, name, radius m, x mm, y mm, layer
     index a, layer index b)]. add_pin joins a via to each layer at k points around its barrel, k parallel branches
     with the via's name between the same two layers: their currents add, and the segment sits at the joints' mean
-    (the via's centre; one joint: its node). Reports, Thermal and the DC models count vias through this, so a via
+    weighted by their shares of the current [A95] (the via's centre; one joint: its node). Reports, Thermal and the DC models count vias through this, so a via
     is one via however many joints it has."""
     groups: dict[tuple, list] = {}
     for k, b in enumerate(branches):
         if b.kind != "via":
             continue
         x, y = st.xy(b.a)
+        w = float(b.weight)
         g = groups.get((b.name, b.a[0], b.b[0]))
         if g is None:
-            groups[(b.name, b.a[0], b.b[0])] = [[k], float(b.radius), x, y]
+            groups[(b.name, b.a[0], b.b[0])] = [[k], float(b.radius), w * x, w * y, w]
         else:
             g[0].append(k)
-            g[2] += x
-            g[3] += y
-    return [(tuple(ix), name, r, sx / len(ix), sy / len(ix), a, b)
-            for (name, a, b), (ix, r, sx, sy) in groups.items()]
+            g[2] += w * x
+            g[3] += w * y
+            g[4] += w
+    return [(tuple(ix), name, r, sx / sw, sy / sw, a, b)
+            for (name, a, b), (ix, r, sx, sy, sw) in groups.items()]
 
 
 def vertical_branches(st: StackBuild, net: str, pos, span: list[str], drill_mm: float, name: str) -> list[Branch]:

@@ -56,6 +56,7 @@ def test_a_pin_feeds_a_plane_like_the_analytic_field_without_a_hot_spot(tmp_path
     wall = 1.0 / (2 * math.pi * drill / 2 * t)
     assert 0.7 * wall < m[r < 2.5].max() < 1.3 * wall
     monkeypatch.setattr(sim, "pin_joints", lambda drill, d: 1)          # the old single joint
+    monkeypatch.setattr(sim, "RING_POINTS", 1)
     old, r = solve(tmp_path, "old")
     assert old[r < 2.5].max() > 3 * wall
 
