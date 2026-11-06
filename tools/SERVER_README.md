@@ -29,7 +29,7 @@ networks (never public), starts the service, and finally shows:
 
 ```
 In each user's plugin: Preferences, Compute server: run analyses on a GroundTruth compute server,
-  Server address: BIGSERVER or 192.168.1.20
+  Server address: BIGSERVER or 192.0.2.20
   Access key:     <the key>
 ```
 

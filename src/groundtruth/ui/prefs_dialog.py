@@ -600,7 +600,7 @@ class PreferencesDialog(wx.Dialog):
             "still read here, and the results show here as usual. If the server can't be reached you are asked "
             "whether to run the job here instead.")
         self.server = wx.TextCtrl(self, value=p["server"])
-        self.server.SetHint("e.g. 192.168.1.20 or bigpc:8765")
+        self.server.SetHint("e.g. 192.0.2.20 or bigpc:8765")
         row(comp, "Server address", self.server, "the compute server's name or IP address on the local network, "
                                                  "optionally :port (default 8765)")
         self.server_key = wx.TextCtrl(self, value=p["server_key"], style=wx.TE_PASSWORD)

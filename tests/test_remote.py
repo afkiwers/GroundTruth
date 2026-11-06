@@ -41,7 +41,7 @@ def remote(srv, key=KEY):
 def test_addresses_are_completed_with_the_default_port():
     """What the user types in Preferences: a bare host gets http:// and the default port."""
     assert parse_address("bigpc") == "http://bigpc:8765"
-    assert parse_address(" 192.168.1.20:9000/ ") == "http://192.168.1.20:9000"
+    assert parse_address(" 192.0.2.20:9000/ ") == "http://192.0.2.20:9000"
     with pytest.raises(ServerUnavailable):
         parse_address("")
 
