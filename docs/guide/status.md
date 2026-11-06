@@ -2,6 +2,14 @@
 
 What is done and what is planned. Back to the [README](../../README.md).
 
+- **Done (November 2026):**
+  - vias and through-hole pins join the planes as weights over the nodes round the barrel, so a result no longer jumps
+    when a via gains a joint [A95];
+  - plane screening: a plane between two others as one current sheet per face, off by default (Preferences,
+    `analysis.plane_screening`, `--plane-screening`) [A92, A93, A94];
+  - the plugin window stays responsive while a view is drawn: no figure is drawn inside a paint, a "Drawing…" card shows
+    while a view renders, the tab strip is cached, and the run statistics no longer stall Windows;
+  - audit round 8 of the field solver: its findings and fixes are in [VALIDATION_AUDIT.md](../VALIDATION_AUDIT.md).
 - **Done (latest, October 2026):**
   - the sources of every formula, method and theorem, and the model's assumptions, in [docs/REFERENCES.md](../../docs/REFERENCES.md) and in the help (References and assumptions); the code cites them where it uses them;
   - radiated limits other than CISPR 32: MIL-STD-461G RE102 built in, or a limit curve of your own; spread spectrum in the radiated estimate; MIL-STD-461G CE101;
