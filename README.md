@@ -37,7 +37,7 @@ take a couple of KiCad restarts before the buttons show.
 **The command line.** Python 3.11 or newer; install a release's wheel (GroundTruth is not on PyPI):
 
 ```sh
-pip install "groundtruth-pcb @ https://github.com/afkiwers/GroundTruth/releases/download/0.1.42593/groundtruth_pcb-0.1.42593-py3-none-any.whl"
+pip install "groundtruth-pcb @ https://github.com/afkiwers/GroundTruth/releases/download/0.1.44625/groundtruth_pcb-0.1.44625-py3-none-any.whl"
 ```
 
 More, including the development setup, GPU acceleration and where everything is on disk: [Installing](docs/guide/install.md).

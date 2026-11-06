@@ -47,9 +47,9 @@ hardware/
 GroundTruth is not on PyPI. Every [release](https://github.com/afkiwers/GroundTruth/releases) has a Python wheel attached, with the release's number (the same as its KiCad package's); a job installs that one, so every pipeline runs the same analysis code and a new GroundTruth arrives only when you change the number:
 
 ```sh
-pip install "groundtruth-pcb @ https://github.com/afkiwers/GroundTruth/releases/download/0.1.42593/groundtruth_pcb-0.1.42593-py3-none-any.whl"
-pip install "groundtruth-pcb[thermal] @ https://github.com/afkiwers/GroundTruth/releases/download/0.1.42593/groundtruth_pcb-0.1.42593-py3-none-any.whl"   # with Thermal
-groundtruth --version                               # groundtruth 0.1.42593
+pip install "groundtruth-pcb @ https://github.com/afkiwers/GroundTruth/releases/download/0.1.44625/groundtruth_pcb-0.1.44625-py3-none-any.whl"
+pip install "groundtruth-pcb[thermal] @ https://github.com/afkiwers/GroundTruth/releases/download/0.1.44625/groundtruth_pcb-0.1.44625-py3-none-any.whl"   # with Thermal
+groundtruth --version                               # groundtruth 0.1.44625
 ```
 
 It needs Python 3.11 or newer (`python:3.12-slim` is enough; no git). The newest code instead, between releases: `pip install "groundtruth-pcb @ git+https://github.com/afkiwers/GroundTruth.git@main"` (its version says `0.1.dev0`). The `[thermal]` extra is only needed for a temperature criterion (`thermal: max_c`) or `simulate --thermal`. `--refill-zones` needs KiCad's own command line: use the `kicad/kicad:10.0` image for that job (the example's `emi-check-refill`). A runner with an NVIDIA GPU can speed up the solver (`emi-simulate-gpu`).
@@ -59,7 +59,7 @@ It needs Python 3.11 or newer (`python:3.12-slim` is enough; no git). The newest
 ```yaml
 variables:
   BOARD: hardware/myboard.kicad_pcb
-  GROUNDTRUTH_VERSION: "0.1.42593"
+  GROUNDTRUTH_VERSION: "0.1.44625"
   GROUNDTRUTH_WHEEL: "https://github.com/afkiwers/GroundTruth/releases/download/${GROUNDTRUTH_VERSION}/groundtruth_pcb-${GROUNDTRUTH_VERSION}-py3-none-any.whl"
 
 stages: [test, build]
@@ -172,7 +172,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install "groundtruth-pcb @ https://github.com/afkiwers/GroundTruth/releases/download/0.1.42593/groundtruth_pcb-0.1.42593-py3-none-any.whl"
+      - run: pip install "groundtruth-pcb @ https://github.com/afkiwers/GroundTruth/releases/download/0.1.44625/groundtruth_pcb-0.1.44625-py3-none-any.whl"
       - run: >
           groundtruth verify hardware/myboard.kicad_pcb
           --config hardware/groundtruth/configs/release.gtconfig.yaml
