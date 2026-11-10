@@ -545,7 +545,9 @@ the switches <code>hbA_hs</code>, <code>hbA_ls</code>, … (<a href="#labels">De
   no hot-loop checks;</li>
 <li><b>adds the legs at the input</b>: the conducted emission at the battery, read by a simulated EMI receiver
   against the limit;</li>
-<li><b>shares the ripple</b> among the bus capacitors;</li>
+<li><b>shares the ripple</b> among the bus capacitors: the legs' bus-side currents added in time, each by the
+  capacitor's share of that leg's switching current at f_pwm. Capacitors that share every leg alike carry their
+  share of the bus current's AC part; a leg's 120° conduction block cancels in the bus and is no ripple;</li>
 <li><b>maps the RMS currents</b> from the battery to the motor (phase currents, bus current, switching currents)
   with the busiest vias against their IPC-2221 rating;</li>
 <li><b>counts the parts' losses</b>: each FET's conduction, reverse conduction in the dead times, hard turn-on

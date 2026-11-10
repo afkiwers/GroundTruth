@@ -242,6 +242,7 @@ class RmsBasis:
         out = {"maps": {}, "grids": {}, "vias": [], "parts": []}
         sq, grids, via_sq = {}, {}, {}
         seg_sq: dict = {}               # every via segment's mean square, per model: its heat for Thermal [A43]
+        part_rms: dict[str, list] = {}  # a series part: [slow RMS, its conductance, the PWM bands' mean square]
         if self.slow is not None:
             st, idx, fields, I = self.slow
             g = G[np.ix_(idx, idx)]
@@ -255,15 +256,11 @@ class RmsBasis:
                 via_sq[seg["name"]] = max(via_sq.get(seg["name"], (0.0, None))[0], ms), seg
                 for key, mj, js in joints:
                     seg_sq[key] = (seg_sq.get(key, (0.0,))[0] + mj, js)
-            part_rms: dict[str, list] = {}      # a part's parallel branches (simulate.part_pairs): RMS currents add
             for bi, br in enumerate(st.plane.branches):
                 if br.kind == "part" and branch_sq[bi] > 1e-12:     # a series part carrying current (caps: open)
-                    acc = part_rms.setdefault(br.name, [0.0, 0.0])
+                    acc = part_rms.setdefault(br.name, [0.0, 0.0, 0.0])   # parallel branches: RMS currents add
                     acc[0] += math.sqrt(branch_sq[bi])               # in phase, side by side: the RMS values add
                     acc[1] += 1.0 / max(complex(br.z(DC_F)).real, 1e-12)   # parallel: conductances add
-            for name, (rms, g_sum) in part_rms.items():
-                if rms ** 2 > 1e-6:
-                    out["parts"].append({"name": name, "rms_a": rms, "r_ohm": 1.0 / g_sum})
         for n, (st, cols, fields, I) in self.fast.items():
             cc = C[n][np.ix_(cols, cols)]
             for k, layer in enumerate(st.names):
@@ -274,11 +271,24 @@ class RmsBasis:
                     sq[layer] = sq[layer] + _resample(grids[layer], st.grids[k], acc)
                 else:
                     sq[layer], grids[layer] = acc, st.grids[k]
+            # a series part in a leg's hot loop (a low side's sense shunt) also carries the chopped part of its
+            # leg's current: the band's mean square through it, its parallel branches' phasors added first
+            # (before 2026-11-10 only the slow part: a shunt read its low side's RMS 7 % low, its loss 14 %:
+            # audit round 10, F10-3). Capacitors are not series parts: only those the slow paths found
+            for name in part_rms:
+                ix = [bi for bi, br in enumerate(st.plane.branches) if br.kind == "part" and br.name == name]
+                if ix:
+                    col = I[:, ix].sum(axis=1)
+                    part_rms[name][2] += 0.5 * float((col.conj() @ cc.T @ col).real)
             for ms, seg, joints in _via_squares(st, I, cc, True):
                 old, where = via_sq.get(seg["name"], (0.0, seg))
                 via_sq[seg["name"]] = old + ms, where
                 for key, mj, js in joints:
                     seg_sq[key] = (seg_sq.get(key, (0.0,))[0] + mj, js)
+        for name, (rms, g_sum, fast_sq) in part_rms.items():
+            if rms ** 2 + fast_sq > 1e-6:
+                out["parts"].append({"name": name, "rms_a": math.sqrt(rms ** 2 + max(fast_sq, 0.0)),
+                                     "r_ohm": 1.0 / g_sum})
         rho = COPPER.resistivity_20c * 1e3                                 # Ω·mm
         best, best_s = (0.0, "", (0.0, 0.0)), (0.0, "", (0.0, 0.0))
         copper_w = 0.0

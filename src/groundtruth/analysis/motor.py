@@ -256,7 +256,10 @@ class DriveWaveform:
         for j in np.flatnonzero(np.isnan(v).any(axis=1)):
             e = emf(p, theta0 + w * self.t[j])
             on = [k for k in range(3) if not np.isnan(v[j, k])]
-            vn = sum(v[j, k] - e[k] for k in on) / len(on) if len(on) >= 2 else 0.0
+            # the star point: the mean of the driven legs' terminal voltages less their EMFs; with one leg driven
+            # and no current anywhere (a discontinuous interval) that leg's alone, v − e (before 2026-11-10 taken
+            # as 0 there: the open legs' swings read without the driven leg's EMF, audit round 10, F10-4)
+            vn = sum(v[j, k] - e[k] for k in on) / len(on) if on else 0.0
             for k in range(3):
                 if np.isnan(v[j, k]):
                     v[j, k] = min(max(vn + e[k], -vsd), V + vsd)
@@ -292,6 +295,17 @@ class DriveWaveform:
         else:
             s = (a + b) / 2
         return (s * dt).sum(axis=0) / self.period
+
+    def hs_cov(self) -> np.ndarray:
+        """The high sides' currents' covariance over the period (3 × 3, A²): <hs_k·hs_l> − <hs_k>·<hs_l>, exact
+        for the piecewise-linear waveform (the mean of a product of two linear pieces from a, b and c, d over an
+        interval is (2ac + ad + bc + 2bd)/6). Its sum over all entries is the bus current's AC mean square."""
+        dt = np.diff(self.t)
+        a, b = self.hs[:-1], self.hs[1:]
+        prod = (2 * a[:, :, None] * a[:, None, :] + a[:, :, None] * b[:, None, :] + b[:, :, None] * a[:, None, :]
+                + 2 * b[:, :, None] * b[:, None, :]) / 6
+        mean = self._avg(self.hs)
+        return (prod * dt[:, None, None]).sum(axis=0) / self.period - np.outer(mean, mean)
 
     def hs_ac_rms(self) -> list[float]:
         """Per leg: the AC part (RMS) of the high side's current, the leg's switching current."""
@@ -486,7 +500,12 @@ class SixStep:
                             # make progress: the clamp holds now; step on with the new topology
                             continue
                 if record is not None:
-                    record.append((base + s1, i[0], i[1], i[2], S))
+                    # a period's last breakpoint at exactly the next period's first, (m + 1)·T: m·T + T differs
+                    # from it by a rounding step at some m, and a switching instant is two breakpoints at one
+                    # time (switching, waveform: before 2026-11-10 17 of 60 period boundaries were not seen as
+                    # instants at 20 kHz, their swings and turn-ons lost: audit round 10, F10-2)
+                    end = (m + 1) * self.T if s1 == self.T else base + s1
+                    record.append((end, i[0], i[1], i[2], S))
         return i
 
     # ---- steady state for a duty

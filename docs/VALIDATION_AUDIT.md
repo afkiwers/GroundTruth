@@ -779,6 +779,34 @@ tests/test_efficiency.py for F9-5); REFERENCES A96, A97.
   almost none. The group's sum hardly moves, because the second stage's even harmonics (a low duty: no null near
   them) were the larger ones already.
 
+## Round 10 (2026-11-10, branch `audit-10`)
+
+The motor bridges' physics (the Bridges tab): the six-step drive (`analysis/motor.py`), what the legs do together
+(`analysis/bridge.py`) and the RMS currents in the copper (`analysis/bridge_rms.py`), against a reference that shares
+no code with them: a time-stepping simulation of the three-phase R-L-EMF circuit with ideal switches and
+reverse-conducting clamps, started from rest and run until it repeats (`tools/dev/bridge_audit.py`, 95 cases; its
+own energy balance within 0.01 % of the bus power). The regression tests are tests/test_bridge_audit.py and one
+assertion in tests/test_bridge.py; REFERENCES A99.
+
+| ID | Finding | Severity | Status |
+|---|---|---|---|
+| F10-1 | The bus capacitors' ripple added the legs' high-side AC RMS in power. That keeps each leg's 120° conduction envelope, a current at the electrical frequency that cancels in the bus. A capacitor taking the whole switching current read 31.1 A for a bus AC of 25.3 A (H-PWM / L-ON), 64.5 A for 24.8 A (H-ON / L-PWM: the high side held on carries no PWM at all), 50.6 A for 47.5 A (bipolar); the ESR loss by the square, up to 6.8 times. | High (capacitor ripple and ESR heat, conservative) | Fixed [A99]: `bridge.caps_at` from the high sides' covariance, the PWM part by the shares and the bus's slow part by the mean share; within 0.1 % of the reference |
+| F10-2 | A PWM period's last breakpoint (m·T + T) and the next one's first ((m + 1)·T) differ by a rounding step at some m (17 of 60 boundaries at 20 kHz), and a switching instant was recognised by two breakpoints at exactly one time. The instants there were lost: with a dead time the node's swings into it (the snubbers' loss up to 15 % low, unequal between the legs); with `dead_time: 0` the hard turn-ons themselves (the overlap and output-charge loss 10.8 / 7.8 / 8.7 where the three legs must be equal). | Medium | Fixed: the period's end is recorded as (m + 1)·T; the legs are equal to 1e-6 |
+| F10-3 | A low-side sense shunt's RMS current came from the part of its leg's current below f_pwm/2 only: the chopped part was left out. 21.3 A for the low side's 23.1 A on the test bridge (−7 %), its loss −14 %. | Medium | Fixed: the PWM bands' current through a series part is added (`bridge_rms.RmsBasis.evaluate`); −1.9 % |
+| F10-4 | In an interval with one leg driven and no current anywhere (a light load without synchronous rectification), the open legs' node voltages took the star point as 0 instead of the driven leg's v − e: their swings (snubber loss) read 14 % high there. | Low | Fixed (`DriveWaveform.node_voltages`) |
+
+- **Verified as shipped** (the drive at the duty GroundTruth found, against the reference): the bus current's mean
+  and AC RMS, the phase, high-side and low-side RMS currents within 0.3 % for H-PWM / L-ON with and without
+  synchronous rectification, H-ON / L-PWM, bipolar, a sinusoidal EMF, generating, a light load in discontinuous
+  conduction and a locked rotor; the channels' mean squares, the reverse conduction's mean currents and the hard
+  turn-ons' V·I within 1 %. (The first comparison showed 4-7 % on three cases: a defect of the reference, which
+  dropped a clamp-started current of one sign; found by the mirror-image scheme agreeing.)
+- **Limits, documented:** a leg's radiated estimate and L·di/dt take a continuous PWM at its largest switched
+  current (it chops a third of the time: conservative); the switches' on-resistance in the drive is the mean of the
+  two sides'; no reverse-recovery loss for a bridge (GaN assumed, said in the losses' notes) and no gate-drive loss;
+  a node's swing when a freewheeling current runs out between switching instants is not counted for the snubber;
+  how the slow part of the bus current divides between the capacitors and the source [A99].
+
 ## Remaining risks and unverified items
 - SP-19: above 1 GHz a board-wide resonance's worst margin moves about ±2 dB between the 4x, 8x and 16x grids on
   refboard (converged within 0.8 dB below 1 GHz); the grid note asks for 4x and says so (round 4).

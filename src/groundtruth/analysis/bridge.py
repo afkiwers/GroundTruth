@@ -7,8 +7,7 @@ frequency is factorised once for all of them. Its hot-loop current is the leg's 
 drive model, at its largest hard edge (overshoot, ringing, radiated estimate). At the input the legs add: the line
 current is the sum over the legs of each one's transfer to the LISN (complex, per A of its loop current) times the
 spectrum of its high-side current, which the receiver then reads (emi/pwm_lines.py). Each bus capacitor's ripple
-current is its share of every leg's switching current (the legs chop one at a time, so their RMS values add in
-power).
+current is its share of every leg's bus-side current, the legs' currents added in time (caps_at [A99]).
 """
 from __future__ import annotations
 
@@ -278,9 +277,8 @@ def finish_bridge(model: BoardModel, bs: BridgeSetup) -> BridgeResult:
     if not legs:
         res.error = "no leg was solved"
         return res
-    # capacitors: each leg's switching current (its high side's AC part) shared at f_pwm; the legs switch one at a
-    # time, so their contributions add in power
-    hs_ac = w.hs_ac_rms()
+    # capacitors: each one carries its share of every leg's switching current (the leg's high-side current, its
+    # AC part), added as currents in time (cap_ripple [A99]); the shares are the legs' at f_pwm
     caps: dict[str, dict] = {}
     for s in legs:
         for c in s.res.caps:
@@ -288,9 +286,8 @@ def finish_bridge(model: BoardModel, bs: BridgeSetup) -> BridgeResult:
             share = c.get("share_sw")
             if share is not None:
                 e["legs"][s.spec.phase] = share
-                e["p"] += (share * hs_ac[_column(s, legs)]) ** 2
-    res.caps = sorted(({"name": e["name"], "lisn": e["lisn"], "rms_a": math.sqrt(e["p"]), "legs": e["legs"]}
-                       for e in caps.values()), key=lambda e: -e["rms_a"])
+    res.caps = sorted(caps_at(b, [{"name": e["name"], "lisn": e["lisn"], "legs": e["legs"]} for e in caps.values()],
+                              w), key=lambda e: -e["rms_a"])
     # a leg without a switching edge at this operating point (a locked rotor drives one commutation step: one leg
     # held low, one off) has no hot-loop event to check; its solves stay for the sweep's other speeds
     top = max(max(w.edges), 1e-12)
@@ -335,16 +332,35 @@ def sweep_view(b: BridgeResult) -> Optional[BridgeResult]:
 
 
 def caps_at(b: BridgeSpec, caps: list, w: DriveWaveform) -> list[dict]:
-    """The capacitors' ripple currents for another drive waveform: each one's shares of the legs' switching
-    currents at f_pwm, added in power as finish_bridge does."""
+    """The capacitors' ripple currents for a drive waveform (finish_bridge, and the sweep's other operating
+    points) [A99]. The high sides' currents hs_k(t) are what the legs draw from the bus. Their PWM part (the
+    lines from f_pwm/2 up) divides between the capacitors by the shares s_k solved at f_pwm, added as currents
+    in time: s'·C_fast·s with C_fast the high sides' covariance over the period (DriveWaveform.hs_cov) less its
+    part below f_pwm/2 (the slow lines' cross spectrum, pwm_lines.line_spectrum). Below f_pwm/2 each leg's
+    current is its 120° conduction envelope, which cancels in the bus's sum but for the commutation's ripple:
+    that rest (the bus current's own slow AC part) is given to a capacitor by its mean share. With equal shares
+    the two parts are the share of the bus current's whole AC part. Before 2026-11-10 the legs' AC RMS values
+    were added in power, which kept every envelope: a capacitor read 1.2 (H-PWM / L-ON) to 2.6 times (H-ON /
+    L-PWM) its ripple current (audit round 10, F10-1)."""
     phases = [leg.phase for leg in b.legs]
-    hs_ac = w.hs_ac_rms()
+    cov = w.hs_cov()
+    # the lines below f_pwm/2 (none with a locked rotor: the period is one PWM period): ½·Re X_k·conj(X_l) summed
+    xs = np.array([line_spectrum(w.t, w.hs[:, k], w.period, w.T, w.params.rise_time, 0.5 * w.params.f_pwm)[1]
+                   for k in range(3)])
+    slow = 0.5 * (xs @ xs.conj().T).real if xs.size else np.zeros((3, 3))
+    fast, bus_slow = cov - slow, float(slow.sum())
 
     def col(ph):
         """A leg's column in the drive waveform, by its phase (A, B, C), else its position."""
         return "ABC".index(ph) if ph in ("A", "B", "C") else min(phases.index(ph), 2)
-    return [dict(c, rms_a=math.sqrt(sum((share * hs_ac[col(ph)]) ** 2 for ph, share in c["legs"].items())))
-            for c in caps]
+    out = []
+    for c in caps:
+        s = np.zeros(3)
+        for ph, share in c["legs"].items():
+            s[col(ph)] += share
+        mean_share = float(s.sum()) / 3.0
+        out.append(dict(c, rms_a=math.sqrt(max(float(s @ fast @ s) + mean_share ** 2 * max(bus_slow, 0.0), 0.0))))
+    return out
 
 
 def sweep(model: BoardModel, bs: BridgeSetup, legs: list, basis: RmsBasis) -> list[dict]:
