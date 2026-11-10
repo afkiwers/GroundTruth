@@ -10,8 +10,8 @@ controller's own supply current from the input, I_q·V_in. I_in follows from the
 V_in·I_in = V_out·I_out + P_loss (a few rounds: the input path's copper depends on it).
 
 The model assumes continuous conduction: below I_L = ΔI/2 a real controller may skip pulses, burst or run
-discontinuous, and its light-load efficiency differs (`ccm_from` marks that current). Inductor core loss is not
-in it (it needs the maker's loss data). A measured curve (a CSV the settings name, `measured`) can be drawn over
+discontinuous, and its light-load efficiency differs (`ccm_from` marks that current). The inductor's core loss is in
+it when the stage gives a point of the maker's loss data (`core_loss`, thermal.core_loss [A98]). A measured curve (a CSV the settings name, `measured`) can be drawn over
 the model's: it is read here on the computer that draws, never on a compute server. No wx here.
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ EFF_POINTS = 24              # load currents of the default sweep
 EFF_RANGE = (0.05, 1.2)      # the default sweep, a share of the stage's i_out
 EFF_ROUNDS = 4               # energy-balance rounds for the input current (it changes the input path's copper)
 CATEGORIES = ("conduction", "switching", "output charge", "reverse recovery", "dead time", "diode", "inductor",
-              "copper", "series parts", "connectors", "gate drive", "controller", "other")
+              "inductor core", "copper", "series parts", "connectors", "gate drive", "controller", "other")
 
 
 @dataclass
@@ -166,7 +166,10 @@ def _left_out(spec) -> list[str]:
                      "fed by a linear regulator from the input it is V_in / V_gate times larger")
     if not spec.iq:
         notes.append(f"{spec.name}: no iq (the controller's supply current): its own consumption is left out")
-    notes.append("not modelled: inductor core loss and the winding's AC resistance (they need the maker's loss "
+    if spec.core_loss is None:
+        notes.append(f"{spec.name}: no core_loss (the inductor's core loss at this frequency and ripple, from the "
+                     "maker's tool or curves): left out")
+    notes.append("not modelled: the winding's AC resistance (it needs the maker's loss "
                  "data), the capacitors' ESR loss from their ripple current; below the marked current a controller "
                  "may skip pulses or run discontinuous, which the model (continuous conduction) does not")
     return notes

@@ -755,8 +755,11 @@ tests/test_efficiency.py for F9-5); REFERENCES A96, A97.
 - **Limits, documented** (the sweep's notes, REFERENCES A80, A96, A97): the duty is the ideal V_out/V_in (a stage
   with large drops, a diode's V_f at low V_out, conducts a few per cent longer: its high-side conduction reads low
   by that share); one edge time for both edges; the gate-drive loss is the gates' supply at V_gate (a linear
-  regulator from the input: V_in/V_gate times more); not modelled: inductor core loss and the winding's AC
-  resistance, the capacitors' ESR loss from their ripple current, discontinuous conduction. Current capacity fits
+  regulator from the input: V_in/V_gate times more); not modelled: the winding's AC resistance, the capacitors'
+  ESR loss from their ripple current, discontinuous conduction. The inductor's core loss was added after the round
+  (a stage's `core_loss`: a point of the maker's data scaled by the Steinmetz exponents and the duty's iGSE factor,
+  the same at every load current [A98]; tests/test_core_loss.py: the factor against a numerical integral of
+  |dB/dt|^α, the loss in the sweep and the energy balance); without `core_loss` it is left out, with a note. Current capacity fits
   each loss as a quadratic in the load at 0, 1 and 2 times the current: with the valley clamped at zero at no load
   the overlap's fit is exact at the fitted loads only (as the dead times' since round 5).
 - **Refboard** (a scratch copy, its two synchronous GaN bucks as one interleave group at 0° / 180°, the signal nets

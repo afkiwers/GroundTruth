@@ -170,6 +170,14 @@ class ConverterSpec:
     qg: Optional[float] = None            # C, total gate charge of one FET (its Qg field); none: no gate-drive loss
     v_gate: Optional[float] = None        # V, the gate-drive voltage (default EFF_V_GATE, assumed)
     iq: Optional[float] = None            # A, the controller's supply current from the input (none: left out)
+    # the inductor's core loss (thermal.core_loss [A98]): the loss at one point of the maker's data (its tool or
+    # curves), scaled to the stage's frequency and ripple by the Steinmetz exponents. core_loss alone: the loss at
+    # this operating point
+    core_loss: Optional[float] = None     # W, the core loss at core_loss_f and core_loss_di (none: left out)
+    core_loss_f: Optional[float] = None   # Hz, the frequency it is given at (default: the stage's f_sw)
+    core_loss_di: Optional[float] = None  # A p-p, the ripple current it is given at (default: the stage's ripple)
+    core_alpha: Optional[float] = None    # the frequency exponent (default thermal.CORE_ALPHA)
+    core_beta: Optional[float] = None     # the flux (ripple) exponent (default thermal.CORE_BETA)
     efficiency_currents: list = field(default_factory=list)   # A, the sweep's load currents (default: 5-120 % of i_out)
     efficiency_measured: str = ""         # a CSV of measured efficiency (current A, efficiency %[, loss W]), relative to
                                           # the board's groundtruth/ folder: drawn over the model's curve
@@ -1481,6 +1489,11 @@ def config_from_data(data: Any) -> Config:
                 qg=_opt(c.get("qg"), f"{where}.qg", "C"),
                 v_gate=_opt(c.get("v_gate"), f"{where}.v_gate", "V"),
                 iq=_opt(c.get("iq"), f"{where}.iq", "A"),
+                core_loss=_opt(c.get("core_loss"), f"{where}.core_loss", "W"),
+                core_loss_f=_opt(c.get("core_loss_f"), f"{where}.core_loss_f", "Hz"),
+                core_loss_di=_opt(c.get("core_loss_di"), f"{where}.core_loss_di", "A"),
+                core_alpha=_opt(c.get("core_alpha"), f"{where}.core_alpha"),
+                core_beta=_opt(c.get("core_beta"), f"{where}.core_beta"),
                 efficiency_currents=[_num(x, f"{where}.efficiency_currents", "A")
                                      for x in (c.get("efficiency_currents") or [])],
                 efficiency_measured=str(c.get("efficiency_measured") or ""),
@@ -1518,6 +1531,12 @@ def config_from_data(data: Any) -> Config:
             problems.append("dead_rise, dead_fall (dead_time), v_sd and q_rr must not be negative")
         if any(v is not None and v < 0 for v in (spec.qg, spec.v_gate, spec.iq)):
             problems.append("qg, v_gate and iq must not be negative")
+        if spec.core_loss is not None and spec.core_loss < 0:
+            problems.append("core_loss must not be negative")
+        if any(v is not None and v <= 0 for v in (spec.core_loss_f, spec.core_loss_di)):
+            problems.append("core_loss_f and core_loss_di must be positive")
+        if any(v is not None and not 0.5 <= v <= 4.0 for v in (spec.core_alpha, spec.core_beta)):
+            problems.append("core_alpha and core_beta (Steinmetz exponents) must be between 0.5 and 4")
         if any(x <= 0 for x in spec.efficiency_currents):
             problems.append("efficiency_currents must be positive currents (A)")
         elif spec.f_sw > 0 and dead_sum * spec.f_sw >= 0.5:
@@ -1751,6 +1770,8 @@ class SettingsFile:
                                  "  (a silicon body diode's recovery)\n"
                                  "  efficiency sweep: qg (one FET's gate charge), v_gate, iq (the controller's supply\n"
                                  "  current), efficiency_currents [0.5, 1, 2, ...], efficiency_measured: bench.csv\n"
+                                 "  inductor core loss: core_loss: 150mW (at this operating point), or the maker's\n"
+                                 "  point with core_loss_f: 300kHz, core_loss_di: 2 (A p-p), core_alpha, core_beta\n"
                                  "  output_connector: the load's + and - pins (DC output path and ground return)")
         doc.yaml_set_comment_before_after_key(
             "bridges", before="Motor bridges (`groundtruth detect --write` finds the legs; the operating point and the "
@@ -1983,7 +2004,8 @@ class SettingsFile:
                 d["v_sd"] = c.v_sd
             if c.q_rr is not None:
                 d["q_rr"] = format_si(c.q_rr, "C")
-            for key, unit in (("qg", "C"), ("v_gate", ""), ("iq", "A")):
+            for key, unit in (("qg", "C"), ("v_gate", ""), ("iq", "A"), ("core_loss", "W"), ("core_loss_f", "Hz"),
+                              ("core_loss_di", ""), ("core_alpha", ""), ("core_beta", "")):
                 if getattr(c, key) is not None:
                     d[key] = format_si(getattr(c, key), unit) if unit else getattr(c, key)
             if c.efficiency_currents:
