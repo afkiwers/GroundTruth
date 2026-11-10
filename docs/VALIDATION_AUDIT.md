@@ -24,6 +24,9 @@ evidence available), **Fixed** (a defect, corrected, with a regression test that
     the wrong heights. On refboard, Z0 read +21 % (outer layers) and +52 % (inner layers) against the
     field-solved as-built cut, so the line current at high harmonics was underestimated. It is now within +3-4 %
     (outer) and ±8 % (inner).
+- Rounds 9 to 11 (2026-11-10) audited the Converters, Bridges and Signal paths tabs again with independent
+  time-domain references: 6 + 4 + 2 further defects (F9-1 to F9-6, F10-1 to F10-4, F11-1, F11-2), all fixed with
+  regression tests; see "Round 9", "Round 10", "Round 11" below.
 - Everything else examined agrees with independent methods: the path circuit (to 1e-4 against a 600-cell ladder),
   spectra, field formula, limits, LISNs, ringing (RK4), node charge, ripple, capacitor sharing, loop gain and its
   margins, DC-load drops (reciprocity, Tellegen, series parts, pins), via capacity and the energy balance at 60
@@ -854,6 +857,12 @@ harmonics' sum, and a look at what the test site and the receiver do with the nu
   speed-up and the memory guard on a real large model are untested.
 
 ## Final run
+- **Rounds 9 to 11** (2026-11-10, branches `audit-9`, `audit-10`, `audit-11`, each on the one before): the full
+  suite was NOT run on any of them. Run per round: its benchmark tool (34 / 95 / 27 cases, all pass) and the test
+  files of its area: round 9 the converter files (354 passed) and the core loss's (121); round 10 the bridge,
+  thermal, fields and core-loss files (133); round 11 the signal-path files (210 passed, 1 hand formula updated
+  for F11-2) and the emission-related solver files (195). The GUI test files beyond the Converters form's and the
+  rest of the suite are untested on these branches: run `tools/dev/run_tests_split.py` before merging.
 - **Round 3, full suite** (`out/audit_validation/full_round3.log`, 76 min, the machine also running neck sweeps):
   **859 passed, 1 skipped, 4 failed**: the launcher's git mode (as before) and three GUI timing tests (0.53-1.06 s
   against 0.5 s). Re-run under the same load, two of them fail on round 3's code and on the code before it
