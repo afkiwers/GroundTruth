@@ -62,6 +62,10 @@ def capture(frame, path: Path) -> bool:
 def main() -> int:
     """The command line (see the module): open the window on a copy of the board, optionally simulate, then capture
     each tab asked for once the window has been idle."""
+    # the console's code page (cp1252) cannot print every character of the help text: --help raised
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("board")
     ap.add_argument("--settings")

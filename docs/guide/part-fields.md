@@ -27,6 +27,11 @@ the [README](../../README.md); how the fields are read in detail: [the settings 
 | `Vf` | diode | V | `0.55V` | a buck's catch diode: its conduction loss | |
 | `Cj` | diode | pF | `120 picofarad` | a diode buck's catch-diode capacitance at the switch node: ringing, node charge current | |
 | `DCR` | inductor | mΩ | `6.9milliohm` | the winding resistance: winding loss, DC paths | DC loads, Thermal, Signal paths |
+| `Core Loss` | inductor | mW | `150mW` | the inductor's core loss from the maker's tool or curves: alone, at the stage's own frequency and ripple; with the two fields below, a point of the maker's data scaled to them | Thermal |
+| `Core Loss Frequency` | inductor | kHz | `300kHz` | the frequency the `Core Loss` is given at | |
+| `Core Loss Ripple` | inductor | A | `2A` | the ripple current, peak to peak, the `Core Loss` is given at | |
+| `Core Alpha` | inductor | – | `1.3` | the core loss's Steinmetz exponent of the frequency (empty: 1.3 assumed) | |
+| `Core Beta` | inductor | – | `2.2` | the core loss's Steinmetz exponent of the flux swing (empty: 2.2 assumed) | |
 | `Inductance` | inductor | H | `5.6uH` | the inductor's L (else its Value field): ripple, input filter | Signal paths |
 | `Capacitance` | capacitor | F | `10uF` | the capacitor's C (else its Value field) | Bridges, Signal paths, Power integrity |
 | `ESR` | capacitor | mΩ | `5milliohm` | ripple sharing between the input capacitors, conducted emission, capacitor loss | Bridges, Signal paths, Power integrity, Thermal |

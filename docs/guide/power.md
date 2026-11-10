@@ -316,7 +316,9 @@ Motor bridges heat the board with their RMS currents and their parts' losses (se
     P ∝ f^α·ΔI^β (for one inductor the flux swing follows the ripple current), and for a duty away from ½ by
     [D^(1−α) + (1−D)^(1−α)]/2^α (the steeper slope loses more). Without the maker's exponents α = 1.3 and
     β = 2.2 are assumed (a moulded powder core; ferrites 1.2-1.8 and 2.4-2.8), with a note. It heats the
-    inductor in Thermal. Without `core_loss` it is left out, with a note. Not in it: a DC bias's effect on the
+    inductor in Thermal. The inductor's symbol fields fill these (`Core Loss`, `Core Loss Frequency`, `Core Loss
+    Ripple`, `Core Alpha`, `Core Beta`: a parts database's parameters), as its `DCR` does. Without `core_loss` it is
+    left out, with a note. Not in it: a DC bias's effect on the
     loss, and the winding's AC resistance.
   - **reverse recovery** (`q_rr`, a silicon FET's body diode or a PN catch diode; the FETs' `Qrr` field; GaN has
     none): Q_rr·V·f_sw in the main switch at its hard turn-on. The same charge is a current spike in the hot loop,
