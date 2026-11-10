@@ -857,12 +857,20 @@ harmonics' sum, and a look at what the test site and the receiver do with the nu
   speed-up and the memory guard on a real large model are untested.
 
 ## Final run
-- **Rounds 9 to 11** (2026-11-10, branches `audit-9`, `audit-10`, `audit-11`, each on the one before): the full
-  suite was NOT run on any of them. Run per round: its benchmark tool (34 / 95 / 27 cases, all pass) and the test
+- **Rounds 9 to 11, full suite** on `audit-11` (2026-11-11, `tools/dev/run_tests_split.py`, 122 files, 113 min):
+  **1486 passed, 10 skipped, 1 failed**, then fixed: `tests/test_all_cores.py` asks that Use all cores solves
+  more frequencies than the default, and with F11-2 its board's gaps above 1 GHz lie more than
+  REFINE_MARGIN_DB below the warning level (6 dB less field there), where the refinement leaves gaps alone by
+  design: both runs solved the same 12. The solver was right; the test's signal is 6.6 V now, which gives the
+  refinement its gaps back (13 against 15 solves, as before the round), its assertions unchanged. It passes on
+  `main`, `audit-9` and `audit-10` as it was. No other file needed a change.
+- **Rounds 9 to 11, per round** (2026-11-10, branches `audit-9`, `audit-10`, `audit-11`, each on the one before), before the full
+  suite above. Run per round: its benchmark tool (34 / 95 / 27 cases, all pass) and the test
   files of its area: round 9 the converter files (354 passed) and the core loss's (121); round 10 the bridge,
   thermal, fields and core-loss files (133); round 11 the signal-path files (210 passed, 1 hand formula updated
-  for F11-2) and the emission-related solver files (195). The GUI test files beyond the Converters form's and the
-  rest of the suite are untested on these branches: run `tools/dev/run_tests_split.py` before merging.
+  for F11-2) and the emission-related solver files (195). `tools/dev/gui_probe.py` on a refboard copy for the Converters
+  form's five Core loss fields (load, Run checks, every tab twice, Save settings; no Simulate): 0 stalls over
+  150 ms, every step within 0.1 s of `main`'s.
 - **Round 3, full suite** (`out/audit_validation/full_round3.log`, 76 min, the machine also running neck sweeps):
   **859 passed, 1 skipped, 4 failed**: the launcher's git mode (as before) and three GUI timing tests (0.53-1.06 s
   against 0.5 s). Re-run under the same load, two of them fail on round 3's code and on the code before it
