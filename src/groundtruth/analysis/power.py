@@ -110,13 +110,14 @@ class ConverterResult(RouteResult):
     parts: list = field(default_factory=list)
     f_sw: float = 0.0
     pulse_a: float = 0.0
+    pulse_ripple_a: float = 0.0              # the inductor's ripple ΔI p-p on the pulse's top (0: unknown, flat) [A97]
     duty: float = 0.5
     rise_time: float = 0.0
     v_in: Optional[float] = None
     loop_nh: Optional[float] = None          # hot-loop inductance (series LC fit at LOOP_F_LO / LOOP_F)
     loop_mohm: Optional[float] = None        # its resistance at LOOP_F
     loop_f: float = LOOP_F
-    overshoot_v: Optional[float] = None      # L·I/tr
+    overshoot_v: Optional[float] = None      # L·(I + ΔI/2)/tr
     ringing: Optional[dict] = None           # f, q, r_ohm, overshoot_v
     recovery: Optional[dict] = None          # the rectifier's reverse recovery (recovery()): q_rr, i_rr, t_rr, di_dt,
                                              # and with C_oss overshoot_v = I_rr·√(L/C_oss)
@@ -775,10 +776,16 @@ def prepare_converter(model: BoardModel, spec: ConverterSpec, region: Optional[t
     f_max = max(analysis_band(spec.f_sw, edge), 1e9 if spec.c_oss else 0.0)
     top, res.band = band_top(config, min(f_max, RING_F_MAX))
     freqs, amps = trapezoid_harmonics(spec.f_sw, spec.rise_time, i_pulse, duty, top)
-    if res.recovery:          # every harmonic: the spike fills the trapezoid's nulls
+    # the inductor's ripple rides on the pulse's top (a buck's high side conducts I − ΔI/2 rising to I + ΔI/2, a
+    # boost's rectifier the reverse) [A97]: little at most harmonics, all there is near the flat pulse's nulls
+    # (every even harmonic at D = ½: what two phases 180° apart leave). Before 2026-11-10 the pulse was flat
+    # (audit round 9, F9-1). None without the inductor's L, and for a bridge's leg (the motor is its inductor)
+    from .thermal import ripple_pp
+    res.pulse_ripple_a = float(ripple_pp(board, config, spec, duty, spec.v_in) or 0.0) if not spec.bridge else 0.0
+    if res.recovery or res.pulse_ripple_a:    # every harmonic: the spike and the ramp fill the trapezoid's nulls
         freqs = spec.f_sw * np.arange(1, max(1, int(top // spec.f_sw)) + 1)
         amps = pulse_harmonics(freqs, spec.f_sw, i_pulse, duty, spec.rise_time, res.recovery,
-                               boost=spec.topology == "boost")
+                               boost=spec.topology == "boost", ripple=res.pulse_ripple_a)
     fine, cond = ModelRun(st, exc), ModelRun(cond_st, cond_exc)
     setup = ConverterSetup(spec, res, fine, cavity, cond, freqs, amps, amps.copy(), elements, LOOP_F, lisn,
                            standard, std_class, issues, t_start, config=config)
@@ -1220,7 +1227,9 @@ def apply_ringing(setup: ConverterSetup):
     L, _ = loop_inductance(fine.get(LOOP_F_LO), s_hi)
     res.loop_nh = L * 1e9
     res.loop_mohm = s_hi.Z_loop.real * 1e3
-    res.overshoot_v = L * res.pulse_a / spec.rise_time        # v = L di/dt over the edge [A14]
+    # v = L di/dt over the edge [A14], at the largest current the loop commutates: the ripple's peak I + ΔI/2 (the
+    # high side's turn-off; before 2026-11-10 the mean current, ΔI/(2·I) low: audit round 9, F9-6)
+    res.overshoot_v = L * (res.pulse_a + res.pulse_ripple_a / 2) / spec.rise_time
     snub = _snubber_rc(setup.config, spec)
     setup.currents, res.ringing = stage_spectrum(spec, setup.harmonics, setup.pulse, res.v_in, res.pulse_a, L,
                                                  s_hi.Z_loop.real, spec.rise_time, snub)
@@ -1286,17 +1295,41 @@ def recovery(spec: ConverterSpec, i_pulse: float, rise_time: Optional[float] = N
             "di_dt": di_dt}
 
 
+def pulse_shape(n, duty: float, ripple_ratio: float = 0.0) -> np.ndarray:
+    """The Fourier coefficients of a hot loop's current pulse per ampere of its mean height, about the pulse's
+    centre (complex; times e^(−j2πn·t_centre/T) for a pulse centred elsewhere): a pulse of width D·T whose top
+    carries the inductor's ripple, a ramp from 1 − k/2 to 1 + k/2 (k = ripple_ratio = ΔI/I: positive for a buck's
+    high side, whose current rises while it conducts; negative for a boost's rectifier, whose current falls).
+
+    X_n = D·[sin θ/θ − j·k·(sin θ − θ·cos θ)/(2θ²)], θ = πnD [Paul 2006] [A97]: the flat pulse's sinc, and in
+    quadrature the ramp's (1/T)∫ k·(u/τ)·e^(−jωu) du over the pulse (an odd function: imaginary). At a null of the
+    flat pulse (θ = mπ) the ramp's term is all there is: |X_n| = D·k/(2θ) = k/(2πn); at D = ½ every even harmonic."""
+    n = np.asarray(n, float)
+    th = np.pi * n * duty
+    flat = duty * np.sinc(n * duty)
+    if not ripple_ratio:
+        return flat.astype(complex)
+    safe = np.where(th > 1e-3, th, 1.0)
+    # (sin θ − θ cos θ)/(2θ²): θ/6 for small θ (the series; the difference cancels there)
+    ramp = np.where(th > 1e-3, (np.sin(safe) - safe * np.cos(safe)) / (2 * safe * safe), th / 6.0)
+    return flat - 1j * ripple_ratio * duty * ramp
+
+
 def pulse_harmonics(freqs: np.ndarray, f_sw: float, amplitude: float, duty: float, rise_time: float,
-                    rec: Optional[dict] = None, boost: bool = False) -> np.ndarray:
-    """The trapezoid's harmonic amplitudes (trapezoid_harmonics) on given harmonics of f_sw: another edge time on
-    a stage's own frequency grid (the fix advisor). With `rec` (recovery()), the recovery's triangle is added in
+                    rec: Optional[dict] = None, boost: bool = False, ripple: float = 0.0) -> np.ndarray:
+    """The hot-loop pulse's harmonic amplitudes on given harmonics of f_sw (a stage's own frequency grid; another
+    edge time: the fix advisor): the trapezoid's (trapezoid_harmonics), with `ripple` (ΔI p-p of the inductor
+    current, A) the ramp on its top (pulse_shape: rising for a buck's high side, falling for a boost's rectifier)
+    [A97]. With `rec` (recovery()), the recovery's triangle is added in
     phase: a buck's right after the pulse's rising edge (the high side's turn-on: its current overshoots to
     I + I_rr), a boost's right after the falling edge with the opposite sign (its rectifier, the pulse, swings to
     −I_rr when the low side turns on). Fourier coefficients X_n = (1/T)∫x·e^(−j2πnf t) dt [Paul 2006]: the
     trapezoid's A·D·sinc(nD)·sinc(n·f·tr)·e^(−jπn(D + f·tr)), the triangle's ±Q_rr·f·sinc²(n·f·t_rr/2)·
     e^(−j2πn·f·t0) at its centre t0; c_n = 2·|X_n + Y_n|."""
     n = np.rint(np.asarray(freqs, float) / f_sw)
-    x = amplitude * duty * np.sinc(n * duty) * np.sinc(n * f_sw * rise_time)
+    k = (-ripple if boost else ripple) / amplitude if ripple and amplitude else 0.0
+    # the edges: the pulse convolved with a box of width tr (each jump a linear ramp), its spectrum times the box's
+    x = amplitude * pulse_shape(n, duty, k) * np.sinc(n * f_sw * rise_time)
     if rec is None:
         return 2 * np.abs(x)
     x = x * np.exp(-1j * np.pi * n * (duty + f_sw * rise_time))
@@ -1952,11 +1985,13 @@ def input_estimate(board: Board, config: Config, spec, res, dc: list = (), unsol
 
     The losses are the ones Thermal heats the parts with (thermal.part_losses: the switches' conduction, the hard
     edge's overlap and output charge, a catch or boost diode, the inductor's DCR, series parts on the DC paths)
-    and, once the DC paths are solved (`dc`), their copper (r_copper·I²). Gate drive and the controller's own
-    supply are not included. A part without its value (no rds_on, no dcr) counts as lossless: `missing` says so,
-    as it does for a DC path in `unsolved` (its solve failed: its copper and series parts are not in the loss).
-    Returns {i_in_a, i_in_ideal_a, p_out_w, p_loss_w, copper_w, efficiency, losses: [{ref, power_w, what}],
-    missing: [notes]}, or None without an input voltage, an output voltage (or duty) and an output current."""
+    and, once the DC paths are solved (`dc`), their copper (r_copper·I²), and the fixed losses of the efficiency
+    sweep (efficiency.fixed_losses [A80]: the gates' drive and the controller's own supply, when the stage gives
+    qg / iq; before 2026-11-10 left out here, so the stage's efficiency and the sweep's at the same current
+    differed: audit round 9, F9-5). A part without its value (no rds_on, no dcr) counts as lossless: `missing`
+    says so, as it does for a DC path in `unsolved` (its solve failed: its copper and series parts are not in the
+    loss). Returns {i_in_a, i_in_ideal_a, p_out_w, p_loss_w, copper_w, fixed_w, efficiency, losses: [{ref, power_w,
+    what}], missing: [notes]}, or None without an input voltage, an output voltage (or duty) and an output current."""
     from dataclasses import replace
     from types import SimpleNamespace
     from .thermal import part_losses
@@ -1975,9 +2010,12 @@ def input_estimate(board: Board, config: Config, spec, res, dc: list = (), unsol
     missing = list(missing) + [f"DC {name} not solved: its copper and series parts are not in the loss"
                                for name in unsolved]
     copper = sum(p.get("r_copper_mohm", 0.0) * 1e-3 * p["current_a"] ** 2 for p in dc)
-    p_loss = sum(r["power_w"] for r in rows) + copper
+    from .efficiency import fixed_losses
+    fixed = sum(fixed_losses(spec, v_in))
+    p_loss = sum(r["power_w"] for r in rows) + copper + fixed
     return {"i_in_a": (p_out + p_loss) / v_in, "i_in_ideal_a": p_out / v_in, "p_out_w": p_out, "p_loss_w": p_loss,
-            "copper_w": copper, "efficiency": p_out / (p_out + p_loss), "losses": rows, "missing": missing}
+            "copper_w": copper, "fixed_w": fixed, "efficiency": p_out / (p_out + p_loss), "losses": rows,
+            "missing": missing}
 
 
 def _rescale_path(res, path: dict, k: float):
@@ -2018,7 +2056,8 @@ def input_note(est: dict, v_in: float) -> str:
     top = ", ".join(f"{r['ref']} {r['power_w']:.2g} W" for r in est["losses"][:4])
     return (f"input current {est['i_in_a']:.3g} A at {v_in:g} V: {est['p_out_w']:.3g} W out + {est['p_loss_w']:.2g} W "
             f"lost (efficiency {est['efficiency'] * 100:.1f} %; lossless {est['i_in_ideal_a']:.3g} A)"
-            + (f"; losses {top}" + (f", copper {est['copper_w']:.2g} W" if est["copper_w"] else "") if top else "")
+            + (f"; losses {top}" + (f", copper {est['copper_w']:.2g} W" if est["copper_w"] else "")
+               + (f", gate drive and controller {est['fixed_w']:.2g} W" if est.get("fixed_w") else "") if top else "")
             + ("; " + "; ".join(est["missing"]) if est["missing"] else ""))
 
 
@@ -2737,7 +2776,7 @@ def _converter_issues(setup: ConverterSetup, rules, a):
             top = ", ".join(c["name"] for c in res.caps[:2] if not c["lisn"])
             setup.issue(rules, "hot_loop",
                         f"{spec.name}: hot-loop inductance {res.loop_nh:.2f} nH ({top} closest); switching "
-                        f"{res.pulse_a:g} A in {spec.rise_time * 1e9:g} ns gives ≈{v_l:.1f} V of overshoot{ring_txt}: "
+                        f"{res.pulse_a + res.pulse_ripple_a / 2:.3g} A in {spec.rise_time * 1e9:g} ns gives ≈{v_l:.1f} V of overshoot{ring_txt}: "
                         f"{frac * 100:.0f} % of {res.v_in:g} V", loc, severity=sev, layer=res.layer, key=f"{key}:loop",
                         details={"loop_nh": res.loop_nh, "overshoot_v": worst, "fraction": frac})
     for miss in getattr(res, "dc_missing", None) or []:

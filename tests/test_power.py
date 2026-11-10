@@ -671,7 +671,7 @@ def test_input_current_is_output_power_plus_losses_over_the_input_voltage(tmp_pa
     """Energy balance, V_in·I_in = V_out·I_out + P_loss, term by term against the hand sums: a synchronous buck,
     12 V → 3 V at 3 A (D = 0.25), 300 kHz, 4 ns edges: conduction D·I²·R_on (high side) + (1-D-2·t_d·f)·I²·R_on,low,
     the low side's reverse conduction in two 25 ns dead times, (2·I·t_d − 2·Q_oss)·f·V_SD (the soft edge's node
-    swing taken off) [A48], one hard edge ½·V·I·t_r·f, output
+    swing taken off) [A48], one hard edge at the ripple's valley [A96], ½·V·I·t_r·f, output
     charge Q_oss·V·f, the inductor's I²·DCR, the switches and the winding with the ripple's I² + ΔI²/12 (ΔI =
     V_in·D(1−D)/(L·f_sw) [Erickson 2001]); then a DC path's copper I²·R."""
     from types import SimpleNamespace
@@ -685,9 +685,11 @@ def test_input_current_is_output_power_plus_losses_over_the_input_voltage(tmp_pa
     res = SimpleNamespace(net=spec.name, duty=0.25, v_in=12.0)
     est = input_estimate(board, sc.config, spec, res)
     dead = 2 * 25e-9 * 300e3                                                # 1.5 % of the period
-    i2 = 9 + (12 * 0.25 * 0.75 / (sc.config.model_for("L1").get("L") * 300e3)) ** 2 / 12
+    di = 12 * 0.25 * 0.75 / (sc.config.model_for("L1").get("L") * 300e3)
+    i2 = 9 + di ** 2 / 12
+    assert 0 < di < 6                               # the hard turn-on at the ripple's valley [A96] (round 9, F9-2)
     p_loss = (0.25 * i2 * 10e-3 + (0.75 - dead) * i2 * 5e-3 + (2 * 3 * 25e-9 - 2 * 20e-9) * 300e3 * 0.8
-              + 0.5 * 12 * 3 * 4e-9 * 300e3
+              + 0.5 * 12 * (3 - di / 2) * 4e-9 * 300e3
               + 20e-9 * 12 * 300e3 + i2 * 8e-3)
     assert est["p_out_w"] == pytest.approx(9.0) and est["p_loss_w"] == pytest.approx(p_loss)       # 0.251 W
     assert est["i_in_a"] == pytest.approx((9.0 + p_loss) / 12.0) and est["i_in_ideal_a"] == pytest.approx(0.75)

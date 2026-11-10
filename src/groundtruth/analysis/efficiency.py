@@ -80,6 +80,16 @@ def _fets(spec) -> list[str]:
     return [r for r in refs if not r.upper().startswith("D")]
 
 
+def fixed_losses(spec, v_in: float) -> tuple[float, float]:
+    """(gate drive, controller) in W, the same at every load current [A80]: each switching FET's gate charge driven
+    every cycle from v_gate, n·Q_g·V_gate·f_sw (EFF_V_GATE without a v_gate; none without qg), and the controller's
+    supply current from the input, I_q·V_in (none without iq). Shared by the sweep and the stage's input estimate
+    (power.input_estimate), so one operating point has one efficiency."""
+    v_gate = spec.v_gate if spec.v_gate is not None else EFF_V_GATE
+    p_gate = len(_fets(spec)) * spec.qg * v_gate * spec.f_sw if spec.qg and spec.f_sw else 0.0
+    return p_gate, (spec.iq * v_in if spec.iq else 0.0)
+
+
 def sweep(board, config, spec, res, currents: Optional[list] = None) -> Optional[EfficiencyResult]:
     """The stage's efficiency over load current (see the module), or None without an input voltage, an output
     voltage (or duty) or an output current. res: its ConverterResult (duty, v_in, its solved DC paths)."""
@@ -95,10 +105,7 @@ def sweep(board, config, spec, res, currents: Optional[list] = None) -> Optional
     out = EfficiencyResult(res.net, v_in, v_out, spec.i_out, currents)
     by = {c: [] for c in CATEGORIES}
     paths = list(getattr(res, "dc", []) or [])
-    fets = _fets(spec)
-    v_gate = spec.v_gate if spec.v_gate is not None else EFF_V_GATE
-    p_gate = len(fets) * spec.qg * v_gate * spec.f_sw if spec.qg and spec.f_sw else 0.0
-    p_ctrl = spec.iq * v_in if spec.iq else 0.0
+    p_gate, p_ctrl = fixed_losses(spec, v_in)
     one_cfg = None
     for i in currents:
         p_out = v_out * i
@@ -152,10 +159,16 @@ def _left_out(spec) -> list[str]:
         notes.append(f"{spec.name}: no qg (the FETs' gate charge, their Qg field): the gate-drive loss is left out")
     elif spec.v_gate is None:
         notes.append(f"{spec.name}: no v_gate, so the gates are driven from {EFF_V_GATE:g} V (assumed)")
+    if spec.qg:
+        # Q_g·V_gate·f_sw is what a gate supply at V_gate delivers; a linear regulator from the input draws the
+        # same charge at V_in (Q_g·V_in·f_sw: the regulator burns the difference) [A80]
+        notes.append(f"{spec.name}: the gate-drive loss takes the gates' supply as a rail at their drive voltage; "
+                     "fed by a linear regulator from the input it is V_in / V_gate times larger")
     if not spec.iq:
         notes.append(f"{spec.name}: no iq (the controller's supply current): its own consumption is left out")
-    notes.append("inductor core loss is not modelled (it needs the maker's loss data); below the marked current a "
-                 "controller may skip pulses or run discontinuous, which the model (continuous conduction) does not")
+    notes.append("not modelled: inductor core loss and the winding's AC resistance (they need the maker's loss "
+                 "data), the capacitors' ESR loss from their ripple current; below the marked current a controller "
+                 "may skip pulses or run discontinuous, which the model (continuous conduction) does not")
     return notes
 
 

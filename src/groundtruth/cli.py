@@ -751,7 +751,7 @@ def build_parser() -> argparse.ArgumentParser:
                              "GROUNDTRUTH_SPARSE)")
         sp.add_argument("--plane-screening", choices=("on", "off"),
                         help="a plane between two others as two face sheets, so it screens one side from the other "
-                             "at high frequency: right where the one sheet per layer is 7-27 % off, but a board-wide "
+                             "at high frequency: right where the one sheet per layer is 7-27 %% off, but a board-wide "
                              "solve on a multi-layer board takes about 3.5x as long (default: "
                              "analysis.plane_screening in the settings, off)")
         sp.add_argument("--resolution", type=float, choices=(1, 2, 4, 8, 16, 20, 25), metavar="N",

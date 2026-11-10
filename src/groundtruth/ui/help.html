@@ -456,8 +456,10 @@ radiated spectra), and when the recovery snaps off it adds an overshoot I_rr·�
   without vias of its own sends its share through the nearest vias around it, which then carry the most.</li>
 <li><b>The input current</b> is not entered: it follows from the energy balance V_in·I_in = V_out·I_out + losses
   (a buck at 100 % efficiency would draw I_out·D). The losses are the ones Thermal uses: the switches' conduction
-  (R_DS(on)), the hard edge (½·V·I·t_r·f_sw) and output charge (Q_oss·V·f_sw), a diode's V_f, the inductor's DCR,
-  series parts and the copper of the DC paths; gate drive and the controller's own supply are not counted, and a
+  (R_DS(on)), the hard edge (½·V·I·t_r·f_sw at the inductor current of that instant: a synchronous stage's turn-on
+  at the ripple's valley, a diode stage's turn-off at its peak too) and output charge (Q_oss·V·f_sw), a diode's
+  V_f, the inductor's DCR, series parts and the copper of the DC paths, and the gate drive and the controller's
+  own supply when Q_g and I_q are given (the same losses as the efficiency view's at this current); a
   value not given (no R_DS(on), no DCR) counts as no loss: the stage's notes say which. The stage's line on the
   Results tab shows the input current and efficiency, its notes the loss break-down, and the DC input path's map
   (connector to the high side) carries this current: its title reads "expected input current … A (efficiency
@@ -2441,6 +2443,10 @@ smaller but dense, which a regular grid lets it apply with FFTs.</p>
 <li><b>The hot loop.</b> The switches are current filaments carrying the commutated current as a trapezoid pulse
   train; their pours are solved copper.
   <ul>
+  <li>The pulse's top carries the inductor's ripple (from the inductor's L): it rises from I − ΔI/2 to I + ΔI/2
+    through a buck's high side and falls through a boost's rectifier. That fills the nulls a flat pulse has (the
+    even harmonics near 50 % duty, what interleaved phases leave at the input). The L·di/dt overshoot is taken at
+    the peak, I + ΔI/2. It was checked against the Fourier transform of the sampled waveform.</li>
   <li>The loop inductance comes from a series-LC fit at 30 and 100 MHz.</li>
   <li>The ringing is a second-order resonance with C_oss, and an edge-charge factor adds the C_oss·dv/dt current.
     It was checked against a time-domain simulation of the switching cell.</li>

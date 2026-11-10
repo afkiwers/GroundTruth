@@ -348,6 +348,15 @@ def reverse_conduction(t_hard: float, t_soft: float, i_l: float, delta_i: float,
             "charge": i_hard * t_hard + i_soft * t_soft_rev}
 
 
+def hard_edge_current(spec, i_l: float, delta_i: float) -> float:
+    """The current the main switch commutates with voltage across it, summed over its hard edges per period [A96]:
+    a synchronous stage's only at its turn-on, which happens at the ripple's valley I_L − ΔI/2 (never below zero:
+    a negative valley turns it on at zero voltage); with a diode rectifier also its turn-off, at the peak
+    I_L + ΔI/2 (together 2·I_L in continuous conduction). The overlap loss is ½·V·this·t_edge·f_sw."""
+    valley = max(i_l - delta_i / 2, 0.0)
+    return valley if _synchronous(spec) else valley + i_l + delta_i / 2
+
+
 def dead_time_values(board: Board, spec) -> tuple[float, float, float, list[str]]:
     """(rise, fall dead times in s, the rectifier's reverse-conduction voltage, notes on what was assumed) of a
     synchronous stage: its dead_rise / dead_fall and v_sd (set, or from the controller's GT field and the FETs' Vsd
@@ -483,6 +492,10 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
         hs = spec.high_side or spec.switch
         ls = spec.low_side
         main, rect = (ls, hs) if boost else (hs, ls)      # the hard-switched transistor(s), the rectifier
+        if boost and spec.switch and not ls:
+            # a boost with both switches in one IC: the IC is the main switch too. Before 2026-11-10 it was only
+            # the rectifier, and the stage had no switching, output-charge or recovery loss (audit round 9, F9-3)
+            main, rect = list(spec.switch), []
         main = [r for r in main if not _is_diode(r)]
         sync = _synchronous(spec)
         d_hs, d_ls = d, 1 - d                             # conduction share: the high side d in both topologies
@@ -539,9 +552,10 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
         if v and spec.f_sw and main:
             # overlap of voltage and current: synchronous, only the main switch's turn-on edge is hard (at its
             # turn-off the inductor current carries the switch node across while the channel is already off);
-            # with a diode both edges are
-            edges = 1 if sync else 2
-            p_edge = 0.5 * v * i_l * edges * spec.rise_time * spec.f_sw
+            # with a diode both edges are. Each edge at the inductor current of its instant: the turn-on at the
+            # ripple's valley, the turn-off at its peak (hard_edge_current [A96]; before 2026-11-10 the mean
+            # current at both: a synchronous stage's overlap read high by ΔI/2 over I_L, audit round 9, F9-2)
+            p_edge = 0.5 * v * hard_edge_current(spec, i_l, di_rip) * spec.rise_time * spec.f_sw
             # output charge per main-switch turn-on: synchronous, Q_oss·V (its own charge dumped, the rectifier
             # FET's charged through it: for equal FETs together Q_oss·V); a diode: its own energy, ≈ ½·Q_oss·V
             if spec.q_oss is not None:
@@ -557,7 +571,9 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
             for ref in main:
                 add(ref, p_edge / len(main), "switching, turn-on edge" if sync else "switching, both edges",
                     "switching")
-                add(ref, e_oss * spec.f_sw, f"output charge {how}·f_sw", "output charge")
+                # q_oss / c_oss are the side's parallel switches together (components/fields.py): each its share
+                # (before 2026-11-10 each the whole: n parallel switches read n times the loss, round 9, F9-4)
+                add(ref, e_oss * spec.f_sw / len(main), f"output charge {how}·f_sw", "output charge")
                 if e_rr:
                     add(ref, e_rr * spec.f_sw / len(main), f"reverse recovery Q_rr·V·f_sw ({spec.q_rr * 1e9:g} nC)",
                         "reverse recovery")
