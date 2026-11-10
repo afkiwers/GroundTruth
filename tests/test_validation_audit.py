@@ -607,7 +607,8 @@ def test_SP9_a_simulated_route_s_emission_is_its_path_current_times_its_moment(t
     assert not res.error, res.error
     for row in res.emissions[:40]:
         k, r = 2 * math.pi * row["f"] / C0, row["distance_m"]
-        e = 2 * ETA0 * k ** 2 * row["m_m2"] / (4 * math.pi * r) * math.sqrt(1 + 1 / (k * r) ** 2)
+        floor = 2 if row["f"] <= 1e9 else 1          # CISPR 32's floor reflects up to 1 GHz only [A7] (round 11)
+        e = floor * ETA0 * k ** 2 * row["m_m2"] / (4 * math.pi * r) * math.sqrt(1 + 1 / (k * r) ** 2)
         assert row["e_dbuv"] == pytest.approx(20 * math.log10(e / math.sqrt(2) / 1e-6), abs=0.01)
     p = res.path
     lines = [PathLine(r["z0"], r["eeff"], r["length_mm"] * 1e-3, width_m=r["width_mm"] * 1e-3,

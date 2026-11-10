@@ -807,6 +807,33 @@ assertion in tests/test_bridge.py; REFERENCES A99.
   a node's swing when a freewheeling current runs out between switching instants is not counted for the snubber;
   how the slow part of the bus current divides between the capacitors and the source [A99].
 
+## Round 11 (2026-11-10, branch `audit-11`)
+
+The signal paths' physics (the Signal paths tab) once more, for what rounds 1-4, 7, 8 and the 2026-11 signal-path
+audit left open: those verified the path's circuit against a nodal ladder, the spectra, the limits' tables, the
+field's formula, the line cuts and the MNA. This round's references are of another kind
+(`tools/dev/signal_audit.py`, 27 cases; tests/test_signal_audit.py): the line simulated in time, the envelope of the
+harmonics' sum, and a look at what the test site and the receiver do with the numbers.
+
+| ID | Finding | Severity | Status |
+|---|---|---|---|
+| F11-1 | A path through a logic buffer is evaluated at 4000 log-spaced harmonics [A76], and its emission read each kept harmonic alone, although the receiver's bandwidth holds RBW/f0 of the signal's harmonics, which the estimate adds in phase everywhere else [A12]. A 1 kHz signal through a buffer with a 2.5 ns edge read 36 dB low at 50 % duty (60 odd harmonics in 120 kHz), 42 dB where every harmonic is present: a slow sensor line through a Schmitt trigger looked harmless whatever its edge. | High (the paths it applies to: slow signals through buffers) | Fixed: the kept harmonics are the strongest of their neighbourhood (`simulate.thin_harmonics`) and each is weighed by its bandwidth's harmonics (`radiation.window_weight`); the reading from them equals the reading from all 1.3 million within 0.002 dB at 50 % and 30 % duty (0.5 dB at 10 %) |
+| F11-2 | The floor's reflection (+6 dB [A7]) was added at every frequency. CISPR 32 measures above 1 GHz over absorber on the floor (free-space conditions), so the estimate read 6 dB high there against the standard's method. | Medium-Low (conservative) | Fixed: CISPR 32 up to 1 GHz only (`radiation.CISPR_FLOOR_TOP`); a user limit (RE102) keeps it. Results above 1 GHz are 6 dB lower than before, for power stages too |
+
+- **Verified as shipped:**
+  - the path's circuit (`emi/path.path_currents`) against a travelling-wave simulation of the line in time (a
+    trapezoid source behind a resistance, 60 unit-delay sections, a capacitive load, 40 periods, then a Fourier
+    transform): the mean current along the line, the current into it and the end voltage of harmonics 1-15 as
+    complex values within 0.03 % for three lines (a mismatched driver, a ringing short line, a matched one);
+  - the loop's field with exact constants (η0 = μ0·c) within 0.07 % (the code's 1.316e-14 takes c = 3e8), the
+    induction term at 1 m down to 2 MHz;
+  - the in-phase sum of the harmonics within a bandwidth [A12] against the envelope of their sum in time: exact at
+    50 % duty, 2.0 dB over it at 30 % (the two edges of a period beat), never under.
+- **Limits, documented** (REFERENCES A7, A12, A76): a peak reading is compared with CISPR 32's quasi-peak limit
+  (below 1 GHz) and average limit (above): for a signal that repeats slower than about 1 kHz a quasi-peak detector
+  reads several dB to tens of dB less than the peak, so slow signals read conservatively; the estimate is
+  differential mode only and quasi-static (rows above the board's quasi-static limit are marked indicative).
+
 ## Remaining risks and unverified items
 - SP-19: above 1 GHz a board-wide resonance's worst margin moves about ±2 dB between the 4x, 8x and 16x grids on
   refboard (converged within 0.8 dB below 1 GHz); the grid note asks for 4x and says so (round 4).

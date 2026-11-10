@@ -2443,7 +2443,10 @@ smaller but dense, which a regular grid lets it apply with FFTs.</p>
 <li><b>Frequencies.</b> The solves happen at actual harmonics of the signal. The solver then adds solves in the
   gaps where a resonance could hide or where the estimate is closest to the limit, and always solves the
   worst-margin harmonic itself. Between solves, |m| is interpolated on log-log axes.</li>
-<li><b>Emission.</b> A small loop radiates |E| = 1.316·10⁻¹⁴·f²·|m|·I/r, doubled for the ground reflection. The
+<li><b>Emission.</b> A small loop radiates |E| = 1.316·10⁻¹⁴·f²·|m|·I/r, doubled for the ground reflection (CISPR 32: up to 1 GHz, where the test
+  site's floor reflects; above it the standard measures over absorber, so the free-space field is taken).
+  Harmonics closer together than the receiver's bandwidth add up in one reading; a path through a logic buffer,
+  evaluated at a thinned choice of its harmonics, reads what all of them within the bandwidth add up to. The
   receiver's bandwidth adds harmonics that fall in it in phase. The result is compared with CISPR 32.</li>
 </ul>
 
