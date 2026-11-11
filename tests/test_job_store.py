@@ -218,3 +218,48 @@ def test_the_server_jobs_tab_says_whether_the_servers_were_asked_yet():
         f.Destroy()
         if app is not None:
             app.Destroy()
+
+
+def test_the_server_jobs_tab_leaves_its_lists_alone_when_nothing_shown_changed():
+    """ServerJobsPanel.refresh is called after every round of asking the servers, during a Simulate too: with the
+    lines it shows unchanged it rebuilds no list and sets no details text (each rebuild held the GUI thread about
+    0.3 s under a Simulate's load); a changed job rebuilds its own list only, and the selection is kept."""
+    import time
+    wx = pytest.importorskip("wx")
+    app = wx.App(False) if not wx.GetApp() else None
+    from groundtruth.ui.jobs_panel import ServerJobsPanel
+    f = wx.Frame(None)
+    try:
+        p = ServerJobsPanel(f, lambda j: None, lambda j: None, lambda j: None)
+        now = time.time()
+
+        def jobs(fraction=0.4, message="solving"):
+            """Two jobs as the jobs folder gives them: new dicts every time."""
+            return [{"id": "a1", "server": "192.0.2.5", "kind": "simulate", "label": "Simulate", "board_name": "b",
+                     "state": "running", "fraction": fraction, "message": message, "run_s": 10.0, "polled": now,
+                     "submitted": now - 60},
+                    {"id": "b2", "server": "192.0.2.5", "kind": "simulate", "label": "Simulate", "board_name": "b",
+                     "state": "failed", "error": "ValueError", "submitted": now - 900}]
+
+        calls = {"list": 0, "past": 0, "detail": 0}
+        for name, lst in (("list", p.list), ("past", p.past_list)):
+            real = lst.DeleteAllItems
+            lst.DeleteAllItems = lambda real=real, name=name: (calls.__setitem__(name, calls[name] + 1), real())[1]
+        set_value = p.detail.SetValue
+        p.detail.SetValue = lambda t: (calls.__setitem__("detail", calls["detail"] + 1), set_value(t))[1]
+        p.refresh(jobs())
+        assert calls == {"list": 1, "past": 1, "detail": 1}
+        p.list.Select(0)
+        wx.Yield()
+        shown = dict(calls)
+        for _ in range(3):                                   # three rounds with nothing new
+            p.refresh(jobs())
+        assert calls == shown and [m["id"] for m in p.selected()] == ["a1"]
+        assert p.current[0] is not None and p.list.GetItemCount() == 1
+        p.refresh(jobs(message="writing the result"))        # the running job's line changed: its list only
+        assert calls["list"] == shown["list"] + 1 and calls["past"] == shown["past"]
+        assert [m["id"] for m in p.selected()] == ["a1"] and p.list.GetItemText(0, 9) == "writing the result"
+    finally:
+        f.Destroy()
+        if app is not None:
+            app.Destroy()
