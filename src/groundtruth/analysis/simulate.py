@@ -54,7 +54,7 @@ from ..geometry.shapes import arc_points
 from ..rules.checks import CheckResult, run_checks
 from ..solver.peec import (EPS0, GMRES_FIRST_ROWS, cache_value, gmres_restart, Branch, Grid, LidNode, PlaneLayer, PlanePair,
                            PlaneStack, RouteExcitation, Solution, SolverError, TraceSegment, build_grid,
-                           thread_budget, track_impedance, via_impedance)
+                           set_via_plating, thread_budget, track_impedance, via_impedance)
 from ..solver import gpu, peec, stats
 from ..solver import sparse as sparse_solver
 from .progress import Phases
@@ -4231,6 +4231,7 @@ def simulate(board: Board, config: Config, nets: Optional[list[str]] = None,
     (combine_dc; each stage's paths are kept portable instead, compact_dc_branch) and the issues' final
     dedupe/waivers/sort; see `SimulationResult.part`."""
     full = config
+    set_via_plating(config.analysis.via_plating_um)     # the via barrels of every model built below [A3]
     # every capacitor with a DC-bias curve at its own DC voltage (analysis/bias.py), for every solver below
     from .bias import at_dc
     # what the solver does and where the time goes, kept with the result (solver/stats.py, docs/SPEED.md)

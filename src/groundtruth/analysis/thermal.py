@@ -45,6 +45,9 @@ from ..core.issues import Issue, resolve_severity
 from .simulate import RouteResult
 
 Progress = Callable[[str, float], None]
+RDS_ON_TC = 0.005              # per K: a FET's R_DS(on) over temperature when the stage gives no rds_on_tc [A108]
+COPPER_TC = 0.00393            # per K: a copper winding's resistance [IEC 60028] (thermal.materials.COPPER.alpha)
+PART_T_REF = 25.0              # °C the entered R_DS(on) and DCR are for (a datasheet's) [A108]
 DIODE_VF = 0.5
 # s per edge, a synchronous stage without a dead time: an adaptive controller's (the LTC7890's with its DTCx pins on
 # GND [ADI LTC7890]) [A48]
@@ -473,22 +476,29 @@ def inductor_dcr(config: Config, spec, ref: str) -> tuple[Optional[float], str, 
                       "set its R on the Parts tab or the stage's dcr"]
 
 
-def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], list[str]]:
+def part_losses(board: Board, config: Config, converters, fixed: bool = False) -> tuple[list[dict], list[str]]:
     """[{"ref", "power_w", "what"}] of every power stage's parts at its operating point, and notes on what is
-    missing."""
+    missing. fixed: also the stage's gate-drive and controller losses (efficiency.fixed_losses), as heat in its
+    controller IC: for Thermal and Current capacity. The efficiency sweep and the input estimate add those two
+    themselves and call without it."""
     from .power import switch_inductor
     out: dict[str, dict] = {}
     notes = []
 
-    def add(ref: str, w: float, what: str, cat: str = "other"):
+    def add(ref: str, w: float, what: str, cat: str = "other", tc: float = 0.0):
         """Add a loss to a part, with its cause and its category (LOSS_CATEGORIES: the efficiency sweep's
-        breakdown, analysis/efficiency.py)."""
+        breakdown, analysis/efficiency.py). tc: the loss is an I²R whose resistance rises by this share per kelvin
+        (a FET's R_DS(on), a winding's copper): kept apart in the row's "tdep" {tc: W at PART_T_REF}, for Thermal
+        to scale with the part's temperature [A108]."""
         if w <= 0 or board.footprint(ref) is None:
             return
         e = out.setdefault(ref, {"ref": ref, "power_w": 0.0, "what": [], "by": {}})
         e["power_w"] += w
         e["what"].append(what)
         e["by"][cat] = e["by"].get(cat, 0.0) + w
+        if tc > 0:
+            e.setdefault("tdep", {})
+            e["tdep"][tc] = e["tdep"].get(tc, 0.0) + w
 
     from .pins import params_cache, series_note
     pin_params = params_cache(board, config)
@@ -588,19 +598,21 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
                     "swing", "dead time")
         if spec.rds_on is not None:
             r_lo = spec.rds_on_low if spec.rds_on_low is not None else spec.rds_on
+            # the channel's resistance rises with its temperature: the stage's rds_on_tc, else RDS_ON_TC [A108]
+            tc_fet = RDS_ON_TC if getattr(spec, "rds_on_tc", None) is None else spec.rds_on_tc
             fets_hs, fets_ls = [r for r in hs if not _is_diode(r)], [r for r in ls if not _is_diode(r)]
             for ref in fets_hs:              # parallel switches share the current: I²/n² each (ripple too)
                 if spec.switch and not rect:     # integrated, both switches inside: the current always flows
-                    add(ref, i_sq * spec.rds_on / len(fets_hs), f"conduction {i_l:g} A", "conduction")
+                    add(ref, i_sq * spec.rds_on / len(fets_hs), f"conduction {i_l:g} A", "conduction", tc_fet)
                 # (an integrated switch with an external rectifier, a catch diode, conducts its own share only:
                 # before 2026-11-12 the whole period, 1/D too much, with the diode's share counted as well: audit
                 # round 12, T-3)
                 else:
                     add(ref, d_hs * i_sq / len(fets_hs) ** 2 * spec.rds_on,
-                        f"conduction {d_hs * 100:.0f} % of the time", "conduction")
+                        f"conduction {d_hs * 100:.0f} % of the time", "conduction", tc_fet)
             for ref in fets_ls:
                 add(ref, d_ls * i_sq / len(fets_ls) ** 2 * r_lo, f"conduction {d_ls * 100:.0f} % of the time",
-                    "conduction")
+                    "conduction", tc_fet)
         else:
             notes.append(f"{spec.name}: no rds_on, so the switches' conduction loss is left out")
         for ref in rect:                     # a rectifier diode conducts while the main switch is off
@@ -641,7 +653,7 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
             dcr, how, n = inductor_dcr(config, spec, inductor.reference)
             notes.extend(n)
             if dcr is not None:
-                add(inductor.reference, i_sq * dcr, f"DCR {dcr * 1e3:g} mΩ{how}", "inductor")
+                add(inductor.reference, i_sq * dcr, f"DCR {dcr * 1e3:g} mΩ{how}", "inductor", COPPER_TC)
             # the core's loss from the ripple's flux swing [A98]: the same at every load current
             p_core, how, n = core_loss(spec, di_rip, d)
             notes.extend(n)
@@ -676,6 +688,27 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
         note = series_note(ref, pin, amps, pp)
         if note:
             notes.append(note)
+    if fixed:
+        # the gate drive's n·Q_g·V_gate·f_sw and the controller's I_q·V_in are drawn from the input and end as heat
+        # in the controller (its driver and regulator; the gate resistors' share is taken there too) [A107].
+        # Before 2026-11-12 they were in the stage's efficiency but heated nothing (audit round 12, T-5)
+        from .efficiency import fixed_losses
+        from .loop import controller
+        for res in converters:
+            spec = specs.get(res.net)
+            v_in = (spec.v_in or getattr(res, "v_in", None)) if spec is not None else None
+            if spec is None or not v_in:
+                continue
+            p_gate, p_ctrl = fixed_losses(spec, v_in)
+            if p_gate + p_ctrl <= 0:
+                continue
+            ctrl, _ = controller(board, spec)
+            if ctrl is None:
+                notes.append(f"{spec.name}: no controller IC found on its switch node, so its gate-drive and "
+                             f"supply loss ({p_gate + p_ctrl:.3g} W) heats no part here")
+                continue
+            add(ctrl.reference, p_gate, "gate drive", "gate drive")
+            add(ctrl.reference, p_ctrl, "its own supply current", "controller")
     rows = [dict(e, what=", ".join(e["what"])) for e in out.values()]
     return sorted(rows, key=lambda r: -r["power_w"]), notes
 
@@ -688,6 +721,9 @@ def _merged(*lists) -> list[dict]:
             e = out.setdefault(r["ref"], {"ref": r["ref"], "power_w": 0.0, "what": []})
             e["power_w"] += r["power_w"]
             e["what"].append(r["what"])
+            for tc, w in (r.get("tdep") or {}).items():          # the watts that follow the temperature [A108]
+                e.setdefault("tdep", {})
+                e["tdep"][tc] = e["tdep"].get(tc, 0.0) + w
     return sorted((dict(e, what=", ".join(w for w in e["what"] if w)) for e in out.values()),
                   key=lambda r: -r["power_w"])
 
@@ -723,6 +759,8 @@ def run_thermal(board: Board, config: Config, converters, progress: Optional[Pro
                 cancel=None) -> tuple[ThermalResult, list[Issue]]:
     """The thermal solve of these power-stage results (ConverterResults from simulate, their DC paths solved), with
     the DC paths at the solved temperatures (with_dc_at_temperature)."""
+    from ..solver.peec import set_via_plating
+    set_via_plating(config.analysis.via_plating_um)     # DC models built again at temperature [A3]
     inputs = thermal_inputs(board, config, converters, progress)
     if inputs is None:
         return _empty(config, NO_STAGES), []
@@ -825,7 +863,7 @@ def thermal_inputs(board: Board, config: Config, converters, progress: Optional[
         return None
     if progress:
         progress("thermal: the heat of the DC paths and the parts", 0.01)
-    losses, notes = part_losses(board, config, stages)
+    losses, notes = part_losses(board, config, stages, fixed=True)
     # a DC path whose solve failed has no current map: its copper heat is missing, so say so rather than present
     # the temperatures as the whole stage's (VALIDATION_AUDIT.md round 6, ISSUE-25)
     notes = list(notes) + [f"{s.net}: DC {name} was not solved: its copper heat is not in these temperatures"
@@ -843,7 +881,7 @@ def solve_thermal(board: Board, config: Config, heat: dict, losses: list[dict], 
     to solve on its mesh (the electro-thermal rounds) instead of planning one for this heat [A90]."""
     say = _sayer(progress)
     m = _build_model(board, config, heat, losses, notes, say, cancel, mesh_plan)
-    sol = _coupled(m, m.p20, m.Qc, say)
+    sol = _coupled(m, m.p20, m.Qc, say, tdep=_tdep(m, losses))
     if sol.error:
         res = _empty(config, sol.error)
         res.losses, res.notes, res.mesh_plan = losses, list(m.notes), m.mesh_plan
@@ -894,6 +932,7 @@ class _Solution:
     Pcu: Optional[np.ndarray] = None
     Q: Optional[np.ndarray] = None
     linear: str = ""                      # the last linear solve's failure (CG unconverged / broken down), if any
+    parts_hot: float = 0.0                # W the parts' I²R losses gained from their temperature (tdep) [A108]
     error: str = ""
     settled: bool = True
 
@@ -923,7 +962,10 @@ def _build_model(board: Board, config: Config, heat: dict, losses: list[dict], n
     say("thermal: preparing the board model", 0.02)
     tb = to_thermal_board(board)
     model_notes = list(notes or [])
+    # the barrels' plating as the settings' (their heat conduction through the board) [A3]
+    from ..thermal.project import BoardMaterials
     setup = BoardSetup(board_file=str(tb.path),
+                       materials=BoardMaterials(plating_um=float(config.analysis.via_plating_um or 25.0)),
                        components=[ComponentPower(l["ref"], l["power_w"], tc.theta_jb.get(l["ref"], 0.0))
                                    for l in losses],
                        mesh=MeshSettings(quality=tc.quality))
@@ -988,8 +1030,43 @@ def _build_model(board: Board, config: Config, heat: dict, losses: list[dict], n
     return _Model(tc, env, tb, setup, th, mesh, grid, layers, nodes, p20, Qc, model_notes, t0, mesh_plan)
 
 
-def _coupled(m: _Model, p20: np.ndarray, Qc: np.ndarray, say=None, T: Optional[np.ndarray] = None) -> _Solution:
-    """The coupled iteration (copper resistivity follows the temperature), from T (default: ambient)."""
+def _part_units(m: _Model, refs) -> dict:
+    """{ref: (nodes, weights summing to 1)}: where one watt of each part enters the mesh (its pads by area)."""
+    from ..thermal.project import ComponentPower
+    out, saved = {}, m.setup.components
+    try:
+        for r in refs:
+            m.setup.components = [ComponentPower(r, 1.0, 0.0)]
+            q, _ = m.th.component_heat()
+            i = np.nonzero(q)[0]
+            if len(i):
+                out[r] = (i, q[i] / q[i].sum())
+    finally:
+        m.setup.components = saved
+    return out
+
+
+def _tdep(m: _Model, rows, units: Optional[dict] = None) -> list:
+    """The parts' temperature-dependent losses for _coupled: [(nodes, weights, W at PART_T_REF, share per K, K the
+    junction is over the pads)] from loss rows' "tdep" ({ref, power_w, tdep}); the junction's rise over the pads
+    is θ_jb × the part's whole loss where a θ_jb is set."""
+    refs = [r["ref"] for r in rows if r.get("tdep")]
+    units = units if units is not None else _part_units(m, refs)
+    out = []
+    for r in rows:
+        if r.get("tdep") and r["ref"] in units:
+            i, w = units[r["ref"]]
+            rise = m.tc.theta_jb.get(r["ref"], 0.0) * r["power_w"]
+            out += [(i, w, watts, tc, rise) for tc, watts in r["tdep"].items() if watts > 0]
+    return out
+
+
+def _coupled(m: _Model, p20: np.ndarray, Qc: np.ndarray, say=None, T: Optional[np.ndarray] = None,
+             tdep: Optional[list] = None) -> _Solution:
+    """The coupled iteration (copper resistivity follows the temperature), from T (default: ambient). tdep (_tdep):
+    the parts' I²R losses whose resistance follows the part's temperature too: each adds
+    W·tc·(T_part − PART_T_REF) at its pads, T_part its pads' mean (plus its junction's rise) [A108]; never less
+    than half its entered loss (a part colder than its datasheet's 25 °C)."""
     from ..thermal.materials import COPPER
     th, env, nodes = m.th, m.env, m.nodes
     T = np.full(th.n, env.ambient_c) if T is None else T.copy()
@@ -1003,6 +1080,12 @@ def _coupled(m: _Model, p20: np.ndarray, Qc: np.ndarray, say=None, T: Optional[n
         lin_tol = 1e-5 if not hist else float(np.clip(1e-3 * hist[-1]["dT"] / rise, 1e-8, 1e-5))
         Pcu = p20 * (1 + COPPER.alpha * (T[nodes] - 20.0)) if len(nodes) else p20
         Q = Qc + np.bincount(nodes, weights=Pcu, minlength=th.n)
+        extra = 0.0
+        for i, w, watts, tc, rise in tdep or ():
+            more = watts * max(tc * (float(w @ T[i]) + rise - PART_T_REF), -0.5)
+            Q[i] += more * w
+            extra += more
+        sol.parts_hot = extra
         T_new = th.solve(Q, T, tol=lin_tol)
         # an unconverged CG returns its best x; two such in a row can differ by less than the tolerance, which would
         # read as settled (ISSUE-26): the last solve must have converged for the answer to count
@@ -1045,7 +1128,12 @@ def _result(board: Board, config: Config, m: _Model, sol: _Solution, losses: lis
     res.power_w = float(sol.Q.sum())
     res.copper_w20 = float(sol.p20.sum())
     res.copper_w = float(sol.Pcu.sum()) if len(m.nodes) else 0.0
-    res.parts_w = float(sol.Qc.sum())
+    res.parts_w = float(sol.Qc.sum()) + sol.parts_hot
+    if abs(sol.parts_hot) > 0.005 * max(float(sol.Qc.sum()), 1e-9):
+        res.notes.append(f"the switches' conduction and the windings' DCR losses at their temperatures: "
+                         f"{sol.parts_hot:+.3g} W against the entered values' (R_DS(on) {RDS_ON_TC * 100:g} %/K "
+                         f"unless the stage sets rds_on_tc, copper {COPPER_TC * 100:.2f} %/K, from "
+                         f"{PART_T_REF:g} °C); the parts' table lists the entered values' losses")
     res.heat_out = {"total": float(th.heat_out(T))}            # convection + radiation (+ mounts), W
 
     # maps: the level-0 grid, one temperature map per copper layer (rows of PCB Thermal's maps are y)
@@ -1222,16 +1310,20 @@ def capacity_inputs(board: Board, config: Config, converters) -> dict:
         for layer in cols[0]:
             old = terms[g].get(layer, (np.zeros(0), np.zeros(0), np.zeros(0)))
             terms[g][layer] = tuple(np.concatenate([old[i], cols[i][layer]]) for i in range(3))
-    losses, loss_notes = part_losses(board, config, stages)
+    losses, loss_notes = part_losses(board, config, stages, fixed=True)
     losses = _merged(losses, *(b.losses for b in bridges))
     fixed = {b.net: {r["ref"]: (0.0, 0.0, r["power_w"]) for r in b.losses} for b in bridges}
     scaled = {b.net: _bridge_terms(board, config, b) for b in bridges if b.net in names}
-    loss_terms = {}
+    loss_terms, tdep_terms = {}, {}
     for g, members in groups.items():
         conv = members & (set(specs) | set(rails))
-        at = [{r["ref"]: r["power_w"] for r in part_losses(board, *_scaled(config, stages, conv, s))[0]}
+        at = [{r["ref"]: r["power_w"] for r in part_losses(board, *_scaled(config, stages, conv, s), fixed=True)[0]}
               for s in (0.0, 1.0, 2.0)]
         lt = {ref: _quadratic(*(p.get(ref, 0.0) for p in at)) for ref in sorted(set().union(*at))}
+        # the share of each part's loss that follows its temperature, per coefficient, as quadratics too [A108]
+        td = [{(r["ref"], tc): w for r in part_losses(board, *_scaled(config, stages, conv, s), fixed=True)[0]
+               for tc, w in (r.get("tdep") or {}).items()} for s in (0.0, 1.0, 2.0)]
+        tdep_terms[g] = {k: _quadratic(*(p.get(k, 0.0) for p in td)) for k in sorted(set().union(*td))}
         for b in bridges:
             for ref, abc in (scaled[b.net] if b.net in members else fixed[b.net]).items():
                 lt[ref] = tuple(x + y for x, y in zip(lt.get(ref, (0.0, 0.0, 0.0)), abc))
@@ -1240,7 +1332,7 @@ def capacity_inputs(board: Board, config: Config, converters) -> dict:
     if ALL_STAGES in groups:
         info[ALL_STAGES] = {"i_out": None, "members": dict(nominal)}
     return {"heat": heat, "losses": losses, "notes": loss_notes + notes, "terms": terms, "loss_terms": loss_terms,
-            "stages": info}
+            "tdep_terms": tdep_terms, "stages": info}
 
 
 def _bridge_terms(board: Board, config: Config, b) -> dict[str, tuple]:
@@ -1359,6 +1451,7 @@ class _Capacity:
         self.near = {r: board.footprint(r).position for r in self.refs if board.footprint(r) is not None}
         self.what = {l["ref"]: l["what"] for l in inputs["losses"]}
         self.T_warm = None
+        self.tdep: list = []                # the last heat_at's temperature-dependent part losses (_coupled)
 
     def heat_at(self, name: str, s: float):
         """The heat with stage `name` at s x its load current: every heat term is a quadratic in s (a s^2 for the
@@ -1371,6 +1464,14 @@ class _Capacity:
         for r, p in P.items():
             if p > 0 and r in self.unit:
                 Qc[self.unit[r][0]] += p * self.unit[r][1]
+        # the parts' losses that follow their temperature at this current (_coupled's tdep) [A108]
+        rows = {}
+        for (r, tc), (a, b, c) in (self.inputs.get("tdep_terms") or {}).get(name, {}).items():
+            w = max(a * s * s + b * s + c, 0.0)
+            if w > 0 and r in self.unit:
+                rows.setdefault(r, {"ref": r, "power_w": P.get(r, 0.0), "tdep": {}})["tdep"][tc] = w
+        units = {r: (self.unit[r][0], self.unit[r][1] / self.unit[r][1].sum()) for r in rows}
+        self.tdep = _tdep(m, list(rows.values()), units)
         return p20, Qc, P
 
     def hottest(self, sol: _Solution, P: dict) -> tuple[float, str]:
@@ -1394,7 +1495,7 @@ class _Capacity:
     def run(self, name: str, s: float, k: int, n: int, count: int = 0) -> tuple:
         """One trial: (s, f = hottest − limit, solution, part powers, where); f is inf at a thermal runaway."""
         p20, Qc, P = self.heat_at(name, s)
-        sol = _coupled(self.m, p20, Qc, None, self.T_warm)
+        sol = _coupled(self.m, p20, Qc, None, self.T_warm, tdep=self.tdep)
         if sol.error:
             f, where = math.inf, "thermal runaway"
         else:

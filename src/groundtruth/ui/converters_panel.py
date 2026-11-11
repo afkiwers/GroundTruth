@@ -776,7 +776,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             old = self.converters[i]
             # what the form does not show stays as it was (the spread spectrum is on the form since 2026-10-17)
             new = replace(spec, source=old.source, reviewed=True, enabled=old.enabled, r_damp=old.r_damp,
-                          duty=old.duty, note=old.note,
+                          duty=old.duty, note=old.note, rds_on_tc=old.rds_on_tc,
                           snubber=list(old.snubber), snubber_c=old.snubber_c, snubber_r=old.snubber_r,
                           loop=dict(old.loop))
             link_form(self.board, self.settings.config, new, old)

@@ -64,7 +64,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from ..solver.kernel import filament_mutual
-from ..solver.peec import SIGMA_CU, VIA_PLATING
+from ..solver.peec import SIGMA_CU, via_plating
 
 KEYS = ("pin", "pin_d", "pin_r", "fill", "joint", "contact", "bond", "entry", "metal")
 # resistivity at 20 °C, Ω·m: copper 100 % IACS [IEC 60028]; brass C26000 ~28 %; phosphor bronze C51000 ~15 %;
@@ -373,7 +373,7 @@ def column_conductance(params: PinParams, drill_mm: float, thickness_m: float) -
     (2·π·r·t); pin_r replaces the rod's σ·A by thickness / pin_r. Above the solder only the plating conducts: the pin is
     not joined to the hole there."""
     r = max(drill_mm / 2 * 1e-3, 5e-5)
-    plating = SIGMA_CU * 2 * math.pi * r * VIA_PLATING
+    plating = SIGMA_CU * 2 * math.pi * r * via_plating()
     if params.pin == "hole" and params.pin_r is None:
         return SIGMA_CU * math.pi * r * r, plating
     d = params.pin_d if params.pin_d is not None else max(drill_mm - PIN_CLEARANCE_MM, 0.6 * drill_mm)

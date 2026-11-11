@@ -1443,7 +1443,11 @@ Simulate, it says so and asks for a Simulate instead of heating the design as it
   temperature);</li>
 <li>parts: their losses at the operating point (switch conduction, switching edges, output charge, a synchronous
   rectifier's reverse conduction in the dead times and its recovery charge, an inductor's DCR and core loss,
-  series parts, connector pins' contact and joint resistance; for a
+  series parts, connector pins' contact and joint resistance, and the gate drive and the controller's supply as
+  heat in the controller IC (when Q_g and I_q are given). A FET's conduction loss rises with its temperature
+  (0.5 %/K from 25 °C; <code>rds_on_tc</code> in the stage's settings sets another value, 0 none) and a winding's
+  DCR loss with copper's 0.39 %/K, in Thermal and Current capacity; a part in several stages' input paths (the
+  input pass FET) is heated by their summed current; for a
   bridge, the losses from its drive waveform).</li>
 </ul>
 <p><b>Current capacity</b> (Results tab, <b>Further analysis ▾</b>) finds, per converter, the load current, and per bridge, the phase
@@ -2065,7 +2069,8 @@ the standard's, 10 m below 1 GHz and 3 m above for CISPR 32), <code>ground_refle
 floor's reflection out everywhere), <code>driver_ohms</code> (25) and <code>load_pf</code> (5) for paths without
 their own source and load, <code>plane_capacitance</code>, <code>planes</code> (auto or nearest),
 <code>cavity_max_nodes</code> (40 000: the board-wide model's grid budget; <code>max_nodes</code> is 100 000),
-<code>via_plating_um</code> (25: a via's plating for its IPC-2221 capacity and current density),
+<code>via_plating_um</code> (25: a via's plating, for its resistance, heat, current density and IPC-2221
+capacity),
 <code>ce101_source_v</code> and <code>ce101_load_a</code>.
 In the plugin, <a href="#prefs">Preferences</a> sets the resolution and can replace <code>threads</code>,
 <code>gpu</code>, <code>sparse</code>, <code>plane_screening</code>, <code>thermal.quality</code>, the electro-thermal

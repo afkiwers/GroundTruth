@@ -72,7 +72,22 @@ from .kernel import (GMD_FLAT, MU0, filament_mutual, leggauss, segment_mutual, s
                      strip_kernel, strip_self, strip_self_numeric)
 
 SIGMA_CU = 5.8e7            # S/m, annealed copper at 20 °C [IEC 60028]
-VIA_PLATING = 25e-6         # m, a via barrel's plating [A3]
+VIA_PLATING = 25e-6         # m, a via barrel's plating [A3]: the default of analysis.via_plating_um
+_via_plating = VIA_PLATING  # the plating the models are built with now (set_via_plating)
+
+
+def set_via_plating(um: Optional[float]):
+    """The barrels' plating for the models built from now on: the settings' analysis.via_plating_um (µm; None or
+    not positive: the default). Simulate, Thermal and Current capacity set it from their settings as they start,
+    so a via's resistance, its heat and its share of the current follow the setting, as its IPC-2221 capacity and
+    current density do. Before 2026-11-12 only those two did (audit round 12, T-6) [A3]."""
+    global _via_plating
+    _via_plating = um * 1e-6 if um and um > 0 else VIA_PLATING
+
+
+def via_plating() -> float:
+    """The barrels' plating in metres as set (set_via_plating)."""
+    return _via_plating
 EPS0 = 8.8541878128e-12
 GMRES_MEMORY = 4e8          # bytes allowed for the Krylov basis (sets the restart length) ...
 GMRES_RESTART_MIN = 100     # ... but a restart at least this long: refboard's board-wide model at 8x (~1 M
@@ -1052,7 +1067,7 @@ def via_impedance(length_m: float, drill_m: float, sigma: float = SIGMA_CU, fill
     # [Grover 1946]); its
     # resistance that of the plating ring 2 pi r t (or of the whole hole when a pin fills it)
     L = float(filament_mutual(max(length_m, 1e-6), np.array(0.0), np.array(r)))
-    area = math.pi * r * r if filled else math.pi * 2 * r * VIA_PLATING
+    area = math.pi * r * r if filled else math.pi * 2 * r * via_plating()
     R = max(length_m, 1e-6) / (sigma * area)
     return lambda f, R=R, L=L: complex(R, 2 * math.pi * f * L)
 
