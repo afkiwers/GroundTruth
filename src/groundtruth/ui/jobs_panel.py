@@ -130,6 +130,8 @@ class ServerJobsPanel(wx.Panel):
         self.jobs: list[dict] = []
         self.current: list[dict] = []
         self.past: list[dict] = []
+        self._lines: list = [None, None]        # the lines shown in the two lists (refresh: unchanged ones stay)
+        self._detail_text: Optional[str] = None  # the details box's text as set last
         self.where = wx.StaticText(self, label="Jobs handed to a compute server from this computer (Preferences, "
                                                "Compute server). They run there while you work on, or with the "
                                                "laptop asleep; a result waits there 24 h and comes here when the "
@@ -250,27 +252,37 @@ class ServerJobsPanel(wx.Panel):
         if height > 0:
             theme.save_prefs(**{DETAILS_PREF: int(self.ToDIP(height))})
 
+    def _row(self, m: dict) -> tuple:
+        """A job's line: its columns' texts (the elapsed time left empty: _tick's, every second) and whether it is
+        drawn as a failure."""
+        return (m["id"], time.strftime("%Y-%m-%d %H:%M", time.localtime(m.get("submitted", 0))),
+                m.get("server_name") or m.get("server", ""), version_text(m), m.get("board_name", ""),
+                (m.get("label") if m.get("attached") else None) or KINDS.get(m.get("kind"), m.get("kind", "")),
+                resolution_text(m), state_text(m), "", self._memory(m), self._summary(m),
+                m.get("state") in ("failed", "lost"))
+
     def refresh(self, jobs: list[dict]):
-        """Show `jobs` (LocalJobs.all()) in the two lists, keeping the selection."""
+        """Show `jobs` (LocalJobs.all()) in the two lists, keeping the selection. A list whose lines are the ones
+        shown already is left alone: the tracker calls this after every round of asking the servers, during a
+        Simulate too, and rebuilding two lists and the details then held the GUI thread about 0.3 s each time
+        while the solver's threads had the processor (tools/dev/gui_probe.py)."""
         keep = {m["id"] for m in self.selected()}
         self.jobs = list(jobs)
         self.current = [m for m in self.jobs if m.get("state") not in PAST]
         self.past = [m for m in self.jobs if m.get("state") in PAST]
-        for lst, rows in ((self.list, self.current), (self.past_list, self.past)):
+        for which, (lst, rows) in enumerate(((self.list, self.current), (self.past_list, self.past))):
+            lines = [self._row(m) for m in rows]
+            if lines == self._lines[which]:
+                continue
+            self._lines[which] = lines
             lst.Freeze()
             try:
                 lst.DeleteAllItems()
-                for k, m in enumerate(rows):
-                    lst.InsertItem(k, time.strftime("%Y-%m-%d %H:%M", time.localtime(m.get("submitted", 0))))
-                    for col, text in enumerate((m.get("server_name") or m.get("server", ""), version_text(m),
-                                                m.get("board_name", ""),
-                                                (m.get("label") if m.get("attached") else None)
-                                                or KINDS.get(m.get("kind"), m.get("kind", "")), resolution_text(m),
-                                                state_text(m),
-                                                clock_text(elapsed(m)), self._memory(m), self._summary(m)),
-                                               start=1):
-                        lst.SetItem(k, col, text)
-                    if m.get("state") in ("failed", "lost"):
+                for k, (m, line) in enumerate(zip(rows, lines)):
+                    lst.InsertItem(k, line[1])
+                    for col, text in enumerate(line[2:-1], start=1):
+                        lst.SetItem(k, col, clock_text(elapsed(m)) if col == ELAPSED else text)
+                    if line[-1]:
                         lst.SetItemTextColour(k, theme.colour(theme.palette().warn))
                     if m["id"] in keep:
                         lst.Select(k)
@@ -323,9 +335,11 @@ class ServerJobsPanel(wx.Panel):
     def _show_details(self):
         """The details box for the selection, and the buttons."""
         sel = self.selected()
-        self.detail.SetValue("\n\n".join(details(m) for m in sel) if sel else
-                             "Select a job for its details: where and how long it ran, and a failure's error in "
-                             "full.")
+        text = ("\n\n".join(details(m) for m in sel) if sel else
+                "Select a job for its details: where and how long it ran, and a failure's error in full.")
+        if text != self._detail_text:           # an unchanged text is not set again (it would also scroll to the top)
+            self._detail_text = text
+            self.detail.SetValue(text)
         self._enable()
 
     def _copy(self):
@@ -340,12 +354,13 @@ class ServerJobsPanel(wx.Panel):
                                   "the clipboard is busy (another program has it open): try again")
 
     def _enable(self):
-        """The buttons for what is selected."""
+        """The buttons for what is selected (only those whose state changes are touched)."""
         sel = self.selected()
-        self.buttons["show"].Enable(any(m.get("state") == "ready" for m in sel))
-        self.buttons["cancel"].Enable(any(m.get("state") in ("queued", "running") for m in sel))
-        self.buttons["remove"].Enable(bool(sel))
-        self.buttons["copy"].Enable(bool(sel))
+        for name, on in (("show", any(m.get("state") == "ready" for m in sel)),
+                         ("cancel", any(m.get("state") in ("queued", "running") for m in sel)),
+                         ("remove", bool(sel)), ("copy", bool(sel))):
+            if self.buttons[name].IsEnabled() != on:
+                self.buttons[name].Enable(on)
 
     def count_active(self) -> tuple[int, int]:
         """(jobs on the server, results here not shown yet)."""

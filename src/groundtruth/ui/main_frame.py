@@ -712,9 +712,11 @@ class MainFrame(ConfigActions, wx.Frame):
         # the servers (the user: "current jobs are lost after a while")
         self.remote_jobs = SafeJobs()
         close_stale(self.remote_jobs)           # waited-for jobs of a window closed meanwhile: past jobs
-        self._tracker = SyncTracker(self.remote_jobs, self._remote_for, lambda m: wx.CallAfter(self._job_changed, m),
+        # both callbacks run on the tracker's thread: the jobs folder is read there and handed to the GUI thread
+        self._tracker = SyncTracker(self.remote_jobs, self._remote_for,
+                                    lambda m: wx.CallAfter(self._job_changed, m, self.remote_jobs.all()),
                                     servers=self._job_servers,
-                                    on_round=lambda t: wx.CallAfter(self._jobs_synced, t))
+                                    on_round=lambda t: wx.CallAfter(self._jobs_synced, t, self.remote_jobs.all()))
         self._tracker.start()
         # the window appears at once; its tabs follow step by step, then the board is read in the background
         self._sync_loading("building the tabs", 0.0)
@@ -2757,7 +2759,8 @@ class MainFrame(ConfigActions, wx.Frame):
                 "session": self._session_token, "pid": os.getpid()}    # job_store.close_stale: whose window
         if cfg is not None:
             base["resolution"] = float(cfg.analysis.resolution)
-        return watcher(self.remote_jobs, base, lambda m: wx.CallAfter(self._refresh_jobs))
+        # (the jobs folder is read on the caller's thread, not the GUI thread: _refresh_jobs)
+        return watcher(self.remote_jobs, base, lambda m: wx.CallAfter(self._refresh_jobs, self.remote_jobs.all()))
 
     def _handed_over(self, h: "HandedOver"):
         """The job is on the server: say so, list it, have the tracker ask about it at once."""
@@ -2769,26 +2772,30 @@ class MainFrame(ConfigActions, wx.Frame):
         self._refresh_jobs()
         self._tracker.poke()
 
-    def _refresh_jobs(self):
-        """The Server jobs tab from the jobs folder (a few small files), and whether the servers were asked yet."""
-        panel = getattr(self, "server_jobs", None)
-        if panel is not None:
-            panel.refresh(self.remote_jobs.all())
-            panel.set_sync(self._tracker.last_round)
-
-    def _jobs_synced(self, when: float):
-        """(GUI thread, from the tracker) A round of asking the compute servers is done: the tab's list is theirs."""
+    def _refresh_jobs(self, jobs: Optional[list] = None):
+        """The Server jobs tab from the jobs folder, and whether the servers were asked yet. `jobs`: the folder's
+        list as a background thread read it (the tracker, a hand-over's watcher), so the GUI thread reads no files;
+        None: read here (after a click: a few small files)."""
         panel = getattr(self, "server_jobs", None) if self else None
         if panel is not None:
-            panel.refresh(self.remote_jobs.all())
+            panel.refresh(self.remote_jobs.all() if jobs is None else jobs)
+            panel.set_sync(self._tracker.last_round)
+
+    def _jobs_synced(self, when: float, jobs: Optional[list] = None):
+        """(GUI thread, from the tracker) A round of asking the compute servers is done: the tab's list is theirs.
+        `jobs`: the list the tracker's thread read (see _refresh_jobs)."""
+        panel = getattr(self, "server_jobs", None) if self else None
+        if panel is not None:
+            panel.refresh(self.remote_jobs.all() if jobs is None else jobs)
             panel.set_sync(when)
 
-    def _job_changed(self, meta: dict):
+    def _job_changed(self, meta: dict, jobs: Optional[list] = None):
         """(GUI thread, from the tracker) A job's state changed: the tab follows; a finished one is shown at once
-        when this window handed it over for the board open here and no results were shown since, else offered."""
+        when this window handed it over for the board open here and no results were shown since, else offered.
+        `jobs`: the list the tracker's thread read (see _refresh_jobs)."""
         if not self:
             return
-        self._refresh_jobs()
+        self._refresh_jobs(jobs)
         state, what = meta.get("state"), f"{meta.get('label', 'job')} on {meta.get('board_name', '')}"
         if state == "ready":
             mine = (meta.get("session") == self._session_token and self._same_board(meta)
