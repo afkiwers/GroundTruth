@@ -843,6 +843,39 @@ harmonics' sum, and a look at what the test site and the receiver do with the nu
   reads several dB to tens of dB less than the peak, so slow signals read conservatively; the estimate is
   differential mode only and quasi-static (rows above the board's quasi-static limit are marked indicative).
 
+## Round 12 (2026-11-11 / 12, branch `audit-12`)
+
+A round across the whole tool, asked for as "another full audit of the physics", with the help and the references
+checked against the code and their sources. Independent reviewers read one area each and reported findings; every
+finding was then checked against the code or recomputed before anything was changed. Done so far: the
+references, the help, the field solver's and the emission estimates' physics. **Not done yet** (see "Open" below):
+the thermal and DC models, power integrity / signal integrity / the circuit solver, and a second pass over the
+converters, bridges and signal paths.
+
+| ID | Finding | Severity | Status |
+|---|---|---|---|
+| E-1 | A signal path radiated as a small loop carrying its MEAN current, also when the route is not short against the wavelength. The mean is the broadside radiation integral only: on a standing wave it goes through nulls while the trace radiates towards its ends. Against the exact far field of a trace over a plane (image theory, end posts and displacement current included) the estimate read 8 to 20 dB low from about a quarter wavelength of route (50 mm from 0.9 GHz, 100 mm from 0.45 GHz), 30 dB and more at the nulls. | High (optimistic; fast nets on long routes) | Fixed: the current's phase along the route counts, the maximum over direction of the radiation integral (`emi.path.radiating_current`, `PathResult.i_rad`) [A103]; within 0.2 dB of the exact field for 20-150 mm, 30 MHz-6 GHz |
+| E-2 | With spread spectrum a CISPR conducted estimate was judged on the average detector against the average limit only. That is the strictest for undithered harmonics, but a dithered one's average reading falls by about RBW / sweep while its quasi-peak reading hardly falls when the modulation is slower than the bandwidth: the quasi-peak limit binds. A 10 % triangle at 1 kHz was credited 3 to 7 dB too much from 0.8 MHz up (class B). | Medium (optimistic; stages with a slow dither) | Fixed: both detectors are read (the second with the simulated peak detector, 0.9-1.5 dB over a quasi-peak one) and the smaller margin kept (`conducted.conducted_arrays`) [A104]; checked against an independent quasi-peak detector in time |
+| E-3 | The loop moment's height is foil centre to foil centre at every frequency, while the inductance uses the facing surfaces [A79]: 0.9 to 2.3 dB high for 35 µm foils on 0.1-0.2 mm dielectrics. | Low (conservative) | Documented [A105], not changed |
+| R-1 | CISPR 25's peak limit was taken as the average one + 20 dB in every band; TV band I (41-88 MHz) is + 10 dB. Only the help chart's peak line used it. | Low | Fixed (`conducted.CISPR25_AV5`'s last column) [A10] |
+| R-2, R-3 | The recovered-charge loss was cited as Erickson §4.6 (the 2nd edition has no such section: §4.3.2) and the diode's recovery as Mohan §20-3 (the breakdown-voltage section: §20-5). | Low (citations) | Fixed |
+| R-5, R-6 | Peaceman's equivalent radius of a source cell (0.198·Δx, the thermal solver's via model) had no source; the FR-4 and foil defaults of a board without stackup data and the tied-cell cluster's radius were not listed as assumptions. | Low | Added: [Peaceman 1978], [A101], [A102] |
+| R-4, R-7 to R-12, R-15 | Table numbers, editions and details of the list (CISPR 32's tables, CISPR 16-1-1 / 16-1-2 / 25 editions, the V-network's band, Jackson §5.4, a proceedings' year). | Low | Fixed in docs/REFERENCES.md |
+| H-1 to H-17, H-19, H-20, H-24 | The help against the code: it denied a common-mode estimate the tool makes; the loss lists lacked the dead times, the recovered charge, the core loss and connector pins; the power-integrity and control-loop issues' thresholds; the floor rule's exception for a limit of the user's and the refinement's choice were missing; 18 of the 45 checks were never named; the rules' thresholds had no numbers. | Documentation | Fixed in `ui/help.html` |
+| names | Real net names and part designators of the reference board stood in comments, tests, docs and the help. | Repository rule | Replaced by generic ones in every tracked file (one consistent mapping) |
+
+- **Verified as shipped** (by the reviewers, by recomputation or against the sources they could see): the small
+  loop's field and its constant, the loop moment's terms, the CISPR 32 / 22 radiated and conducted tables, CISPR
+  25's average table, CE102 and its LISN, the receiver bandwidths, the trapezoid spectrum and `pulse_shape`, the
+  spread receiver's average detector (0.2 dB), the path line's limits, IPC-2221B's spacing table and capacity
+  constants, copper's constants, the convection correlations.
+- **Open** (round 12 is not finished): the three areas named above have not been reviewed; of the help's
+  findings H-18 (stacked boards), H-21 to H-23 (settings without a form field, Preferences details, some form
+  fields) and the parts of the help the review did not read (menus, the results panels, the Server section, the
+  guides in full); MIL-STD-461's CE101 and RE102-1 / -2 figure values were not re-read; suspicions noted and not
+  checked: a limit of the user's with CISPR bandwidths below 30 MHz, `edge_charge_factor` on the ripple ramp's
+  harmonics, RE102 below 30 MHz (a rod antenna's vertical field).
+
 ## Remaining risks and unverified items
 - SP-19: above 1 GHz a board-wide resonance's worst margin moves about ±2 dB between the 4x, 8x and 16x grids on
   refboard (converged within 0.8 dB below 1 GHz); the grid note asks for 4x and says so (round 4).

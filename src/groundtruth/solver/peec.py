@@ -2640,7 +2640,8 @@ class PlaneStack:
 
     def moment(self, trace: list[TraceSegment], Ib: np.ndarray) -> np.ndarray:
         """m = ½ ∮ r × I dl over the closed loop (signal path, plane strips, displacement currents, branches): the
-        magnetic dipole moment [Jackson 1999, §5.6]."""
+        magnetic dipole moment [Jackson 1999, §5.6]. The strips sit at their foils' centres at every
+        frequency [A105]."""
         # m = 1/2 sum over every piece of the closed loop of r x (I dl); for a straight piece from a to b this is
         # I (a x b) / 2 exactly. The loop is closed (KCL holds), so the result does not depend on the origin.
         m = np.zeros(3, complex)
