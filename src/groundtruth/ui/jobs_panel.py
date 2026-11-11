@@ -132,6 +132,8 @@ class ServerJobsPanel(wx.Panel):
         self.past: list[dict] = []
         self._lines: list = [None, None]        # the lines shown in the two lists (refresh: unchanged ones stay)
         self._detail_text: Optional[str] = None  # the details box's text as set last
+        self._sync_text: Optional[str] = None    # the line over the lists as set last, and its colour
+        self._sync_colour = None
         self.where = wx.StaticText(self, label="Jobs handed to a compute server from this computer (Preferences, "
                                                "Compute server). They run there while you work on, or with the "
                                                "laptop asleep; a result waits there 24 h and comes here when the "
@@ -233,9 +235,17 @@ class ServerJobsPanel(wx.Panel):
         else:
             text = f"Checked with the compute server(s) at {time.strftime('%H:%M:%S', time.localtime(when))}."
             colour = theme.palette().muted
-        if self.sync.GetLabel() != text:
-            self.sync.SetLabel(text)
+        # as few calls into wx as the change needs: each one hands the interpreter to the solver's threads and waits
+        # to get it back, which adds up to a visible stall during a Simulate (after every round: the time's text)
+        if text == self._sync_text:
+            return
+        relayout = self._sync_text is None or len(text) != len(self._sync_text)
+        self._sync_text = text
+        self.sync.SetLabel(text)
+        if colour != self._sync_colour:
+            self._sync_colour = colour
             self.sync.SetForegroundColour(theme.colour(colour))
+        if relayout:                    # the same wording with another time keeps its size
             self.Layout()
 
     def _destroyed(self, evt):
@@ -266,12 +276,16 @@ class ServerJobsPanel(wx.Panel):
         shown already is left alone: the tracker calls this after every round of asking the servers, during a
         Simulate too, and rebuilding two lists and the details then held the GUI thread about 0.3 s each time
         while the solver's threads had the processor (tools/dev/gui_probe.py)."""
+        current = [m for m in jobs if m.get("state") not in PAST]
+        past = [m for m in jobs if m.get("state") in PAST]
+        both = [[self._row(m) for m in current], [self._row(m) for m in past]]
+        if both == self._lines:         # nothing shown changes: no call into wx at all (see set_sync)
+            self.jobs, self.current, self.past = list(jobs), current, past
+            return
         keep = {m["id"] for m in self.selected()}
-        self.jobs = list(jobs)
-        self.current = [m for m in self.jobs if m.get("state") not in PAST]
-        self.past = [m for m in self.jobs if m.get("state") in PAST]
+        self.jobs, self.current, self.past = list(jobs), current, past
         for which, (lst, rows) in enumerate(((self.list, self.current), (self.past_list, self.past))):
-            lines = [self._row(m) for m in rows]
+            lines = both[which]
             if lines == self._lines[which]:
                 continue
             self._lines[which] = lines
