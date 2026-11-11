@@ -935,8 +935,11 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   opposite, came out up to 14 dB low.
   Tests: `tests/test_path.py` (series LC, AC coupling, a matched line, source L and C, the fall time against a
   numerical Fourier series, a board path through R, L and C).
-- Emission: `|E| = 1.316e-14 f² |m| Ī / r`, ×2 for ground reflection, compared with CISPR 32 class A/B (QP at
-  10 m below 1 GHz, average at 3 m above). `|m(f)|` is log-log interpolated between solved harmonics.
+- Emission: `|E| = 1.316e-14 f² |m| Ī / r`, ×2 for ground reflection (CISPR 32: up to 1 GHz only, absorber on the
+  floor above, `radiation.CISPR_FLOOR_TOP` [A7]), compared with CISPR 32 class A/B (QP at
+  10 m below 1 GHz, average at 3 m above). Harmonics within one receiver bandwidth add in phase (`receiver_sum`
+  [A12]); a path through a logic buffer, evaluated at thinned harmonics (`simulate.thin_harmonics` [A76]), weighs
+  each by its bandwidth's harmonics (`radiation.window_weight`, audit round 11). `|m(f)|` is log-log interpolated between solved harmonics.
 - `plane_resonance` (warning): the combined moment rises more than `resonance_db` (10 dB) above its f0 value
   at a solved harmonic. The message names the plane pair carrying the most displacement current there.
 
@@ -1313,8 +1316,9 @@ D = ½). L·di/dt is at the peak current, and the main switch's overlap loss at 
     factorisation serves every DC solve of every stage. The hot loops' high-frequency models keep their regions.
   - **Expected input current** (`input_estimate`): V_in·I_in = V_out·I_out + P_loss, with the parts' losses that
     Thermal uses (`thermal.part_losses`: conduction, the hard edge, Q_oss·V·f, a diode's V_f, the inductor's
-    DCR, series parts) plus, once the DC paths are solved, their copper (r_copper·I²). Not counted: gate drive,
-    the controller's supply, core loss, dead-time conduction. `dc_runs` solves the input path at the estimate
+    DCR, series parts) plus, once the DC paths are solved, their copper (r_copper·I²), the dead times' reverse
+    conduction, and when the stage gives them the gate drive and the controller's supply
+    (`efficiency.fixed_losses`) and the inductor's core loss (`thermal.core_loss` [A98]); audit round 9. `dc_runs` solves the input path at the estimate
     without copper; `finish_converter` recomputes it with the copper and scales the input path's figures
     (`_rescale_path`, DC is linear; also `dc_branch`). Shown in the DC input view's title, the stage's Results
     line and a loss break-down note. Test: `test_input_current_is_output_power_plus_losses_over_the_input_voltage`.
@@ -2159,7 +2163,8 @@ the legs' hot loops, the bus ripple shared by the capacitors and the conducted e
   (all legs' pads, the rail capacitors near them, the input path), so all legs use the same cached build. Legs
   skip DC runs, the conducted table, common mode and the input filter. `finish_bridge` interpolates each leg's
   complex transfer to the input (|T| log-log, phase from the ratio to leg A), forms I_line = Σ T_k·X_k, reads it
-  with the receiver against the limit, gives each capacitor's ripple RMS from its share at f_pwm and the worst
+  with the receiver against the limit, gives each capacitor's ripple RMS from its shares at f_pwm of the legs' bus-side currents added in time
+  (`bridge.caps_at`, `DriveWaveform.hs_cov` [A99], audit round 10) and the worst
   leg's L·di/dt and radiated margin. The snubber enters the ringing (`snubbed_response`): node impedance
   C_oss ∥ (R_s + C_s); without one it reduces to the converters' formula. A leg with no hard edge at the operating
   point (a locked rotor holds one commutation step: one leg low, one off; edge < 1 % of the largest) loses its

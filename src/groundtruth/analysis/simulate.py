@@ -2036,11 +2036,24 @@ def _route_buffers(config: Config, route: Route) -> list:
     return [m for ref in route.parts if (m := config.model_for(ref)) is not None and m.kind == "buffer"]
 
 
+def thin_harmonics(n_max: int, duty: float, count: Optional[int] = None) -> np.ndarray:
+    """`count` (HARMONICS_MAX) harmonic numbers log-spaced from 1 to n_max, each moved to the nearby harmonic
+    where a trapezoid of this duty is strongest: |sin(nπD)| is the beat of its two edges [Paul 2006] (every even
+    harmonic null at 50 %, every tenth at 30 %), so the kept harmonics lie on the edges' envelope and stand for
+    their neighbours (emi.radiation.window_weight) [A76]."""
+    n = np.unique(np.round(np.geomspace(1, n_max, count or HARMONICS_MAX)).astype(np.int64))
+    span = int(min(math.ceil(0.5 / max(min(duty, 1.0 - duty), 1e-3)), 50))      # half a beat period each way
+    cand = np.clip(n[:, None] + np.arange(-span, span + 1)[None, :], 1, n_max)
+    # the first maximum from the middle outwards: the nearest strongest harmonic (ties to the lower one)
+    strength = np.round(np.abs(np.sin(np.pi * duty * cand)), 9) - 1e-12 * np.abs(cand - n[:, None])
+    return np.unique(cand[np.arange(len(n)), np.argmax(strength, axis=1)])
+
+
 def _buffer_harmonics(config: Config, spec: NetSpec, buffers: list) -> tuple[np.ndarray, np.ndarray, dict]:
     """A path through logic buffers: (harmonic frequencies, the path's own amplitudes there, the band record). The
     band reaches the fastest edge of the path and its buffers (a buffer's 2.5 ns after a Hall sensor's
     microseconds); the harmonics are n·f0, all of them up to HARMONICS_MAX, else HARMONICS_MAX log-spaced ones
-    (odd ones at 50 % duty, where the even ones are nulls): a slow signal with a fast buffer would have millions
+    (thin_harmonics: the strongest of their neighbourhood): a slow signal with a fast buffer would have millions
     [A76]. Harmonics where every stage's spectrum is null are left out."""
     f0 = spec.freq
     edge = min([spec.rise_time, spec.fall_time or spec.rise_time] + [m.buf_rise() for m in buffers])
@@ -2049,11 +2062,10 @@ def _buffer_harmonics(config: Config, spec: NetSpec, buffers: list) -> tuple[np.
     if n_max <= HARMONICS_MAX:
         n = np.arange(1, n_max + 1)
     else:
-        n = np.unique(np.round(np.geomspace(1, n_max, HARMONICS_MAX)).astype(np.int64))
-        if abs(spec.duty - 0.5) < 1e-9:
-            n = np.unique(n | 1)
-        n = n[n <= n_max]
+        n = thin_harmonics(n_max, spec.duty)
         band["thinned"] = int(len(n))
+        # what the receiver's reading needs to weigh in the harmonics left out within its bandwidth [A12, A76]
+        band["harmonic_of"] = (float(f0), float(spec.duty))
     f = n * f0
     own = trapezoid_at(f, f0, spec.rise_time, spec.amplitude_v, spec.duty, spec.fall_time)
     edges = [trapezoid_at(f, f0, m.buf_rise(), 1.0, spec.duty) for m in buffers]
@@ -2901,7 +2913,8 @@ def finish_route(model: BoardModel, setup: RouteSetup) -> RouteResult:
     freqs = setup.harmonics
     m_curve = moment_curve(setup, freqs, fs, ms)
     currents = setup.currents
-    res.emissions = emission_table(freqs, currents, m_curve, a.limit_spec(), a.distance_m, a.ground_reflection)
+    res.emissions = emission_table(freqs, currents, m_curve, a.limit_spec(), a.distance_m, a.ground_reflection,
+                                   harmonic_of=res.band.get("harmonic_of"))
     compared = [r for r in res.emissions if r["margin_db"] is not None]
     mark_quasi_static(res, model.board)
     res.notes += band_notes(res)
@@ -4174,7 +4187,7 @@ def _margin_curve(setup: RouteSetup, config: Config, fs: list[float], ms) -> np.
     a = config.analysis
     m = moment_curve(setup, setup.harmonics, fs, ms)
     return emission_arrays(setup.harmonics, setup.currents, m, a.limit_spec(), a.distance_m,
-                           a.ground_reflection)["margin_db"]
+                           a.ground_reflection, harmonic_of=setup.res.band.get("harmonic_of"))["margin_db"]
 
 
 def simulate(board: Board, config: Config, nets: Optional[list[str]] = None,

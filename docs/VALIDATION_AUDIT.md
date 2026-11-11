@@ -24,6 +24,9 @@ evidence available), **Fixed** (a defect, corrected, with a regression test that
     the wrong heights. On refboard, Z0 read +21 % (outer layers) and +52 % (inner layers) against the
     field-solved as-built cut, so the line current at high harmonics was underestimated. It is now within +3-4 %
     (outer) and ±8 % (inner).
+- Rounds 9 to 11 (2026-11-10) audited the Converters, Bridges and Signal paths tabs again with independent
+  time-domain references: 6 + 4 + 2 further defects (F9-1 to F9-6, F10-1 to F10-4, F11-1, F11-2), all fixed with
+  regression tests; see "Round 9", "Round 10", "Round 11" below.
 - Everything else examined agrees with independent methods: the path circuit (to 1e-4 against a 600-cell ladder),
   spectra, field formula, limits, LISNs, ringing (RK4), node charge, ripple, capacitor sharing, loop gain and its
   margins, DC-load drops (reciprocity, Tellegen, series parts, pins), via capacity and the energy balance at 60
@@ -807,6 +810,33 @@ assertion in tests/test_bridge.py; REFERENCES A99.
   a node's swing when a freewheeling current runs out between switching instants is not counted for the snubber;
   how the slow part of the bus current divides between the capacitors and the source [A99].
 
+## Round 11 (2026-11-10, branch `audit-11`)
+
+The signal paths' physics (the Signal paths tab) once more, for what rounds 1-4, 7, 8 and the 2026-11 signal-path
+audit left open: those verified the path's circuit against a nodal ladder, the spectra, the limits' tables, the
+field's formula, the line cuts and the MNA. This round's references are of another kind
+(`tools/dev/signal_audit.py`, 27 cases; tests/test_signal_audit.py): the line simulated in time, the envelope of the
+harmonics' sum, and a look at what the test site and the receiver do with the numbers.
+
+| ID | Finding | Severity | Status |
+|---|---|---|---|
+| F11-1 | A path through a logic buffer is evaluated at 4000 log-spaced harmonics [A76], and its emission read each kept harmonic alone, although the receiver's bandwidth holds RBW/f0 of the signal's harmonics, which the estimate adds in phase everywhere else [A12]. A 1 kHz signal through a buffer with a 2.5 ns edge read 36 dB low at 50 % duty (60 odd harmonics in 120 kHz), 42 dB where every harmonic is present: a slow sensor line through a Schmitt trigger looked harmless whatever its edge. | High (the paths it applies to: slow signals through buffers) | Fixed: the kept harmonics are the strongest of their neighbourhood (`simulate.thin_harmonics`) and each is weighed by its bandwidth's harmonics (`radiation.window_weight`); the reading from them equals the reading from all 1.3 million within 0.002 dB at 50 % and 30 % duty (0.5 dB at 10 %) |
+| F11-2 | The floor's reflection (+6 dB [A7]) was added at every frequency. CISPR 32 measures above 1 GHz over absorber on the floor (free-space conditions), so the estimate read 6 dB high there against the standard's method. | Medium-Low (conservative) | Fixed: CISPR 32 up to 1 GHz only (`radiation.CISPR_FLOOR_TOP`); a user limit (RE102) keeps it. Results above 1 GHz are 6 dB lower than before, for power stages too |
+
+- **Verified as shipped:**
+  - the path's circuit (`emi/path.path_currents`) against a travelling-wave simulation of the line in time (a
+    trapezoid source behind a resistance, 60 unit-delay sections, a capacitive load, 40 periods, then a Fourier
+    transform): the mean current along the line, the current into it and the end voltage of harmonics 1-15 as
+    complex values within 0.03 % for three lines (a mismatched driver, a ringing short line, a matched one);
+  - the loop's field with exact constants (η0 = μ0·c) within 0.07 % (the code's 1.316e-14 takes c = 3e8), the
+    induction term at 1 m down to 2 MHz;
+  - the in-phase sum of the harmonics within a bandwidth [A12] against the envelope of their sum in time: exact at
+    50 % duty, 2.0 dB over it at 30 % (the two edges of a period beat), never under.
+- **Limits, documented** (REFERENCES A7, A12, A76): a peak reading is compared with CISPR 32's quasi-peak limit
+  (below 1 GHz) and average limit (above): for a signal that repeats slower than about 1 kHz a quasi-peak detector
+  reads several dB to tens of dB less than the peak, so slow signals read conservatively; the estimate is
+  differential mode only and quasi-static (rows above the board's quasi-static limit are marked indicative).
+
 ## Remaining risks and unverified items
 - SP-19: above 1 GHz a board-wide resonance's worst margin moves about ±2 dB between the 4x, 8x and 16x grids on
   refboard (converged within 0.8 dB below 1 GHz); the grid note asks for 4x and says so (round 4).
@@ -827,6 +857,20 @@ assertion in tests/test_bridge.py; REFERENCES A99.
   speed-up and the memory guard on a real large model are untested.
 
 ## Final run
+- **Rounds 9 to 11, full suite** on `audit-11` (2026-11-11, `tools/dev/run_tests_split.py`, 122 files, 113 min):
+  **1486 passed, 10 skipped, 1 failed**, then fixed: `tests/test_all_cores.py` asks that Use all cores solves
+  more frequencies than the default, and with F11-2 its board's gaps above 1 GHz lie more than
+  REFINE_MARGIN_DB below the warning level (6 dB less field there), where the refinement leaves gaps alone by
+  design: both runs solved the same 12. The solver was right; the test's signal is 6.6 V now, which gives the
+  refinement its gaps back (13 against 15 solves, as before the round), its assertions unchanged. It passes on
+  `main`, `audit-9` and `audit-10` as it was. No other file needed a change.
+- **Rounds 9 to 11, per round** (2026-11-10, branches `audit-9`, `audit-10`, `audit-11`, each on the one before), before the full
+  suite above. Run per round: its benchmark tool (34 / 95 / 27 cases, all pass) and the test
+  files of its area: round 9 the converter files (354 passed) and the core loss's (121); round 10 the bridge,
+  thermal, fields and core-loss files (133); round 11 the signal-path files (210 passed, 1 hand formula updated
+  for F11-2) and the emission-related solver files (195). `tools/dev/gui_probe.py` on a refboard copy for the Converters
+  form's five Core loss fields (load, Run checks, every tab twice, Save settings; no Simulate): 0 stalls over
+  150 ms, every step within 0.1 s of `main`'s.
 - **Round 3, full suite** (`out/audit_validation/full_round3.log`, 76 min, the machine also running neck sweeps):
   **859 passed, 1 skipped, 4 failed**: the launcher's git mode (as before) and three GUI timing tests (0.53-1.06 s
   against 0.5 s). Re-run under the same load, two of them fail on round 3's code and on the code before it

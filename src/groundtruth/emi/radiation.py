@@ -178,19 +178,65 @@ def receiver_sum(freqs, peaks, bands=RBW_BANDS) -> np.ndarray:
     return cs[hi] - cs[lo]
 
 
+WINDOW_DIRECT = 1000        # harmonics each side of one summed one by one in window_weight (more: their mean)
+
+
+def window_weight(freqs, harmonic_of: tuple, bands=RBW_BANDS) -> np.ndarray:
+    """What the harmonics of a trapezoid within the receiver's bandwidth add up to, per unit of the harmonic at
+    each frequency: harmonic_of = (f0, duty). A trapezoid's harmonic n is its edges' envelope times |sin(nπD)|
+    [Paul 2006] (the two edges of a period beating: every even one null at D = ½), and the envelope is smooth
+    across a bandwidth, so the in-phase sum [A12] of the harmonics n_k − m … n_k + m in the window ±RBW/2
+    (m = floor(RBW / (2·f0))) is the harmonic n_k's amplitude times Σ|sin(nπD)| / |sin(n_k·πD)|. The sum is
+    taken one by one for up to WINDOW_DIRECT harmonics each side, beyond that from their mean. 1 where the
+    harmonics are further apart than the bandwidth."""
+    f0, duty = harmonic_of
+    f = np.asarray(freqs, float)
+    n = np.rint(f / f0)
+    m_all = np.floor(receiver_bandwidth(f, bands) / (2 * f0) + 1e-9).astype(np.int64)
+    out = np.ones(len(f))
+    for m in np.unique(m_all):
+        if m < 1:
+            continue
+        sel = m_all == m
+        mm = int(min(m, WINDOW_DIRECT))
+        offs = np.arange(-mm, mm + 1)
+        nn = n[sel][:, None] + offs[None, :]
+        s = np.where(nn >= 1, np.abs(np.sin(np.pi * duty * nn)), 0.0)
+        total = s.sum(axis=1) * (2 * m + 1) / (2 * mm + 1)
+        own = np.abs(np.sin(np.pi * duty * n[sel]))
+        # a harmonic near a null of the beat carries almost nothing itself: its weight is capped (the thinned
+        # choice takes the harmonics at the beat's maxima, simulate.thin_harmonics)
+        out[sel] = np.maximum(total / np.maximum(own, 0.5), 1.0)
+    return out
+
+
+CISPR_FLOOR_TOP = 1e9       # CISPR 32: a reflecting floor up to here (OATS / SAC), absorber on it above (FSOATS) [A7]
+
+
 def emission_arrays(freqs, currents, m_per_amp, cls: Union[str, RadiatedLimit] = "B", distance_m: Optional[float] = None,
-                    ground_reflection: bool = True, spread=None) -> dict[str, np.ndarray]:
+                    ground_reflection: bool = True, spread=None, harmonic_of: Optional[tuple] = None
+                    ) -> dict[str, np.ndarray]:
     """Vectorised estimate per harmonic: field (RMS, dBµV/m at the standard or given distance, receiver
     bandwidth applied), limit and margin (NaN where no limit applies). spread = (f0, emi.spread.Spread): a power
     stage's dithered switching frequency; the receiver is simulated as for the conducted estimate
     (spread.spread_readings), within the limit's band and where each reading holds one harmonic (f0 above every
-    bandwidth used); elsewhere the harmonics within a bandwidth add up as without spread."""
+    bandwidth used); elsewhere the harmonics within a bandwidth add up as without spread.
+    harmonic_of = (f0, duty): `freqs` are a thinned choice of the signal's harmonics n·f0 (a path through a logic
+    buffer [A76]); a reading then takes its own harmonic times what the signal's harmonics within the bandwidth
+    add up to per unit of it (window_weight), what receiver_sum gives on all of them where the edges' envelope
+    is smooth across a bandwidth [A12]. Before 2026-11-10 a thinned set read one harmonic per bandwidth: a 1 kHz
+    signal through a buffer 36 dB low at 50 % duty (60 odd harmonics in 120 kHz) (audit round 11, F11-1).
+    The floor's reflection [A7] is taken for CISPR 32 up to 1 GHz only: above it the standard's site has absorber
+    on the floor (free-space conditions; before 2026-11-10 +6 dB there too, F11-2). A user limit (RE102) keeps it
+    over its whole range."""
     f = np.asarray(freqs, float)
     i_pk = np.asarray(currents, float)
     m = np.asarray(m_per_amp, float) * np.ones_like(f)
     lim, dist = limits(f, cls)
     r = np.full(f.shape, float(distance_m)) if distance_m else dist
     e_pk = loop_field(f, m * i_pk, r, ground_reflection)
+    if ground_reflection and not isinstance(cls, RadiatedLimit):
+        e_pk = np.where(f > CISPR_FLOOR_TOP, e_pk / 2.0, e_pk)
     bands = rbw_bands(cls)
     if spread is not None and len(f) and spread[0] > float(np.max(receiver_bandwidth(f, bands))):
         from .spread import spread_readings
@@ -198,8 +244,8 @@ def emission_arrays(freqs, currents, m_per_amp, cls: Union[str, RadiatedLimit] =
         reading = spread_readings(f, e_pk, f0, sp, lambda x: float(receiver_bandwidth([x], bands)[0]),
                                   f_max=limit_range(cls)[1])
     else:
-        # peak amplitudes summed within the receiver bandwidth
-        reading = receiver_sum(f, e_pk, bands)
+        # peak amplitudes summed within the receiver bandwidth (a thinned set: each one for its window's harmonics)
+        reading = receiver_sum(f, e_pk, bands) if harmonic_of is None else e_pk * window_weight(f, harmonic_of, bands)
     # as RMS (/sqrt 2): what the limits are written in
     e_db = dbuv(reading / math.sqrt(2))
     # at another distance than the standard's the limit is moved by the far field's 1/r: 20 log10(d_std / r)
@@ -236,11 +282,12 @@ def thin_rows(f: np.ndarray, values: np.ndarray, idx: np.ndarray, bands=RBW_BAND
 
 
 def emission_table(freqs, currents, m_per_amp, cls: Union[str, RadiatedLimit] = "B", distance_m: Optional[float] = None,
-                   ground_reflection: bool = True, per_decade: Optional[int] = None, spread=None) -> list[dict]:
+                   ground_reflection: bool = True, per_decade: Optional[int] = None, spread=None,
+                   harmonic_of: Optional[tuple] = None) -> list[dict]:
     """Rows of `emission_arrays` for reports. When the harmonics are closer than the receiver bandwidth
     (low switching frequencies: 16 000 harmonics at 10 kHz), one row per bandwidth is kept: neighbouring
     rows would only repeat the same receiver reading. per_decade: see thin_rows."""
-    a = emission_arrays(freqs, currents, m_per_amp, cls, distance_m, ground_reflection, spread)
+    a = emission_arrays(freqs, currents, m_per_amp, cls, distance_m, ground_reflection, spread, harmonic_of)
     f = a["f"]
     keep = thin_rows(f, a["e_dbuv"], np.arange(len(f)), rbw_bands(cls), per_decade=per_decade)
     rows = []
