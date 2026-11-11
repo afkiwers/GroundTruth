@@ -1009,7 +1009,10 @@ average detectors, so the lowest limit (the average one) decides [CISPR 16-1-1].
 <b>quasi-peak</b> line for CISPR 22 and the <b>peak</b> line for CISPR 25 (dashed): 10-13 dB (CISPR 22) and
 20 dB (CISPR 25) above the average ones. A margin in GroundTruth is therefore smaller than the same spectrum's
 margin in WEBENCH by about that much. Spread spectrum is the exception: it smears each harmonic over the receiver's
-bandwidth and lowers the average reading more than the peak, which Simulate models when the stage has a spread.</p>
+bandwidth and lowers the average reading more than the peak, which Simulate models when the stage has a spread.
+The quasi-peak (CISPR 22 / 32) or peak (CISPR 25) limit can then be the one that binds, above all when the dither is
+slower than the receiver's 9 kHz bandwidth: Simulate reads both detectors and keeps the smaller margin (a stage's
+note says when the second limit binds; its rows then show that limit and a peak reading).</p>
 <p><b>CISPR 22 (and CISPR 32): CLASS A and CLASS B.</b> Information technology and multimedia equipment on the mains
 or a DC network, 150 kHz to 30 MHz, LISN 50 Ω ∥ (50 µH + 5 Ω) [CISPR 16-1-2]. CISPR 32 replaced CISPR 22 in 2017
 and kept its conducted limits, so the two lines are the same; choose the one your test plan names [CISPR 22]

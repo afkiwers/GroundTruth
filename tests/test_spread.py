@@ -187,3 +187,57 @@ def test_overlapping_sweeps_read_by_peak_and_average_detectors():
     avg = spread_readings(f, a, f0, sp, lambda x: 120e3, "average")
     g_avg = harmonic_gains(f, f0, sp, lambda x: 120e3, "average")
     assert np.all(avg > g_avg)                                   # the neighbours' power adds
+
+
+def _dithered_detectors(n, f0, fraction, rate, rbw=9e3, charge=1e-3, discharge=160e-3):
+    """Independent reference: harmonic n of a switching frequency swept 0..+fraction as a triangle at `rate`, as a
+    complex tone in time through a Gaussian filter of −6 dB width rbw, tuned for the worst case; returns the
+    (average, quasi-peak, peak) readings relative to the undithered tone. The quasi-peak detector is CISPR 16-1-1's
+    for band B in steady state: the mean charging current through `charge` equals the discharge through
+    `discharge`."""
+    import numpy as np
+    width = n * f0 * fraction
+    fs = 4 * (width + 4 * rbw)
+    periods = 8
+    t = np.arange(int(round(periods / rate * fs))) / fs
+    tri = 2 * np.abs((t * rate) % 1.0 - 0.5)                        # 1 → 0 → 1 per period
+    phase = 2 * np.pi * np.cumsum(width * tri - width / 2) / fs
+    spec = np.fft.fft(np.exp(1j * phase))
+    f = np.fft.fftfreq(len(t), 1 / fs)
+    best = (0.0, 0.0, 0.0)
+    for fc in np.arange(-width / 2, width / 2 + rbw / 4, rbw / 4):
+        env = np.abs(np.fft.ifft(spec * np.exp(-np.log(2) * ((f - fc) / (rbw / 2)) ** 2)))
+        lo, hi = 0.0, float(env.max())
+        for _ in range(50):                                         # bisection for the detector's steady state
+            mid = (lo + hi) / 2
+            if np.mean(np.maximum(env - mid, 0.0)) / charge > mid / discharge:
+                lo = mid
+            else:
+                hi = mid
+        best = tuple(max(a, b) for a, b in zip(best, (float(env.mean()), lo, float(env.max()))))
+    return best
+
+
+@pytest.mark.parametrize("n", [5, 25])
+def test_E_2_a_slow_dither_is_judged_against_the_quasi_peak_limit(n):
+    """CISPR 32 class B, f_sw 400 kHz dithered +10 % as a triangle at 1 kHz: the average reading falls by 20 dB and
+    more, the quasi-peak one by a few dB only, so the quasi-peak limit (10 dB over the average one) binds and the
+    margin gained is about 10 dB minus the quasi-peak reading's fall, not the average's. The estimate (its peak
+    reading against the quasi-peak limit [A104]) gains no more than an independent quasi-peak detector allows, and
+    at most 2.5 dB less. At 10 kHz, faster than the 9 kHz bandwidth, the average limit still binds. Before (audit
+    round 12, E-2) the average alone: 5.5 dB (n = 5) and 7 dB (n = 25) too many."""
+    import math
+    import numpy as np
+    from groundtruth.emi.conducted import conducted_arrays
+    from groundtruth.emi.spread import Spread
+    f, i = np.array([n * 400e3]), np.array([1e-3])
+    plain = conducted_arrays(f, i, "cispr32", "B")
+    slow = conducted_arrays(f, i, "cispr32", "B", (400e3, Spread(0.10, "triangle", 1e3)))
+    avg, qp, _pk = (20 * math.log10(x) for x in _dithered_detectors(n, 400e3, 0.10, 1e3))
+    true_gain = min(-avg, 10.0 - qp)
+    gain = float(slow["margin_db"][0] - plain["margin_db"][0])
+    assert bool(slow["second_detector"][0]) and -avg > 10.0 - qp + 3.0
+    assert true_gain - 2.5 <= gain <= true_gain + 0.5
+    assert slow["limit_dbuv"][0] == pytest.approx(plain["limit_dbuv"][0] + 10.0)      # the quasi-peak line
+    fast = conducted_arrays(f, i, "cispr32", "B", (400e3, Spread(0.10, "triangle", 10e3)))
+    assert not bool(fast["second_detector"][0])

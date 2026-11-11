@@ -1221,7 +1221,9 @@ D = ½). L·di/dt is at the peak current, and the main switch's overlap loss at 
   - The standard's receiver bandwidth sums neighbouring harmonics, and the result is compared with the
     average limit.
   - CW harmonics read the same in peak, quasi-peak and average, as long as f_sw exceeds the receiver
-    bandwidth.
+    bandwidth. With spread spectrum they do not: the average reading falls far more than the quasi-peak one, so
+    a dithered stage is also read with the peak detector against the quasi-peak (CISPR 22 / 32) or peak
+    (CISPR 25) limit and the smaller margin counts [A104].
   - Limits: CISPR 32 class A/B (AC mains port), CISPR 25 voltage method classes 1–5 (band-limited), and
     MIL-STD-461 CE102 (basic curve plus the voltage relaxations). They were entered from the published tables:
     verify them against the edition in use.

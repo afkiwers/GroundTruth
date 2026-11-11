@@ -8,7 +8,9 @@ Each LISN's receiver reads the voltage across its 50 ohm port [Paul 2006].
 A switching waveform is a set of phase-locked CW harmonics. While f_sw exceeds the receiver bandwidth each reading
 holds one harmonic, and peak, quasi-peak and average detectors all read its RMS value [CISPR 16-1-1], so the estimate is
 compared with the average limit (the strictest). Below that, neighbouring harmonics add up in one reading
-(`receiver_sum`, [A12]).
+(`receiver_sum`, [A12]). A dithered switching frequency (spread spectrum) is the exception: the detectors then
+read differently, and the limit's other detector (quasi-peak for CISPR 22 / 32, peak for CISPR 25) can be the
+one that binds: both are read and the smaller margin kept (`conducted_arrays`, [A104]).
 
 Not modelled [A11]: common-mode emission (switch-node dV/dt through stray capacitance to the chassis or heatsink),
 which often dominates above a few MHz.
@@ -227,12 +229,23 @@ def detector(standard: str) -> str:
     return "peak" if standard.lower() == "mil461" else "average"
 
 
+SECOND_DETECTOR = {"cispr22": "qp", "cispr32": "qp", "cispr25": "peak"}    # band_limits' name of the other limit line
+
+
 def conducted_arrays(freqs, line_current, standard: str, cls: str = "B", spread=None) -> dict[str, np.ndarray]:
     """Receiver reading at each harmonic (RMS dBµV, receiver bandwidth applied) from the peak differential-mode
     line current per harmonic, the limit and the margin (NaN where no limit applies). spread = (f0, Spread): the
     switching frequency is dithered; the receiver is simulated (emi/spread.py) within the standard's range. That
     model takes one harmonic per receiver bandwidth; for f0 at or below the bandwidth the spread is ignored and
-    the harmonics add coherently as without it (conservative)."""
+    the harmonics add coherently as without it (conservative).
+
+    With spread on a CISPR limit the detectors no longer read alike: a dithered harmonic's average reading falls by
+    about the bandwidth over the sweep's width, its quasi-peak and peak readings far less while the modulation is
+    slower than the bandwidth, so the quasi-peak limit (CISPR 22 / 32: 10 dB over the average one in class B, 13 in
+    A) or CISPR 25's peak limit becomes the one that binds. Both are read, the second with the simulated peak
+    detector (it is at most ~1.5 dB over a quasi-peak one here [A104]), and per harmonic the reading, limit and
+    margin of the smaller margin are returned; "second_detector" is True there. Before 2026-11-12 the average
+    reading alone: up to 7 dB of margin too many for a 10 % triangle at 1 kHz (audit round 12, E-2)."""
     from .spread import spread_readings
     f = np.asarray(freqs, float)
     i_pk = np.abs(np.asarray(line_current, complex))
@@ -247,11 +260,25 @@ def conducted_arrays(freqs, line_current, standard: str, cls: str = "B", spread=
         f0, sp = spread
         reading = spread_readings(f, v_pk, f0, sp, lambda x: float(receiver_bandwidth([x], bands)[0]),
                                   detector(std), rng[1] if rng else math.inf) / math.sqrt(2)
+        second = SECOND_DETECTOR.get(std)
     else:
         reading = receiver_sum(f, v_pk, bands) / math.sqrt(2)
+        second = None
     v_db = 20 * np.log10(np.maximum(reading, 1e-30) / 1e-6)
     lim = limit_line(f, standard, cls)
-    return {"f": f, "current_a": i_pk, "v_dbuv": v_db, "limit_dbuv": lim, "margin_db": lim - v_db}
+    margin = lim - v_db
+    binds = np.zeros(f.shape, bool)
+    if second is not None:
+        f0, sp = spread
+        peak = spread_readings(f, v_pk, f0, sp, lambda x: float(receiver_bandwidth([x], bands)[0]), "peak",
+                               rng[1] if rng else math.inf) / math.sqrt(2)
+        v2 = 20 * np.log10(np.maximum(peak, 1e-30) / 1e-6)
+        lim2 = limit_line(f, standard, cls, second)
+        with np.errstate(invalid="ignore"):
+            binds = (lim2 - v2) < margin                 # False where either is NaN (no limit there)
+        v_db, lim, margin = np.where(binds, v2, v_db), np.where(binds, lim2, lim), np.where(binds, lim2 - v2, margin)
+    return {"f": f, "current_a": i_pk, "v_dbuv": v_db, "limit_dbuv": lim, "margin_db": margin,
+            "second_detector": binds}
 
 
 def conducted_table(freqs, line_current, standard: str, cls: str = "B", per_decade: Optional[int] = None,
@@ -269,6 +296,8 @@ def conducted_table(freqs, line_current, standard: str, cls: str = "B", per_deca
         rows.append({"f": float(f[j]), "current_a": float(a["current_a"][j]), "v_dbuv": float(a["v_dbuv"][j]),
                      "limit_dbuv": None if np.isnan(lim) else float(lim),
                      "margin_db": None if np.isnan(lim) else float(a["margin_db"][j])})
+        if a["second_detector"][j]:           # read against the limit's other detector (spread spectrum [A104])
+            rows[-1]["detector"] = SECOND_DETECTOR[standard.lower()]
     return rows
 
 

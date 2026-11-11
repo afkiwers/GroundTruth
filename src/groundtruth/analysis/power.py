@@ -1475,6 +1475,11 @@ def finish_converter(model: BoardModel, setup: ConverterSetup) -> ConverterResul
             res.notes.append(f"spread spectrum: f_sw dithered 0 to +{sp.spread * 100:g} % ({sp.spread_mode}"
                              + (f" at {format_si(sp.spread_rate, 'Hz')}" if sp.spread_rate else ", every cycle")
                              + "); conducted readings from a simulated receiver")
+            if any(r.get("detector") for r in res.conducted):
+                which = "quasi-peak" if setup.standard in ("cispr22", "cispr32") else "peak"
+                res.notes.append(f"with the spread, the {which} limit binds at some harmonics (their rows show that "
+                                 f"limit and a peak reading): the average reading falls with the dither, the "
+                                 f"{which} one hardly while the modulation is slower than the receiver's bandwidth")
         compared = [r for r in res.conducted if r["margin_db"] is not None]
         if compared:
             res.conducted_worst = min(compared, key=lambda r: r["margin_db"])
