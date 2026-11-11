@@ -69,8 +69,9 @@ def test_conduction_and_the_winding_carry_the_ripple(stage):
 
 def test_the_copper_scales_as_the_square_of_its_current_and_the_balance_holds(stage):
     """The output path's copper at each current is r·I² (the DC model is linear); at the stage's own current the
-    sweep's loss is Simulate's input estimate plus the gates and the controller (the same losses), and each point's
-    efficiency is P_out/(P_out + P_loss)."""
+    sweep's loss and efficiency are Simulate's input estimate's (the same losses, the gates and the controller in
+    both: one operating point has one efficiency, audit round 9, F9-5), and each point's efficiency is
+    P_out/(P_out + P_loss)."""
     _, cfg, r = stage
     e = r.efficiency
     r_out = sum(p["r_copper_mohm"] * 1e-3 for p in r.dc if p["name"].startswith("output"))
@@ -83,7 +84,9 @@ def test_the_copper_scales_as_the_square_of_its_current_and_the_balance_holds(st
     fixed = sweep_at.by["gate drive"][0] + sweep_at.by["controller"][0]
     # the same losses; the sweep iterates the input current (its path's copper) to the balance, the estimate takes
     # one pass: 0.01 % apart here
-    assert sweep_at.p_loss[0] - fixed == pytest.approx(r.input["p_loss_w"], rel=1e-3)
+    assert sweep_at.p_loss[0] == pytest.approx(r.input["p_loss_w"], rel=1e-3)
+    assert sweep_at.efficiency[0] == pytest.approx(r.input["efficiency"], rel=1e-4)
+    assert r.input["fixed_w"] == pytest.approx(fixed) and fixed > 0
     for j in range(len(e.currents)):
         assert e.efficiency[j] == pytest.approx(e.p_out[j] / (e.p_out[j] + e.p_loss[j]))
     assert min(e.efficiency) == e.efficiency[0] and e.efficiency[0] < max(e.efficiency) - 0.03   # light load falls

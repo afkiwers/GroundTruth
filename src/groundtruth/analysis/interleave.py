@@ -32,15 +32,18 @@ from ..core.issues import Issue, resolve_severity
 # at the LISN) and of the radiated one (A m² vectors, x/y/z), the conducted standard and class, the spread spectrum
 
 
-def trapezoid_phase(n: np.ndarray, duty: float, f_sw: float, rise_time: float, start: float = 0.0) -> np.ndarray:
+def trapezoid_phase(n: np.ndarray, duty: float, f_sw: float, rise_time: float, start: float = 0.0,
+                    ripple_ratio: float = 0.0) -> np.ndarray:
     """The unit phasors of a trapezoid pulse train's harmonics n: a pulse of width duty·T at half height, equal
     edges of rise_time, rising at start·T. Its coefficients are A·D·sinc(nD)·sinc(n·f·tr)·e^(-j2πn(start + D/2))
     [Paul 2006] (a pulse centred at start + D/2, the sincs real and signed: a lobe past a null turns the phase by π);
-    their magnitudes are spectrum.trapezoid_harmonics'."""
+    their magnitudes are spectrum.trapezoid_harmonics'. With ripple_ratio (ΔI/I of the inductor's ripple on the
+    pulse's top, negative for a falling top) the pulse's own coefficients about its centre are complex
+    (power.pulse_shape [A97]: the ramp in quadrature), and their phase is taken."""
+    from .power import pulse_shape
     n = np.asarray(n, float)
-    sign = np.sign(np.sinc(n * duty) * np.sinc(n * f_sw * rise_time))
-    sign[sign == 0] = 1.0
-    return sign * np.exp(-2j * np.pi * n * (start + duty / 2))
+    shape = pulse_shape(n, duty, ripple_ratio) * np.sinc(n * f_sw * rise_time)
+    return _unit(shape) * np.exp(-2j * np.pi * n * (start + duty / 2))
 
 
 def ripple_phase(n: np.ndarray, duty: float) -> np.ndarray:
@@ -69,8 +72,12 @@ def loop_phase(setup, freqs: np.ndarray) -> np.ndarray:
     spec, res = setup.spec, setup.res
     f = np.asarray(freqs, float)
     n = np.rint(f / spec.f_sw)
-    start = (1.0 - res.duty) if spec.topology == "boost" else 0.0
-    u = trapezoid_phase(n, res.duty, spec.f_sw, spec.rise_time, start)
+    boost = spec.topology == "boost"
+    start = (1.0 - res.duty) if boost else 0.0
+    # the inductor's ripple on the pulse's top: rising through a buck's high side, falling through a boost's rectifier
+    ripple = getattr(res, "pulse_ripple_a", 0.0) or 0.0
+    ratio = (-ripple if boost else ripple) / res.pulse_a if ripple and res.pulse_a > 0 else 0.0
+    u = trapezoid_phase(n, res.duty, spec.f_sw, spec.rise_time, start, ratio)
     model = getattr(setup, "ringing_model", None)
     if model is not None:
         L, r, c_oss, snub = model

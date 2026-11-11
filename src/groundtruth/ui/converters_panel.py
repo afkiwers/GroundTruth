@@ -119,6 +119,14 @@ FIELD_TIPS = {
             "snaps off.",
     "Q_g": "One switching FET's total gate charge (the FET's Qg field), e.g. 12n: the efficiency sweep's gate-drive "
            "loss Q_g·V_gate·f_sw per FET. Empty: left out.",
+    "Core loss": "The inductor's core loss from the maker's tool or curves, e.g. 150mW. Alone: the loss at this "
+                 "stage's frequency and ripple. With 'at f' / 'at ΔI': a point of the maker's data, scaled to them.",
+    "Core loss at f": "The frequency the core loss is given at, e.g. 300kHz (empty: the switching frequency).",
+    "Core loss at ΔI (A)": "The ripple current, peak to peak, the core loss is given at (empty: this stage's "
+                           "ripple, V·D(1−D)/(L·f_sw)).",
+    "Core α (frequency)": "Steinmetz exponent of the frequency, P ∝ f^α (empty: 1.3, typical of a moulded powder "
+                          "core; ferrite 1.2-1.8).",
+    "Core β (ripple)": "Steinmetz exponent of the flux swing, P ∝ ΔI^β (empty: 2.2; ferrite 2.4-2.8).",
     "Gate drive (V)": "The gate-drive voltage the controller drives the FETs with, e.g. 5 (empty: 5 V assumed).",
     "Controller I_q (A)": "The controller's own supply current from the input, e.g. 2m (its datasheet's operating "
                           "or quiescent current while switching): the sweep's loss I_q·V_in. Empty: left out.",
@@ -253,6 +261,16 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self.v_gate.SetHint("5 (assumed)")
         self.iq = wx.TextCtrl(fw)
         self.iq.SetHint("none")
+        self.core_loss = wx.TextCtrl(fw)         # the inductor's core loss: a point of the maker's data [A98]
+        self.core_loss.SetHint("none")
+        self.core_loss_f = wx.TextCtrl(fw)
+        self.core_loss_f.SetHint("at f_sw")
+        self.core_loss_di = wx.TextCtrl(fw)
+        self.core_loss_di.SetHint("at this ripple")
+        self.core_alpha = wx.TextCtrl(fw)
+        self.core_alpha.SetHint("1.3 (assumed)")
+        self.core_beta = wx.TextCtrl(fw)
+        self.core_beta.SetHint("2.2 (assumed)")
         self.eff_currents = wx.TextCtrl(fw)
         self.eff_currents.SetHint("5-120 % of the load")
         self.eff_measured = wx.TextCtrl(fw)
@@ -314,7 +332,10 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             ("Losses", "Empty: left out (the run says so). ◆ schematic, ◇ Parts tab, ! differs (click: reset)",
              [("R_DS(on)", self.rds_on), ("R_DS(on) low side", self.rds_on_low), ("Inductor DCR", self.dcr),
               ("Diode V_f (V)", self.diode_vf), ("Dead time, rise", self.dead_rise),
-              ("Dead time, fall", self.dead_fall), ("Reverse V_SD (V)", self.v_sd), ("Q_rr", self.q_rr)]),
+              ("Dead time, fall", self.dead_fall), ("Reverse V_SD (V)", self.v_sd), ("Q_rr", self.q_rr),
+              ("Core loss", self.core_loss), ("Core loss at f", self.core_loss_f),
+              ("Core loss at ΔI (A)", self.core_loss_di), ("Core α (frequency)", self.core_alpha),
+              ("Core β (ripple)", self.core_beta)]),
             ("Efficiency", "The curve over load current: fixed losses, bench data.",
              [("Q_g", self.qg), ("Gate drive (V)", self.v_gate), ("Controller I_q (A)", self.iq),
               ("Efficiency currents (A)", self.eff_currents), ("Measured efficiency", self.eff_measured)]),
@@ -406,6 +427,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
              "conducted": ("choice", ""), "conducted_class": ("choice", ""), "spread_mode": ("choice", ""),
              "spread": ("pct", ""),
              "interleave": ("text", ""), "qg": ("num", "C"), "v_gate": ("num", "V"), "iq": ("num", "A"),
+             "core_loss": ("num", "W"), "core_loss_f": ("num", "Hz"), "core_loss_di": ("num", "A"),
+             "core_alpha": ("num", ""), "core_beta": ("num", ""),
              "efficiency_currents": ("nums", "A"), "efficiency_measured": ("text", "")}
 
     def _ctrls(self) -> dict:
@@ -419,6 +442,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
                 "input_connector": self.inp, "output_connector": self.out, "conducted": self.standard,
                 "conducted_class": self.std_class, "spread": self.spread, "spread_mode": self.spread_mode, "spread_rate": self.spread_rate,
                 "interleave": self.interleave, "phase_deg": self.phase_deg, "qg": self.qg, "v_gate": self.v_gate,
+                "core_loss": self.core_loss, "core_loss_f": self.core_loss_f, "core_loss_di": self.core_loss_di,
+                "core_alpha": self.core_alpha, "core_beta": self.core_beta,
                 "iq": self.iq, "efficiency_currents": self.eff_currents, "efficiency_measured": self.eff_measured}
 
     def _texts(self, c: ConverterSpec) -> dict:
@@ -446,6 +471,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
                 "spread_mode": c.spread_mode if c.spread_mode in SPREAD_MODES else SPREAD_MODES[0],
                 "spread_rate": si(c.spread_rate, "Hz"), "interleave": c.interleave, "phase_deg": g(c.phase_deg),
                 "qg": si(c.qg, "C"), "v_gate": g(c.v_gate), "iq": si(c.iq, "A"),
+                "core_loss": si(c.core_loss, "W"), "core_loss_f": si(c.core_loss_f, "Hz"),
+                "core_loss_di": g(c.core_loss_di), "core_alpha": g(c.core_alpha), "core_beta": g(c.core_beta),
                 "efficiency_currents": ", ".join(f"{x:g}" for x in c.efficiency_currents),
                 "efficiency_measured": c.efficiency_measured}
 
@@ -677,6 +704,9 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             rds_on_low=num(self.rds_on_low, "Ω"), dcr=num(self.dcr, "Ω"), diode_vf=num(self.diode_vf, "V"),
             dead_rise=num(self.dead_rise, "s"), dead_fall=num(self.dead_fall, "s"), v_sd=num(self.v_sd, "V"),
             q_rr=num(self.q_rr, "C"), qg=num(self.qg, "C"), v_gate=num(self.v_gate, "V"), iq=num(self.iq, "A"),
+            core_loss=num(self.core_loss, "W"), core_loss_f=num(self.core_loss_f, "Hz"),
+            core_loss_di=num(self.core_loss_di, "A"), core_alpha=num(self.core_alpha, ""),
+            core_beta=num(self.core_beta, ""),
             efficiency_currents=[v for v in (parse_field(x.strip(), "A") for x in self.eff_currents.GetValue()
                                              .split(",") if x.strip()) if v],
             efficiency_measured=self.eff_measured.GetValue().strip(),

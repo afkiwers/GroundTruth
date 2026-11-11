@@ -1134,7 +1134,13 @@ collects share the outer one).
 ## Power stages (`analysis/power.py`, `emi/conducted.py`)
 A converter's switches commutate the load current within the edge time. That current flows around the hot
 loop as a trapezoid pulse train (`ConverterSpec.pulse()`: amplitude = load current for a buck, input current
-for a boost; duty = the high-side conduction time). The inductor current is continuous and stays out of it.
+for a boost; duty = the high-side conduction time). The inductor current is continuous and stays out of it,
+but its ripple is the pulse's top: a ramp from I − ΔI/2 to I + ΔI/2 through a buck's high side, falling through a
+boost's rectifier (`power.pulse_shape`, `pulse_harmonics(ripple=)`, `ConverterResult.pulse_ripple_a` from
+`thermal.ripple_pp`; flat without the inductor's L and for a bridge's leg) [A97]. The ramp's term is in quadrature
+with the flat pulse's sinc: negligible at the fundamental, all there is at the sinc's nulls (the even harmonics at
+D = ½). L·di/dt is at the peak current, and the main switch's overlap loss at each hard edge's own current
+(`thermal.hard_edge_current`) [A96]. Audit round 9 (VALIDATION_AUDIT.md) is the record.
 
 - **Elements** (`elements_of`): the high side (rail → switch node), the low side (switch node → ground, a FET
   or catch diode), or one integrated stage (rail → ground, both switches in the IC). Parallel parts split the

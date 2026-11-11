@@ -49,6 +49,8 @@ DIODE_VF = 0.5
 # s per edge, a synchronous stage without a dead time: an adaptive controller's (the LTC7890's with its DTCx pins on
 # GND [ADI LTC7890]) [A48]
 DEFAULT_DEAD_TIME = 20e-9
+# Steinmetz exponents of an inductor's core loss without the maker's: a moulded metal-powder core's [A98]
+CORE_ALPHA, CORE_BETA = 1.3, 2.2
 V_SD_GAN, V_SD_SI = 2.0, 0.8            # V, reverse conduction without v_sd: GaN, a silicon body diode (as the bridges)
 CAPACITY_MAX_SCALE = 10.0               # the capacity search stops at 10x a stage's operating current
 CAPACITY_TOL_K = 0.25                   # and settles when the hottest point is this close to the limit
@@ -348,6 +350,58 @@ def reverse_conduction(t_hard: float, t_soft: float, i_l: float, delta_i: float,
             "charge": i_hard * t_hard + i_soft * t_soft_rev}
 
 
+def hard_edge_current(spec, i_l: float, delta_i: float) -> float:
+    """The current the main switch commutates with voltage across it, summed over its hard edges per period [A96]:
+    a synchronous stage's only at its turn-on, which happens at the ripple's valley I_L − ΔI/2 (never below zero:
+    a negative valley turns it on at zero voltage); with a diode rectifier also its turn-off, at the peak
+    I_L + ΔI/2 (together 2·I_L in continuous conduction). The overlap loss is ½·V·this·t_edge·f_sw."""
+    valley = max(i_l - delta_i / 2, 0.0)
+    return valley if _synchronous(spec) else valley + i_l + delta_i / 2
+
+
+def core_duty_factor(duty: float, alpha: float) -> float:
+    """A triangular flux of the same swing and frequency whose rise takes the share `duty` of the period, against
+    the symmetric triangle: [D^(1−α) + (1−D)^(1−α)] / 2^α, from the improved generalised Steinmetz equation
+    P ∝ (1/T)∫|dB/dt|^α dt · ΔB^(β−α) on the two slopes ΔB/(D·T) and ΔB/((1−D)·T) [Venkatachalam 2002]. 1 at
+    D = ½, more for a short rise or fall (the faster slope), 1 for α = 1."""
+    d = min(max(duty, 1e-3), 1.0 - 1e-3)
+    return (d ** (1.0 - alpha) + (1.0 - d) ** (1.0 - alpha)) / 2.0 ** alpha
+
+
+def core_loss(spec, delta_i: float, duty: float) -> tuple[Optional[float], str, list[str]]:
+    """(the inductor's core loss in W or None, how it was found in words, notes) [A98]. `core_loss` is the loss at
+    one point of the maker's data; it is scaled to the stage by the Steinmetz equation P ∝ f^α·ΔB^β [Steinmetz
+    1892] with ΔB ∝ ΔI for a given inductor: (f_sw / core_loss_f)^α when the point's frequency is given, and
+    (ΔI / core_loss_di)^β times the duty's factor (core_duty_factor: the point is a symmetric swing) when its
+    ripple is given. Without either it is the loss at this operating point as it stands. delta_i: the stage's
+    ripple p-p (0: unknown); duty: the share of the period the inductor current rises or falls."""
+    from ..components.values import format_si
+    if spec.core_loss is None:
+        return None, "", []
+    alpha = spec.core_alpha if spec.core_alpha is not None else CORE_ALPHA
+    beta = spec.core_beta if spec.core_beta is not None else CORE_BETA
+    p, how, notes, assumed = spec.core_loss, [], [], []
+    if spec.core_loss_f is not None and spec.f_sw:
+        p *= (spec.f_sw / spec.core_loss_f) ** alpha
+        how.append(f"from {format_si(spec.core_loss_f, 'Hz')}, f^{alpha:g}")
+        if spec.core_alpha is None:
+            assumed.append(f"core_alpha {CORE_ALPHA:g}")
+    if spec.core_loss_di is not None:
+        if not delta_i > 0:
+            return None, "", [f"{spec.name}: core_loss is given at {spec.core_loss_di:g} A of ripple, but the stage's "
+                              "ripple is unknown (the inductor's L, v_in): the core loss is left out"]
+        p *= (delta_i / spec.core_loss_di) ** beta * core_duty_factor(duty, alpha)
+        how.append(f"from {spec.core_loss_di:g} A p-p to {delta_i:.3g} A, ΔI^{beta:g}")
+        if spec.core_beta is None:
+            assumed.append(f"core_beta {CORE_BETA:g}")
+        if spec.core_alpha is None and not any("core_alpha" in a for a in assumed):
+            assumed.append(f"core_alpha {CORE_ALPHA:g}")
+    if assumed:
+        notes.append(f"{spec.name}: {' and '.join(assumed)} assumed for the core loss (a moulded powder core's; "
+                     "the maker's data gives the exponents)")
+    return p, "; ".join(how) or "as given for this operating point", notes
+
+
 def dead_time_values(board: Board, spec) -> tuple[float, float, float, list[str]]:
     """(rise, fall dead times in s, the rectifier's reverse-conduction voltage, notes on what was assumed) of a
     synchronous stage: its dead_rise / dead_fall and v_sd (set, or from the controller's GT field and the FETs' Vsd
@@ -389,6 +443,7 @@ def ripple_pp(board: Board, config: Config, spec, duty: float, v_in: Optional[fl
 
 # the loss categories of part_losses' rows ("by": {category: W}), the efficiency sweep's breakdown (efficiency.py)
 LOSS_CATEGORIES = ("conduction", "switching", "output charge", "reverse recovery", "dead time", "diode", "inductor",
+                   "inductor core",
                    "series parts", "connectors", "other")
 
 
@@ -483,6 +538,10 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
         hs = spec.high_side or spec.switch
         ls = spec.low_side
         main, rect = (ls, hs) if boost else (hs, ls)      # the hard-switched transistor(s), the rectifier
+        if boost and spec.switch and not ls:
+            # a boost with both switches in one IC: the IC is the main switch too. Before 2026-11-10 it was only
+            # the rectifier, and the stage had no switching, output-charge or recovery loss (audit round 9, F9-3)
+            main, rect = list(spec.switch), []
         main = [r for r in main if not _is_diode(r)]
         sync = _synchronous(spec)
         d_hs, d_ls = d, 1 - d                             # conduction share: the high side d in both topologies
@@ -539,9 +598,10 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
         if v and spec.f_sw and main:
             # overlap of voltage and current: synchronous, only the main switch's turn-on edge is hard (at its
             # turn-off the inductor current carries the switch node across while the channel is already off);
-            # with a diode both edges are
-            edges = 1 if sync else 2
-            p_edge = 0.5 * v * i_l * edges * spec.rise_time * spec.f_sw
+            # with a diode both edges are. Each edge at the inductor current of its instant: the turn-on at the
+            # ripple's valley, the turn-off at its peak (hard_edge_current [A96]; before 2026-11-10 the mean
+            # current at both: a synchronous stage's overlap read high by ΔI/2 over I_L, audit round 9, F9-2)
+            p_edge = 0.5 * v * hard_edge_current(spec, i_l, di_rip) * spec.rise_time * spec.f_sw
             # output charge per main-switch turn-on: synchronous, Q_oss·V (its own charge dumped, the rectifier
             # FET's charged through it: for equal FETs together Q_oss·V); a diode: its own energy, ≈ ½·Q_oss·V
             if spec.q_oss is not None:
@@ -557,7 +617,9 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
             for ref in main:
                 add(ref, p_edge / len(main), "switching, turn-on edge" if sync else "switching, both edges",
                     "switching")
-                add(ref, e_oss * spec.f_sw, f"output charge {how}·f_sw", "output charge")
+                # q_oss / c_oss are the side's parallel switches together (components/fields.py): each its share
+                # (before 2026-11-10 each the whole: n parallel switches read n times the loss, round 9, F9-4)
+                add(ref, e_oss * spec.f_sw / len(main), f"output charge {how}·f_sw", "output charge")
                 if e_rr:
                     add(ref, e_rr * spec.f_sw / len(main), f"reverse recovery Q_rr·V·f_sw ({spec.q_rr * 1e9:g} nC)",
                         "reverse recovery")
@@ -567,6 +629,11 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
             notes.extend(n)
             if dcr is not None:
                 add(inductor.reference, i_sq * dcr, f"DCR {dcr * 1e3:g} mΩ{how}", "inductor")
+            # the core's loss from the ripple's flux swing [A98]: the same at every load current
+            p_core, how, n = core_loss(spec, di_rip, d)
+            notes.extend(n)
+            if p_core:
+                add(inductor.reference, p_core, f"core loss ({how})", "inductor core")
         for path in getattr(res, "dc", []) or []:
             for p in path.get("parts", []):
                 add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"in DC {path['name']}", "series parts")

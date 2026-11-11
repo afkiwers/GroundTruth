@@ -220,7 +220,7 @@ def evaluate(setup, change: Optional[Change] = None) -> Outcome:
     from .power import (_interp_loglog, _snubber_rc, _transfer, cm_estimate, pulse_harmonics, recovery,
                         recovery_overshoot, spread_of, stage_spectrum)
     from .simulate import band_moments
-    from .thermal import _synchronous
+    from .thermal import hard_edge_current
     change = change or Change()
     spec, res, cfg = setup.spec, setup.res, setup.config
     a = cfg.analysis
@@ -231,11 +231,13 @@ def evaluate(setup, change: Optional[Change] = None) -> Outcome:
     freqs = setup.harmonics
     # the rectifier's recovery at this edge (a slower edge, a lower di/dt: a smaller, longer spike)
     rec = recovery(spec, res.pulse_a, tr)
-    pulse = pulse_harmonics(freqs, spec.f_sw, res.pulse_a, res.duty, tr, rec, boost=spec.topology == "boost")
+    ripple = getattr(res, "pulse_ripple_a", 0.0) or 0.0          # the inductor's ripple on the pulse's top [A97]
+    pulse = pulse_harmonics(freqs, spec.f_sw, res.pulse_a, res.duty, tr, rec, boost=spec.topology == "boost",
+                            ripple=ripple)
     currents, ring = stage_spectrum(spec, freqs, pulse, res.v_in, res.pulse_a, L, r_loop, tr, snub)
     rec = recovery_overshoot(rec, L, spec.c_oss)
     out = Outcome(f_ring=ring["f"] if ring else None, q=ring["q"] if ring else None,
-                  overshoot_v=max(L * res.pulse_a / tr if tr > 0 else 0.0, (ring or {}).get("overshoot_v", 0.0),
+                  overshoot_v=max(L * (res.pulse_a + ripple / 2) / tr if tr > 0 else 0.0, (ring or {}).get("overshoot_v", 0.0),
                                   (rec or {}).get("overshoot_v", 0.0)))
     fs, ms = band_moments(setup)
     if fs:
@@ -267,8 +269,8 @@ def evaluate(setup, change: Optional[Change] = None) -> Outcome:
                      res, standard, std_class) if not spec.bridge else None
     out.cm_budget_pf = cm["budget_pf"] if cm else None
     v = res.v_in or 0.0
-    edges = 1 if _synchronous(spec) else 2
-    loss = 0.5 * v * res.pulse_a * edges * (tr - spec.rise_time) * spec.f_sw
+    # the overlap loss's change with the edge time, at the hard edges' currents (thermal.part_losses' [A96])
+    loss = 0.5 * v * hard_edge_current(spec, res.pulse_a, ripple) * (tr - spec.rise_time) * spec.f_sw
     if change.snubber:
         loss += change.snubber[0] * v * v * spec.f_sw
     if change.filter:

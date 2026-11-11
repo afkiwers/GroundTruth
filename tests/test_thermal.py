@@ -90,8 +90,8 @@ def _rip2(cfg, d_on, v_in, f_sw):
 
 
 def test_part_losses_follow_the_operating_point(tmp_path):
-    """Synchronous buck at 24 → 5 V, 5 A, 500 kHz, 2 ns: D = 5/24. High side D·I²·R, one hard edge ½·V·I·t·f (at
-    its turn-off the inductor current carries the switch node), and the output charge C_oss·V²·f, or Q_oss·V·f
+    """Synchronous buck at 24 → 5 V, 5 A, 500 kHz, 2 ns: D = 5/24. High side D·I²·R, one hard edge ½·V·(I − ΔI/2)·t·f
+    at the ripple's valley [A96] (at its turn-off the inductor current carries the switch node), and the output charge C_oss·V²·f, or Q_oss·V·f
     when Q_oss is given; low side (1−D)·I²·R; inductor I²·DCR. No R_DS(on) or DCR: left out, with a note. No dead
     time here (dead_rise, dead_fall 0): its reverse conduction is test_dead_time's. The switches and the winding
     carry the ripple too: I² + ΔI²/12."""
@@ -107,7 +107,9 @@ def test_part_losses_follow_the_operating_point(tmp_path):
     assert i2 > 25
     res = NS(net=spec.name, duty=d, v_in=24.0, dc=[])
     rows = {r["ref"]: r for r in part_losses(board, cfg, [res])[0]}
-    edge = 0.5 * 24 * 5 * 2e-9 * 500e3
+    valley = 5 - (12 * (i2 - 25)) ** 0.5 / 2      # the main switch turns on at I − ΔI/2 [A96] (round 9, F9-2)
+    assert 0 < valley < 5
+    edge = 0.5 * 24 * valley * 2e-9 * 500e3
     assert rows["Q1"]["power_w"] == pytest.approx(d * i2 * 0.010 + edge + 600e-12 * 24 ** 2 * 500e3)
     assert "turn-on edge" in rows["Q1"]["what"] and "C_oss·V²" in rows["Q1"]["what"]
     assert rows["Q2"]["power_w"] == pytest.approx((1 - d) * i2 * 0.010)
@@ -317,8 +319,10 @@ def test_capacity_inputs_rescale_shared_copper_with_the_cross_term(tmp_path):
 
 
 def test_capacity_inputs_scale_the_part_losses_with_the_load_current(tmp_path):
-    """The losses as quadratics in the load-current scale s, from three part_losses evaluations: at s = 1.7 the
-    high side has d·(1.7·I)²·R + ½·V·(1.7·I)·t_r·f + C_oss·V²·f (C_oss stays), the low side and the inductor
+    """The losses as quadratics in the load-current scale s, from three part_losses evaluations (s = 0, 1, 2): at
+    s = 1 and 2 the high side has d·(s·I)²·R + ½·V·(s·I − ΔI/2)·t_r·f + C_oss·V²·f (the turn-on at the ripple's
+    valley [A96], clamped at zero at no load, so the fit is exact at the fitted loads only, as the dead times';
+    C_oss stays), the low side and the inductor
     their I² terms (no dead time: dead_rise, dead_fall 0); the ripple's ΔI²/12 does not scale with the load: in the
     constant term."""
     from dataclasses import replace
@@ -328,15 +332,19 @@ def test_capacity_inputs_scale_the_part_losses_with_the_load_current(tmp_path):
     spec = replace(detect_converters(board, sc.config)[0].spec, i_out=5.0, v_in=24.0, v_out=5.0, f_sw=500e3,
                    rise_time=2e-9, c_oss=600e-12, rds_on=0.010, dcr=0.020, dead_rise=0.0, dead_fall=0.0)
     cfg = replace(sc.config, converters=[spec])
-    d, s, i = 5.0 / 24.0, 1.7, 1.7 * 5.0
+    d = 5.0 / 24.0
     stage = NS(kind="converter", net=spec.name, view_of=None, error=None, duty=d, v_in=24.0, dc=[], dc_vectors={},
                dc_grids={})
     terms = capacity_inputs(board, cfg, [stage])["loss_terms"][spec.name]
     r2 = _rip2(cfg, d * (1 - d), 24.0, 500e3)
-    at = {ref: a * s * s + b * s + c for ref, (a, b, c) in terms.items()}
-    assert at["Q1"] == pytest.approx(d * (i * i + r2) * 0.010 + 0.5 * 24 * i * 2e-9 * 500e3 + 600e-12 * 24 ** 2 * 500e3)
-    assert at["Q2"] == pytest.approx((1 - d) * (i * i + r2) * 0.010)
-    assert at["L1"] == pytest.approx((i * i + r2) * 0.020)
+    half = (12 * r2) ** 0.5 / 2                           # ΔI/2
+    for s in (1.0, 2.0):
+        i = s * 5.0
+        at = {ref: a * s * s + b * s + c for ref, (a, b, c) in terms.items()}
+        assert at["Q1"] == pytest.approx(d * (i * i + r2) * 0.010 + 0.5 * 24 * (i - half) * 2e-9 * 500e3
+                                         + 600e-12 * 24 ** 2 * 500e3)
+        assert at["Q2"] == pytest.approx((1 - d) * (i * i + r2) * 0.010)
+        assert at["L1"] == pytest.approx((i * i + r2) * 0.020)
     # at no load C_oss·V²·f and the ripple's conduction are left
     assert terms["Q1"][2] == pytest.approx(600e-12 * 24 ** 2 * 500e3 + d * r2 * 0.010)
 

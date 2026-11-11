@@ -727,6 +727,58 @@ pyproject.toml: a PYTHONPATH override does not switch the code under test). In s
     reads +8.9 / +2.9 / +1.5 % at 0.4 / 0.2 / 0.1 mm cells (10 mm wide), converging first order; the same cells on
     40 / 80 mm lines +1.1 %.
 
+## Round 9 (2026-11-10, branch `audit-9`)
+
+The power stages' physics again, against references that share nothing with the code: a time-domain simulation of
+the switched circuit (each interval's exact exponential, the on-time regulated to the load current), the FFT of the
+sampled hot-loop current, closed forms written out. The benchmarks are `tools/dev/converter_audit.py` (34 cases: 10
+failed on the code before the round, none after), the regression tests tests/test_converter_audit.py (and
+tests/test_efficiency.py for F9-5); REFERENCES A96, A97.
+
+| ID | Finding | Severity | Status |
+|---|---|---|---|
+| F9-1 | The hot loop's current pulse was a flat trapezoid: the inductor's ripple on its top was left out of the spectrum. Odd harmonics within 0.9 dB, but a stage near D = ½ read its even harmonics up to 12.8 dB low (10 A, 4.9 A p-p, D = 0.509: the 2nd 0.18 A for 0.79 A), and exactly zero at D = ½: the harmonics two phases 180° apart leave at the input. A boost's rectifier pulse (a falling top) likewise. | High (interleaved stages, stages near ½ duty) | Fixed [A97]: `power.pulse_shape`, `pulse_harmonics(ripple=)`, the phase in `interleave.trapezoid_phase`; within 0.01 dB of the sampled waveform |
+| F9-2 | The main switch's overlap loss took the mean inductor current at every hard edge. A synchronous stage turns on at the ripple's valley (where the dead-time model already had it): ½·V·(I − ΔI/2)·t·f_sw. 48 V, 5 A, 3.8 A p-p: 0.30 W reported for 0.185 W (+62 %). A diode stage's two edges (valley + peak = 2·I) were right except where the valley is clamped at zero. | Medium | Fixed [A96]: `thermal.hard_edge_current` (the fix advisor's loss change too) |
+| F9-3 | A boost with both switches in one IC (`switch:`) had no switching, output-charge or recovery loss: the IC was taken as the rectifier only. | Medium | Fixed: the IC is the main switch |
+| F9-4 | A side's parallel main switches each got the whole Q_oss·V·f_sw (`q_oss` is the side's switches together): n times the loss. | Medium | Fixed: shared, as the overlap and the recovery were |
+| F9-5 | One operating point had two efficiencies: the stage's (input current, the DC input path's current, the verify gate's `efficiency`) left out the gate drive and the controller's supply, the efficiency view had them (the test buck: 96.45 % against 95.95 %). | Medium-Low | Fixed: `efficiency.fixed_losses` in `power.input_estimate` (`fixed_w`) |
+| F9-6 | L·di/dt took the mean current; the loop commutates the ripple's peak at the high side's turn-off: low by ΔI/(2·I). | Medium-Low | Fixed [A96]: L·(I + ΔI/2)/t_r in Simulate, the issue's text and the fix advisor |
+| F9-7 | `groundtruth simulate --help` raised (a bare % in the `--plane-screening` help text). | Low | Fixed |
+
+- **Verified as shipped** (the time-domain simulation, its own energy balance within 1e-8 W): a synchronous buck's
+  high- and low-side conduction with the ripple (0.5 % / 0.8 %: the model takes the ideal duty, the circuit's is a
+  loss's share longer), the dead times' reverse conduction (3e-6), the winding (1e-5), the ripple ΔI (0.16 %), the
+  same at a tenth of the load, where the ripple is most of the RMS (0.1 %); a diode buck's catch diode (2.6 %; its
+  high side 10 % low at the ideal duty, 0.208 against the real 0.228: the diode's drop, see the limits); a
+  synchronous boost's inductor current, both switches, dead times and winding by the model's rules (2-4 %); the
+  sweep's categories add up to its loss at every current.
+- **Limits, documented** (the sweep's notes, REFERENCES A80, A96, A97): the duty is the ideal V_out/V_in (a stage
+  with large drops, a diode's V_f at low V_out, conducts a few per cent longer: its high-side conduction reads low
+  by that share); one edge time for both edges; the gate-drive loss is the gates' supply at V_gate (a linear
+  regulator from the input: V_in/V_gate times more); not modelled: the winding's AC resistance, the capacitors'
+  ESR loss from their ripple current, discontinuous conduction. The inductor's core loss was added after the round
+  (a stage's `core_loss`: a point of the maker's data scaled by the Steinmetz exponents and the duty's iGSE factor,
+  the same at every load current [A98]; tests/test_core_loss.py: the factor against a numerical integral of
+  |dB/dt|^α, the loss in the sweep and the energy balance); without `core_loss` it is left out, with a note. Current capacity fits
+  each loss as a quadratic in the load at 0, 1 and 2 times the current: with the valley clamped at zero at no load
+  the overlap's fit is exact at the fitted loads only (as the dead times' since round 5).
+- **Refboard** (a scratch copy, its two synchronous GaN bucks as one interleave group at 0° / 180°, the signal nets
+  left out; the code before in a worktree, the same settings, 15 min each): the hot loops' inductance, the radiated
+  worst (−22.8 / −25.5 dB at 193 MHz) and every DC path are unchanged, the issue count too (59).
+
+  | | Before | After |
+  |---|---|---|
+  | First stage (D = 0.509, ΔI 4.9 A on 10 A): conducted margin at 2·f_sw / 4·f_sw / 6·f_sw | +0.6 / +4.9 / −3.7 dB | −12.8 / −2.4 / −8.4 dB |
+  | Its conducted worst (the fundamental) | −40.1 dB | −40.2 dB |
+  | Its L·di/dt | 5.5 V | 6.9 V |
+  | Its main switch, loss; the stage's efficiency | 1.65 W; 98.74 % | 1.58 W; 98.77 % |
+  | Second stage (D = 0.095, ΔI 1.7 A): conducted margins; L·di/dt; main switch | −29.3 dB worst; 5.6 V; 1.51 W | within 0.06 dB; 6.1 V; 1.49 W |
+  | The group together: conducted worst / at 2·f_sw; radiated worst | −39.9 / −19.7 dB; −25.1 dB | −40.3 / −19.8 dB; −24.6 dB |
+
+  The first stage alone had passed at its even harmonics and fails there now: near half duty the flat pulse had
+  almost none. The group's sum hardly moves, because the second stage's even harmonics (a low duty: no null near
+  them) were the larger ones already.
+
 ## Remaining risks and unverified items
 - SP-19: above 1 GHz a board-wide resonance's worst margin moves about ±2 dB between the 4x, 8x and 16x grids on
   refboard (converged within 0.8 dB below 1 GHz); the grid note asks for 4x and says so (round 4).
