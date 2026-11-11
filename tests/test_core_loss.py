@@ -125,3 +125,23 @@ def test_the_settings_round_trip_and_are_checked(tmp_path):
     back = SettingsFile.load(sc.path).config.converters[0]
     assert (back.core_loss, back.core_loss_f, back.core_loss_di, back.core_alpha, back.core_beta) == (
         pytest.approx(0.15), pytest.approx(300e3), 2.0, 1.4, None)
+
+
+def test_the_inductor_s_fields_give_the_stage_its_core_loss(tmp_path):
+    """The inductor's Core Loss fields (a parts database's parameters) reach the stage as its DCR does: the loss
+    with its unit, the point's frequency and ripple, the exponents as plain numbers; a bare Core Loss is in mW."""
+    from groundtruth.components.fields import STAGE_KEYS, stage_values
+    g = discrete_buck_board()
+    g.fields("L1", **{"Core Loss": "150mW", "Core Loss Frequency": "300kHz", "Core Loss Ripple": "2A",
+                      "Core Alpha": "1.4", "Core Beta": "2.5"})
+    b, sc, _ = make(tmp_path, g, "cf", nets=())
+    values, notes = stage_values(b, sc.config, _spec())
+    got = {k: values[k].value for k in ("core_loss", "core_loss_f", "core_loss_di", "core_alpha", "core_beta")}
+    assert got == pytest.approx({"core_loss": 0.15, "core_loss_f": 300e3, "core_loss_di": 2.0, "core_alpha": 1.4,
+                                 "core_beta": 2.5})
+    assert values["core_loss"].source == "L1 Core Loss 150mW" and not notes
+    assert set(got) <= set(STAGE_KEYS["converter"])
+    g2 = discrete_buck_board()
+    g2.fields("L1", **{"Core Loss": "80"})
+    b2, sc2, _ = make(tmp_path, g2, "cf2", nets=())
+    assert stage_values(b2, sc2.config, _spec())[0]["core_loss"].value == pytest.approx(0.08)

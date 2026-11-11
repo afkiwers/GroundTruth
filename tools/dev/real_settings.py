@@ -49,7 +49,7 @@ def main():
     ap.add_argument("out", type=Path)
     ap.add_argument("--standard", default="mil461")
     ap.add_argument("--spread-mode", default="random", choices=("random", "triangle", "off"),
-                    help="LTC7890 spread spectrum (0 to +20 %; the datasheet does not give the modulation)")
+                    help="LTC7890 spread spectrum (0 to +20 %%; the datasheet does not give the modulation)")
     ap.add_argument("--spread-rate", type=float, help="triangle modulation frequency, Hz")
     ap.add_argument("--test", action="store_true", help="the session-3 test operating points instead of the real ones")
     a = ap.parse_args()

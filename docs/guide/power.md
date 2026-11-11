@@ -158,7 +158,7 @@ Simulate then:
 - **drives the motor in six-step** (Hall commutation) at the operating point: the phase, switch and bus currents in steady state, with the PWM, the dead time, reverse conduction while a switch is off, and each commutation (the outgoing phase's current running out, back into the bus for a held-low phase). The duty is found so the phase current is reached; if the bus voltage cannot drive it at that speed, a `bridge_operating_point` issue says what is reached. Star and delta motors are the same at the terminals for a sinusoidal back-EMF; for a trapezoidal one the delta's circulating current is reported;
 - **solves each leg's hot loop** (bus capacitors, high side, phase node, low side, ground) on one model of the bridge, at the leg's largest switched current: loop inductance, L·di/dt, ringing with C_oss (damped by the leg's RC snubber) and the radiated estimate, as for a power stage;
 - **adds the legs at the input**: each leg's high-side current spectrum (exact, every electrical-frequency sideband of every PWM harmonic) times its share reaching the LISN, read by a simulated EMI receiver (its bandwidth, peak or average detector), against the conducted limit (`conducted_emission`);
-- **shares the ripple among the bus capacitors**: each capacitor's ripple current (RMS) at the operating point.
+- **shares the ripple among the bus capacitors**: each capacitor's ripple current (RMS) at the operating point. The legs' bus-side currents are added in time, each weighted by the capacitor's share of that leg's switching current at f_pwm, so capacitors that share every leg alike carry their share of the bus current's AC part (the drive view's "bus AC"); a leg's 120° conduction block is no ripple of its own, it cancels in the bus. A low-side sense shunt carries its leg's whole low-side current, the chopped part included.
 
 - **counts the parts' losses** from the drive: each FET's conduction (R_DS(on), parallel FETs sharing the current), reverse conduction in the dead times (V_SD), the hard turn-on (overlap ½·V·I·t_r and the output charge Q_oss·V; `q_oss` and `c_oss` are one side's parallel switches together), the snubber resistors (½·C·ΔV² per swing), the bus capacitors' ESR and the series parts on the battery path (give a current sensor or ideal-diode FET a `resistor` model with its real resistance: a `short` gets no loss, only a note). Turn-off is taken as soft (GaN); the gate drive's loss is left out;
 - **maps the RMS current density** from the battery to the motor: the phase current through each leg to its motor pin, the bus current from the battery, and the switching currents in the hot loops, as RMS values (what heats the copper), with each via's RMS current against its IPC-2221 capacity (`current_density`, `via_overload`);
@@ -316,7 +316,9 @@ Motor bridges heat the board with their RMS currents and their parts' losses (se
     P ∝ f^α·ΔI^β (for one inductor the flux swing follows the ripple current), and for a duty away from ½ by
     [D^(1−α) + (1−D)^(1−α)]/2^α (the steeper slope loses more). Without the maker's exponents α = 1.3 and
     β = 2.2 are assumed (a moulded powder core; ferrites 1.2-1.8 and 2.4-2.8), with a note. It heats the
-    inductor in Thermal. Without `core_loss` it is left out, with a note. Not in it: a DC bias's effect on the
+    inductor in Thermal. The inductor's symbol fields fill these (`Core Loss`, `Core Loss Frequency`, `Core Loss
+    Ripple`, `Core Alpha`, `Core Beta`: a parts database's parameters), as its `DCR` does. Without `core_loss` it is
+    left out, with a note. Not in it: a DC bias's effect on the
     loss, and the winding's AC resistance.
   - **reverse recovery** (`q_rr`, a silicon FET's body diode or a PN catch diode; the FETs' `Qrr` field; GaN has
     none): Q_rr·V·f_sw in the main switch at its hard turn-on. The same charge is a current spike in the hot loop,

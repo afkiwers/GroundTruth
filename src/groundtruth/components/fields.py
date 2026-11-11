@@ -86,6 +86,19 @@ PARAMS = (
           "120 picofarad", "ringing and the node charge current"),
     Param("DCR", "inductor", "dcr, and the inductor model's R", "ohm", 1e-3, "mΩ", 1e-5, 10.0, "6.9milliohm",
           "winding loss, DC paths"),
+    # the inductor's core loss (analysis/thermal.core_loss [A98]): a point of the maker's loss data and, when the
+    # maker gives them, its Steinmetz exponents
+    Param("Core Loss", "inductor", "core_loss: the core loss at Core Loss Frequency and Core Loss Ripple (alone: at "
+          "the stage's own frequency and ripple)", "W", 1e-3, "mW", 0.0, 100.0, "150mW",
+          "the inductor's core loss: efficiency, the input current, Thermal"),
+    Param("Core Loss Frequency", "inductor", "core_loss_f: the frequency the Core Loss is given at", "Hz", 1e3, "kHz",
+          1e3, 1e8, "300kHz", "scales the core loss to the switching frequency, f^α"),
+    Param("Core Loss Ripple", "inductor", "core_loss_di: the ripple current, peak to peak, the Core Loss is given at",
+          "A", 1.0, "A", 1e-3, 1e3, "2A", "scales the core loss to the stage's ripple, ΔI^β"),
+    Param("Core Alpha", "inductor", "core_alpha: the core loss's Steinmetz exponent of the frequency", "gain", 1.0,
+          "", 0.5, 4.0, "1.3", "the core loss's scaling with frequency (empty: 1.3 assumed)"),
+    Param("Core Beta", "inductor", "core_beta: the core loss's Steinmetz exponent of the flux swing", "gain", 1.0,
+          "", 0.5, 4.0, "2.2", "the core loss's scaling with the ripple (empty: 2.2 assumed)"),
     Param("ESR", "capacitor", "the capacitor model's ESR", "ohm", 1e-3, "mΩ", 0.0, 100.0, "5milliohm",
           "ripple sharing, conducted emission, capacitor losses"),
     Param("ESL", "capacitor", "the capacitor model's ESL", "H", 1e-9, "nH", 0.0, 1e-6, "0.4nH",
@@ -362,6 +375,8 @@ def stage_values(board, config, spec) -> tuple[dict[str, Reading], list[str]]:
     _, inductor = switch_inductor(board, config, spec)
     if inductor is not None:
         put("dcr", [inductor.reference], "DCR")
+        for key, name in CORE_FIELDS:              # the core loss's point and exponents [A98]
+            put(key, [inductor.reference], name)
     return out, notes
 
 
@@ -436,8 +451,11 @@ def same(a, b) -> bool:
     return abs(a - b) <= REL_TOL * max(abs(a), abs(b), 1e-30)
 
 
+# a stage's core-loss keys and the inductor fields they come from
+CORE_FIELDS = (("core_loss", "Core Loss"), ("core_loss_f", "Core Loss Frequency"), ("core_loss_di", "Core Loss Ripple"),
+               ("core_alpha", "Core Alpha"), ("core_beta", "Core Beta"))
 STAGE_KEYS = {"converter": ("rds_on", "rds_on_low", "c_oss", "q_oss", "diode_vf", "dcr", "v_sd", "q_rr",
-                            "dead_rise", "dead_fall", "qg"),
+                            "dead_rise", "dead_fall", "qg") + tuple(k for k, _ in CORE_FIELDS),
               "bridge": ("rds_on", "rds_on_low", "c_oss", "q_oss", "v_sd")}
 
 
@@ -465,7 +483,8 @@ def show_value(v, unit: str = "") -> str:
 
 
 _KEY_UNITS = {"rds_on": "Ω", "rds_on_low": "Ω", "dcr": "Ω", "ESR": "Ω", "R": "Ω", "c_oss": "F", "C": "F",
-              "C_bias": "F", "q_oss": "C", "q_rr": "C", "qg": "C", "dead_rise": "s", "dead_fall": "s", "v_sd": "V", "diode_vf": "V",
+              "C_bias": "F", "q_oss": "C", "q_rr": "C", "qg": "C", "core_loss": "W", "core_loss_f": "Hz", "core_loss_di": "A",
+              "core_alpha": "", "core_beta": "", "dead_rise": "s", "dead_fall": "s", "v_sd": "V", "diode_vf": "V",
               "ESL": "H", "L": "H", "gbw": "Hz",
               "bandwidth": "Hz", "z_out": "Ω", "c_in": "F", "r_in": "Ω", "slew": "V/s", "cmrr": "dB", "gain": "",
               "aol": "dB", "fp2": "Hz", "pm": "°"}

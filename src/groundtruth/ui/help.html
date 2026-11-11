@@ -322,7 +322,9 @@ resistance).</p>
   this stage's frequency and ripple; with <b>Core loss at f</b> and <b>at ΔI</b> (the ripple, peak to peak) a point
   of the maker's data, scaled by the Steinmetz equation P ∝ f^α·ΔI^β (α 1.3 and β 2.2 assumed when empty, with a
   note) and for the duty. The ripple does not follow the load, so the core loss is the same at every load current:
-  it weighs most at light load. It also heats the inductor in Thermal. The winding's AC resistance is not
+  it weighs most at light load. It also heats the inductor in Thermal. The inductor's schematic fields <b>Core
+  Loss</b>, <b>Core Loss Frequency</b>, <b>Core Loss Ripple</b>, <b>Core Alpha</b> and <b>Core Beta</b> fill these
+  (◆), as its DCR field does. The winding's AC resistance is not
   modelled.</li>
 <li><b>The currents</b>: 24 points from 5 % to 120 % of the stage's load current, or the list in <b>Efficiency
   currents (A)</b> (settings: <code>efficiency_currents: [0.5, 1, 2, 4, 6]</code>).</li>
@@ -543,7 +545,9 @@ the switches <code>hbA_hs</code>, <code>hbA_ls</code>, … (<a href="#labels">De
   no hot-loop checks;</li>
 <li><b>adds the legs at the input</b>: the conducted emission at the battery, read by a simulated EMI receiver
   against the limit;</li>
-<li><b>shares the ripple</b> among the bus capacitors;</li>
+<li><b>shares the ripple</b> among the bus capacitors: the legs' bus-side currents added in time, each by the
+  capacitor's share of that leg's switching current at f_pwm. Capacitors that share every leg alike carry their
+  share of the bus current's AC part; a leg's 120° conduction block cancels in the bus and is no ripple;</li>
 <li><b>maps the RMS currents</b> from the battery to the motor (phase currents, bus current, switching currents)
   with the busiest vias against their IPC-2221 rating;</li>
 <li><b>counts the parts' losses</b>: each FET's conduction, reverse conduction in the dead times, hard turn-on

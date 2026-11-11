@@ -589,6 +589,10 @@ def test_a_leg_with_its_own_shunt_closes_its_hot_loop_through_it(solved, solved_
         assert not legs[ph].error and plain[ph].loop_nh < legs[ph].loop_nh < 2 * plain[ph].loop_nh
     shunts = {p["name"]: p["rms_a"] for p in br.rms["parts"] if p["name"] in ("R51", "R52", "R53")}
     assert len(shunts) == 3 and max(shunts.values()) == pytest.approx(min(shunts.values()), rel=0.01)
+    # the low side's whole current, its chopped part too (the PWM bands' share through the shunt): the drive's
+    # low-side RMS (before audit round 10, F10-3, only the part below f_pwm/2: 7 % low, the loss 14 %)
+    for k, ref in enumerate(("R51", "R52", "R53")):
+        assert shunts[ref] == pytest.approx(br.waveform.stats()["ls_rms"][k], rel=0.03)
     loss = {x["ref"]: x["power_w"] for x in br.losses}
     for ref, i in shunts.items():
         assert loss[ref] == pytest.approx(i ** 2 * 2e-3, rel=0.01)
