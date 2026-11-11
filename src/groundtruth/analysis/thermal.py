@@ -499,6 +499,14 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
         if pin and board.find_pin(pin) is not None:
             pin_amps[pin] = pin_amps.get(pin, 0.0) + abs(amps)
 
+    # a series part (or its joints) in several stages' or rails' supply paths carries the sum of their currents:
+    # per part √R_k·I_k of each path, for the cross terms added below [A106]
+    shared: dict[tuple, list] = {}
+
+    def through(p: dict, amps: float, kind: str):
+        """Note that a supply path's current `amps` runs through part p (its effective R for that path)."""
+        shared.setdefault((p["name"], kind), []).append(math.sqrt(max(p["r_mohm"], 0.0) * 1e-3) * abs(amps))
+
     specs = {c.name: c for c in config.converters}
     loads = {d.name: d for d in config.dc_loads}
     for res in converters:
@@ -507,9 +515,11 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
             for path in getattr(res, "dc", []) or []:
                 for p in path.get("parts", []):
                     add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"in DC load {res.net}", "series parts")
+                    through(p, path["current_a"], "part")
                 for p in path.get("joints", []):        # its solder joints (power.dc_summary) at the part
                     add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"solder joints, DC load {res.net}",
                         "series parts")
+                    through(p, path["current_a"], "joints")
             if res.net in loads:
                 from .dcload import pin_currents
                 for pin, amps in pin_currents(loads[res.net]).items():
@@ -580,8 +590,11 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
             r_lo = spec.rds_on_low if spec.rds_on_low is not None else spec.rds_on
             fets_hs, fets_ls = [r for r in hs if not _is_diode(r)], [r for r in ls if not _is_diode(r)]
             for ref in fets_hs:              # parallel switches share the current: I²/n² each (ripple too)
-                if spec.switch:                  # integrated: both switches inside, the current always flows
+                if spec.switch and not rect:     # integrated, both switches inside: the current always flows
                     add(ref, i_sq * spec.rds_on / len(fets_hs), f"conduction {i_l:g} A", "conduction")
+                # (an integrated switch with an external rectifier, a catch diode, conducts its own share only:
+                # before 2026-11-12 the whole period, 1/D too much, with the diode's share counted as well: audit
+                # round 12, T-3)
                 else:
                     add(ref, d_hs * i_sq / len(fets_hs) ** 2 * spec.rds_on,
                         f"conduction {d_hs * 100:.0f} % of the time", "conduction")
@@ -637,9 +650,21 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
         for path in getattr(res, "dc", []) or []:
             for p in path.get("parts", []):
                 add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"in DC {path['name']}", "series parts")
+                if path["name"].startswith("input "):
+                    through(p, path["current_a"], "part")
             for p in path.get("joints", []):            # its solder joints (power.dc_summary) at the part
                 add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"solder joints, DC {path['name']}",
                     "series parts")
+                if path["name"].startswith("input "):
+                    through(p, path["current_a"], "joints")
+    # the cross terms of a part in several supply paths: (Σ √R_k·I_k)² − Σ R_k·I_k², what one part carrying the
+    # summed current loses beyond the paths' own I²R (two equal stages: twice the sum; before 2026-11-12 left
+    # out: the input pass FET of two stages read half its heat, audit round 12, T-1) [A106]
+    for (name, kind), xs in sorted(shared.items()):
+        if len(xs) > 1:
+            add(name, sum(xs) ** 2 - sum(x * x for x in xs),
+                f"{len(xs)} supply paths' currents add up in " + ("it" if kind == "part" else "its solder joints"),
+                "series parts")
     # each fed pin's solder joint and mating contact (analysis/pins.py): I²·R at its part, with the pin's current
     # summed over the stages and rails through it (a connector feeding two converters)
     for pin, amps in sorted(pin_amps.items()):
@@ -1126,8 +1151,12 @@ def _scaled(config: Config, stages, name: str, s: float):
     """The settings and stage results with stage `name`'s load current scaled by s (what part_losses reads)."""
     from dataclasses import replace
     names = {name} if isinstance(name, str) else set(name)
+    # a DC rail's loads too: its connector pins' joint and contact heat follows their currents (before 2026-11-12
+    # they stayed at the operating point's: audit round 12, T-4)
     cfg = replace(config, converters=[replace(c, i_out=c.i_out * s) if c.name in names else c
-                                      for c in config.converters])
+                                      for c in config.converters],
+                  dc_loads=[replace(d, loads=[replace(ld, current=ld.current * s) for ld in d.loads])
+                            if d.name in names else d for d in config.dc_loads])
     out = [SimpleNamespace(kind=getattr(c, "kind", "converter"), net=c.net, duty=c.duty, v_in=c.v_in,
                            dc=[dict(p, current_a=p["current_a"] * s) for p in (getattr(c, "dc", None) or [])])
            if c.net in names else c for c in stages]
