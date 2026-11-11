@@ -13,9 +13,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from groundtruth.analysis.simulate import thin_harmonics
+from groundtruth.analysis.simulate import simulate, thin_harmonics
 from groundtruth.emi.path import PathLine, PathLoad, PathSource, path_currents
-from groundtruth.emi.radiation import (RE102_LIMITS, emission_arrays, loop_field, receiver_sum, window_weight)
+from groundtruth.emi import radiation
+from groundtruth.emi.radiation import (RE102_LIMITS, emission_arrays, floor_absorbed, loop_field, receiver_sum,
+                                       window_weight)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "dev"))
 from signal_audit import C0, MU0, edge_harmonics, envelope_peak, line_reference, trapezoid_samples  # noqa: E402
@@ -113,3 +115,35 @@ def test_F11_1_the_weight_is_one_where_harmonics_are_further_apart_than_the_band
     harmonics within ±60 kHz (n, n ± 2)."""
     assert window_weight(np.array([30e6, 500e6, 2e9]), (10e6, 0.5)) == pytest.approx([1.0, 1.0, 1.0])
     assert window_weight(np.array([20e3 * 5001]), (20e3, 0.5)) == pytest.approx([3.0])
+
+
+def test_F11_2_the_refinement_solves_the_same_frequencies_whatever_the_floor_above_1_ghz(tmp_path, monkeypatch):
+    """The floor's reflection is left out of the reported field above 1 GHz (CISPR 32), but not out of the
+    refinement's choice of gaps [A100]: a board with cavity resonances above 1 GHz is solved at the same
+    frequencies as on a site that reflects everywhere, and its rows above 1 GHz then differ by the 6.02 dB alone.
+    Before, the gaps above 1 GHz fell out of the refinement's window: a solve fewer here (2150 MHz), and on the
+    refboard a resonance near 1.07 GHz read off an interpolation, 8 dB better than its solve."""
+    from boardgen import microstrip_board
+    from conftest import make
+    board, sc, _ = make(tmp_path, microstrip_board(layers=4), "w", capacitance=True)
+    cispr = simulate(board, sc.config).routes[0]
+    monkeypatch.setattr(radiation, "CISPR_FLOOR_TOP", 1e99)
+    everywhere = simulate(board, sc.config).routes[0]
+    solved = [s["f"] for s in cispr.cavity_solves]
+    assert solved == [s["f"] for s in everywhere.cavity_solves]
+    assert sum(1e9 < f < 3e9 for f in solved) >= 2                 # the gaps above 1 GHz were split
+    rows = [(a["f"], b["e_dbuv"] - a["e_dbuv"]) for a, b in zip(cispr.emissions, everywhere.emissions)]
+    assert any(f > 1.2e9 for f, _ in rows)
+    for f, d in rows:
+        if f > 1.2e9:                                              # clear of the receiver windows at 1 GHz
+            assert d == pytest.approx(20 * math.log10(2), abs=0.01)
+        elif f < 0.9e9:
+            assert d == pytest.approx(0.0, abs=0.01)
+
+
+def test_floor_absorbed_is_cispr_above_1_ghz_only():
+    """Above 1 GHz for CISPR 32's classes; never for a user limit (RE102) or with the reflection off."""
+    f = np.array([0.5e9, 1e9, 1.5e9])
+    assert floor_absorbed(f, "B").tolist() == [False, False, True]
+    assert not floor_absorbed(f, "B", ground_reflection=False).any()
+    assert not floor_absorbed(f, RE102_LIMITS["re102_ground_army"]).any()

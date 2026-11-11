@@ -805,6 +805,8 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   - Each gap between solved neighbours gets an uncertainty. It is the change of |m| across the gap or, with
     plane capacitance, 3 dB per octave of width, whichever is larger, because a resonance can hide in a wide
     gap whose ends look alike.
+  - (For this choice the floor's reflection counts at every frequency, also above 1 GHz where CISPR 32's
+    reported field leaves it out: the solves do not depend on the test site [A100].)
   - Gaps under 3 dB count as resolved. Gaps whose estimated emission stays 20 dB below the warning level are
     skipped.
   - Of the rest, the gap closest to the limit is split at its log-midpoint harmonic.

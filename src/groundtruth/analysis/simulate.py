@@ -45,7 +45,7 @@ from ..components.models import model_pads
 from ..config.settings import Config, NetSpec
 from ..core.board import Board, Pad
 from ..core.issues import Issue, dedupe, resolve_severity, sort_issues
-from ..emi.radiation import emission_arrays, emission_table, limit_range
+from ..emi.radiation import emission_arrays, emission_table, floor_absorbed, limit_range
 from ..emi.path import (PathAmp, PathBuffer, PathLine, PathLoad, PathPart, PathShunt, PathSource, amplified_path,
                         path_currents)
 from ..emi.spectrum import analysis_band, microstrip, offset_stripline, trapezoid_at, trapezoid_harmonics
@@ -2737,6 +2737,9 @@ def next_frequencies(setup: RouteSetup, run: ModelRun, max_solves: int, config: 
     (resolving a resonance far below the limit changes nothing). Once no gap qualifies, the harmonic with the
     worst estimated margin gets a solve of its own (with plane capacitance), so the reported worst case is not
     an interpolation across a possible resonance. k > 1 lets parallel workers refine several gaps at once.
+    For all these choices the floor's reflection counts at every frequency, also where the reported field leaves
+    it out (CISPR 32 above 1 GHz [A7]): the solves are then the same whatever the test site above 1 GHz, and a
+    resonance there is resolved as one below is (`_margin_curve(refine=True)` [A100]).
 
     The gaps share the budget max_solves; the worst harmonic's own solve does not stop at it, up to WORST_EXTRA
     more. It did: with the budget spent the function returned before that rule, and the reported worst could be an
@@ -2755,7 +2758,8 @@ def next_frequencies(setup: RouteSetup, run: ModelRun, max_solves: int, config: 
     floor = (config.rules.emi_margin_db + REFINE_MARGIN_DB) if weigh else None
     octave_db = REFINE_OCTAVE_DB if setup.cavity is not None and run is setup.cavity else 0.0
     H_all = setup.harmonics
-    margins = _margin_curve(setup, config, fs, ms) if weigh else None    # per harmonic, NaN without a limit
+    # per harmonic, NaN without a limit; what is worth a solve: with the floor's reflection everywhere [A100]
+    margins = _margin_curve(setup, config, fs, ms, refine=True) if weigh else None
     tried = np.round(np.array(sorted(run.sols)), 3)
     solvable = (H_all <= F_SOLVE_MAX) & ~np.isin(np.round(H_all, 3), tried)
     gaps = []
@@ -4181,13 +4185,22 @@ def moment_curve(setup, freqs, fs: Optional[list[float]] = None, ms=None) -> np.
     return np.maximum(np.linalg.norm(total, axis=1), 1e-30)
 
 
-def _margin_curve(setup: RouteSetup, config: Config, fs: list[float], ms) -> np.ndarray:
+def _margin_curve(setup: RouteSetup, config: Config, fs: list[float], ms, refine: bool = False) -> np.ndarray:
     """Estimated emission margin (dB) at every harmonic, with the loop moment interpolated between the solved
-    frequencies (refinement decisions). NaN where no limit applies."""
+    frequencies (refinement decisions). NaN where no limit applies.
+    refine: the margin by which next_frequencies chooses the frequencies to solve: the floor's reflection counted
+    at every frequency (6 dB less margin where the reported field leaves it out, CISPR 32 above 1 GHz [A7]). The
+    window REFINE_MARGIN_DB allows for what an unsolved resonance may add, and that does not shrink with the test
+    site: without this a resonance above 1 GHz within 26 dB of the warning level went unsolved and its row was
+    read off an interpolation (refboard, a data line near 1.07 GHz: 39.6 dB where the solve gives 31.7) [A100]."""
     a = config.analysis
     m = moment_curve(setup, setup.harmonics, fs, ms)
-    return emission_arrays(setup.harmonics, setup.currents, m, a.limit_spec(), a.distance_m,
-                           a.ground_reflection, harmonic_of=setup.res.band.get("harmonic_of"))["margin_db"]
+    margin = emission_arrays(setup.harmonics, setup.currents, m, a.limit_spec(), a.distance_m,
+                             a.ground_reflection, harmonic_of=setup.res.band.get("harmonic_of"))["margin_db"]
+    if refine:
+        absorbed = floor_absorbed(setup.harmonics, a.limit_spec(), a.ground_reflection)
+        margin = margin - np.where(absorbed, 20 * math.log10(2.0), 0.0)
+    return margin
 
 
 def simulate(board: Board, config: Config, nets: Optional[list[str]] = None,

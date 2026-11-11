@@ -213,6 +213,16 @@ def window_weight(freqs, harmonic_of: tuple, bands=RBW_BANDS) -> np.ndarray:
 CISPR_FLOOR_TOP = 1e9       # CISPR 32: a reflecting floor up to here (OATS / SAC), absorber on it above (FSOATS) [A7]
 
 
+def floor_absorbed(freqs, cls: Union[str, RadiatedLimit] = "B", ground_reflection: bool = True) -> np.ndarray:
+    """Where (bool per frequency) the floor's reflection is asked for but not taken: CISPR 32 above
+    CISPR_FLOOR_TOP, measured over absorber on the floor [A7]. Nowhere for a limit curve of the user's (RE102, over
+    a bench's ground plane at every frequency) or with the reflection switched off."""
+    f = np.asarray(freqs, float)
+    if not ground_reflection or isinstance(cls, RadiatedLimit):
+        return np.zeros(f.shape, bool)
+    return f > CISPR_FLOOR_TOP
+
+
 def emission_arrays(freqs, currents, m_per_amp, cls: Union[str, RadiatedLimit] = "B", distance_m: Optional[float] = None,
                     ground_reflection: bool = True, spread=None, harmonic_of: Optional[tuple] = None
                     ) -> dict[str, np.ndarray]:
@@ -235,8 +245,7 @@ def emission_arrays(freqs, currents, m_per_amp, cls: Union[str, RadiatedLimit] =
     lim, dist = limits(f, cls)
     r = np.full(f.shape, float(distance_m)) if distance_m else dist
     e_pk = loop_field(f, m * i_pk, r, ground_reflection)
-    if ground_reflection and not isinstance(cls, RadiatedLimit):
-        e_pk = np.where(f > CISPR_FLOOR_TOP, e_pk / 2.0, e_pk)
+    e_pk = np.where(floor_absorbed(f, cls, ground_reflection), e_pk / 2.0, e_pk)
     bands = rbw_bands(cls)
     if spread is not None and len(f) and spread[0] > float(np.max(receiver_bandwidth(f, bands))):
         from .spread import spread_readings
