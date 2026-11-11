@@ -7,7 +7,7 @@ from dataclasses import replace
 import pytest
 
 from boardgen import microstrip_board
-from conftest import SIG, make
+from conftest import make
 from groundtruth.analysis.simulate import ALL_CORES_K, MAX_THREADS, refine_width, simulate, solver_threads
 
 
@@ -33,10 +33,8 @@ def test_all_cores_solves_more_frequencies_and_agrees_with_the_default(tmp_path)
     (more solves than the default) and the worst margin stays close; the result says it ran that way."""
     # with plane capacitance (cavity resonances): the refinement has gaps to split; a smooth model stops early
     # either way and solves the same frequencies
-    # 6.6 V: the gaps above 1 GHz, where CISPR 32's floor adds no reflection (6 dB less field [A7]), stay within
-    # REFINE_MARGIN_DB of the warning level; at 3.3 V they are left alone and both runs solve the same frequencies
-    board, sc, _ = make(tmp_path, microstrip_board(layers=4), "w", nets=(replace(SIG, amplitude_v=6.6),),
-                        capacitance=True)
+    # (its gaps are above 1 GHz: the refinement chooses them with the floor's reflection there too [A100])
+    board, sc, _ = make(tmp_path, microstrip_board(layers=4), "w", capacitance=True)
     base = cfg_with(sc.config, threads=8)
     one = simulate(board, base)
     many = simulate(board, cfg_with(base, all_cores=True))

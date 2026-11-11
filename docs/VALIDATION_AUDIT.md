@@ -832,6 +832,12 @@ harmonics' sum, and a look at what the test site and the receiver do with the nu
     induction term at 1 m down to 2 MHz;
   - the in-phase sum of the harmonics within a bandwidth [A12] against the envelope of their sum in time: exact at
     50 % duty, 2.0 dB over it at 30 % (the two edges of a period beat), never under.
+- **Follow-up to F11-2** (2026-11-11, branch `refine-floor`): with 6 dB less field above 1 GHz the gaps there fell
+  out of the refinement's window (REFINE_MARGIN_DB below the warning level), so the board-wide model was solved at
+  fewer frequencies. On the refboard a data line's resonance near 1.07 GHz went unsolved and its row read 39.6 dB
+  from the interpolation where the solve gives 31.7 dB; the reported resonance moved to 1.59 GHz. The refinement
+  now chooses its gaps by the margin with the reflection at every frequency (`simulate._margin_curve(refine=True)`
+  [A100]): the solves are those of a site that reflects everywhere, the reported rows keep the 6 dB.
 - **Limits, documented** (REFERENCES A7, A12, A76): a peak reading is compared with CISPR 32's quasi-peak limit
   (below 1 GHz) and average limit (above): for a signal that repeats slower than about 1 kHz a quasi-peak detector
   reads several dB to tens of dB less than the peak, so slow signals read conservatively; the estimate is
