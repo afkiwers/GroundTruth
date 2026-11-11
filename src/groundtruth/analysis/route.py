@@ -321,8 +321,8 @@ def copper_graph(board: Board, nets: set) -> "_Graph":
             continue
         tree, items = trees[layer]
         # the track's round end, not only its centre line's end point: copper that overlaps is connected (KiCad's
-        # rule). refboard's R303: the 0.4 mm track ends 0.02 mm outside the rotated pad's edge, its end
-        # cap well inside; the point alone left /CPU/ADC_I_RAIL_1 "unrouted". Copper of different nets never
+        # rule). refboard's R41: the 0.4 mm track ends 0.02 mm outside the rotated pad's edge, its end
+        # cap well inside; the point alone left /MCU/ADC_SENSE_1 "unrouted". Copper of different nets never
         # overlaps on a board that passes DRC, so the wider test joins nothing that isn't joined.
         sp = SPoint(pt).buffer(max(t.width / 2, 1e-4), quad_segs=4)
         for idx in tree.query(sp, predicate="intersects"):
@@ -524,14 +524,14 @@ class PathChain:
     parts: list[str]
     receivers: list[str]
     shunts: list[str] = field(default_factory=list)
-    # every 2-pin part hanging off the path, by the path's net it sits on (path order): [(net, ["R307 10k → GND",
-    # "✗ C309 100n → GND (DNP)"])]: capacitors, pull-ups / -downs, to any other net; DNP ones marked (path_branches)
+    # every 2-pin part hanging off the path, by the path's net it sits on (path order): [(net, ["R45 10k → GND",
+    # "✗ C42 100n → GND (DNP)"])]: capacitors, pull-ups / -downs, to any other net; DNP ones marked (path_branches)
     branches: list = field(default_factory=list)
     notes: list = field(default_factory=list)       # what the path's circuit leaves out (an op-amp without a model)
     error: str = ""
 
     def text(self) -> str:
-        """`U302.3 → U301 ×1 → R303 4k7 → U1102.9` (several receivers joined by commas)."""
+        """`U42.3 → U41 ×1 → R41 4k7 → U53.9` (several receivers joined by commas)."""
         return " → ".join([self.driver, *self.parts, ", ".join(self.receivers)])
 
 

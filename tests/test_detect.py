@@ -25,7 +25,7 @@ def spi_board(tmp_path):
 
 
 @pytest.mark.parametrize("net,pins,expected", [
-    ("/CPU/SPI_SCK", [], "SPI clock"), ("/X/RMII_REF_CLK", [], "Ethernet (R)MII"), ("USB_DP", [], "USB data"),
+    ("/MCU/SPI_SCK", [], "SPI clock"), ("/X/RMII_REF_CLK", [], "Ethernet (R)MII"), ("USB_DP", [], "USB data"),
     ("Net-(U1-Pad3)", ["MOSI"], "SPI data"), ("/SW_CLK", [], "Debug clock"), ("/I2C_SCL", [], "I2C"),
 ])
 def test_classify(net, pins, expected):
@@ -103,12 +103,12 @@ def _named_net_board(tmp_path, net):
 
 
 def test_a_net_that_measures_a_supply_is_a_signal(tmp_path):
-    """/CPU/ADC_I_RAIL_1 (the user's board: the ADC input measuring rail 1's current) contains RAIL, yet it is a
+    """/MCU/ADC_SENSE_1 (the user's board: the ADC input measuring rail 1's current) contains RAIL, yet it is a
     sensitive signal: a measuring word in the name (ADC, SENSE, MON, FB …) makes a supply-looking name a signal;
     a plain rail name stays a supply, unless the user says it is a signal (as_signal: "Add it anyway")."""
     from groundtruth.analysis.detect import suggest_net
-    board, cfg = _named_net_board(tmp_path, "/CPU/ADC_I_RAIL_1")
-    found, why = suggest_net(board, cfg, "/CPU/ADC_I_RAIL_1")
+    board, cfg = _named_net_board(tmp_path, "/MCU/ADC_SENSE_1")
+    found, why = suggest_net(board, cfg, "/MCU/ADC_SENSE_1")
     assert found is not None, why
     (tmp_path / "x").mkdir()
     board, cfg = _named_net_board(tmp_path / "x", "RAIL_3V3_LOAD")

@@ -207,7 +207,7 @@ def _ohms(r: float) -> str:
 
 
 def _name(ref: str) -> str:
-    """A part's reference as a SymPy symbol name (R303 stays R303; other characters become _)."""
+    """A part's reference as a SymPy symbol name (R41 stays R41; other characters become _)."""
     return "".join(c if c.isalnum() else "_" for c in ref)
 
 

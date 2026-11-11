@@ -3,7 +3,7 @@
 going to ground and power, there are also OPamps connected to them for bias etc".
 
     .venv/Scripts/python tools/dev/path_map.py BOARD --from U4.11 --to U1.9
-    .venv/Scripts/python tools/dev/path_map.py BOARD --from "Net-(U3A-+)" --to PH_A_DIV --to U1102.9 \\
+    .venv/Scripts/python tools/dev/path_map.py BOARD --from "Net-(U3A-+)" --to PH_A_DIV --to U53.9 \\
         [--settings S.groundtruth.yaml] [--depth 3] [--max-routes 200] [--max-nets 30] [--json OUT.json] [--dot OUT.dot]
 
 --from / --to: a pin (REF.PAD) or a net (its full name, or the last part of it when that is unique); several --to are

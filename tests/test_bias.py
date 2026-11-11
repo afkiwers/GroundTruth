@@ -1,7 +1,7 @@
 """A ceramic capacitor at its own DC voltage (components/bias.py: the curve; analysis/bias.py: the voltage across
 each capacitor and the run's copy of the settings) against closed forms. The user: "cbias is saved as a single
 value, this is probably not ideal as it will be used with different DC voltages", "rather than having a real value
-we could use an array like this (90nF@10V 75nF@50V, 20nF@70V)", and of C304 at an ADC input: "Worst case the opamp
+we could use an array like this (90nF@10V 75nF@50V, 20nF@70V)", and of C41 at an ADC input: "Worst case the opamp
 is a rail-to-rail IC so in this case it would be 3.3 V"."""
 import math
 

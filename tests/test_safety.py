@@ -157,7 +157,7 @@ def test_the_safety_settings():
 
 def test_a_pass_fet_joins_its_drain_and_source_not_its_gate(tmp_path):
     """The surge stopper's FET Q9 (VBATT -> VIN, gate Q9_G) modelled as a short, without pins: VBATT takes VIN's
-    voltage, the gate net does not (refboard's V_BATT through Q601 was taken as 0 V before)."""
+    voltage, the gate net does not (refboard's V_SUPPLY through Q45 was taken as 0 V before)."""
     from boardgen import discrete_buck_board
     from groundtruth.components.models import ComponentModel
     b, sc, _ = make(tmp_path, discrete_buck_board(surge_fet=True), "pass", nets=())

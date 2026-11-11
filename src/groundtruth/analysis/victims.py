@@ -58,7 +58,7 @@ class VictimSet:
 
 
 def _leaf(net: str) -> str:
-    """A hierarchical net's last part ("/CPU/NRST" -> "NRST"): what the name patterns are matched against."""
+    """A hierarchical net's last part ("/MCU/NRST" -> "NRST"): what the name patterns are matched against."""
     return net.split("/")[-1]
 
 

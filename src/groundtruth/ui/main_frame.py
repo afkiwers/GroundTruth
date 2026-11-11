@@ -877,7 +877,7 @@ class MainFrame(ConfigActions, wx.Frame):
                 continue
             found, why = suggest_net(self.board, self.settings.config, net)
             if found is None:
-                # refused as a supply: the user may know better (the user: "/CPU/ADC_I_RAIL_1 ... is actually a
+                # refused as a supply: the user may know better (the user: "/MCU/ADC_SENSE_1 ... is actually a
                 # sensitive signal to an ADC ... it should be allowed to go into the nets tab")
                 forced, _ = suggest_net(self.board, self.settings.config, net, as_signal=True)
                 if forced is not None and message_box(

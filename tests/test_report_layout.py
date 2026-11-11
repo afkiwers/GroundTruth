@@ -25,7 +25,7 @@ def test_findings_are_one_line_per_check_most_severe_first():
             + [_issue("clearance_voltage", "warning", "+VDC", 3)]
             + [_issue("emi_margin", "error", "buck conv1", 4, margin_db=-15.2),
                _issue("emi_margin", "error", "buck conv2", 5, margin_db=-19.6),
-               _issue("esd_protection", "info", "J101", 6)])
+               _issue("esd_protection", "info", "J42", 6)])
     out = html._findings_by_check(live)
     order = [c for c in ("clearance_voltage", "emi_margin", "esd_protection") if f"data-show-check='{c}'" in out]
     assert order == ["clearance_voltage", "emi_margin", "esd_protection"]

@@ -307,7 +307,7 @@ class ElectricalModel:
 
         When the mesh is too coarse to put any cell centre inside the pad, the
         barrel joins the single cell under it. That cell's potential represents
-        the field at Peaceman's radius r_eq = 0.198 dx; the part of the radial
+        the field at Peaceman's radius r_eq = 0.198 dx [Peaceman 1978]; the part of the radial
         term beyond the pad (r_p to r_eq) is only real where copper surrounds the
         via (planes, pours), so it is weighted by the surrounding copper coverage.
         """
@@ -331,8 +331,8 @@ class ElectricalModel:
         def equiv_radius(n_t):
             """The radius a cluster of n_t tied cells acts like for radial current."""
             # Equivalent radius of n tied cells on a 5-point grid: Peaceman's 0.198 dx for one
-            # cell; for clusters the square-block fit (0.5845 sqrt(n) - 0.48) dx, calibrated
-            # numerically against the continuum log potential.
+            # cell [Peaceman 1978]; for clusters the square-block fit (0.5845 sqrt(n) - 0.48) dx,
+            # calibrated numerically against the continuum log potential [A102].
             return 0.198 * dx if n_t == 1 else (0.5845 * math.sqrt(n_t) - 0.48) * dx
 
         ids = within(r_p)

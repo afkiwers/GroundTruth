@@ -366,7 +366,7 @@ def test_the_report_shows_an_op_amp_stage(tmp_path):
 
 
 def test_a_series_part_after_the_op_amp_keeps_its_own_impedance(tmp_path):
-    """U1 → R1 → op-amp U5 → R2 4.7 kΩ → U2 (refboard's ADC path: buffer, then R303): each op-amp stage
+    """U1 → R1 → op-amp U5 → R2 4.7 kΩ → U2 (refboard's ADC path: buffer, then R41): each op-amp stage
     gets its own series parts. Before, the stage after U5 paired its part step with the route's first part left
     over, U5 itself: R2 was modelled as the op-amp (1 Ω) instead of 4.7 kΩ."""
     from boardgen import opamp_path_board
@@ -419,8 +419,8 @@ def _labelled_opamp_board():
 
 
 def test_stale_detected_entries_are_replaced_and_their_pieces_removed(tmp_path):
-    """Settings made before the labels list the path's pieces (as refboard's did: /CPU/ADC_I_RAIL_1 from
-    C304.1, Net-(U301-+) and Net-(U301--) on their own), unreviewed, and the op-amp as 'open'. Loading the board
+    """Settings made before the labels list the path's pieces (as refboard's did: /MCU/ADC_SENSE_1 from
+    C41.1, Net-(U41-+) and Net-(U41--) on their own), unreviewed, and the op-amp as 'open'. Loading the board
     makes the labelled op-amp an amplifier; Detect replaces the unreviewed entry of the same name (keeping its
     tick) and removes the pieces inside the new path; a reviewed entry is never touched."""
     from groundtruth.analysis.detect import detect_nets, refreshes

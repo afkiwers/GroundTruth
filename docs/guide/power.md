@@ -204,14 +204,14 @@ work on stacks is paused.
 
 ```yaml
 stack:
-  - name: logic                  # its parts and nets become logic:U8, logic:/CPU/NRST
+  - name: logic                  # its parts and nets become logic:U8, logic:/MCU/NRST
     file: ../logic/logic.kicad_pcb   # relative to this board's folder
     gap: 3.2mm                   # between the two boards' facing surfaces
     connectors: [[J7, J1]]       # [this board's connector, the other board's], pins joined by number
     side: above                  # or below
     flip: auto                   # auto | no | yes: the other board turned over (its top facing this board)
 victims:
-  nets: [logic:/CPU/NRST, logic:/CPU/PWM_AH]   # optional: otherwise found
+  nets: [logic:/MCU/NRST, logic:/MCU/PWM_AH]   # optional: otherwise found
   drive_ohms: 50
   input_pf: 5
 ```
@@ -266,13 +266,13 @@ Issues: `loop_phase_margin` (under 45°, or a gain margin under 6 dB: a warning;
 (subharmonic oscillation) as the stage's note. Overrides per stage:
 `converters: [{..., loop: {mode: current, gm: 1.8m, cs_gain: 0.05, slope: 50mV/us, r_sense: 4m}}]`.
 
-On refboard (U303's fields set on 2026-10-17 at the user's "add those yourself": Control Mode peak current,
+On refboard (U43's fields set on 2026-10-17 at the user's "add those yourself": Control Mode peak current,
 Vref 0.8V, EA gm 1.8mmho, Vsense Max 50mV for ILIM floating, ITH Range 1V from the datasheet's
-Figure 13, "Maximum Current Sense Threshold vs V_ITH": 0 mV at 0.4 V to 50 mV at 1.4 V; U502 COT, U503 internal): conv1 (28 V, 10 A)
+Figure 13, "Maximum Current Sense Threshold vs V_ITH": 0 mV at 0.4 V to 50 mV at 1.4 V; U46 COT, U47 internal): conv1 (28 V, 10 A)
 crosses over at 11.2 kHz with 77° of phase margin and 20.2 dB of gain margin (Simulate of 2026-10-18; 22.6 dB when
 this was first written), conv2 (5.4 V, 5 A) at 29 kHz with 91°
-and 20 dB (R311 22 kΩ + C313 2.2 nF (1.9 nF at bias) + C311 5 pF; R306 / R307 and R331 / R332 with R305 / R333 from
-ADJ_RAIL as AC grounds; R309 ∥ R310 and R328 ∥ R329, 4 mΩ; slope compensation assumed at half the down-slope).
+and 20 dB (R48 22 kΩ + C44 2.2 nF (1.9 nF at bias) + C43 5 pF; R44 / R45 and R56 / R57 with R43 / R58 from
+ADJ_RAIL as AC grounds; R46 ∥ R47 and R54 ∥ R55, 4 mΩ; slope compensation assumed at half the down-slope).
 `tools/dev/loop_check.py BOARD SETTINGS [--set conv1:ith_range=0.8] [--png DIR]` prints a stage's loop without a
 Simulate.
 
@@ -360,7 +360,7 @@ Motor bridges heat the board with their RMS currents and their parts' losses (se
   twice, not per trial: a draft model finds where each capacity lies, then a model at `thermal.quality`, its mesh
   planned for the heat at those currents, settles it to 0.25 K. A stage whose neighbour alone already passes the
   limit at its operating point shows **blocked**, naming that stage and the spot ("buck conv1 at its operating
-  point already puts copper at Q301 (F.Cu) at 143.7 °C, over the 105 °C limit"): fix that stage's heat first, or
+  point already puts copper at Q41 (F.Cu) at 143.7 °C, over the 105 °C limit"): fix that stage's heat first, or
   read the "all power stages" row.
 - The plugin solves in a process of its own and stops it (with a message) when it uses more than 60 % of the
   computer's memory, or when less than 5 % (0.5 GB) is left free: use `thermal.quality: draft` (or Thermal quality

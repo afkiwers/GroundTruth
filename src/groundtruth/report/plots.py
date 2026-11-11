@@ -202,7 +202,7 @@ def _route(ax, board: Board, rr: RouteResult):
 # menu, which the plugin's report follows too). The user, of a map crowded with markers and labels: "I only want to
 # see the heatmap, no vias etc. A toggle for each of the components would be handy and a master switch"
 MARKS = {"vias": "Via markers (▲)", "parts": "Part markers (■)", "shares": "Shares at the markers (12 %)",
-         "pins": "Switch pins (S, D, SW, …)", "switch_names": "Switch names (Q301, U502, …)",
+         "pins": "Switch pins (S, D, SW, …)", "switch_names": "Switch names (Q41, U46, …)",
          "issues": "Issue rings", "hot_spot": "Hot spot (×)", "route": "Signal route",
          "outlines": "Part outlines", "names": "Part names"}
 
@@ -569,7 +569,7 @@ def cluster_text(group: list) -> str:
 
 def view_issues(rr, issues) -> list:
     """The issues a view's maps mark: its own net's (or power stage's), and of a power stage only those about what
-    the view shows. A DC path's view (view_of: "input J101.2 → Q301") marks that path's current-density and via
+    the view shows. A DC path's view (view_of: "input J42.2 → Q41") marks that path's current-density and via
     issues (keys ending ":dc:<path>" / ":via:<path>", power._converter_issues); the stage's other views (the hot
     loop, a bridge's RMS currents) mark none of its DC paths' issues. Before, every view of a stage showed all of
     them: the output path's overloaded via appeared on the switch-node map, where that current doesn't flow."""

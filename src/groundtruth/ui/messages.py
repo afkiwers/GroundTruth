@@ -3,7 +3,7 @@ other error window better. I want it to be clear and glancable. Currently it is 
 
 `box` has wx.MessageBox's signature and return values, so every call site uses it unchanged. It shows a headline
 (the message's first line, or the caption's word for it), then each problem as a block: where it is in bold
-("Signal path /CPU/ADC_I_RAIL_1"), what is wrong below it; long numbers in engineering form (6.67e-07 s -> 667 ns).
+("Signal path /MCU/ADC_SENSE_1"), what is wrong below it; long numbers in engineering form (6.67e-07 s -> 667 ns).
 Tracebacks keep their own monospaced block. Tests replace wx.MessageBox with a stand-in that answers at once: box
 then hands over to it, so they never wait on a dialog.
 """
@@ -33,7 +33,7 @@ def tidy(text: str) -> str:
 
 
 def split_problem(line: str) -> tuple[str, str]:
-    """(where, what) of one problem line: a settings path ("nets[0] (/CPU/X): ...") named as the tab's row, else
+    """(where, what) of one problem line: a settings path ("nets[0] (/MCU/X): ...") named as the tab's row, else
     the part before a first ": " when it is short; ("", line) otherwise."""
     m = WHERE.match(line)
     if m:

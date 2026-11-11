@@ -2,7 +2,7 @@
 
     .venv/Scripts/python tools/dev/thermal_check.py BOARD SETTINGS [--only SW1,SW2] [--rds-on 4m] [--dcr 5m]
         [--quality draft|normal|fine] [--ambient 25] [--png DIR] [--capacity [--limit 105]] [--cache FILE]
-        [--theta Q301=2,Q303=2] [--linear] [--electrothermal ROUNDS [--et-tol 0.01]]
+        [--theta Q41=2,Q43=2] [--linear] [--electrothermal ROUNDS [--et-tol 0.01]]
 
 Simulates the chosen power stages (their DC paths drive the thermal model), then solves the temperatures. The
 loss parameters given here override the settings file for this run only (nothing is written). --png saves the
@@ -38,7 +38,7 @@ def main() -> int:
     ap.add_argument("--capacity", action="store_true")
     ap.add_argument("--limit", type=float)
     ap.add_argument("--cache")
-    ap.add_argument("--theta", help="theta_jb per part, e.g. Q301=2,Q303=2 (K/W)")
+    ap.add_argument("--theta", help="theta_jb per part, e.g. Q41=2,Q43=2 (K/W)")
     ap.add_argument("--linear", action="store_true")
     ap.add_argument("--electrothermal", type=int, metavar="ROUNDS")
     ap.add_argument("--et-tol", type=float, default=0.01)

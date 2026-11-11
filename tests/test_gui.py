@@ -1648,7 +1648,7 @@ def test_draw_hot_loop_puts_the_stages_hot_loop_on_its_layer(app, tmp_path, monk
         assert not b.blocked(), b.blocked()
         name = f.settings.config.converters[0].name
         spec = f.settings.config.converters[0]
-        # the stage's main view says what it is (the user: "should Q301->Q302 have some comment behind it like (EMI
+        # the stage's main view says what it is (the user: "should Q41->Q42 have some comment behind it like (EMI
         # results)?")
         assert f.results_panel.choice.GetString(0) == f"{name}  hot loop {spec.high_side[0]}→{spec.low_side[0]} (EMI)"
         run_steps(app, f, [lambda: b.click()])
@@ -1667,7 +1667,7 @@ def test_a_long_status_message_wraps_instead_of_being_cut_off(app, frame):
     run_steps(app, f, [])
     f.SetSize((900, 600))
     one_line = f.status.GetSize().height
-    text = ("/DCDC Stage/DC_OUT_RAIL_1 is a supply net, not a signal: the Nets tab is for clock and data nets, whose "
+    text = ("/Power/OUT_RAIL_1 is a supply net, not a signal: the Nets tab is for clock and data nets, whose "
             "return current GroundTruth follows. Its current is analysed with the power stage buck SW1 on the "
             "Converters tab (Simulate: hot loop, conducted emission and the DC current density).")
     f.SetStatusText(text)
@@ -2039,7 +2039,7 @@ def test_parts_table_sorts_by_a_header_click_and_keeps_a_dragged_width(app, fram
     import wx.grid as gridlib
     from groundtruth.ui.parts_panel import COLS, sort_key
     assert sorted(["22u0", "100n", "1u0", "4k7", "C at"], key=sort_key) == ["100n", "1u0", "22u0", "4k7", "C at"]
-    assert sorted(["C10", "C9", "R1", "C100"], key=sort_key) == ["C9", "C10", "C100", "R1"]
+    assert sorted(["C10", "C9", "R1", "C56"], key=sort_key) == ["C9", "C10", "C56", "R1"]
     f = frame
     run_steps(app, f, [])
     f.notebook.SetSelection(f.notebook.FindPage(f.parts))
@@ -2713,7 +2713,7 @@ def test_every_button_works_before_and_after_a_simulate(app, frame, monkeypatch)
 def test_detect_offers_to_replace_a_stale_unreviewed_net(app, tmp_path):
     """The Nets tab's Detect… dialog: an unreviewed detected entry whose path detection now sees differently is
     offered again, ticked, marked REPLACES; choosing it replaces the entry in place (its tick kept) and removes
-    the unreviewed pieces inside its path (refboard's /CPU/ADC_I_RAIL_1 after the op-amp labels)."""
+    the unreviewed pieces inside its path (refboard's /MCU/ADC_SENSE_1 after the op-amp labels)."""
     sys.path.insert(0, os.path.dirname(__file__))
     from test_path import _labelled_opamp_board
     from groundtruth.analysis.detect import detect_nets
@@ -4025,7 +4025,7 @@ def test_the_sweep_heading_says_it_adds_to_the_operating_point_and_opens_its_hel
 
 
 def test_reference_nets_gone_from_the_board_are_offered_for_removal(app, frame, monkeypatch):
-    """A ground deleted in KiCad stayed in reference_nets and blocked every run ("reference net 'GND_ISO' does not
+    """A ground deleted in KiCad stayed in reference_nets and blocked every run ("reference net 'GND2' does not
     exist on the board", the user: "can't seem to get rid of it", then "offer an option to remove it
     automatically"): before a run the window asks, Yes keeps the nets still on the board (saved, one undo step),
     No leaves the settings and the run blocked; with none of them left, the grounds found on the board."""
@@ -4033,12 +4033,12 @@ def test_reference_nets_gone_from_the_board_are_offered_for_removal(app, frame, 
     f = frame
     run_steps(app, f, [])
     assert "GND" in f.board.nets
-    f.settings.set_reference_nets(["GND", "GND_ISO"])
-    assert missing_reference_nets(f.settings.config, f.board) == (["GND_ISO"], ["GND"])
+    f.settings.set_reference_nets(["GND", "GND2"])
+    assert missing_reference_nets(f.settings.config, f.board) == (["GND2"], ["GND"])
     asked = []
     monkeypatch.setattr(wx, "MessageBox", lambda msg, *a, **k: asked.append(msg) or wx.NO)
     assert not f._ready(simulate=False)                                  # No: still blocked, nothing changed
-    assert "GND_ISO" in asked[0] and f.settings.config.reference_nets == ["GND", "GND_ISO"]
+    assert "GND2" in asked[0] and f.settings.config.reference_nets == ["GND", "GND2"]
     monkeypatch.setattr(wx, "MessageBox", lambda msg, *a, **k: asked.append(msg) or wx.YES)
     assert f._ready(simulate=False)
     assert f.settings.config.reference_nets == ["GND"]
@@ -4137,7 +4137,7 @@ def test_the_spread_rate_hint_follows_the_spread_mode(app, conv_frame):
 
 
 def test_an_integrated_stage_greys_the_discrete_switch_fields(app, conv_frame):
-    """The user: "when entering Integrated stage = U502, should you grey out the High side, Low side and Switch node
+    """The user: "when entering Integrated stage = U46, should you grey out the High side, Low side and Switch node
     then. It is very confusing otherwise". Typing an IC greys the three (their text kept), clearing it enables them
     again, Add saves none of them for the integrated stage, and a stage selected from the list shows its own
     state."""

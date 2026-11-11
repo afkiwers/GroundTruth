@@ -107,7 +107,7 @@ class HistoryPanel(wx.Panel):
         self.list.Bind(wx.EVT_LIST_ITEM_DESELECTED, lambda e: (self._selection_changed(), e.Skip()))
         self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda e: self._on_button("report"))
         self.note = wx.TextCtrl(self, style=wx.TE_PROCESS_ENTER)
-        self.note.SetHint("a note for the selected run, e.g. 'GND vias at C324/C326'")
+        self.note.SetHint("a note for the selected run, e.g. 'GND vias at C46/C47'")
         self.note.Bind(wx.EVT_TEXT_ENTER, lambda e: self._save_note())
         self.save_note = theme.Button(self, "Save note")
         self.save_note.Bind(wx.EVT_BUTTON, lambda e: self._save_note())

@@ -105,7 +105,7 @@ def connect():
 
 def pin_name(name: str) -> str:
     """A pad's symbol pin name as the file reader gives it: KiCad appends the pin number ("G_1", "PA5_12"), the
-    rules match the name ("G", "PA5"). Found live: Q601's gate came through the API as "G_1", so the surge
+    rules match the name ("G", "PA5"). Found live: Q45's gate came through the API as "G_1", so the surge
     stopper's FET was not recognised and no input connector was found in the plugin (the CLI found it)."""
     return re.sub(r"_\d+$", "", name or "")
 

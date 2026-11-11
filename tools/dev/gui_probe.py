@@ -337,7 +337,7 @@ def main(argv=None) -> int:
                                                                         button=1, dblclick=True))
         steps.append(("(heatmap views)", views))
     long_status = ("a status line long enough to wrap onto a second line, as a job's progress messages do: "
-                   "/CPU/SPI_SCK: 1.234 GHz, board-wide model (34 000 nodes), solve 12 of at most 40, about 6:59 "
+                   "/MCU/SPI_SCK: 1.234 GHz, board-wide model (34 000 nodes), solve 12 of at most 40, about 6:59 "
                    "left of the whole Simulate, the window laid out again when the bar grows and when it shrinks")
     # every tab before and after the status bar changes height: a tab shown the first time after the window was
     # laid out again pays for its own layout then (wx lays a hidden notebook page out when it is shown)

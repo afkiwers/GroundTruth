@@ -23,7 +23,7 @@ from .widgets import (FilteredCheckList, InfoBox, PickDialog, button_row, fit_sc
 
 # hover explanations of the form's fields (on the label and the field)
 NET_TIPS = {
-    "Start net": "The net the path is named after and starts its search from, e.g. /CPU/SPI_SCK: the path runs "
+    "Start net": "The net the path is named after and starts its search from, e.g. /MCU/SPI_SCK: the path runs "
                  "from the driver pin through series parts, Pass-through parts and op-amps to the receiver pins, "
                  "and its return current is solved in the planes under all of it.",
     "Driver pin": "The pin that drives the net (the source of the signal's current), e.g. U1.12.",

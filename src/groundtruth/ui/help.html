@@ -54,7 +54,7 @@ next one).</p>
 <li><b>Run checks</b> (seconds): rule checks on the nets' routes against the planes.</li>
 <li><b>Simulate</b> (minutes): the field solver on everything listed. Results go to the Issues and Results
   tabs. Both first check the settings against the board: a net, pin or part the board no longer has stops the
-  run with what to fix. A reference net (a ground such as GND_ISO) deleted or renamed in KiCad is offered for
+  run with what to fix. A reference net (a ground such as GND2) deleted or renamed in KiCad is offered for
   removal instead: <b>Yes</b> takes it out of the settings (with none left, the grounds found on the board), one
   Undo step.</li>
 <li><b>Look and fix:</b> click an issue to see it in KiCad, look at the current maps, let <b>Suggest fixes</b>
@@ -185,10 +185,11 @@ data is listed with what is missing.</p>
 <hr><a name="nets"></a><h3>Signal paths tab</h3>
 <p>The signal paths to analyse, one row each: a path runs from its driver pin to its receiver pins, across nets
 through series parts (0R, termination resistors, ferrites), the parts named in <b>Pass through</b> and op-amp
-stages, and is solved as one. Each row has its frequency, edge time and amplitude (optional: source and load,
-current). A path on one net is simply a path without parts.</p>
+stages, and is solved as one. Each row has its frequency, edge time and amplitude (optional: source and load; in the settings file also
+<code>current_a</code>, the line's peak current at the fundamental, and <code>driver_return</code> /
+<code>receiver_return</code>, the pins the return is taken at). A path on one net is simply a path without parts.</p>
 <p>The table's columns: <b>Path</b> (named after its start net), <b>Status</b>, <b>Chain</b> (the path as the route
-follows it: <code>U302.3 → U301 ×1 → R303 4k7 → U1102.9</code>, op-amps with their gain; worked out in the
+follows it: <code>U42.3 → U41 ×1 → R41 4k7 → U53.9</code>, op-amps with their gain; worked out in the
 background, "no route: …" when the copper or a part doesn't connect), <b>Freq</b>, <b>Rise</b>, <b>Ampl.</b> and
 <b>Class</b> (the kind of signal detection took it for). Under the table, the selected path in full: its chain
 and its <b>Branches</b>: per net of the path, every two-pin part hanging off it to another net (a filter capacitor
@@ -273,7 +274,7 @@ in the schematic: see <a href="#siglabels">Labelling a signal path</a>.</p>
   nodes are refused with the reason. A net that looks like a supply (a power pin on it, a supply name such as
   +3V3, VIN, RAIL) or carries a power stage's current is refused too, but you are asked whether to add it as a
   signal anyway: an ADC input or a sense line measuring a rail is one. A name with a measuring word (ADC, SENSE,
-  SNS, MEAS, MON, FB) is taken as a signal without asking (/CPU/ADC_I_RAIL_1). A net already listed is
+  SNS, MEAS, MON, FB) is taken as a signal without asking (/MCU/ADC_SENSE_1). A net already listed is
   selected.</li>
 <li><b>The tick box at the start of a row</b> switches the net on or off. Switched off, it keeps everything you
   entered (in the settings file as <code>enabled: false</code>) and shows greyed, but Run checks, Simulate and the
@@ -306,7 +307,7 @@ current, and the copper of the stage's DC paths scales with the square of its cu
 resistance).</p>
 <ul>
 <li><b>The plot</b>: the efficiency against the load current above, the losses below on the same current axis,
-  stacked by cause (conduction, the inductor's winding, output charge, switching, dead time, reverse recovery, a
+  stacked by cause (conduction, the inductor's winding, the inductor's core, output charge, switching, dead time, reverse recovery, a
   diode, copper, series parts and connector pins, gate drive, the controller), the total as a line. The dotted line
   is the stage's own load current. The second plot shows the loss at that current by cause, with each one's share:
   the place to start when the efficiency should be higher.</li>
@@ -324,8 +325,12 @@ resistance).</p>
   note) and for the duty. The ripple does not follow the load, so the core loss is the same at every load current:
   it weighs most at light load. It also heats the inductor in Thermal. The inductor's schematic fields <b>Core
   Loss</b>, <b>Core Loss Frequency</b>, <b>Core Loss Ripple</b>, <b>Core Alpha</b> and <b>Core Beta</b> fill these
-  (◆), as its DCR field does. The winding's AC resistance is not
-  modelled.</li>
+  (◆), as its DCR field does. With <b>Core loss at ΔI</b> the inductor needs its L on the Parts tab (the stage's
+  ripple comes from it): without it the core loss is left out and a note says so; with only <b>Core loss at f</b>
+  it is scaled by the frequency alone. In the settings file: <code>core_loss</code>, <code>core_loss_f</code>,
+  <code>core_loss_di</code>, <code>core_alpha</code>, <code>core_beta</code> (0.5 to 4), and for the fixed losses
+  <code>qg</code>, <code>v_gate</code>, <code>iq</code>. The winding's AC resistance and the capacitors' ESR loss
+  from their ripple current are not modelled.</li>
 <li><b>The currents</b>: 24 points from 5 % to 120 % of the stage's load current, or the list in <b>Efficiency
   currents (A)</b> (settings: <code>efficiency_currents: [0.5, 1, 2, 4, 6]</code>).</li>
 <li><b>Measured points</b>: <b>Measured efficiency</b> names a CSV (a file in the board's groundtruth/ folder, or
@@ -400,8 +405,10 @@ switches inside (High side, Low side and Switch node are then greyed: not used);
 class</b> pick the limit (CISPR 22 CLASS A / B, CISPR 25 CLASS 1-5 as in TI WEBENCH, CISPR 32, MIL-STD-461 CE102;
 <i>(analysis default)</i> uses the settings' <code>analysis.conducted</code>; see <a href="#conducted">Conducted-emission
 limits</a> for the classes and when each applies); parts are references separated by
-commas (Q1, Q2), connectors plus then minus (J1.1, J1.2). <b>R_DS(on)</b>, <b>R_DS(on) low side</b>, <b>Inductor
-DCR</b> and <b>Diode V_f (V)</b> are the losses of the thermal solve.</p>
+commas (Q1, Q2), connectors plus then minus (J1.1, J1.2). The <b>Losses</b> group (<b>R_DS(on)</b>, <b>R_DS(on) low side</b>, <b>Inductor DCR</b>, <b>Diode V_f (V)</b>,
+the dead times, <b>Reverse V_SD (V)</b>, <b>Q_rr</b> and the inductor's <b>Core loss</b> with <b>Core loss at
+f</b>, <b>Core loss at ΔI (A)</b>, <b>Core α (frequency)</b> and <b>Core β (ripple)</b>) feeds Thermal, the input
+current and the efficiency sweep.</p>
 <p><a name="deadtime"></a><b>Dead time, reverse conduction and recovery</b> (a synchronous stage: a FET as the
 rectifier, a buck's low side or a boost's high side). Before each switch turns on, both are off for a dead time;
 the inductor current meanwhile flows through the rectifier FET in reverse, at <b>Reverse V_SD</b> (about 1.5-2 V for
@@ -463,10 +470,12 @@ radiated spectra), and when the recovery snaps off it adds an overshoot I_rr·�
   without vias of its own sends its share through the nearest vias around it, which then carry the most.</li>
 <li><b>The input current</b> is not entered: it follows from the energy balance V_in·I_in = V_out·I_out + losses
   (a buck at 100 % efficiency would draw I_out·D). The losses are the ones Thermal uses: the switches' conduction
-  (R_DS(on)), the hard edge (½·V·I·t_r·f_sw at the inductor current of that instant: a synchronous stage's turn-on
-  at the ripple's valley, a diode stage's turn-off at its peak too) and output charge (Q_oss·V·f_sw), a diode's
-  V_f, the inductor's DCR, series parts and the copper of the DC paths, and the gate drive and the controller's
-  own supply when Q_g and I_q are given (the same losses as the efficiency view's at this current); a
+  (R_DS(on), with the inductor's ripple: I² + ΔI²/12), the hard edge (½·V·I·t_r·f_sw at the inductor current of
+  that instant: a synchronous stage's turn-on at the ripple's valley, a diode stage's turn-off at its peak too) and
+  output charge (Q_oss·V·f_sw; a diode stage half of it), a synchronous rectifier's reverse conduction in the dead
+  times and its recovery charge (Q_rr·V·f_sw), a diode's V_f, the inductor's DCR and its core loss, series parts,
+  connector pins (contact and solder joint) and the copper of the DC paths, and the gate drive and the
+  controller's own supply when Q_g and I_q are given (the same losses as the efficiency view's at this current); a
   value not given (no R_DS(on), no DCR) counts as no loss: the stage's notes say which. The stage's line on the
   Results tab shows the input current and efficiency, its notes the loss break-down, and the DC input path's map
   (connector to the high side) carries this current: its title reads "expected input current … A (efficiency
@@ -532,7 +541,8 @@ current-sense ICs and resistors up to 10 Ω, at most two in series (a larger res
 are then one bridge on the common ground, each with its own net and shunt as its <b>Return</b> (the leg list's
 column; <b>Ground return</b> and <b>Shunt</b> in the Selected leg fields); legs with and without shunts mix. Simulate
 closes each leg's hot loop through its shunt: the shunt and its copper are in the loop, its RMS current and loss
-in the bridge's results. <b>When detection still splits a drive</b> into several bridges (a shunt above 10 Ω, a return
+in the bridge's results (a low-side shunt carries its leg's chopped current as well as the slow phase current: its
+RMS and loss count both). <b>When detection still splits a drive</b> into several bridges (a shunt above 10 Ω, a return
 net it cannot follow), tick one of them in Detect…, then add the other legs to it with <b>Add leg</b> (their
 switch node, high and low side, ground return, shunt and output pin) and set the common <b>Ground net</b>; or label
 the switches <code>hbA_hs</code>, <code>hbA_ls</code>, … (<a href="#labels">Detection labels</a>).</p>
@@ -653,7 +663,8 @@ board (pours, tracks and vias, as for a power stage's DC paths) and shows:</p>
   busiest vias against IPC-2221, and the copper's loss; these are checked like a power stage's DC paths
   (current_density, via_overload), and a load above the rail's <b>Max drop</b> is an issue (dc_drop). The checked
   density is the one sustained over 1 mm of the rail's own copper (another net's pour beside a track does not
-  dilute it); its limits are rules of thumb, and what a density does to the copper's temperature is Thermal's.
+  dilute it); its limits are rules of thumb (50 A/mm² a warning, 100 an error; a via from 100 % and 150 % of
+  its IPC-2221 capacity: <a href="#rules">rules</a>), and what a density does to the copper's temperature is Thermal's.
   The <b>peak</b> shown beside it is the density over a quarter millimetre of copper (or one cell, where the cell
   is larger): at an inside corner the density has no finite value at a point, so a single cell's figure would grow
   on every finer grid; over 0.25 mm it settles (a coarse grid reads it up to about 10 % low);</li>
@@ -697,7 +708,8 @@ V &middot; ripple / I_step, whatever the frequency of the IC's current step.</p>
   resonance; the HTML report's Power integrity part and the rail's view), its <b>peaks</b> (anti-resonances: two
   decaps, or the decaps and the planes, ringing together), the <b>part holding the rail</b> at each frequency (the
   regulator, a decap, the planes) and the <b>inductance above its decaps</b>;</li>
-<li>issues: <b>pdn_impedance</b> where an IC's curve is over the target below <i>check_to</i> (default 100 MHz: above
+<li>issues: <b>pdn_impedance</b> where an IC's curve comes within 3 dB of the target (a warning; over the
+  target an error) below <i>check_to</i> (default 100 MHz: above
   it the package and the die's own capacitance take over), naming the part holding the rail there;
   <b>decap_missing</b> for supply pins with no decap pad within <i>decap_mm</i> (3 mm);</li>
 <li>the <b>source</b> (the regulator's output, found by its <i>power_out</i> pin, or a connector) is modelled as
@@ -723,7 +735,7 @@ solder mask, solved as a two-dimensional field problem (within 0.2 % of exact re
 seconds per net; the figures show on this tab and in the report, the issues on the Issues tab.</p>
 <ul>
 <li><b>impedance</b>: Z0 along a net's tracks outside its target. Targets on this tab (Impedance target: nets by
-  name or pattern such as <code>/CPU/SPI_*</code>, or a KiCad net class, with Z0 and tolerance). A listed net
+  name or pattern such as <code>/MCU/SPI_*</code>, or a KiCad net class, with Z0 and tolerance). A listed net
   without a target gets its Z0 shown. A void in the plane under a track shows as a higher Z0 there.</li>
 <li><b>diff_impedance</b>, <b>diff_skew</b>: a pair's differential impedance where its two nets run side by side
   (elsewhere it is uncoupled, about twice Z0), and the delay mismatch of their routed lengths against Max skew (by
@@ -743,7 +755,7 @@ seconds per net; the figures show on this tab and in the report, the issues on t
 </ul>
 <pre>si:
   impedance:
-    - {nets: [/CPU/SPI_*], z0: 50Ω, tol: 10%}
+    - {nets: [/MCU/SPI_*], z0: 50Ω, tol: 10%}
     - {class: HighSpeed, z0: 45Ω}
   pairs:
     - {p: /USB/D_P, n: /USB/D_N, zdiff: 90Ω, rise_time: 500ps, max_skew: 10ps}
@@ -787,7 +799,7 @@ or resistor model on the Parts tab (its drain and source, not its gate). A volta
   the switches' <b>Vds</b> field, above 80 % of it a warning.</li>
 </ul>
 <pre>safety:
-  voltages: {V_BATT: 58V}
+  voltages: {V_SUPPLY: 58V}
   coated: false
   cap_derating: {ceramic: 50%}
   resistor_derating: 50%
@@ -827,7 +839,7 @@ the border to fit the column to its contents (the Note column too, past its usua
   each part as a two-terminal impedance (R, C, L, ESR, ESL); a switch is part of its power stage's hot loop instead,
   so its row stays <code>open</code> with empty cells. Its fields are read into the stage it belongs to: see them on
   the <a href="#converters">Converters tab</a> (or <a href="#bridges">Motor bridges</a>), each marked ◆ "from the
-  schematic" in the stage's form (refboard's Q301 EPC2306: conv1's rds_on 3.1 mΩ, c_oss 616 pF, q_oss 44 nC,
+  schematic" in the stage's form (refboard's Q41 EPC2306: conv1's rds_on 3.1 mΩ, c_oss 616 pF, q_oss 44 nC,
   v_sd 1.6 V).</li>
 <li>an inductor or ferrite: <b>R / DCR</b> is its winding's DC resistance (a <b>DCR</b> field on its symbol fills it).
   Without one it is suggested at 50 mΩ (a ferrite 100 mΩ), a placeholder, not the part's own: its Schematic cell says
@@ -1040,11 +1052,38 @@ bands 150 kHz-108 MHz</td><td>average</td></tr>
 <td>peak</td></tr>
 </table>
 <p>What GroundTruth does not do here: size an input filter as WEBENCH does (the Fixes tab proposes changes to the
-layout and parts instead, each verified with a solve), or estimate common-mode emission at the input (see
-<a href="#limits">Limits</a>).</p>
+layout and parts instead, each verified with a solve). Common mode is estimated only as the switch node's
+C·dV/dt through the stage's <b>C stray</b> (to chassis) into the two LISNs (a conducted_emission issue with the
+stray-capacitance budget); a cable's common mode is not modelled (see <a href="#limits">Limits</a>).</p>
 
 <hr><a name="issues"></a><h3>Issues tab</h3>
-<p>Every problem found, by severity (error, warning, info). Clicking one shows it in KiCad: the copper concerned
+<p>Every problem found, by severity (error, warning, info). The <b>Check</b> column names the check; most are
+explained with their tab, the others here (default severity in brackets; <code>rules: severity:</code> in the
+settings file changes it or switches a check off):</p>
+<table border="1" cellspacing="0" cellpadding="3">
+<tr><td>route_missing (error)</td><td>no copper path between a path's driver and receiver</td></tr>
+<tr><td>no_reference (error), off_plane (warning)</td><td>no reference plane next to the signal layer; a stretch
+  of the trace runs without one</td></tr>
+<tr><td>gap_crossing (error)</td><td>the trace crosses a gap in its reference plane</td></tr>
+<tr><td>layer_change_stitch (error), layer_change_decap (warning)</td><td>the trace changes its reference layer
+  without a return via within 2 mm, or its reference net without a decoupling capacitor within 5 mm</td></tr>
+<tr><td>edge_proximity (warning)</td><td>the trace runs closer to its plane's edge than 3 heights above it</td></tr>
+<tr><td>reference_net (info)</td><td>the trace is referenced to a plane that is not ground</td></tr>
+<tr><td>return_path_broken (error), return_detour (warning; error from 2× the ideal loop)</td><td>the solved
+  return current finds no path on the reference layer, or detours: the loop's inductance is 1.25× the ideal
+  loop's or more</td></tr>
+<tr><td>emi_margin, conducted_emission (warning; over the limit an error)</td><td>the radiated or the conducted
+  estimate is within 6 dB of its limit</td></tr>
+<tr><td>power_loop_broken (error)</td><td>a converter's hot loop cannot be modelled (a switch, the rail or the
+  ground has no copper path)</td></tr>
+<tr><td>bridge_operating_point (warning)</td><td>a motor bridge cannot reach its phase current at this speed and
+  bus voltage</td></tr>
+<tr><td>thermal_hotspot, part_temperature (warning; error above max_c)</td><td>copper or a part above the thermal
+  limits (warn_c 85 °C, max_c 105 °C)</td></tr>
+<tr><td>loop_phase_margin, loop_crossover (warning)</td><td>a converter's control loop: under 45° of phase or 6 dB
+  of gain margin (under 30°: an error); a crossover above f_sw/5</td></tr>
+</table>
+<p> Clicking one shows it in KiCad: the copper concerned
 is selected, its net highlighted and the view zoomed to it (nothing in the design changes); <b>Zoom to it</b> and
 <b>Highlight its net</b> switch those off, <b>Show in KiCad</b> shows the selected issue again after you moved
 KiCad's view. A voltage spacing issue (<b>clearance_voltage</b>) sits in the gap between two nets: both nets'
@@ -1109,8 +1148,9 @@ bar in the middle of each plot that waits; it goes when the picture arrives.</p>
   layer with its share of the current in %, busiest first (the drawing buttons use the busiest layer for <i>main
   layers</i> and <i>all layers</i>).</li>
 <li><b>A buck or boost stage's control loop</b> is one of its responses (the loop gain T): its crossover, phase
-  margin and gain margin are in the stage's tiles and the report, an issue below 45° (30°: an error) or above f_sw/5
-  (a boost: above a fifth of its right-half-plane zero, D'²·R_load/L, marked RHP). The parts
+  margin and gain margin are in the stage's tiles and the report, an issue (<b>loop_phase_margin</b>) below 45°
+  of phase margin or 6 dB of gain margin (below 30°: an error), and (<b>loop_crossover</b>) for a crossover above
+  f_sw/5 (a boost: above a fifth of its right-half-plane zero, D'²·R_load/L, marked RHP). The parts
   come from the board (the controller by its pin on the switch node; the R-C on its ITH / COMP pin, the divider on its
   FB pin, the sense resistor between its SENSE pins), the controller's figures from its symbol's fields: Control Mode
   (peak current, voltage, COT, internal), Vref, EA gm (or EA Gain / EA GBW), Vsense Max and ITH Range (or Current
@@ -1399,7 +1439,8 @@ Simulate, it says so and asks for a Simulate instead of heating the design as it
 <li>copper: a converter's DC paths, a bridge's RMS currents (Joule heat, resistivity following the
   temperature);</li>
 <li>parts: their losses at the operating point (switch conduction, switching edges, output charge, a synchronous
-  rectifier's reverse conduction in the dead times and its recovery charge, an inductor's DCR, series parts; for a
+  rectifier's reverse conduction in the dead times and its recovery charge, an inductor's DCR and core loss,
+  series parts, connector pins' contact and joint resistance; for a
   bridge, the losses from its drive waveform).</li>
 </ul>
 <p><b>Current capacity</b> (Results tab, <b>Further analysis ▾</b>) finds, per converter, the load current, and per bridge, the phase
@@ -1407,10 +1448,13 @@ current, at which the hottest copper or part junction reaches the limit (<code>t
 <code>max_c</code>; <a href="#prefs">Preferences</a>, Capacity limit, sets one for this computer), the others at their
 operating points. When the other stages at their operating points already put a spot over the limit with this one
 at no load, its capacity reads <b>blocked</b> and names the stage whose part is too hot (for example "buck conv1 at
-its operating point already puts copper at Q301 at 143.7 °C"): fix that stage's heat first; its own capacity view
+its operating point already puts copper at Q41 at 143.7 °C"): fix that stage's heat first; its own capacity view
 shows it below its operating point. The thermal settings: ambient temperature,
 orientation, natural or forced convection (air speed), the warning and maximum temperatures, and the parts'
-junction-to-board resistances (<code>theta_jb</code>). The thermal mesh is the settings' <code>thermal.quality</code>
+junction-to-board resistances (<code>theta_jb</code>). In the settings file, under <code>thermal:</code>:
+<code>ambient_c</code> 25, <code>orientation</code> horizontal or vertical, <code>convection</code> natural, forced
+(<code>airspeed</code> 1 m/s) or fixed (<code>h_top</code> 10 and <code>h_bottom</code> 5 W/m²K),
+<code>radiation</code> true, <code>warn_c</code> 85, <code>max_c</code> 105, <code>theta_jb: {U1: 12}</code>. The thermal mesh is the settings' <code>thermal.quality</code>
 (draft, normal, fine) unless <a href="#prefs">Preferences</a> sets one for this computer. Both run in the
 background; <b>Cancel</b> stops them. The solve is steady state: a load that lasts a few seconds (a cranking pulse)
 heats less than shown.</p>
@@ -1455,7 +1499,7 @@ line of its own (its width, layer and the stackup), every via with its resistanc
 does not join (unrouted) is joined as the netlist says, with a note. The source is the driver behind its Source R,
 L and C; the load each receiver's capacitance and the Load R.</p>
 <p>An <b>op-amp</b> is its datasheet's small-signal model: open-loop gain <b>Aol</b> (default 100 dB) with its pole
-at <b>GBW</b>/Aol, an optional second pole (<b>Fp2</b>, or from the phase margin <b>PM</b> at unity gain), the
+at <b>GBW</b>/Aol (GBW 1 MHz when not given, with a note), an optional second pole (<b>Fp2</b>, or from the phase margin <b>PM</b> at unity gain), the
 open-loop output resistance <b>Zout</b> (the datasheet's R_O, default 100 Ω), each input's capacitance to ground
 (<b>Cin</b>, 2 pF) and <b>Rin</b> between the inputs; <b>PM</b> sets the second pole at GBW·sin(PM)·tan(PM), which
 gives a follower exactly that margin. Its gain, bandwidth and output impedance in the circuit then
@@ -1531,7 +1575,8 @@ H(s) = 1 / (C1·C2·R1·R2·s² + C2·(R1 + R2)·s + 1), over the Bode plot and 
 numerically, for the full circuit, in the engineering normal form K · Π(1 + s/ω) · Π(1 + s/(Q·ω) + s²/ω²) / [ … ]
 with every pole's and zero's frequency and Q (K the DC gain), in the summary line and the report. The poles and zeros
 are exact (the circuit's eigenvalues, each track as its lumped π section; a note says up to which frequency that is
-exact); a pole and a zero within 0.1 % of each other cancel. Each op-amp's <b>loop gain</b> is computed by breaking
+exact); a pole and a zero closer than 0.1 % of the pole's distance from the jω axis are left out of the lists (they
+change |H| by less than that). Each op-amp's <b>loop gain</b> is computed by breaking
 its loop at its output: its crossover frequency and <b>phase margin</b> (amber below 45°: the circuit rings; red
 below 20°: close to oscillating). Simulate's emission estimate takes the path's currents from the same circuit.</p>
 <p><a name="tf_how"></a><b>How the transfer function is calculated.</b> No circuit simulator (SPICE or similar)
@@ -1777,7 +1822,7 @@ an example in <a href="#siglabels">Labelling a signal path</a>.</p>
   (<a href="#deadtime">Dead time</a>)</td></tr>
 <tr><td><code>sig</code></td><td>the Signal paths tab: every net of this 2-pin part is a signal (a filter resistor)</td></tr>
 <tr><td><code>sig:9</code></td><td>the net on pin 9 (pad number or pin name: <code>sig:PA3</code>) is a signal, even
-  with a supply-like name (ADC_I_RAIL_1)</td></tr>
+  with a supply-like name (ADC_SENSE_1)</td></tr>
 <tr><td><code>sig_drv:5</code> / <code>sig_rx:9</code></td><td>... and this pin drives / receives it (Detect's guess
   is replaced)</td></tr>
 <tr><td><code>amp_in:3, amp_out:1</code></td><td>an op-amp stage's input and output pin (pad number or pin name):
@@ -1910,13 +1955,13 @@ a <b>Gain</b> field on the symbol or from the <a href="#parts">Parts tab</a> (1 
 <code>amp_out</code> instead.</p>
 <p><b>Example</b> (a current-sense output read by an ADC through a buffer and a resistor):</p>
 <table border="0" cellpadding="3">
-<tr><td>U302 (current-sense amplifier)</td><td><code>sig_drv:3</code></td></tr>
-<tr><td>U301 (op-amp follower)</td><td><code>amp_in:1, amp_out:4</code></td></tr>
-<tr><td>R303 4.7 kΩ, C304 100 nF to ground</td><td>no label</td></tr>
-<tr><td>U1102 (microcontroller)</td><td><code>sig_rx:9</code></td></tr>
+<tr><td>U42 (current-sense amplifier)</td><td><code>sig_drv:3</code></td></tr>
+<tr><td>U41 (op-amp follower)</td><td><code>amp_in:1, amp_out:4</code></td></tr>
+<tr><td>R41 4.7 kΩ, C41 100 nF to ground</td><td>no label</td></tr>
+<tr><td>U53 (microcontroller)</td><td><code>sig_rx:9</code></td></tr>
 </table>
-<p>Detect gives one path, <code>U302.3 → U301 ×1 → R303 4k7 → U1102.9</code>, named after the ADC net, with R303 in
-Pass through and C304 as a part across the path.</p>
+<p>Detect gives one path, <code>U42.3 → U41 ×1 → R41 4k7 → U53.9</code>, named after the ADC net, with R41 in
+Pass through and C41 as a part across the path.</p>
 <p><b>Steps:</b></p>
 <ol>
 <li>In the schematic editor, add a field named <b>GT</b> to each symbol, either in Symbol Properties or, for
@@ -1931,8 +1976,8 @@ Pass through and C304 as a part across the path.</p>
 <p><b>Shortcut:</b> select one bit of copper on each net of the path in the PCB editor and press <b>Add KiCad
 selection</b> (see <a href="#nets">A whole path from KiCad</a>). GroundTruth works out the same labels and adds the
 path at once.</p>
-<p><b>Re-annotated board:</b> the labels move with the parts, so when the parts get new references (U502 becomes
-U501) a converter named after its label (<i>buck conv3</i> for <code>conv3_*</code>) whose parts no longer fit takes
+<p><b>Re-annotated board:</b> the labels move with the parts, so when the parts get new references (U46 becomes
+U45) a converter named after its label (<i>buck conv3</i> for <code>conv3_*</code>) whose parts no longer fit takes
 the parts its labels now name at the next Run checks or Simulate; the status line says what changed (one Undo
 step). The command line does the same for its run.</p>
 <a name="kicad11"></a>
@@ -2002,7 +2047,7 @@ converters, bridges, part models, rules (thresholds, severities), analysis setti
 Commit it with the board. It can be edited by hand; the plugin reads it when the window opens. The same file
 drives the <code>groundtruth</code> command line for CI, with the same results.</p>
 <p>Useful analysis settings: <code>max_nodes</code> (the grid budget of each model: lower it for speed or
-memory), <code>threads</code> (solves in parallel), <code>conducted</code> (cispr32, cispr25, mil461 or none) and
+memory), <code>threads</code> (solves in parallel), <code>conducted</code> (cispr22, cispr25, cispr32, mil461 or none) and
 <code>conducted_class</code>, <code>limit_class</code> (CISPR 32 class A or B for radiated), <code>radiated_limit</code>
 (another radiated limit: MIL-STD-461G RE102 by name, e.g. <code>re102_ground_army</code> or
 <code>re102_aircraft_external</code> (fixed wing, from 2 MHz) or <code>re102_helicopter</code> (from 10 kHz), at 1 m with the standard's bandwidths; or a curve of your own: a name, the
@@ -2012,8 +2057,27 @@ the input leads' current from 30 Hz to 10 kHz, ships under 461H to 20 kHz: <code
 <code>ships</code>; a motor bridge's
 commutation lines, strongest at six times the electrical frequency, read through the bus capacitors and the test
 leads, which can resonate in this band; shown as <i>CE101 margin</i> and in the emission plots), <code>gpu</code> (auto,
-on, off). In the plugin, <a href="#prefs">Preferences</a> sets the resolution and can replace <code>threads</code>,
-<code>gpu</code> and <code>thermal.quality</code> on this computer; those choices are not written to the file.</p>
+on, off). Further: <code>max_solves</code> (10: the solves a model's refinement may add), <code>distance_m</code> (auto:
+the standard's, 10 m below 1 GHz and 3 m above for CISPR 32), <code>ground_reflection</code> (true; false leaves the
+floor's reflection out everywhere), <code>driver_ohms</code> (25) and <code>load_pf</code> (5) for paths without
+their own source and load, <code>plane_capacitance</code>, <code>planes</code> (auto or nearest),
+<code>cavity_max_nodes</code> (40 000: the board-wide model's grid budget; <code>max_nodes</code> is 100 000),
+<code>via_plating_um</code> (25: a via's plating for its IPC-2221 capacity and current density),
+<code>ce101_source_v</code> and <code>ce101_load_a</code>.
+In the plugin, <a href="#prefs">Preferences</a> sets the resolution and can replace <code>threads</code>,
+<code>gpu</code>, <code>sparse</code>, <code>plane_screening</code>, <code>thermal.quality</code>, the electro-thermal
+settings, <code>thermal.capacity_c</code>, <code>safety.solder_mask</code> and <code>safety.esd_mm</code> on this
+computer; those choices are not written to the file.</p>
+<p><a name="rules"></a>The checks' thresholds are under <code>rules:</code>: <code>stitch_distance_mm</code> 2 (a
+return via this close to a layer change), <code>decap_distance_mm</code> 5, <code>edge_factor</code> 3 (a trace
+closer to its plane's edge than this many heights above it), <code>min_gap_mm</code> 0.1,
+<code>detour_warning</code> 1.25 and <code>detour_error</code> 2 (the loop's inductance over the ideal loop's),
+<code>emi_margin_db</code> 6 (radiated and conducted: a warning within it, an error over the limit),
+<code>resonance_db</code> 10 (plane_resonance), <code>overshoot_warning</code> 25 % and
+<code>overshoot_error</code> 50 %, <code>current_density_warning</code> 50 and <code>current_density_error</code>
+100 A/mm² (copper over 1 mm, a via's plating), <code>via_load_warning</code> 100 and <code>via_load_error</code>
+150 % of a via's IPC-2221 capacity. <code>rules: severity: {check: error | warning | info | off}</code> changes a
+check's severity or switches it off (the check names are in the <a href="#issues">Issues tab</a>'s list).</p>
 
 <hr><a name="speed"></a><h3>Speed, memory and the GPU</h3>
 <ul>
@@ -2442,9 +2506,18 @@ smaller but dense, which a regular grid lets it apply with FFTs.</p>
   op-amp stages become current loops of their own, added per harmonic with their own currents.</li>
 <li><b>Frequencies.</b> The solves happen at actual harmonics of the signal. The solver then adds solves in the
   gaps where a resonance could hide or where the estimate is closest to the limit, and always solves the
-  worst-margin harmonic itself. Between solves, |m| is interpolated on log-log axes.</li>
-<li><b>Emission.</b> A small loop radiates |E| = 1.316·10⁻¹⁴·f²·|m|·I/r, doubled for the ground reflection (CISPR 32: up to 1 GHz, where the test
-  site's floor reflects; above it the standard measures over absorber, so the free-space field is taken).
+  worst-margin harmonic itself. Between solves, |m| is interpolated on log-log axes. Which frequencies get a
+  solve is chosen with the floor's reflection counted at every frequency, also above 1 GHz where the reported
+  field leaves it out: the solves are then the same whatever the test site, and a resonance above 1 GHz is not
+  skipped for the 6 dB.</li>
+<li><b>Emission.</b> A small loop radiates |E| = 1.316·10⁻¹⁴·f²·|m|·I/r, times √(1 + 1/(k·r)²) for the near
+  field (k = 2πf/c: it counts at 1 m and at low frequency), doubled for the ground reflection (CISPR 32: up to
+  1 GHz, where the test site's floor reflects; above it the standard measures over absorber, so the free-space
+  field is taken; a radiated limit of your own, RE102 or a curve, keeps the reflection at every frequency, and
+  <code>analysis.ground_reflection: false</code> leaves it out everywhere).
+  A signal path's current I is taken with its phase along the route (the largest value of the route's
+  radiation integral over direction): the mean current while the route is short against the wavelength, more where
+  a standing wave would cancel in the mean but still radiates towards the trace's ends.
   Harmonics closer together than the receiver's bandwidth add up in one reading; a path through a logic buffer,
   evaluated at a thinned choice of its harmonics, reads what all of them within the bandwidth add up to. The
   receiver's bandwidth adds harmonics that fall in it in phase. The result is compared with CISPR 32.</li>
@@ -2481,7 +2554,8 @@ smaller but dense, which a regular grid lets it apply with FFTs.</p>
 <li>The heat comes from two sources:
   <ul>
   <li>the copper's Joule heat ρ·|J|²·t from the DC current maps;</li>
-  <li>the parts' losses: conduction, the switching edges, Q_oss·V·f, a diode's V_f, the inductor's DCR.</li>
+  <li>the parts' losses: conduction, the switching edges, Q_oss·V·f, the dead times' reverse conduction and
+  Q_rr, a diode's V_f, the inductor's DCR and core loss, connector pins.</li>
   </ul></li>
 <li>The system is solved with conjugate gradients, preconditioned by algebraic multigrid (pyamg; a direct solve
   for small models). The copper's resistivity follows each node's temperature, by iteration.</li>

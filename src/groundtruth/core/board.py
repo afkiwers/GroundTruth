@@ -17,7 +17,8 @@ Polygon = tuple[list[Point], list[list[Point]]]
 
 @dataclass
 class CopperLayer:
-    """One copper layer of the stackup: its KiCad name, its position from the top and its foil thickness."""
+    """One copper layer of the stackup: its KiCad name, its position from the top and its foil thickness (35 µm,
+    1 oz, when the board file gives none [A101])."""
     name: str            # "F.Cu", "In1.Cu", ..., "B.Cu"
     index: int           # 0 = top, increasing towards bottom
     z: float = 0.0       # mm, centre of the copper foil measured downwards from the top surface
@@ -27,7 +28,8 @@ class CopperLayer:
 @dataclass
 class DielectricLayer:
     """The insulation between two consecutive copper layers (core or prepreg): its thickness and the material
-    constants the capacitance and loss models use."""
+    constants the capacitance and loss models use (FR-4's ε_r 4.5 and tan δ 0.02 when the board file gives none
+    [A101])."""
     name: str
     thickness: float     # mm
     epsilon_r: float = 4.5

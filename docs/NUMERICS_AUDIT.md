@@ -246,7 +246,7 @@ independent 320 A/mm²; the sustained value 210 / 207 / 207 / 207.
 
 **ISSUE-25.** *Reproduce:* refboard conv1 at GMRES 1e-11: the input path's 10 Hz solve did not converge; the report
 then had four DC paths, input copper 0.229 instead of 0.301 W, losses 3.11 instead of 3.36 W, efficiency 98.9 instead
-of 98.8 %, with one note ("DC input J101.2 → Q301 not solved"). *Root cause:* `dc_analysis` skipped an unsolved path
+of 98.8 %, with one note ("DC input J42.2 → Q41 not solved"). *Root cause:* `dc_analysis` skipped an unsolved path
 and nothing downstream knew it existed. Motor bridges' `RmsBasis` did the same per leg and band. *Fix:* the stage
 lists `dc_unsolved` (the JSON report too), `input_estimate` names each in `missing` (the input note shows it),
 `thermal_inputs` notes the missing heat, a `dc_unsolved` warning names the paths; bridges: `rms_missing` with the same
@@ -319,7 +319,7 @@ refboard (`refboard`, read only; settings `out/refboard_refresh/refboard_all.gro
 | radiated worst | −19.89 dB at 162.5 MHz | −19.89 dB at 162.5 MHz | the loop's own ringing |
 | board-wide resonance (1592 MHz) rise | 30.92 dB | 30.25 dB | the inter-layer kernel (d/dz = 6.4) |
 | harmonics near the top of the band | | ±0.7 dB | the same |
-| victims' ground step, U1101 / U1102 | 0.57 / 1.06 mV | 0.70 / 1.20 mV | sub-mV differences of plane potentials, magnified as the sheet inductance is |
+| victims' ground step, U52 / U53 | 0.57 / 1.06 mV | 0.70 / 1.20 mV | sub-mV differences of plane potentials, magnified as the sheet inductance is |
 | board-wide solves | 10 | 11 | the worst's own (ISSUE-32), no note |
 
 **SPI_SCK** (`tol_refboard_sck_1e-5.json` → `final_refboard_sck_v2.json`): the reported worst +13.20 dB at 1220 MHz

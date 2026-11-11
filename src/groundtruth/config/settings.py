@@ -1836,7 +1836,7 @@ class SettingsFile:
                 updated.append(ref)
             # The symbol says the part is an op-amp stage (GT amp_in / amp_out labels, or a Gain field) while its
             # model is still the default 'open', from before it said so: it becomes that amplifier. (refboard's
-            # U301 / U305 got their labels after the settings were made, then a new value: 'open' with "check model",
+            # U41 / U44 got their labels after the settings were made, then a new value: 'open' with "check model",
             # and the ADC paths could not pass them.) A logic buffer the same (its buf labels or threshold fields).
             if entry.get("model") == "open" and suggestion.kind in ("amplifier", "buffer"):
                 for k in [k for k in entry if k not in ("value", "footprint", "tht")]:
@@ -2465,7 +2465,7 @@ def _natural_key(s: str):
 
 
 def guess_reference_nets(board: Board) -> list[str]:
-    """The board's ground nets by name (GND, AGND, PGND, GND_ISO, VSS, 0V ...; only the last part of a
+    """The board's ground nets by name (GND, AGND, PGND, GND2, VSS, 0V ...; only the last part of a
     hierarchical name is looked at), or ["GND"] when none matches."""
     nets = [n for n in board.nets if GND_PATTERN.search(n.split("/")[-1])]
     return nets or ["GND"]
@@ -2524,7 +2524,7 @@ def implausible(c: Union[ConverterSpec, BridgeSpec]) -> list[str]:
 def missing_reference_nets(config: Config, board: Board) -> tuple[list[str], list[str]]:
     """(the settings' reference nets the board no longer has, the list to keep instead): those still on the board,
     or, when none is, the ones guessed from the board (guess_reference_nets), so the analyses keep a return plane.
-    The plugin offers to write it (the user, 2026-11-01, after deleting GND_ISO from a board: "offer an option to
+    The plugin offers to write it (the user, 2026-11-01, after deleting GND2 from a board: "offer an option to
     remove it automatically")."""
     nets = set(board.nets)
     gone = [r for r in config.reference_nets if r not in nets]

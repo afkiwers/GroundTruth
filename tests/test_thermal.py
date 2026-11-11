@@ -388,20 +388,20 @@ def test_capacity_of_a_real_stage_is_confirmed_by_a_fresh_solve(tmp_path):
 
 
 def test_a_zero_capacity_names_the_stage_already_over_the_limit():
-    """Over the limit with a stage at no load (the user's conv2 at "0 A", why?: conv1's Q301 at 143.7 °C): the
+    """Over the limit with a stage at no load (the user's conv2 at "0 A", why?: conv1's Q41 at 143.7 °C): the
     stages whose own loss heats the part at the hottest spot, i.e. grows with their load, are named; a part whose
     loss is a constant of every stage, or a spot at no part, names none; the all-stages group never."""
     from groundtruth.analysis.thermal import _Capacity
     k = object.__new__(_Capacity)
     k.inputs = {"stages": {"conv1": {"i_out": 5.0}, "conv2": {"i_out": 5.0},
                            "all power stages": {"i_out": None, "members": {"conv1": 5.0, "conv2": 5.0}}},
-                "loss_terms": {"conv1": {"Q301": (1.5, 0.9, 0.2), "Q303": (0.0, 0.0, 2.0), "R1": (0.0, 0.0, 0.3)},
-                               "conv2": {"Q301": (0.0, 0.0, 2.4), "Q303": (1.4, 0.8, 0.0), "R1": (0.0, 0.0, 0.3)},
-                               "all power stages": {"Q301": (1.5, 0.9, 0.0), "Q303": (1.4, 0.8, 0.0)}}}
-    assert k.blocked_by("conv2", "copper at Q301 (F.Cu)") == ["conv1"]
-    assert k.blocked_by("conv2", "Q301's junction") == ["conv1"]
-    assert k.blocked_by("conv1", "copper at Q303 (In1.Cu)") == ["conv2"]
-    assert k.blocked_by("conv2", "copper at Q303 (F.Cu)") == []       # its own part: its no-load heat
+                "loss_terms": {"conv1": {"Q41": (1.5, 0.9, 0.2), "Q43": (0.0, 0.0, 2.0), "R1": (0.0, 0.0, 0.3)},
+                               "conv2": {"Q41": (0.0, 0.0, 2.4), "Q43": (1.4, 0.8, 0.0), "R1": (0.0, 0.0, 0.3)},
+                               "all power stages": {"Q41": (1.5, 0.9, 0.0), "Q43": (1.4, 0.8, 0.0)}}}
+    assert k.blocked_by("conv2", "copper at Q41 (F.Cu)") == ["conv1"]
+    assert k.blocked_by("conv2", "Q41's junction") == ["conv1"]
+    assert k.blocked_by("conv1", "copper at Q43 (In1.Cu)") == ["conv2"]
+    assert k.blocked_by("conv2", "copper at Q43 (F.Cu)") == []       # its own part: its no-load heat
     assert k.blocked_by("conv2", "copper at R1 (F.Cu)") == []         # a constant of every stage
     assert k.blocked_by("conv2", "copper (inside the board)") == []
 

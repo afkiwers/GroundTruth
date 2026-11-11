@@ -20,7 +20,8 @@ from groundtruth.emi.radiation import (RE102_LIMITS, emission_arrays, floor_abso
                                        window_weight)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "dev"))
-from signal_audit import C0, MU0, edge_harmonics, envelope_peak, line_reference, trapezoid_samples  # noqa: E402
+from signal_audit import (C0, MU0, edge_harmonics, envelope_peak, line_reference, trace_far_field,  # noqa: E402
+                          trapezoid_samples)
 
 
 # ------------------------------------------------------------------------ the path's circuit, in time
@@ -147,3 +148,21 @@ def test_floor_absorbed_is_cispr_above_1_ghz_only():
     assert floor_absorbed(f, "B").tolist() == [False, False, True]
     assert not floor_absorbed(f, "B", ground_reflection=False).any()
     assert not floor_absorbed(f, RE102_LIMITS["re102_ground_army"]).any()
+
+
+@pytest.mark.parametrize("length", [0.02, 0.05, 0.15])
+def test_E_1_a_long_trace_radiates_with_its_currents_phase_along_the_route(length):
+    """The current a path radiates with (PathResult.i_rad: the maximum over direction of the route's radiation
+    integral) against the exact far field of the trace over a plane (image theory, the end posts and the
+    displacement current included): within 0.3 dB from 30 MHz to 6 GHz; it is the mean current while the trace is
+    short, and never under it. Before (audit round 12, E-1) the mean alone: through nulls where the trace radiates
+    towards its ends, more than 10 dB low somewhere above a quarter wavelength of route."""
+    fs = np.geomspace(30e6, 6e9, 40)
+    got = path_currents(fs, np.ones(len(fs)), [PathLine(50.0, 3.0, length)], PathSource(25.0), PathLoad(5e-12))
+    want = np.array([trace_far_field(float(f), length) for f in fs])
+    assert np.max(np.abs(20 * np.log10(got.i_rad / want))) < 0.3
+    assert np.all(got.i_rad >= np.abs(got.i_mean) * (1 - 1e-9))
+    short = fs * length * math.sqrt(3.0) / C0 < 0.05                 # under a twentieth of a wavelength
+    assert got.i_rad[short] == pytest.approx(np.abs(got.i_mean[short]), rel=0.01)
+    if length >= 0.05:
+        assert np.max(20 * np.log10(want / np.abs(got.i_mean))) > 10.0

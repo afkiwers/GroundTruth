@@ -4,7 +4,7 @@ stage's DC paths (drop, hotspot), and the combined DC map's peak density near th
 soldered pin feeds its current). Reads the board and settings only (the values go into a copy of the settings in
 memory).
 
-    .venv/Scripts/python tools/dev/pin_check.py BOARD SETTINGS --part J101 --values "fill:75, contact:0.5m"
+    .venv/Scripts/python tools/dev/pin_check.py BOARD SETTINGS --part J42 --values "fill:75, contact:0.5m"
         [--only "buck conv1" "buck conv2"] [--resolution 1] [--radius 6]
 """
 import argparse
@@ -89,7 +89,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("board")
     ap.add_argument("settings")
-    ap.add_argument("--part", required=True, help="the part whose pin values are tried, e.g. J101")
+    ap.add_argument("--part", required=True, help="the part whose pin values are tried, e.g. J42")
     ap.add_argument("--values", required=True, help='its pin values, e.g. "fill:75, contact:0.5m"')
     ap.add_argument("--only", nargs="*", default=None, help="power stages to simulate (default: all enabled)")
     ap.add_argument("--resolution", type=float, default=1.0)

@@ -3,7 +3,7 @@
 A part whose terminal is a resistive sheet (its Terminal Sheet Resistance, analysis/simulate.part_lid [A70]) takes
 part of a pad's current into its own metal: a FET's lead frame, an inductor's clip. The maps show the board's copper
 only, so under such a terminal the copper reads low with a sharp edge where the current moves up into the part (the
-user, of Q601's drain tab on F.Cu: "F.CU has still a knive's edge"), and the current seems to vanish there. With the
+user, of Q45's drain tab on F.Cu: "F.CU has still a knive's edge"), and the current seems to vanish there. With the
 preference on, a view's maps show the copper's current plus the terminal's above it (simulate.terminal_vectors,
 kept per view in `terminal_vectors`), in the copper's units: what flows at that spot, as if the copper carried it.
 The figures, checks, tiles and Thermal stay the copper's own; this is the picture only.

@@ -312,9 +312,9 @@ def test_selected_nets_from_the_kicad_selection():
     from kipy.board_types import Net
     from groundtruth.adapters.kipy_source import selected_nets
     track, via, unconnected = Track(), Via(), Track()
-    track.net, via.net = Net(name="/CPU/SPI_SCK"), Net(name="/CPU/SPI_SCK")   # unconnected: an empty net
-    items = [track, NS(net=NS(name="/CPU/SPI_MOSI")), via, NS(reference="U1"), NS(net=None), unconnected]
-    assert selected_nets(NS(get_selection=lambda: items)) == ["/CPU/SPI_SCK", "/CPU/SPI_MOSI"]
+    track.net, via.net = Net(name="/MCU/SPI_SCK"), Net(name="/MCU/SPI_SCK")   # unconnected: an empty net
+    items = [track, NS(net=NS(name="/MCU/SPI_MOSI")), via, NS(reference="U1"), NS(net=None), unconnected]
+    assert selected_nets(NS(get_selection=lambda: items)) == ["/MCU/SPI_SCK", "/MCU/SPI_MOSI"]
     from groundtruth.adapters.kipy_source import selection_kinds
     assert selection_kinds(NS(get_selection=lambda: [via, NS(reference="U1")])) == ["Via", "SimpleNamespace"]
 
@@ -431,7 +431,7 @@ def test_show_items_reports_unknown_actions_and_layers_and_restores_a_layer_by_i
 
 
 def test_pin_names_from_the_api_lose_the_pin_number_like_the_file_readers():
-    """KiCad 10.0.5's API sends a pad's symbol pin as name + '_' + number (Q601 on refboard: 'G_1', 'S_2',
+    """KiCad 10.0.5's API sends a pad's symbol pin as name + '_' + number (Q45 on refboard: 'G_1', 'S_2',
     'D_3'); the file reader strips that suffix and every pin-name rule (gate, SW, VIN, GND) expects it stripped.
     With 'G_1' the surge stopper's FET was not recognised in the plugin and no input connector was found."""
     pytest.importorskip("kipy")
@@ -453,8 +453,8 @@ def test_selected_references_reads_footprints_only_and_does_not_wait_when_pollin
 
     def fp(ref):
         return NS(reference_field=NS(text=NS(value=ref)))
-    items = [fp("Q601"), NS(net=NS(name="GND")), fp("R309"), fp("Q601")]
-    assert selected_references(NS(get_selection=lambda: items)) == ["Q601", "R309"]
+    items = [fp("Q45"), NS(net=NS(name="GND")), fp("R46"), fp("Q45")]
+    assert selected_references(NS(get_selection=lambda: items)) == ["Q45", "R46"]
 
     def busy():
         raise ApiError("KiCad is busy", code=ApiStatusCode.AS_BUSY)
@@ -479,7 +479,7 @@ def test_schematic_labels_fall_back_when_kicad_cannot_take_them():
     class Board:
         client = Client()
     with pytest.raises(SchematicApiUnavailable):
-        write_symbol_labels(Board(), {"U301": "amp_in:1, amp_out:4"})
+        write_symbol_labels(Board(), {"U41": "amp_in:1, amp_out:4"})
 
 
 def test_commits_name_their_document_for_kicad_with_several_editors_open():

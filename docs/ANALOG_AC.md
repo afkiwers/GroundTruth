@@ -1,7 +1,7 @@
 # Plan: a generic small-signal model of op-amp circuits (any topology)
 
-Status: **steps 1-5 merged into `main`** (2026-10-21, 56fb575); **the step response** on branch `step-response` (the user: "let's do it now -> Step response"). Asked by the user, of refboard's ADC path (ZXCT1107 → R304 →
-TLV6001 follower → R303 / C304 → ADC): "Are we currently considering the Opamp circuit and it's amplification etc.
+Status: **steps 1-5 merged into `main`** (2026-10-21, 56fb575); **the step response** on branch `step-response` (the user: "let's do it now -> Step response"). Asked by the user, of refboard's ADC path (ZXCT1107 → R42 →
+TLV6001 follower → R41 / C41 → ADC): "Are we currently considering the Opamp circuit and it's amplification etc.
 If I were to build an active lowpass filter, would that simulate it as one?", then "yes plan it", "present the
 plan", and: **"I want a generic model that can calculate any circuit made from an OPA"**. Builds on `bode-sweep`
 (the signal paths' Bode sweeps, `simulate.bode_paths`, the full telegrapher line, the op-amp's closed-loop output
@@ -112,7 +112,7 @@ For each path (input: its driver, output: its receivers), and on request between
 |---|---|
 | RC, RLC series and parallel, a capacitor's ESL notch | their rational functions |
 | Inverting amplifier | −R2/R1, bandwidth GBW / (1 + R2/R1), closed-loop R_O / (1 + Aβ) |
-| Non-inverting, follower | 1 + R2/R1, same bandwidth; refboard's U301 path unchanged (451 Hz) |
+| Non-inverting, follower | 1 + R2/R1, same bandwidth; refboard's U41 path unchanged (451 Hz) |
 | Differential amplifier (4 resistors) | R2/R1 · (v₊ − v₋), its common-mode rejection from resistor mismatch |
 | Integrator, differentiator | −1/(sRC) between its corners; the differentiator's peaking from the second pole |
 | Transimpedance stage with feedback C | −R_f/(1 + sR_fC_f), its stability (phase margin) against the closed form |
@@ -157,18 +157,18 @@ On the real board: refboard's two ADC paths (unchanged), and test boards for the
   field), `route.copper_graph` split out of find_route; mna.py: sparse solve (refboard's ADC path, 97 track
   segments: 0.17 s for 300 frequencies), the normal form H(s) = K·s^m·Π(1 − s/z)/Π(1 − s/p). tests/test_analog_net.py:
   4 pass (an inverting amplifier and a Sallen-Key read from generated boards, `boardgen.opamp_circuit_board`;
-  pin roles; a dual op-amp's channels). Refboard's /CPU/ADC_I_RAIL_1: U301 as the macromodel (its IN− from the pin
+  pin roles; a dual op-amp's channels). Refboard's /MCU/ADC_SENSE_1: U41 as the macromodel (its IN− from the pin
   name "−"), 451 Hz from the circuit, the follower's pole at 686 kHz.
 - **Step 3, the transfer function written out** (ab320dc, 10f5eed; the user: "add sympy make sure to list it under
   the used libs": pyproject, plugin/requirements.txt, the help's licence list with mpmath): `analysis/symbolic.py`
   (the ideal circuit's H(s) in part names: text, LaTeX, MathML), `transfer.normal_form` (the full circuit's exact
   poles and zeros as factors with f and Q), `simulate.network_responses` (every path's Bode responses from its
   circuit: the receiver, each op-amp's output; doublets cancelled), the Bode plot's math-text line, the report's
-  MathML. Refboard ADC_I_RAIL_1: `H(s) = 1 / (C304·R303·s + 1)`. Two model fixes on the way: an op-amp's c_in to ground
+  MathML. Refboard ADC_SENSE_1: `H(s) = 1 / (C41·R41·s + 1)`. Two model fixes on the way: an op-amp's c_in to ground
   (between the inputs it made an undamped 5.88 MHz notch with R_O), pads joined through tracks are not "unrouted".
 - **Step 4, loop gain and phase margin** (488e151): `Circuit.loop_gain` (broken at the op-amp's ideal internal
   output [Middlebrook 1975]), `transfer.phase_margin`, a loop-gain response per op-amp and a "phase margin" tile.
-  Refboard's U301: crossover 671 kHz, 89°.
+  Refboard's U41: crossover 671 kHz, 89°.
 - **T-junctions** (383d0e6): a track another track ends on is split there (copper_graph's joins from the junction
   to its ends had doubled its copper); refboard's ADC path 35 track pieces, not 97.
 - **Step 5, Simulate's emission from the circuit** (`simulate.NetworkPath`): per stage a PathResult from the MNA

@@ -43,7 +43,7 @@ PARAM_COL = {"R": 4, "C": 5, "C_bias": 6, "L": 8, "ESR": 9, "ESL": 10}
 SCHEMATIC_COL = COLS.index("Schematic")    # ◆ the parameters taken from the symbol's fields, ! set here and different
 NOTE_COL = COLS.index("Note")
 # The table fills the tab (the user: "expand the table across the whole plane"): the width the columns do not need
-# goes to the text columns, in these shares. A long note (Q601's suggested one, ~180 characters) would make the
+# goes to the text columns, in these shares. A long note (Q45's suggested one, ~180 characters) would make the
 # whole table scroll sideways, so the Note column starts at most NOTE_MAX wide; editing the cell shows all of it.
 STRETCH = {"Value": 1.0, "Footprint": 2.0, "Schematic": 1.0, "Note": 3.0}
 NOTE_MAX = 360

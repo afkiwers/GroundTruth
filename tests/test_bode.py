@@ -166,7 +166,7 @@ def test_a_followers_output_impedance_is_divided_by_its_loop():
     """ComponentModel.amp_z_out_at: z_out 2.3 kΩ (open loop), GBW 1 MHz, gain 1: z_out·jf/(jf + 1 MHz) [Franco
     2015], 2.3 Ω at 1 kHz, z_out far above; without GBW or bandwidth z_out as given, without z_out 1 Ω. Into
     4.7 kΩ and 75 nF the stage's corner is then 1/(2π·4.7 kΩ·75 nF) = 451 Hz (1 %), not the 303 Hz of a flat
-    2.3 kΩ (refboard's TLV6001 → R303 → C304)."""
+    2.3 kΩ (refboard's TLV6001 → R41 → C41)."""
     from groundtruth.components.models import ComponentModel
     from groundtruth.emi.path import PathAmp, PathLoad, PathPart, PathShunt, PathSource, amplified_path
     from groundtruth.analysis.transfer import Response, gain_figures

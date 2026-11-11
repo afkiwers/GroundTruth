@@ -1,13 +1,13 @@
 """The power stages' DC current density at a part's pads, the DC paths alone (no field solve of the hot loops).
 
-    .venv/Scripts/python tools/dev/pad_density.py BOARD SETTINGS --part Q601 [--resolution 2] [--only "buck conv1"]
+    .venv/Scripts/python tools/dev/pad_density.py BOARD SETTINGS --part Q45 [--resolution 2] [--only "buck conv1"]
         [--src DIR] [--json OUT.json]
 
 Builds the enabled stages as Simulate does, solves only their DC paths on the whole-board DC model, sums them as the
 "DC currents together" view does (power.combine_dc) and prints: that view's hotspot (sustained and peak A/mm², where),
 the part's current, and the density in the copper under and around each of the part's pads (its largest, and where,
 and a row of values across the pad's long side through its centre). For checking how a part joins its copper
-(simulate.part_lid, [A65]; refboard's Q601 drain read 54 A/mm² in a corner with the sampled joins before 2026-10-24).
+(simulate.part_lid, [A65]; refboard's Q45 drain read 54 A/mm² in a corner with the sampled joins before 2026-10-24).
 --src runs another tree's code (main's in a `git worktree`) for a before/after.
 """
 import argparse
@@ -23,7 +23,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("board")
     ap.add_argument("settings")
-    ap.add_argument("--part", required=True, help="the part whose pads to look at (e.g. Q601)")
+    ap.add_argument("--part", required=True, help="the part whose pads to look at (e.g. Q45)")
     ap.add_argument("--resolution", type=float, default=1.0)
     ap.add_argument("--only", nargs="*", help="power stages (default: every enabled one)")
     ap.add_argument("--src", help="the src folder of another tree (default: this one's)")
@@ -53,7 +53,7 @@ def main() -> int:
     combo, _, _ = combine_dc([s.res for s in setups], cfg.rules, cfg.analysis.via_plating_um)
     view = combo if combo is not None else setups[0].res
     # the path that carries the part (one stage alone has no combined view: its first path is the switch node's,
-    # and a surge stopper such as refboard's Q601 is on its input path), else the first
+    # and a surge stopper such as refboard's Q45 is on its input path), else the first
     path = next((p for p in view.dc if any(q["name"] == args.part for q in p.get("parts", []))), view.dc[0])
     out = {"code": args.src or "this tree", "resolution": args.resolution, "seconds": round(time.perf_counter() - t0, 1),
            "sustained_a_mm2": path.get("sustained_a_mm2"), "peak_a_mm2": path.get("peak_a_mm2"),

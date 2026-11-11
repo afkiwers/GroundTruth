@@ -114,7 +114,7 @@ def test_settings_and_rail_names():
         config_from_data({"pdn": [{"rail": "VDD", "ripple": 5}]})
     with pytest.raises(ConfigError, match="needs its rail"):
         config_from_data({"pdn": [{"ripple": "5%"}]})
-    assert [rail_voltage(n) for n in ("+3V3", "+12V", "VDD_1V8", "/CPU/+5V_ISO", "GND")] == [3.3, 12.0, 1.8, 5.0, None]
+    assert [rail_voltage(n) for n in ("+3V3", "+12V", "VDD_1V8", "/MCU/+5V_ISO", "GND")] == [3.3, 12.0, 1.8, 5.0, None]
 
 
 def test_settings_round_trip(tmp_path):

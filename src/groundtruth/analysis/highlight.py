@@ -116,7 +116,7 @@ def _path_nets(board: Board, config: Config, names: Sequence[str]) -> set[str]:
     """The nets to light for rows of the Nets tab: each listed net's whole signal path (route.signal_nets: through
     series parts, its Pass through parts and op-amp stages) plus its driver's and receivers' nets, never a
     reference net. A name not in the settings is its own net only. (Lighting the named net alone stopped
-    refboard's /CPU/ADC_I_RAIL_1 at R303, short of the ZXCT1107 that drives it.)"""
+    refboard's /MCU/ADC_SENSE_1 at R41, short of the ZXCT1107 that drives it.)"""
     from .route import signal_nets
     specs = {n.name: n for n in config.nets}
     want = set(names)
@@ -519,7 +519,7 @@ def _spot(issue: Issue, board: Board) -> Highlight:
 
 def _interleaved(issue: Issue, board: Board, config: Config, routes: Sequence) -> Highlight:
     """An interleaved group's issue (analysis/interleave.py: the phases of one controller added as phasors; the
-    issue's net is the group's name, e.g. the controller U303): every phase's switches and hot-loop capacitors,
+    issue's net is the group's name, e.g. the controller U43): every phase's switches and hot-loop capacitors,
     as each stage's own issue shows them (_power_stage), and for conducted emission the input connector."""
     members = [c.name for c in config.stages() if c.interleave == issue.net]
     focus, context, nets = [], [], False

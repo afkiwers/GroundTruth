@@ -20,13 +20,13 @@ rules: {stitch_distance_mm: 2.0, decap_distance_mm: 5.0, edge_factor: 3.0, min_g
         detour_warning: 1.25, detour_error: 2.0, emi_margin_db: 6.0, resonance_db: 10.0,
         severity: {reference_net: off}}          # per-check override: error | warning | info | off
 nets:                                            # nets to analyse: typed in, or suggested by `groundtruth detect`
-  - {name: /CPU/SPI_SCK, driver: U1102.12, receivers: [U1103.6], freq: 20MHz, rise_time: 2ns, amplitude_v: 3.3,
+  - {name: /MCU/SPI_SCK, driver: U53.12, receivers: [U54.6], freq: 20MHz, rise_time: 2ns, amplitude_v: 3.3,
      driver_ohms: 33}                            # optional per net: driver_ohms, load_pf, current_a ...
   - {name: /USB_D_A, driver: U1.5, receivers: [U9.2], freq: 50MHz, rise_time: 1ns, fall_time: 1.5ns,
      driver_nh: 1.5, driver_pf: 3, load_ohms: 50, through: [C12]}   # a path through an AC-coupling C12
-  - {name: /CPU/SPI_MISO, driver: U1103.2, receivers: [U1102.13], freq: 10MHz, rise_time: 2ns, amplitude_v: 3.3,
+  - {name: /MCU/SPI_MISO, driver: U54.2, receivers: [U53.13], freq: 10MHz, rise_time: 2ns, amplitude_v: 3.3,
      source: auto, reviewed: false, class: SPI data}   # suggestion, not yet confirmed
-  - {name: /CPU/SW_CLK, driver: J1101.4, receivers: [U1102.28], freq: 10MHz, rise_time: 3ns,
+  - {name: /MCU/SW_CLK, driver: J41.4, receivers: [U53.28], freq: 10MHz, rise_time: 3ns,
      enabled: false}                             # switched off: kept, but not analysed (the tick box in the plugin)
 components:                                      # one line per part, pre-filled with a suggested model
   R12: {value: 0R, footprint: R_0402_1005Metric, model: short}
@@ -205,7 +205,7 @@ a warning; `off` drops the check's issues entirely. `--fail-on` then decides whi
 ## Finding the nets to analyse
 
 `groundtruth detect board.kicad_pcb` (or **Detect…** on the plugin's Signal paths tab) suggests nets with their driver, receivers and default timing:
-- **Signal class** comes from the net name and the schematic pin names, for example SPI clock (20 MHz / 2 ns), RMII (50 MHz / 1 ns), USB, SDIO/QSPI, debug clocks, crystals and switching nodes. A net with no class gets 10 MHz / 2 ns, unless an op-amp with a `Slew Rate` or `GBW` / `Bandwidth` field drives it (its output on the driver's net): then the fastest full 3.3 V swing that op-amp can make, edge max(0.8·3.3 V / SR, 0.35 / BW) and frequency min(10 MHz, BW, SR / (π·3.3 V)). refboard's U301 (TLV6001, 0.5 V/µs) gives Net-(U301--) 5.28 µs at 48.2 kHz instead of GHz content on a current-sense signal.
+- **Signal class** comes from the net name and the schematic pin names, for example SPI clock (20 MHz / 2 ns), RMII (50 MHz / 1 ns), USB, SDIO/QSPI, debug clocks, crystals and switching nodes. A net with no class gets 10 MHz / 2 ns, unless an op-amp with a `Slew Rate` or `GBW` / `Bandwidth` field drives it (its output on the driver's net): then the fastest full 3.3 V swing that op-amp can make, edge max(0.8·3.3 V / SR, 0.35 / BW) and frequency min(10 MHz, BW, SR / (π·3.3 V)). refboard's U41 (TLV6001, 0.5 V/µs) gives Net-(U41--) 5.28 µs at 48.2 kHz instead of GHz content on a current-sense signal.
 - **Driver** comes from the schematic pin types: an output beats a bidirectional pin, which beats a connector/passive pin, which beats an input.
 - **Series parts:** suggestions follow 0R/termination resistors and ferrites, so a series-terminated line is one net.
 - **Excluded:** power nets.

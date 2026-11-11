@@ -80,8 +80,8 @@ def test_missing_route_is_reported(tmp_path):
 
 def test_a_track_ending_just_short_of_a_pad_still_reaches_it():
     """Copper that overlaps is connected (KiCad's rule): a 0.2 mm track whose centre line stops 0.05 mm before R1's
-    pad, its round end over the pad. Testing only the end point left refboard's /CPU/ADC_I_RAIL_1
-    without a route (a 0.4 mm track 0.02 mm outside R303's rotated pad)."""
+    pad, its round end over the pad. Testing only the end point left refboard's /MCU/ADC_SENSE_1
+    without a route (a 0.4 mm track 0.02 mm outside R41's rotated pad)."""
     from boardgen import BoardGen
     from groundtruth.adapters.file_source import loads_board
     from groundtruth.config.settings import Config

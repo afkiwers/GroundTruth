@@ -32,7 +32,7 @@ PAIR_TIPS = {
     "Note": "Your own note (kept in the settings file).",
 }
 TARGET_TIPS = {
-    "Nets": "The nets to hold to Z0: names or patterns with * and ?, comma separated (e.g. /CPU/SPI_*).",
+    "Nets": "The nets to hold to Z0: names or patterns with * and ?, comma separated (e.g. /MCU/SPI_*).",
     "Net class": "Or a KiCad net class (from the project file beside the board), e.g. HighSpeed.",
     "Z0 (Ω)": "The single-ended impedance to hold, e.g. 50.",
     "Tol. (%)": "How far Z0 may be off, in % (default 10).",
@@ -132,7 +132,7 @@ class SiPanel(SelectableRows, wx.Panel):
         self.t_z0 = wx.TextCtrl(tw)
         self.t_tol = wx.TextCtrl(tw)
         self.t_layers = wx.TextCtrl(tw)
-        for ctrl, hint in ((self.t_nets, "e.g. /CPU/SPI_*"), (self.t_class, "or a KiCad net class"),
+        for ctrl, hint in ((self.t_nets, "e.g. /MCU/SPI_*"), (self.t_class, "or a KiCad net class"),
                            (self.t_z0, "e.g. 50"), (self.t_tol, "10"), (self.t_layers, "every layer")):
             ctrl.SetHint(hint)
         section_rows(tw, tform, [("Impedance target", "A single-ended Z0 for nets or a net class.",

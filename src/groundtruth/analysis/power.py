@@ -524,9 +524,9 @@ def _lisn_branch(st: StackBuild, board: Board, spec: ConverterSpec, standard: st
 
 def stage_power_nets(board: Board, config: Config, specs) -> dict[str, str]:
     """Every net that carries a power stage's current, with what it is for the stage ('the rail', 'the inductor
-    L301's output side', ...): rail, ground, switch node, the input path, the inductor's far side and the output
+    L41's output side', ...): rail, ground, switch node, the input path, the inductor's far side and the output
     path from there to the output connector (through shunts, ferrites, 0R). None of them is a signal, even where a
-    sense amplifier's input pin sits on one (Net-(U302-Vs+) between L301 and its 8 mOhm shunts)."""
+    sense amplifier's input pin sits on one (Net-(U42-Vs+) between L41 and its 8 mOhm shunts)."""
     out: dict[str, str] = {}
     for spec in specs:
         owner = (f"leg {spec.phase} of the motor bridge {spec.bridge}" if spec.bridge
@@ -1243,7 +1243,7 @@ def apply_ringing(setup: ConverterSetup):
 def recovery_overshoot(rec: Optional[dict], L: float, c_oss: Optional[float]) -> Optional[dict]:
     """The recovery with its overshoot: a snappy recovery ends with I_rr in the loop inductance, whose energy
     ½·L·I_rr² swings into the node's C_oss: V = I_rr·√(L/C_oss) above the rail (undamped, an upper bound)
-    [Mohan 2003, §20-3] [A49]. Unchanged without C_oss or a loop inductance."""
+    [Mohan 2003, §20-5] [A49]. Unchanged without C_oss or a loop inductance."""
     if rec is None or not c_oss or L <= 0:
         return rec
     return dict(rec, overshoot_v=rec["i_rr"] * math.sqrt(L / c_oss))
@@ -1282,7 +1282,7 @@ def recovery(spec: ConverterSpec, i_pulse: float, rise_time: Optional[float] = N
     """The rectifier's reverse recovery at the main switch's hard turn-on, or None (no q_rr; a synchronous FET with
     no dead time at the hard edge, whose body diode then never conducts). The current commutates at di/dt = I/t_edge [A14]; a snappy
     recovery then reverses the rectifier's current to I_rr = √(2·Q_rr·di/dt) within t_rr = √(2·Q_rr/(di/dt))
-    [Mohan 2003, §20-3], taken as a triangle of that peak and base (its area ½·I_rr·t_rr is Q_rr) [A49].
+    [Mohan 2003, §20-5], taken as a triangle of that peak and base (its area ½·I_rr·t_rr is Q_rr) [A49].
     {q_rr, i_rr, t_rr, di_dt}; rise_time: another edge (the fix advisor's what-if), else the stage's."""
     tr = spec.rise_time if rise_time is None else rise_time
     if not spec.q_rr or i_pulse <= 0 or tr <= 0:
@@ -1562,7 +1562,7 @@ def _pad_nodes(st: StackBuild, pad: Pad, side: str) -> list[tuple]:
 
 
 def _by_pin(pads: list[Pad]) -> dict[str, list[Pad]]:
-    """The pads grouped by their pin ("Q304.2"), in their order: a footprint can draw one pin from several
+    """The pads grouped by their pin ("Q44.2"), in their order: a footprint can draw one pin from several
     overlapping primitives (an EPC GaN FET's source pin: a bar and three tabs over it)."""
     out: dict[str, list[Pad]] = {}
     for p in pads:
@@ -2253,7 +2253,7 @@ def _output_runs(model: BoardModel, setup: "ConverterSetup", sw_net: Optional[st
         notes.append(f"output connector {plus.pin} ({plus.net}) does not reach {out_net} through parts with a "
                      "series model; DC output path not modelled")
         # an issue too (_converter_issues: dc_path_missing), naming the connector that does reach it the way
-        # detection finds one (the user's stages kept connectors of an earlier layout: J104 on the other rail, and
+        # detection finds one (the user's stages kept connectors of an earlier layout: J43 on the other rail, and
         # the output tracks showed no current with nothing but this note to say why)
         from .detect import _centre, _connector_for
         found = _connector_for(board, config, out_net, spec.ground, stop - {None, out_net},
@@ -2363,7 +2363,7 @@ def combine_dc(results, rules, plating_um: float = 25.0):
     Every stage's paths are solved on the one whole-board model (dc_board_build), each at its own current, so on
     that grid their current densities add as vectors and their via currents as signed branch currents: the
     current the copper really carries with every load on at once (the user: "the currents are not added together.
-    So one plot shows 5.15 A the other says 1 A"; refboard's two bucks share J101, Q601, the +VDC pours
+    So one plot shows 5.15 A the other says 1 A"; refboard's two bucks share J42, Q45, the +VDC pours
     and the ground). The current-density and via-load checks run on this total, as issues of COMBINED_NET (the
     stages' own DC-path issues are then dropped by the caller). Only with two or more stages solved on one model."""
     import copy

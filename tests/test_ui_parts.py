@@ -88,25 +88,25 @@ def test_capacity_tiles_and_labels():
     def view(scale, bound=""):
         v = ThermalResult("thermal", "power stages", "", power_w=3.2, copper_w=1.1, parts_w=2.1)
         v.capacity = {"stage": "buck SW1", "i_nominal": 10.0, "i_capacity": 10.0 * scale, "scale": scale,
-                      "limit_c": 105.0, "t_hottest": 105.1, "limited_by": "copper at Q301 (F.Cu)", "bound": bound,
+                      "limit_c": 105.0, "t_hottest": 105.1, "limited_by": "copper at Q41 (F.Cu)", "bound": bound,
                       "solves": 3}
         return v
     t = {k[0]: k for k in kpis(view(1.42))}
     assert t["current capacity"][1] == "14.2 A" and t["current capacity"][3] == "ok"
     assert "operating point 10 A (70 % of it)" in t["current capacity"][2]
-    assert t["limited by"][1] == "copper at Q301 (F.Cu)" and "105.1 °C" in t["limited by"][2]
+    assert t["limited by"][1] == "copper at Q41 (F.Cu)" and "105.1 °C" in t["limited by"][2]
     assert t["total loss"][1] == "3.20 W"
     assert {k[0]: k for k in kpis(view(1.1))}["current capacity"][3] == "warn"
     assert {k[0]: k for k in kpis(view(0.8))}["current capacity"][3] == "error"
     zero = {k[0]: k for k in kpis(view(0.0, "zero"))}["current capacity"]
     assert zero[1] == "0 A" and zero[3] == "error" and "even without load" in zero[2]
-    # another stage at its operating point already over the limit (the user's conv2 "0 A" from conv1's Q301): it
+    # another stage at its operating point already over the limit (the user's conv2 "0 A" from conv1's Q41): it
     # says so instead of 0 A
     blocked = view(0.0, "zero")
     blocked.capacity["blocked_by"] = ["buck SW2"]
     t = {k[0]: k for k in kpis(blocked)}["current capacity"]
     assert t[1] == "blocked" and t[3] == "error"
-    assert t[2] == ("buck SW2 at its operating point already puts copper at Q301 (F.Cu) at 105.1 °C, over the "
+    assert t[2] == ("buck SW2 at its operating point already puts copper at Q41 (F.Cu) at 105.1 °C, over the "
                     "105 °C limit: no headroom left for buck SW1")
     assert blocked.label() == "Thermal: buck SW1 blocked by buck SW2"
     assert capacity_text(view(10.0, "above").capacity) == "≥ 100 A"

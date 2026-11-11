@@ -1118,7 +1118,7 @@ def test_SP26_the_path_s_line_is_the_field_solved_cut_of_the_board(tmp_path, lay
 
 def test_SP26_a_stretch_without_a_cut_at_its_middle_takes_one_further_along(tmp_path):
     """SP-26 (ISSUE-5's remainder, 2026-10-18): the longest track widens into a pour of its own net at its middle, so
-    no cut can be made there; _line_of takes the cut a quarter along instead (what refboard's U301- needed)
+    no cut can be made there; _line_of takes the cut a quarter along instead (what refboard's U41- needed)
     and reads the same line as the board without the pour, within 1 %, not the closed forms."""
     from boardgen import BoardGen
     from groundtruth.adapters.file_source import load_board

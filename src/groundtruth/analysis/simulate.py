@@ -525,7 +525,7 @@ class BoardModel:
             # each side's metal (a terminal, a FET's drain or source) is one node, its lid, soldered to every grid
             # node under that side's pads (part_lid): the copper decides where the current hands over to the part.
             # Until 2026-10-24 the part joined up to 8 sampled nodes per side (the pads' corners first): each a point
-            # sink, refboard's Q601 drain read 54 A/mm² at a corner its current only reaches by crowding (the user)
+            # sink, refboard's Q45 drain read 54 A/mm² at a corner its current only reaches by crowding (the user)
             bond = pin_params(fp.reference).bond         # the part's own solder thickness (pins.py), else built in
             sides = [[p for p in fpads if p.net == pa.net], [p for p in fpads if p.net == pb.net]]
             # each side's terminal: a perfect plate, or a resistive sheet (its Terminal Sheet Resistance field [A70])
@@ -1378,7 +1378,7 @@ def _line_of(board: Board, segments: list, ref_layer: str, cache=None) -> tuple[
         tracks = [s for s in segments if s.layer == layer and s.kind == "track" and s.length > 0 and s.net]
         # the longest tracks first, each at its middle, then a quarter from either end: a cut at one place can fail
         # (a pad, a via or a pour's edge in it) where one a little further along is clean. On refboard,
-        # Net-(U301--) (1.8 mm of track) had no cut at its longest track's middle and 43.8 ohm at three quarters
+        # Net-(U41--) (1.8 mm of track) had no cut at its longest track's middle and 43.8 ohm at three quarters
         # (2026-10-18; before, the closed forms took over at the first failed cut)
         for s in sorted(tracks, key=lambda x: -x.length)[:LINE_CUT_TRACKS]:
             (ax, ay), (bx, by) = s.start, s.end
@@ -1583,7 +1583,7 @@ def _stage_routes(route: Route, config: Config) -> Optional[list[list]]:
     ending the stage, or None, None for the last, the series parts inside the stage)], or None without either on
     the route. Part segments
     pair with route.parts in order; each stage gets its own parts (all of the route's but the op-amp, as before,
-    paired the stage after an op-amp's R303 with the op-amp U301: a 4.7 kΩ resistor modelled as the op-amp)."""
+    paired the stage after an op-amp's R41 with the op-amp U41: a 4.7 kΩ resistor modelled as the op-amp)."""
     parts = iter(route.parts)
     cuts, owner = [], {}                    # owner: step index -> the part of that part segment
     for i, step in enumerate(route.steps):
@@ -1633,7 +1633,7 @@ class NetworkPath:
 
     def results(self, f, v_source) -> list:
         """One PathResult per stage at frequencies f, scaled by the source's amplitude per frequency v_source."""
-        from ..emi.path import PathResult
+        from ..emi.path import PathResult, radiating_current
         f = np.asarray(f, float)
         v_src = np.asarray(v_source, complex)
         x = self.net.circuit.solve(f) * v_src[:, None]
@@ -1651,7 +1651,11 @@ class NetworkPath:
             i_b = y[:, 1, 0] * va + y[:, 1, 1] * vb           # into the line at b (flowing b -> a)
             mean_ab = i_a * np.sinh(g) / g - (va / zc) * (np.cosh(g) - 1) / g
             mean_ba = i_b * np.sinh(g) / g - (vb / zc) * (np.cosh(g) - 1) / g
-            lines.append({**meta, "i_a": i_a, "i_b": i_b, "mean_ab": mean_ab, "mean_ba": mean_ba})
+            # the line's two travelling waves seen from each end (emi.path.radiating_current)
+            gam = gl / line.length_m if line.length_m > 0 else gl
+            lines.append({**meta, "i_a": i_a, "i_b": i_b, "mean_ab": mean_ab, "mean_ba": mean_ba,
+                          "wave_ab": ((i_a - va / zc) / 2, (i_a + va / zc) / 2, gam),
+                          "wave_ba": ((i_b - vb / zc) / 2, (i_b + vb / zc) / 2, gam)})
         out = []
         for k, sr in enumerate(self.stages):
             out.append(self._stage(sr, self.shunt_sets[k] if k < len(self.shunt_sets) else [], f, x, lines))
@@ -1659,7 +1663,7 @@ class NetworkPath:
 
     def _stage(self, sr: Route, shunts: list, f: np.ndarray, x: np.ndarray, lines: list):
         """A stage's PathResult from the circuit's solution x (see results)."""
-        from ..emi.path import PathResult
+        from ..emi.path import PathResult, radiating_current
         n = len(f)
         pieces = []         # (segment index, place along it 0..1, length m, mean current, current entering it)
         parts = iter(sr.parts)
@@ -1691,7 +1695,8 @@ class NetworkPath:
                 cur = ln["mean_ab"] if fwd else ln["mean_ba"]
                 entry = ln["i_a"] if fwd else ln["i_b"]   # the current entering it at its start along the route
                 mid = ((ln["pa"][0] + ln["pb"][0]) / 2, (ln["pa"][1] + ln["pb"][1]) / 2)
-                pieces.append((si, _seg_place(mid, seg), ln["line"].length_m, cur, entry))
+                pieces.append((si, _seg_place(mid, seg), ln["line"].length_m, cur, entry,
+                               ln["wave_ab"] if fwd else ln["wave_ba"]))
                 last = cur
         # groups between the shunts (their places along the route), as the cascade's path_elements makes them
         marks = sorted(shunts, key=lambda sh: (sh["seg"], sh["t"]))
@@ -1706,7 +1711,7 @@ class NetworkPath:
         acc, length, j = np.zeros(n, complex), 0.0, 0
         before = np.zeros(n, complex)
         order = sorted(pieces, key=lambda p: (p[0], p[1]))
-        for si, t, ln_m, cur, _entry in order:
+        for si, t, ln_m, cur, *_rest in order:
             while j < len(marks) and (si, t) > (marks[j]["seg"], marks[j]["t"]):
                 sh = marks[j]
                 groups.append(acc / length if length > 0 else before)
@@ -1734,7 +1739,10 @@ class NetworkPath:
         # 4 % on SP-9's 30 mm microstrip at 450 MHz)
         i_in = order[0][4] if order else np.zeros(n, complex)
         v_end = self._node_v(x, self._pad_node(sr.receiver))
-        return PathResult(f, i_mean, i_in, v_end, part_z, groups, shunt_i, g_len, split)
+        # the route's current with its phase along it: a line's two waves, a part's or a pour's one current
+        waves = [(p[2], *p[5]) if len(p) > 5 else (p[2], p[3], None, None) for p in order]
+        return PathResult(f, i_mean, i_in, v_end, part_z, groups, shunt_i, g_len, split,
+                          i_rad=radiating_current(f, waves) if total > 0 else np.abs(i_mean))
 
 
 def line_y_of(line):
@@ -2118,7 +2126,7 @@ def cancel_doublets(poles, zeros) -> tuple[list, list, int]:
     """Poles and zeros without the pairs closer than DOUBLET of the pole's distance from the jω axis, |Re p|: such a
     doublet changes |H| by less than that fraction anywhere on the axis (|s − p| ≥ |Re p| there, so |(s − z)/(s − p)|
     lies within 1 ± |z − p|/|Re p|), but writing it out doubles the transfer function's length (refboard's TLV6001
-    output: 451 Hz twice, 0.02 % apart: the R303 / C304 load its closed loop hardly sees). Audit round 7, AA-8: within
+    output: 451 Hz twice, 0.02 % apart: the R41 / C41 load its closed loop hardly sees). Audit round 7, AA-8: within
     DOUBLET of |p| instead, a pair of Q 2000 0.05 % apart was cancelled though it moves |H| by 7.7 dB near it.
     (poles, zeros, pairs removed)."""
     p, z, n = list(poles), list(zeros), 0
@@ -2695,7 +2703,9 @@ def prepare_route(model: BoardModel, spec: NetSpec, route: Route) -> tuple[Optio
                 pr = setup.network.results(freqs, amps)[0]
                 res.notes.append("signal path currents from its whole circuit (every track a line, every part "
                                  "and op-amp on its nets)")
-            setup.currents = np.abs(pr.i_mean)
+            # what the path radiates with: its current with the phase along the route, never under the mean's
+            # (emi.path.radiating_current; the mean alone before 2026-11-12, audit round 12 E-1)
+            setup.currents = np.abs(pr.i_mean) if pr.i_rad is None else np.maximum(pr.i_rad, np.abs(pr.i_mean))
             setup.path = (rows, pr)
             setup.response_fn = lambda fs: path_currents(fs, np.ones(len(fs)), elements, source, load).v_end
             if shunts:
@@ -3020,8 +3030,9 @@ def band_top(config: Config, natural: float) -> tuple[float, dict]:
 
 def mark_quasi_static(res: RouteResult, board: Board):
     """With the board-wide model (res.cavity): every emission row above quasi_static_limit gets "indicative": True,
-    the band record its f_qs, and a note says what that means when any row lies there [A47]. A route or hot loop
-    alone is a few millimetres and stays quasi-static far higher: without the board-wide model nothing is marked."""
+    the band record its f_qs, and a note says what that means when any row lies there [A47]. A route's or hot loop's
+    own loop is thin against the wavelength far higher (a long route's phase along it is in its current,
+    emi.path.radiating_current [A103]): without the board-wide model nothing is marked."""
     qs = quasi_static_limit(board) if res.cavity else None
     if qs is None:
         return

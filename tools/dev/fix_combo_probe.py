@@ -5,7 +5,7 @@ Runs the baseline simulation, then predicts the route's worst margin over all ha
 report alone and for all of them together. Compare with the report's verification row (rebuilt models, all fixes).
 Read-only; nothing is written.
 
-    .venv/Scripts/python tools/dev/fix_combo_probe.py BOARD SETTINGS SUGGESTIONS.json "/CPU/SPI_MOSI"
+    .venv/Scripts/python tools/dev/fix_combo_probe.py BOARD SETTINGS SUGGESTIONS.json "/MCU/SPI_MOSI"
 
 Session 3 case (refboard as saved 18:35): SPI_MOSI verified +15.0 dB @ 820 MHz -> +11.0 dB @ 740 MHz with
 S1+S2+S3, while each fix alone was predicted at -0.3 to +0.5 dB.

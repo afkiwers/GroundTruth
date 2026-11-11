@@ -4,7 +4,7 @@ Runs the baseline simulation, solves one route's board-wide model at extra harmo
 and prints its margin per solved frequency before and after adding them; then, with a suggestions report, the
 margin there with all selected fixes (low-rank prediction). Read-only.
 
-    .venv/Scripts/python tools/dev/gap_probe.py BOARD SETTINGS SUGGESTIONS.json "/CPU/SPI_MOSI" [700e6,740e6,780e6]
+    .venv/Scripts/python tools/dev/gap_probe.py BOARD SETTINGS SUGGESTIONS.json "/MCU/SPI_MOSI" [700e6,740e6,780e6]
 
 If the baseline already reads about the verification's worst margin in the gap, a before/after comparison of
 differently sampled spectra was the cause, not the fixes.

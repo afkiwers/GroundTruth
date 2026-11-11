@@ -4,9 +4,9 @@ direction comes from the op-amps (input pin on one net, output pin on the next) 
 and the result is everything a hand-labelled path has: the path (a NetSpec with its Pass-through parts), the
 op-amps' amplifier models with their pins, and the GT labels for the schematic symbols (analysis/tags.py).
 
-refboard's current sense: a track of Net-(U301-+), one of Net-(U301--) and one of /CPU/ADC_I_RAIL_1 give
-U302.3 → U301 (amp_in:1, amp_out:4) → R303 4.7 kΩ (Pass through) → U1102.9, named /CPU/ADC_I_RAIL_1, with the labels
-U302 sig_drv:3, U301 amp_in:1, amp_out:4, U1102 sig_rx:9.
+refboard's current sense: a track of Net-(U41-+), one of Net-(U41--) and one of /MCU/ADC_SENSE_1 give
+U42.3 → U41 (amp_in:1, amp_out:4) → R41 4.7 kΩ (Pass through) → U53.9, named /MCU/ADC_SENSE_1, with the labels
+U42 sig_drv:3, U41 amp_in:1, amp_out:4, U53 sig_rx:9.
 """
 from __future__ import annotations
 
@@ -129,7 +129,7 @@ def _rank(p: Pad) -> float:
 def _add_labels(old: str, words: list[str], amp: bool = False) -> str:
     """A GT field's text with these labels added (those already there kept, none twice). amp: the part is an
     op-amp stage on the path, so its own signal labels (sig, sig_drv, sig_rx) go: they would cut the path at it
-    (refboard's U301 had sig_drv:4 before it was labelled as the op-amp it is)."""
+    (refboard's U41 had sig_drv:4 before it was labelled as the op-amp it is)."""
     have = [w.strip() for w in (old or "").replace(";", ",").split(",") if w.strip()]
     if amp:
         have = [w for w in have if not w.lower().replace(" ", "").startswith("sig")]
@@ -138,7 +138,7 @@ def _add_labels(old: str, words: list[str], amp: bool = False) -> str:
 
 
 def path_from_selection(board: Board, config: Config, nets: list[str], pins: list[str] = ()) -> PathProposal:
-    """One path through the selected nets (two or more), see the module. `pins`: pads selected in KiCad ("U302.3"):
+    """One path through the selected nets (two or more), see the module. `pins`: pads selected in KiCad ("U42.3"):
     one on an end net fixes that end's driver or receiver."""
     from .tags import tag_text
     out = PathProposal()

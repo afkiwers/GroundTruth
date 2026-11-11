@@ -146,7 +146,7 @@ def test_cli_detect_lists_the_labels_and_their_problems(tmp_path, capsys):
 
 
 def test_a_labelled_converter_ic_with_a_pin_on_both_ends_of_its_inductor(tmp_path):
-    """Like the LT3970 (U503 on refboard): the IC's SW pin on one end of the inductor and its OUT pin on
+    """Like the LT3970 (U47 on refboard): the IC's SW pin on one end of the inductor and its OUT pin on
     the other. The switch node is the end on the SW pin."""
     g = BoardGen(layers=2, size=(30.0, 20.0))
     g.plane("GND", "B.Cu")
@@ -280,15 +280,15 @@ def test_a_quad_comparators_buffer_labels_in_the_compact_form(tmp_path):
 
 def test_labelled_nets_joined_by_a_large_resistor_are_one_path(tmp_path):
     """refboard's ADC input: an op-amp buffer's output (GT sig_drv:1 on U2) through a 4.7 kΩ resistor (no
-    signal part by default) to the ADC pin (GT sig_rx:1 on U1) on ADC_I_RAIL_1. One suggestion, named after the
+    signal part by default) to the ADC pin (GT sig_rx:1 on U1) on ADC_SENSE_1. One suggestion, named after the
     named net, driver U2.1, receiver U1.1, R1 in `through`; the route runs through it."""
     from groundtruth.analysis.detect import detect_nets, suggest_net
     from groundtruth.rules.checks import run_checks
     g = BoardGen(layers=2, size=(40.0, 20.0))
-    g.ic("U1", (5.0, 10.0), "ADC_I_RAIL_1")
+    g.ic("U1", (5.0, 10.0), "ADC_SENSE_1")
     g.ic("U2", (35.0, 10.0), "Net-(U2-OUT)")
-    g.two_pin("R1", "4k7", (20.0, 10.0), "ADC_I_RAIL_1", "Net-(U2-OUT)", kind="R")
-    g.track((5.0, 10.0), (19.5, 10.0), "ADC_I_RAIL_1")
+    g.two_pin("R1", "4k7", (20.0, 10.0), "ADC_SENSE_1", "Net-(U2-OUT)", kind="R")
+    g.track((5.0, 10.0), (19.5, 10.0), "ADC_SENSE_1")
     g.track((20.5, 10.0), (35.0, 10.0), "Net-(U2-OUT)")
     g.plane("GND", g.cu[-1])
     g.label("U2", "sig_drv:1")
@@ -298,12 +298,12 @@ def test_labelled_nets_joined_by_a_large_resistor_are_one_path(tmp_path):
     found, why = suggest_net(board, cfg, "Net-(U2-OUT)")
     assert found is not None, why
     s = found.spec
-    assert (s.name, s.driver, s.receivers, s.through) == ("ADC_I_RAIL_1", "U2.1", ["U1.1"], ["R1"])
-    assert [d.spec.name for d in detect_nets(board, cfg) if d.spec.name in ("ADC_I_RAIL_1", "Net-(U2-OUT)")] == \
-        ["ADC_I_RAIL_1"]
+    assert (s.name, s.driver, s.receivers, s.through) == ("ADC_SENSE_1", "U2.1", ["U1.1"], ["R1"])
+    assert [d.spec.name for d in detect_nets(board, cfg) if d.spec.name in ("ADC_SENSE_1", "Net-(U2-OUT)")] == \
+        ["ADC_SENSE_1"]
     cfg.nets = [s]
     res = run_checks(board, cfg)
-    assert ("ADC_I_RAIL_1", "U1.1") in res.routes and res.routes[("ADC_I_RAIL_1", "U1.1")].parts == ["R1"]
+    assert ("ADC_SENSE_1", "U1.1") in res.routes and res.routes[("ADC_SENSE_1", "U1.1")].parts == ["R1"]
 
 
 def test_a_reannotated_board_s_converter_follows_its_labels(tmp_path):

@@ -124,7 +124,7 @@ def capacity_text(c: dict) -> str:
 
 def zero_text(c: dict) -> str:
     """Why a capacity is zero: the other stages at their operating points already put the hottest spot over the
-    limit with this stage at no load ("buck conv1 at its operating point already puts copper at Q301 (F.Cu) at
+    limit with this stage at no load ("buck conv1 at its operating point already puts copper at Q41 (F.Cu) at
     143.7 °C, over the 105 °C limit: no headroom left for buck conv2"), or this stage's own no-load heat does."""
     hot = f"{c['limited_by']} at {c['t_hottest']:.1f} °C, over the {c['limit_c']:g} °C limit"
     if c.get("blocked_by"):
@@ -362,7 +362,7 @@ def hard_edge_current(spec, i_l: float, delta_i: float) -> float:
 def core_duty_factor(duty: float, alpha: float) -> float:
     """A triangular flux of the same swing and frequency whose rise takes the share `duty` of the period, against
     the symmetric triangle: [D^(1−α) + (1−D)^(1−α)] / 2^α, from the improved generalised Steinmetz equation
-    P ∝ (1/T)∫|dB/dt|^α dt · ΔB^(β−α) on the two slopes ΔB/(D·T) and ΔB/((1−D)·T) [Venkatachalam 2002]. 1 at
+    P ∝ (1/T)∫|dB/dt|^α dt · ΔB^(β−α) on the two slopes ΔB/(D·T) and ΔB/((1−D)·T) [Venkatachalam 2002], the exponents Steinmetz's [Steinmetz 1892]. 1 at
     D = ½, more for a short rise or fall (the faster slope), 1 for α = 1."""
     d = min(max(duty, 1e-3), 1.0 - 1e-3)
     return (d ** (1.0 - alpha) + (1.0 - d) ** (1.0 - alpha)) / 2.0 ** alpha
@@ -611,7 +611,7 @@ def part_losses(board: Board, config: Config, converters) -> tuple[list[dict], l
             if not sync:
                 e_oss, how = 0.5 * e_oss, "½·" + how
             # the rectifier's recovered charge, swept out through the main switch at its hard turn-on with the full
-            # voltage across it: Q_rr·V per period [Erickson 2001, §4.6] [A49]. Only when the rectifier conducted
+            # voltage across it: Q_rr·V per period [Erickson 2001, §4.3.2] [A49]. Only when the rectifier conducted
             # before it: a diode always, a synchronous FET's body diode in the dead time
             e_rr = spec.q_rr * v if spec.q_rr and (not sync or hard_rev) else 0.0
             for ref in main:
@@ -1411,7 +1411,7 @@ class _Capacity:
 
     def blocked_by(self, name: str, where: str) -> list[str]:
         """Over the limit with stage `name` at no load: the other stages whose own loss heats the part at the
-        hottest spot ("copper at Q301 (F.Cu)", "Q301's junction"), i.e. the part's loss grows with that stage's
+        hottest spot ("copper at Q41 (F.Cu)", "Q41's junction"), i.e. the part's loss grows with that stage's
         load (a quadratic or linear term in its scale), so it is their operating point that is already too hot.
         Empty when the spot is at no part, or the part's loss is a constant of every stage."""
         m = re.match(r"(\S+)'s junction", where) or re.search(r" at (\S+) \(", where)

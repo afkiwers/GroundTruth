@@ -143,15 +143,15 @@ def test_pairs_found_by_their_names(tmp_path):
     """_P/_N, CAN_H/CAN_L, USB DP/DM, D+/D-, an inverted twin RX / RX*; not two unrelated nets ending in P and N;
     the interface's defaults by name."""
     from types import SimpleNamespace
-    board = SimpleNamespace(nets=["/USB/USB_DP", "/USB/USB_DM", "/COMMS/CAN_H", "/COMMS/CAN_L", "LVDS_CLK_P",
+    board = SimpleNamespace(nets=["/USB/USB_DP", "/USB/USB_DM", "/BUS/CAN_H", "/BUS/CAN_L", "LVDS_CLK_P",
                                   "LVDS_CLK_N", "/RX", "/RX*", "D+", "D-", "VCAP", "VCAN", "GND", "TX0P", "TX0N",
                                   "CLKP", "CLKN"])
     pairs = set(find_pairs(board))
-    assert {("/USB/USB_DP", "/USB/USB_DM"), ("/COMMS/CAN_H", "/COMMS/CAN_L"), ("LVDS_CLK_P", "LVDS_CLK_N"),
+    assert {("/USB/USB_DP", "/USB/USB_DM"), ("/BUS/CAN_H", "/BUS/CAN_L"), ("LVDS_CLK_P", "LVDS_CLK_N"),
             ("/RX", "/RX*"), ("D+", "D-"), ("TX0P", "TX0N"), ("CLKP", "CLKN")} <= pairs
     assert not any("VCAP" in p for p in pairs)
     assert pair_defaults("/USB/USB_DP", "/USB/USB_DM")[:1] == (90.0,)
-    assert pair_defaults("/COMMS/CAN_H", "/COMMS/CAN_L") == (None, 50e-9, "CAN")
+    assert pair_defaults("/BUS/CAN_H", "/BUS/CAN_L") == (None, 50e-9, "CAN")
 
 
 def test_targets_by_kicad_net_class(tmp_path):
