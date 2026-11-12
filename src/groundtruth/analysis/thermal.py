@@ -659,6 +659,15 @@ def part_losses(board: Board, config: Config, converters, fixed: bool = False) -
             notes.extend(n)
             if p_core:
                 add(inductor.reference, p_core, f"core loss ({how})", "inductor core")
+        # an RC snubber across the switch node: its capacitor is charged to the switched voltage and discharged
+        # once per period through its resistor, C·V²·f_sw in the resistor whatever its value [Erickson 2001]
+        # (the fix advisor charges a proposed one the same; before 2026-11-12 one on the board lost nothing:
+        # audit round 12, P-1)
+        if v and spec.f_sw and len(spec.snubber) == 2:
+            from .power import _snubber_rc
+            rc = _snubber_rc(config, spec)
+            if rc is not None:
+                add(spec.snubber[1], rc[0] * v * v * spec.f_sw, f"snubber {rc[0] * 1e9:.3g} nF at {v:g} V", "other")
         for path in getattr(res, "dc", []) or []:
             for p in path.get("parts", []):
                 add(p["name"], p["r_mohm"] * 1e-3 * path["current_a"] ** 2, f"in DC {path['name']}", "series parts")

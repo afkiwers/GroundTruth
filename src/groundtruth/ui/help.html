@@ -1461,7 +1461,7 @@ Simulate, it says so and asks for a Simulate instead of heating the design as it
   temperature);</li>
 <li>parts: their losses at the operating point (switch conduction, switching edges, output charge, a synchronous
   rectifier's reverse conduction in the dead times and its recovery charge, an inductor's DCR and core loss,
-  series parts, connector pins' contact and joint resistance, and the gate drive and the controller's supply as
+  series parts, an RC snubber's resistor (C·V²·f_sw), connector pins' contact and joint resistance, and the gate drive and the controller's supply as
   heat in the controller IC (when Q_g and I_q are given). A FET's conduction loss rises with its temperature
   (0.5 %/K from 25 °C; <code>rds_on_tc</code> in the stage's settings sets another value, 0 none) and a winding's
   DCR loss with copper's 0.39 %/K, in Thermal and Current capacity; a part in several stages' input paths (the

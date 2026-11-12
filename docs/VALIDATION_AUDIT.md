@@ -873,6 +873,11 @@ converters, bridges and signal paths.
 | C-3 | Crosstalk was the matched-line closed forms only; an unterminated receiver sees about twice as much. | Medium (optimistic) | Fixed: 2·max(FEXT, NEXT/2) at the receiver is judged too [A109] |
 | C-4 | An inverting gain block's bandwidth was GBW/\|gain\|, not GBW/(1 + \|gain\|): a −1 inverter twice too wide. | Medium-Low | Fixed (`ComponentModel.amp_corner`) |
 | C-5 | A connector found as a rail's source gets the regulator's default 5 mΩ + 20 nH. | Low (suspicion) | Open: the values are settings and are named in the result |
+| P-1 | A converter's RC snubber on the board lost nothing in its resistor (a bridge leg's and a proposed one were counted): C·V²·f_sw, 2.3 W for 2 nF at 48 V and 500 kHz. | Medium (optimistic: Thermal, capacity, efficiency) | Fixed (`thermal.part_losses`) |
+| P-2 | The switch node's charge current (C·dv/dt) multiplied the whole pulse, the ripple's ramp included, though the node's voltage is a flat trapezoid: the flat pulse's nulls read up to 50 dB high, and at light load (ΔI > 2·I) the whole envelope ΔI/(2·I) high. | Medium (conservative, unbounded towards no load) | Fixed: the charge goes on the flat part only (`power.edge_charge_term`, also its phase in `interleave.loop_phase`); every harmonic within 0.3 dB of the sampled waveform's |
+| P-3 | The hot loop's RMS current for its copper heat was the flat pulse's, without the ripple on its top. | Low (optimistic) | Fixed: D(1−D)·I² + D·ΔI²/12 |
+| P-4 | At current reversal (I < ΔI/2) the overlap loss is zero while the output-charge loss stays whole and the dead-time loss drops to zero; a partial swing in the dead time would be between. | Low | Open: needs a time-domain reference before it is changed |
+| P-5 | A motor bridge's CISPR conducted reading uses the average detector only; the bus current's PWM groups read up to 14 dB higher on a peak detector at low speed, so the quasi-peak limit could bind by a few dB on some groups (E-2's rule is applied to converters only). | Low (suspicion) | Open |
 | names | Real net names and part designators of the reference board stood in comments, tests, docs and the help. | Repository rule | Replaced by generic ones in every tracked file (one consistent mapping) |
 
 - **Verified as shipped** (by the reviewers, by recomputation or against the sources they could see): the small
