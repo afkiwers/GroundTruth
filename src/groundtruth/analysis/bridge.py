@@ -20,7 +20,7 @@ import numpy as np
 
 from ..config.settings import BridgeSpec, simulation_blockers
 from ..core.issues import Issue, resolve_severity
-from ..emi.conducted import BANDS, LISNS, describe, detector, frequency_range, limit_line
+from ..emi.conducted import BANDS, LISNS, SECOND_DETECTOR, describe, detector, frequency_range, limit_line
 from ..emi.pwm_lines import line_spectrum, receiver, tunings_for
 from ..emi.radiation import receiver_bandwidth, thin_rows
 from ..solver.peec import RouteExcitation, SolverError
@@ -562,9 +562,26 @@ def conducted_rows(model: BoardModel, legs: list, w: DriveWaveform, std: str) ->
     reading = receiver(freqs, v, 1.0 / w.period, tun, rbw, detector(std))
     v_db = 20 * np.log10(np.maximum(reading / math.sqrt(2), 1e-30) / 1e-6)
     lim = limit_line(tun, std, cls)
-    return [{"f": float(tun[j]), "v_dbuv": float(v_db[j]), "limit_dbuv": None if np.isnan(lim[j]) else float(lim[j]),
-             "margin_db": None if np.isnan(lim[j]) else float(lim[j] - v_db[j])}
-            for j in thin_rows(tun, v_db, np.arange(len(tun)), bands, REPORT_PER_DECADE)]
+    second = np.zeros(len(tun), bool)
+    if std.lower() in SECOND_DETECTOR:
+        # the bus current's lines are not CW: the PWM's sidebands, swept by the commutation, read higher on a peak
+        # (and quasi-peak) detector than on the average one, so the quasi-peak (CISPR 22 / 32) or peak (CISPR 25)
+        # limit can bind: both are read, the second with the peak detector, the smaller margin kept, as for a
+        # dithered converter [A104] (before 2026-11-12 the average reading alone: audit round 12, P-5)
+        pk = receiver(freqs, v, 1.0 / w.period, tun, rbw, "peak")
+        v2 = 20 * np.log10(np.maximum(pk / math.sqrt(2), 1e-30) / 1e-6)
+        lim2 = limit_line(tun, std, cls, SECOND_DETECTOR[std.lower()])
+        with np.errstate(invalid="ignore"):
+            second = (lim2 - v2) < (lim - v_db)
+        v_db, lim = np.where(second, v2, v_db), np.where(second, lim2, lim)
+    rows = []
+    for j in thin_rows(tun, v_db, np.arange(len(tun)), bands, REPORT_PER_DECADE):
+        rows.append({"f": float(tun[j]), "v_dbuv": float(v_db[j]),
+                     "limit_dbuv": None if np.isnan(lim[j]) else float(lim[j]),
+                     "margin_db": None if np.isnan(lim[j]) else float(lim[j] - v_db[j])})
+        if second[j]:
+            rows[-1]["detector"] = SECOND_DETECTOR[std.lower()]
+    return rows
 
 
 def ce101_spec(model: BoardModel, w: DriveWaveform):

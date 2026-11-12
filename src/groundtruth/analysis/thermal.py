@@ -345,12 +345,30 @@ def reverse_conduction(t_hard: float, t_soft: float, i_l: float, delta_i: float,
     current flows in reverse for the whole dead time. At the soft edge (its turn-off, at the peak I_L + ΔI/2) the
     current first swings the node across, moving the two FETs' output charge q_node in slew = q_node / I; only the
     rest of the dead time is reverse conduction. charge = i_hard·t_hard + i_soft·t_soft_rev (C per period: the
-    loss is charge·V_SD·f_sw)."""
+    loss is charge·V_SD·f_sw).
+
+    With the valley below zero (light load, I_L < ΔI/2) the current at the hard edge has reversed: it swings the
+    node towards the main switch by itself in the dead time, moving q_node in q_node / |I_v| [A111]. Done within
+    the dead time, the main switch's own body diode conducts the rest of it (main_charge, C per period) and the
+    turn-on is soft; not done, a share `residual` of the voltage is left for the main switch to switch hard (its
+    output-charge loss scales with residual², a linear capacitance's energy). Before 2026-11-12 a reversed valley
+    counted as fully soft for the overlap but fully hard for the output charge, and neither switch conducted in
+    that dead time (audit round 12, P-4)."""
     i_hard, i_soft = max(i_l - delta_i / 2, 0.0), i_l + delta_i / 2
     slew = q_node / i_soft if i_soft > 0 else 0.0
     t_soft_rev = max(t_soft - slew, 0.0)
+    i_rev = max(delta_i / 2 - i_l, 0.0)               # the reversed valley's magnitude (0 in continuous conduction)
+    residual, main_charge = 1.0, 0.0
+    if i_rev > 0 and q_node > 0:
+        swing = q_node / i_rev                        # the time the reversed current takes to swing the node
+        if swing <= t_hard:
+            residual, main_charge = 0.0, i_rev * (t_hard - swing)
+        else:
+            residual = 1.0 - t_hard / swing
+    elif i_rev > 0:                                   # no output charge known: the node swings at once
+        residual, main_charge = 0.0, i_rev * t_hard
     return {"i_hard": i_hard, "i_soft": i_soft, "slew": slew, "t_soft_rev": t_soft_rev,
-            "charge": i_hard * t_hard + i_soft * t_soft_rev}
+            "charge": i_hard * t_hard + i_soft * t_soft_rev, "residual": residual, "main_charge": main_charge}
 
 
 def hard_edge_current(spec, i_l: float, delta_i: float) -> float:
@@ -365,7 +383,8 @@ def hard_edge_current(spec, i_l: float, delta_i: float) -> float:
 def core_duty_factor(duty: float, alpha: float) -> float:
     """A triangular flux of the same swing and frequency whose rise takes the share `duty` of the period, against
     the symmetric triangle: [D^(1−α) + (1−D)^(1−α)] / 2^α, from the improved generalised Steinmetz equation
-    P ∝ (1/T)∫|dB/dt|^α dt · ΔB^(β−α) on the two slopes ΔB/(D·T) and ΔB/((1−D)·T) [Venkatachalam 2002], the exponents Steinmetz's [Steinmetz 1892]. 1 at
+    P ∝ (1/T)∫|dB/dt|^α dt · ΔB^(β−α) on the two slopes ΔB/(D·T) and ΔB/((1−D)·T) [Venkatachalam 2002], the exponents
+    Steinmetz's [Steinmetz 1892]. 1 at
     D = ½, more for a short rise or fall (the faster slope), 1 for α = 1."""
     d = min(max(duty, 1e-3), 1.0 - 1e-3)
     return (d ** (1.0 - alpha) + (1.0 - d) ** (1.0 - alpha)) / 2.0 ** alpha
@@ -576,6 +595,7 @@ def part_losses(board: Board, config: Config, converters, fixed: bool = False) -
         # channel is off for both dead times and carries the rest of its share [Erickson 2001]
         rect_fets = [r for r in rect if not _is_diode(r)]
         hard_rev = False                                  # the rectifier conducts before the hard turn-on (Q_rr)
+        residual = 1.0                                    # the share of V the main switch turns on against
         if rect_fets and not spec.switch and spec.f_sw:
             rise, fall, v_sd, why = dead_time_values(board, spec)
             notes += why
@@ -596,6 +616,13 @@ def part_losses(board: Board, config: Config, converters, fixed: bool = False) -
                     f"reverse conduction {v_sd:g} V: {t_hard * 1e9:g} ns at the hard turn-on, "
                     f"{rc['t_soft_rev'] * 1e9:.3g} of {t_soft * 1e9:g} ns after the {rc['slew'] * 1e9:.3g} ns node "
                     "swing", "dead time")
+            # a reversed valley (I_L < ΔI/2): the node swings by itself before the main switch turns on [A111]
+            residual = rc["residual"]
+            main_fets = [r for r in main if not _is_diode(r)]
+            if rc["main_charge"] > 0 and main_fets:
+                for ref in main_fets:
+                    add(ref, rc["main_charge"] * spec.f_sw * v_sd / len(main_fets),
+                        f"reverse conduction {v_sd:g} V before its turn-on (the current has reversed)", "dead time")
         if spec.rds_on is not None:
             r_lo = spec.rds_on_low if spec.rds_on_low is not None else spec.rds_on
             # the channel's resistance rises with its temperature: the stage's rds_on_tc, else RDS_ON_TC [A108]
@@ -635,6 +662,8 @@ def part_losses(board: Board, config: Config, converters, fixed: bool = False) -
                 e_oss, how = (spec.c_oss or 0.0) * v * v, "C_oss·V²"
             if not sync:
                 e_oss, how = 0.5 * e_oss, "½·" + how
+            elif residual < 1.0:                          # a reversed valley swung the node (part of) the way
+                e_oss, how = e_oss * residual ** 2, f"{residual ** 2:.2g}·" + how
             # the rectifier's recovered charge, swept out through the main switch at its hard turn-on with the full
             # voltage across it: Q_rr·V per period [Erickson 2001, §4.3.2] [A49]. Only when the rectifier conducted
             # before it: a diode always, a synchronous FET's body diode in the dead time

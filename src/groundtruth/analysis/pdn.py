@@ -52,6 +52,8 @@ SHARE_MIN = 0.05                 # a part's share of the port current listed fro
 SUPPLY_TYPES = ("power_in",)     # schematic pin types of an IC's supply pins
 IC_PREFIXES = ("U", "IC")        # without pin types on the board: parts with these prefixes and rail + ground pads
 CONNECTOR_PREFIXES = ("J", "P", "X", "CN", "CON")
+VRM_R_DEFAULT, VRM_L_DEFAULT = 5e-3, 20e-9       # PdnSpec's defaults: a regulator's output
+HARNESS_R, HARNESS_L = 20e-3, 500e-9             # a connector's source with those defaults: ~0.5 m of lead [A110]
 
 
 def rail_voltage(name: str) -> Optional[float]:
@@ -255,6 +257,13 @@ def _source_branch(st, src: Footprint, rail: str, ground: str, spec: PdnSpec) ->
     rail_pads = [p for p in src.pads if p.net == rail]
     gnd_pads = [p for p in src.pads if p.net == ground]
     r, l_ = spec.vrm_r, spec.vrm_l
+    # a connector (no power_out pin on the rail) has a harness and the supply behind it, not a regulator's output:
+    # with the regulator's defaults left as they are, a lead's instead [A110] (before 2026-11-12 the regulator's
+    # 20 nH: the impedance below the decaps' range up to ~30 dB low: audit round 12, C-5)
+    harness = (not any(p.net == rail and p.pin_type == "power_out" for p in src.pads)
+               and r == VRM_R_DEFAULT and l_ == VRM_L_DEFAULT)
+    if harness:
+        r, l_ = HARNESS_R, HARNESS_L
 
     def z(f, r=r, l_=l_):
         """The source's output impedance."""
@@ -271,7 +280,8 @@ def _source_branch(st, src: Footprint, rail: str, ground: str, spec: PdnSpec) ->
     n = len(pairs)
     out = [Branch(a, b, z if n == 1 else (lambda f, z=z, n=n: n * z(f)), f"source {src.reference}", "part")
            for a, b in pairs]
-    return out, (f"{src.reference} ({src.value}) as {r * 1e3:g} mΩ + {l_ * 1e9:g} nH (vrm_r, vrm_l)")
+    return out, (f"{src.reference} ({src.value}) as {r * 1e3:g} mΩ + {l_ * 1e9:g} nH (vrm_r, vrm_l"
+                 + ("; a connector: a harness's defaults, give the supply's own values" if harness else "") + ")")
 
 
 def copper_pieces(st, plane) -> tuple[np.ndarray, dict]:
