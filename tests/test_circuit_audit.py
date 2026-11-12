@@ -89,3 +89,25 @@ def test_C_3_crosstalk_at_an_unterminated_receiver_against_a_coupled_line_in_tim
     open_rx = far_end(z0 / 2, 0.0) / (1.0)                        # the aggressor's settled swing is the source's
     rx = 2.0 * max(fxt, DRIVER_REFLECTION * nxt)
     assert open_rx > 1.3 * fxt and rx >= open_rx * 0.95
+
+
+def test_a_signal_named_after_its_supply_domain_is_not_a_supply():
+    """Crosstalk victims and pair detection leave out supplies and grounds only: a voltage in the name counts as a
+    supply when a power pin or a pour is on the net or the name starts as a supply's does; PG_3V3, EN_1V8 and
+    ADC_12V_MON are signals (they were all left out as supplies before)."""
+    from boardgen import BoardGen
+    from groundtruth.adapters.file_source import load_board
+    from groundtruth.analysis.si import supply_nets
+    import tempfile
+    from pathlib import Path
+    g = BoardGen(layers=2, size=(40.0, 20.0))
+    names = ["+3V3", "VDD_1V8", "5V_ISO", "PG_3V3", "EN_1V8", "ADC_12V_MON", "GND", "SPI_SCK", "PWR_1V2"]
+    for k, net in enumerate(names):
+        g.footprint(f"R{k + 1}", "R", "Resistor_SMD:R_0603_1608Metric", (5.0 + 3 * k, 10.0),
+                    [{"number": 1, "at": (-0.8, 0.0), "net": net, "size": (0.8, 0.9)},
+                     {"number": 2, "at": (0.8, 0.0), "net": "GND", "size": (0.8, 0.9)}])
+    g.zone("PWR_1V2", "B.Cu", [(2.0, 2.0), (38.0, 2.0), (38.0, 6.0), (2.0, 6.0)])     # a pour: a supply
+    board = load_board(g.write(Path(tempfile.mkdtemp()) / "b.kicad_pcb"))
+    got = supply_nets(board)
+    assert {"+3V3", "VDD_1V8", "5V_ISO", "GND", "PWR_1V2"} <= got
+    assert not ({"PG_3V3", "EN_1V8", "ADC_12V_MON", "SPI_SCK"} & got)

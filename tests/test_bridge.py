@@ -794,3 +794,28 @@ def test_under_461h_a_bridges_ships_ce101_runs_to_20_khz_on_the_conducted_solves
     g = ce101_bridge_rows(None, legs, br.waveform, Ce101("ships", 48.0, 30.0, "G"))
     assert max(row["f"] for row in g) <= 10e3
     assert _ce101_complex_transfer(s, 10e3)[0].tolist() == low.tolist()
+
+
+def test_a_bridges_conducted_reading_is_judged_on_both_detectors(solved, monkeypatch):
+    """The bus current's lines are not CW: on a CISPR limit each reading is the average detector's against the
+    average limit or the peak detector's against the quasi-peak (CISPR 22 / 32) or peak (CISPR 25) limit, whichever
+    margin is smaller [A104]; a row read the second way says so and carries that limit. No margin is larger than
+    the average reading's alone (audit round 12, P-5)."""
+    import groundtruth.analysis.bridge as br
+    from groundtruth.emi.conducted import limit_line
+    board, cfg, r = solved
+    legs = [s for s in r.converter_setups if s.spec.bridge == "bridge J1"]
+    std, cls = legs[0].standard, legs[0].standard_class
+    if std not in br.SECOND_DETECTOR:
+        pytest.skip(f"the bridge is checked against {std}")
+    w = r.bridges[0].waveform
+    both = br.conducted_rows(r.model, legs, w, std)
+    monkeypatch.setattr(br, "SECOND_DETECTOR", {})
+    avg = {round(x["f"]): x for x in br.conducted_rows(r.model, legs, w, std)}
+    compared = [(row, avg[round(row["f"])]) for row in both
+                if row["margin_db"] is not None and round(row["f"]) in avg]
+    assert compared
+    for row, old in compared:
+        assert row["margin_db"] <= old["margin_db"] + 1e-9
+        if row.get("detector"):
+            assert row["limit_dbuv"] == pytest.approx(float(limit_line([row["f"]], std, cls, row["detector"])[0]))

@@ -156,3 +156,26 @@ def test_T_2_a_hot_parts_conduction_loss_rises_with_its_temperature():
     hot = _coupled(m, np.zeros(0), np.array([1.0]), tdep=[one])
     assert plain.T[0] == pytest.approx(75.0, abs=0.05)
     assert hot.T[0] == pytest.approx(25.0 + 50.0 / 0.75, abs=0.1) and hot.parts_hot == pytest.approx(1 / 0.75 - 1, abs=0.01)
+
+
+@pytest.mark.parametrize("i_l, delta_i", [(5.0, 4.0), (1.5, 4.0), (1.0, 4.0), (0.2, 4.0), (0.0, 4.0)])
+def test_P_4_a_reversed_valley_swings_the_node_before_the_main_switch_turns_on(i_l, delta_i):
+    """The node at the hard edge's dead time (20 ns), charged by the reversed valley current |I_v| = ΔI/2 − I_L
+    through a linear capacitance holding q_node = 80 nC at 48 V, stepped in time and clamped at the rail by the
+    main switch's body diode: the voltage left for the turn-on and the charge the body diode carries equal
+    reverse_conduction's residual and main_charge within 0.5 %. Continuous conduction (I_v ≤ 0): nothing swings."""
+    from groundtruth.analysis.thermal import reverse_conduction
+    v, q_node, t_dead = 48.0, 80e-9, 20e-9
+    c = q_node / v
+    i_v = max(delta_i / 2 - i_l, 0.0)
+    node, diode, dt = 0.0, 0.0, t_dead / 20000
+    for _ in range(20000):
+        if node < v:
+            node = min(node + i_v * dt / c, v)
+        else:
+            diode += i_v * dt
+    rc = reverse_conduction(t_dead, t_dead, i_l, delta_i, q_node)
+    assert rc["residual"] == pytest.approx(1.0 - node / v, abs=0.005)
+    assert rc["main_charge"] == pytest.approx(diode, rel=0.005, abs=1e-12)
+    if i_v == 0:
+        assert rc["residual"] == 1.0 and rc["main_charge"] == 0.0

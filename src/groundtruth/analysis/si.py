@@ -210,15 +210,14 @@ def detect_pairs(board: Board, config) -> list:
     their interface's defaults (pair_defaults). Supply-like nets (a voltage in the name, grounds: BAT+ / BAT-) and
     nets without tracks are left out."""
     from ..config.settings import DiffPairSpec
-    from .pdn import rail_voltage
-    from .safety import is_ground
     listed = {frozenset((p.p, p.n)) for p in getattr(getattr(config, "si", None), "pairs", ())}
     routed = {t.net for t in board.tracks}
     out = []
+    supplies = supply_nets(board)
     for pn, nn in find_pairs(board):
         if frozenset((pn, nn)) in listed or not ({pn, nn} <= routed):
             continue
-        if any(is_ground(x) or rail_voltage(x) is not None for x in (pn, nn)):
+        if pn in supplies or nn in supplies:
             continue
         z, tr, what = pair_defaults(pn, nn)
         out.append(DiffPairSpec(pn, nn, zdiff=z, rise_time=tr, source="auto", reviewed=False,
@@ -720,14 +719,13 @@ def check_crosstalk(board: Board, cache: SectionCache, aggressors: list, limit: 
     """crosstalk (see the module): aggressors [(net, rise time s, swing V)]."""
     from shapely import STRtree
     from shapely.geometry import LineString
-    from .safety import is_ground
-    from .pdn import rail_voltage
     by_layer: dict[str, list[Track]] = {}
     for t in board.tracks:
         if t.net and not t.is_arc:
             by_layer.setdefault(t.layer, []).append(t)
     trees = {lay: STRtree([LineString([t.start, t.end]) for t in ts]) for lay, ts in by_layer.items()}
     out = []
+    supplies = supply_nets(board)
     for net, tr, swing in aggressors:
         groups: dict[tuple, dict] = {}
         for a in (t for t in board.tracks if t.net == net and not t.is_arc):
@@ -739,7 +737,7 @@ def check_crosstalk(board: Board, cache: SectionCache, aggressors: list, limit: 
             ts = by_layer[a.layer]
             for k in trees[a.layer].query(LineString([a.start, a.end]).buffer(reach + a.width)):
                 b = ts[int(k)]
-                if b.net == net or not b.net or is_ground(b.net) or rail_voltage(b.net) is not None:
+                if b.net == net or not b.net or b.net in supplies:
                     continue
                 lb = math.dist(b.start, b.end)
                 if lb < COUPLED_MIN_MM:
@@ -827,6 +825,36 @@ def check_stubs(board: Board, nets: list, factor: float, add: Add) -> list[dict]
                 f"resonating at {f_res / 1e9:.2f} GHz, under {factor:g} × the signal's {knee / 1e9:.2f} GHz knee: "
                 "back-drill it, use a blind via or change layers nearer the via's end",
                 v.position, layer=a, key=f"via_stub:{net}:{v.position[0]:.2f},{v.position[1]:.2f}", details=row)
+    return out
+
+
+SUPPLY_WORDS = re.compile(r"^[+-]|^(?:V(?=\d)|VCC|VDD|VIN|VBUS|VBAT|AVDD|DVDD|PVDD|VREF|VIO|VCORE|\d+V\d*|\d+\.\d+V)(?:$|[_\d.])")
+
+
+def supply_nets(board: Board) -> set[str]:
+    """The nets that are supplies or grounds, not signals: a ground by name, or a voltage in the name AND a sign
+    of a supply: a power pin on it (schematic types power_in / power_out), a pour of it, or a name that starts as
+    a supply's does (+3V3, 5V_ISO, VDD_1V8, VCC3.3). A signal named after its domain (PG_3V3, EN_1V8,
+    ADC_12V_MON) is not one: it is a crosstalk victim and may be a pair like any other (before 2026-11-12 every
+    name with a voltage was left out: audit round 12, under C-1)."""
+    from .pdn import rail_voltage
+    from .safety import is_ground
+    types: dict[str, set] = {}
+    for fp in board.footprints:
+        for p in fp.pads:
+            if p.net:
+                types.setdefault(p.net, set()).add(p.pin_type or "")
+    poured = {z.net for z in board.zones if getattr(z, "net", None)}
+    out = set()
+    for net in board.nets:
+        if is_ground(net):
+            out.add(net)
+            continue
+        if rail_voltage(net) is None:
+            continue
+        last = net.upper().rsplit("/", 1)[-1]
+        if types.get(net, set()) & {"power_in", "power_out"} or net in poured or SUPPLY_WORDS.match(last):
+            out.add(net)
     return out
 
 

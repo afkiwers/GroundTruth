@@ -208,3 +208,13 @@ def test_the_pins_fine_model_makes_a_coarse_grid_converge(tmp_path, monkeypatch)
     assert mid[1] == pytest.approx(ref[1], rel=0.05)
     assert corr[0] == pytest.approx(ref[0], rel=0.02) and port["l_correction_nh"] > 0.1
     assert port["local_pitch_mm"] < 0.3
+
+
+def test_a_connector_source_with_the_regulators_defaults_is_a_harness(tmp_path):
+    """A connector as the rail's source (no power_out pin), its R and L left at the regulator's 5 mΩ / 20 nH: it is
+    fed through 20 mΩ + 500 nH, a short lead [A110], and the source's description says so; at 300 kHz the IC
+    then sees about ω·500 nH = 0.94 Ω (with 20 nH it read 0.04 Ω: audit round 12, C-5)."""
+    p, _, _ = _run(tmp_path, "harness", PdnSpec("VDD", source="J1"), source=True)
+    assert "harness" in p.source and "500 nH" in p.source
+    z, f = _at(p.ports[0], 3e5)
+    assert z == pytest.approx(2 * math.pi * f * 500e-9, rel=0.25)
