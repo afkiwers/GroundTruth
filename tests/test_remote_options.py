@@ -140,3 +140,52 @@ def test_the_requests_need_the_servers_key(home, monkeypatch):
         assert srv.option is None
     finally:
         srv.stop()
+
+
+def test_the_plugin_offers_what_the_server_lists_and_follows_it():
+    """Options… (ui/server_updates.py, no wx): installs of the options that suit the server, a removal for a package
+    that is there (once), nothing for a server that lists none; following an install tells each step and ends with
+    what the server says."""
+    from groundtruth.ui import server_updates as su
+    status = {"host": "server-pc", "options": {
+        "available": [{"name": "gpu-cu126", "label": "GPU cu126", "about": "2.5 GB", "group": "gpu", "package": "torch",
+                       "unsuitable": ""},
+                      {"name": "gpu-cu128", "label": "GPU cu128", "about": "2.5 GB", "group": "gpu", "package": "torch",
+                       "unsuitable": ""},
+                      {"name": "sparse-mkl", "label": "MKL", "about": "150 MB", "group": "sparse", "package": "mkl",
+                       "unsuitable": "x86 only"}],
+        "installed": {"torch": "2.6.0+cu126", "mkl": None}, "current": None}}
+    got = su.option_choices(status)
+    assert [(c["name"], c["action"]) for c in got] == [("gpu-cu126", "install"), ("gpu-cu128", "install"),
+                                                       ("gpu-cu126", "remove")]
+    assert "replaces the installed torch 2.6.0+cu126" in got[0]["text"] and "server-pc" in got[2]["confirm"]
+    assert su.option_choices({"host": "old"}) == [] and su.option_choices({"options": {"available": []}}) == []
+
+    class Fake:
+        """A client whose status answers come from `answers`."""
+        answers, asked = [], []
+
+        def __init__(self, address, key):
+            pass
+
+        def option(self, name, action):
+            Fake.asked.append((name, action))
+            return {"name": name, "action": action, "state": "waiting", "since": 5.0}
+
+        def status(self):
+            a = Fake.answers.pop(0)
+            if isinstance(a, Exception):
+                raise a
+            return {"options": {"current": a}}
+    cur = {"name": "sparse-mkl", "since": 5.0}
+    Fake.answers = [{**cur, "state": "waiting"}, OSError("busy"), {"name": "gpu-cu126", "since": 1.0, "state": "done"},
+                    {**cur, "state": "installing"}, {**cur, "state": "done"}]
+    steps = []
+    done, text = su.follow_option("server-pc", KEY, "sparse-mkl", "install", steps.append, remote=Fake,
+                                  sleep=lambda s: None)
+    assert done and text == "sparse-mkl installed" and Fake.asked == [("sparse-mkl", "install")]
+    assert any("after the running job" in s for s in steps) and any("installing sparse-mkl" in s for s in steps)
+    Fake.answers = [{**cur, "state": "failed", "error": "pip ended with code 1: see options.log at the server"}]
+    done, text = su.follow_option("server-pc", KEY, "sparse-mkl", "install", steps.append, remote=Fake,
+                                  sleep=lambda s: None)
+    assert not done and "pip ended with code 1" in text

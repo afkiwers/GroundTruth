@@ -189,3 +189,71 @@ def update(address: str, key: str, bundle: dict, progress: Callable[[str], None]
         return False, ("the update is waiting at the server for its running job(s): it installs by itself when "
                        "they have finished")
     return False, "no answer from the updated server within 30 minutes: check it there (install_server status)"
+
+
+# ------------------------------------------------------------- a server's options (remote/options.py), from here
+OPTION_WAIT_S = 75 * 60         # how long an install is followed (a 2.5 GB download; the server's own limit is 60)
+
+
+def option_choices(status: dict) -> list[dict]:
+    """What Options… offers for a server, from its status's "options": [{text, name, action, confirm}], installs
+    first. An option the server says does not suit its machine is left out; a package already there is offered
+    for removal once, and another GPU build is offered as its replacement. [] for a server that offers none (an
+    older build, or one running in a window)."""
+    opt = status.get("options") or {}
+    have = opt.get("installed") or {}
+    out, removals = [], {}
+    for o in opt.get("available") or []:
+        if o.get("unsuitable"):
+            continue
+        version = have.get(o["package"])
+        there = f"; replaces the installed {o['package']} {version}" if version else ""
+        if not (version and o["group"] != "gpu"):               # MKL there: nothing to install again
+            out.append({"text": f"Install  {o['label']}  ({o['about']}{there})", "name": o["name"],
+                        "action": "install",
+                        "confirm": f"Install on {status.get('host') or 'the server'}:\n\n{o['label']}\n({o['about']})"
+                                   "\n\nThe server downloads it from the package's own index and installs it once "
+                                   "no job is running; queued jobs wait until it is done."})
+        if version and o["package"] not in removals:
+            removals[o["package"]] = {"text": f"Remove  {o['package']} {version}", "name": o["name"],
+                                      "action": "remove",
+                                      "confirm": f"Remove {o['package']} {version} from "
+                                                 f"{status.get('host') or 'the server'}?\n\nIts jobs then run without "
+                                                 "it (on the CPU, or with the built-in sparse solver)."}
+    return out + list(removals.values())
+
+
+def follow_option(address: str, key: str, name: str, action: str, progress: Callable[[str], None], stop=None,
+                  remote=None, clock=time.monotonic, sleep=time.sleep) -> tuple[bool, str]:
+    """Ask a server to install or remove one of its options, then follow it: (done, what happened).
+    `progress(text)` is told each step; `stop` ends the following early (the server carries on by itself)."""
+    from ..remote.client import Remote
+    remote = remote or Remote
+    srv = remote(address, key)
+    progress("asking the server…")
+    try:
+        answer = srv.option(name, action)
+    except Exception as e:                          # noqa: BLE001 - refused or unreachable: said on its row
+        return False, str(e).split(": ", 1)[-1] if ": " in str(e) else str(e)
+    since = answer.get("since")
+    verb = "installing" if action == "install" else "removing"
+    t0 = clock()
+    while clock() - t0 < OPTION_WAIT_S:
+        if stop is not None and stop.is_set():
+            return False, f"{verb} {name} goes on at the server (not followed any more)"
+        sleep(POLL_S)
+        try:
+            cur = (srv.status().get("options") or {}).get("current") or {}
+        except Exception:                           # noqa: BLE001 - busy with the install: ask again
+            continue
+        if cur.get("name") != name or cur.get("since") != since:
+            continue
+        if cur.get("state") == "waiting":
+            progress(f"{name}: after the running job(s)")
+        elif cur.get("state") == "installing":
+            progress(f"{verb} {name}… ({int((clock() - t0) // 60)} min)")
+        elif cur.get("state") == "done":
+            return True, f"{name} {'installed' if action == 'install' else 'removed'}"
+        elif cur.get("state") == "failed":
+            return False, f"{name}: {cur.get('error') or 'failed'}"
+    return False, f"{verb} {name}: no end within {OPTION_WAIT_S // 60} minutes; see the server's options.log"
