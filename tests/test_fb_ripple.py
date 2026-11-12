@@ -163,3 +163,30 @@ def test_a_cot_stage_is_checked_against_its_fb_ripple_min(tmp_path):
     assert fine.fb_pp == pytest.approx(low.fb_pp, rel=0.02)
     js = r.converters[0].summary()["fb_ripple"]
     assert js["kind"] == "fb_ripple" and js["fb_pp"] == pytest.approx(low.fb_pp)
+
+
+def test_the_ripple_is_shown_tiles_text_plots_and_report(tmp_path):
+    """The view (its own entry after the stages), its tiles (FB ripple judged against the limit), the console line,
+    both plots and the HTML report's section."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+    from groundtruth.report.formats import converter_text, fb_ripple_text
+    from groundtruth.report.plots import draw_fb_ripple, draw_fb_ripple_sources
+    from groundtruth.ui.kpi import kpis
+    from groundtruth.ui.main_frame import result_views
+    res, r = _cot(tmp_path, injection=True, **{"FB Ripple Min": "25mV"})
+    views = result_views(r)
+    assert res in views and res.label().endswith("FB ripple")
+    tiles = kpis(res)
+    assert tiles[0][0] == "FB ripple" and tiles[0][3] == "ok" and any(t[0] == "from the injection" for t in tiles)
+    assert any(t[0] == "FB ripple" for t in kpis(r.converters[0]))
+    assert fb_ripple_text(res)[0].strip().startswith("FB ripple at U1.")
+    assert sum("FB ripple at" in line for line in converter_text(r.converters[0])) == 1
+    for draw in (draw_fb_ripple, draw_fb_ripple_sources):
+        fig = Figure(figsize=(8, 3))
+        draw(fig, res)
+        assert fig.axes and fig.axes[0].get_lines()
+    from groundtruth.report.html import render_html
+    page = render_html(r.model.board, r.issues, r.routes, "simulation", converters=r.converters)
+    assert "id='fbripple" in page and "FB ripple" in page and "U1." in page
