@@ -875,9 +875,7 @@ converters, bridges and signal paths.
   25's average table, CE102 and its LISN, the receiver bandwidths, the trapezoid spectrum and `pulse_shape`, the
   spread receiver's average detector (0.2 dB), the path line's limits, IPC-2221B's spacing table and capacity
   constants, copper's constants, the convection correlations.
-- **Open** (round 12 is not finished): the three areas named above have not been reviewed; of the help's
-  findings H-18 (stacked boards), H-21 to H-23 (settings without a form field, Preferences details, some form
-  fields) and the parts of the help the review did not read (menus, the results panels, the Server section, the
+- **Open** (round 12 is not finished): the three areas named above have not been reviewed; of the help, the parts of the help the review did not read (menus, the results panels, the Server section, the
   guides in full); MIL-STD-461's CE101 and RE102-1 / -2 figure values were not re-read; suspicions noted and not
   checked: a limit of the user's with CISPR bandwidths below 30 MHz, `edge_charge_factor` on the ripple ramp's
   harmonics, RE102 below 30 MHz (a rod antenna's vertical field).

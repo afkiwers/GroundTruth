@@ -494,7 +494,14 @@ radiated spectra), and when the recovery snaps off it adds an overshoot I_rr·�
   <b>Show</b> explains them (see <a href="#labels">Detection labels</a>). The Bridges tab has the same line.</li>
 </ul>
 
+<p><b>In the settings file only</b> (a converter's keys without a form field): <code>duty</code> (replaces
+V_out / V_in), <code>r_damp</code> (0.1 Ω: the damping of the switch node's ringing, which sets its overshoot),
+<code>snubber: {C: 2.2n, R: 1.5}</code> (an RC snubber not on the board, to try), <code>rds_on_tc</code> (a FET's
+resistance rise per kelvin for Thermal, 0.005 when not given), <code>loop:</code> (overrides of the control
+loop's values) and a <code>note</code>. The form keeps them when it saves.</p>
 <hr><a name="bridges"></a><h3>Bridges tab</h3>
+<p>A bridge's defaults when a value is not given: PWM 20 kHz, dead time 50 ns, edge 2 ns, the largest duty
+<code>d_max</code> 0.98 (the bootstrap's refresh; settings file only).</p>
 <p>Motor bridges: half-bridge legs on one bus, the motor's winding as the inductor (BLDC drives, ESCs,
 starter-generators). The legs, their phase nodes, drivers, snubbers and the motor connector are detected; the
 operating point and the motor are yours to enter:</p>
@@ -653,6 +660,7 @@ map is drawn at one frequency. 100 MHz is chosen because:</p>
 ringing current flows rather than where most of the emitted energy is.</p>
 
 <hr><a name="dcloads"></a><h3>DC loads tab</h3>
+<p>The table's <b>Total</b> column is the rail's current, the sum of its loads; a rail's <b>Note</b> is yours.</p>
 <p>A <b>DC load</b> is a supply rail with the currents its loads draw: a power connector feeding several boards'
 connectors, a pour or track to a regulator, a fused output. Simulate solves each rail on the copper of the whole
 board (pours, tracks and vias, as for a power stage's DC paths) and shows:</p>
@@ -697,6 +705,10 @@ resolution (0.24 mm cells widen its edges); 4x is converged.</p>
   - {name: VDD rail, source: J1.2, source_return: J1.1, max_drop: 200mV, loads: [{pin: J2.2, return: J2.1, current: 500mA}, {pin: J3.2, return: J3.1, current: 500mA}]}</pre>
 
 <hr><a name="pdn"></a><h3>Power integrity tab (PDN impedance)</h3>
+<p>The form's fields: <b>Rail</b>, <b>Ground</b> (its return net), <b>Voltage (V)</b> and a <b>Note</b>; the target
+from <b>Ripple (%)</b> and <b>Load step (A)</b>, checked up to <b>Check up to (Hz)</b>; the regulator
+(<b>Source</b>, <b>Source R (Ω)</b>, <b>Source L (H)</b>; empty: defaults); <b>ICs</b>: where the impedance is
+read (empty: every IC on the rail).</p>
 <p>For a supply rail, the <b>impedance its ICs see</b> between their supply and ground pins, from 10 kHz to 1 GHz:
 the decaps (their C, ESR and ESL from the Parts tab, plus their pads and vias), the planes' capacitance, the copper
 and the regulator together, solved on one model of the whole board. Each IC with supply pins (schematic pin type
@@ -728,6 +740,11 @@ rail at each IC across frequency. In the settings file:</p>
   - {rail: VDD_CORE, voltage: 1.2V, ripple: 3%, i_step: 2A, source: U7, vrm_r: 2mΩ, vrm_l: 10nH}</pre>
 
 <hr><a name="si"></a><h3>Signal integrity tab</h3>
+<p>The forms: a pair (<b>P net</b>, <b>N net</b>, <b>Name</b>, <b>Note</b>; <b>Zdiff (Ω)</b>, <b>Tolerance
+(%)</b>, <b>Edge (s)</b>, <b>Max skew (s)</b>; <b>Find pairs</b> lists the board's); an impedance target
+(<b>Nets</b> or a <b>Net class</b>, <b>Z0 (Ω)</b>, <b>Tol. (%)</b>, the <b>Layers</b> it holds on; empty: every
+layer); and the limits of every check on the tab, set with <b>Apply limits</b>: <b>Crosstalk (%)</b>, <b>Stub
+factor</b> and <b>Cut every (mm)</b>, the distance between cross-sections.</p>
 <p>The characteristic impedance of the listed nets along their tracks, differential pairs, crosstalk and via stubs,
 from <b>cross-sections</b> of the board: a cut across every copper layer perpendicular to the track, every 2 mm, with
 all the copper in it (other nets, pours and planes as the reference at 0 V), the stackup's dielectrics and the
@@ -747,7 +764,7 @@ seconds per net; the figures show on this tab and in the report, the issues on t
   above the limit (5 %) an issue on the victim.</li>
 <li><b>KiCad tuning profiles</b> (Board Setup &gt; Tuning Profiles, assigned to a net class): the profile's target
   impedance is its nets' target (a Differential profile's, its pairs'), and <b>tuning_delay</b> compares its unit
-  delay per layer with the cross-sections' when it tunes in time: KiCad turns lengths into delays with the figure
+  delay per layer with the cross-sections' when it tunes in time (an issue from 10 % apart): KiCad turns lengths into delays with the figure
   typed there (FR-4 microstrip is about 60 ps/cm). A profile on the Default class applies to the listed nets.</li>
 <li><b>via_stub</b>: a via of a listed net or pair whose barrel runs on past the layers it uses: the stub resonates
   at a quarter wave; below 3 × the signal's knee (0.35 / rise time) an issue (back-drill, a blind via, or change
@@ -1688,7 +1705,9 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
   on: refuses to run without one; off: never), on this computer (a laptop with other programs open wants fewer
   threads, a server more). <i>From the settings file</i> keeps the
   board's own <code>analysis.threads</code> and <code>analysis.gpu</code>.</td></tr>
-<tr><td valign="top"><b>Sparse solver</b></td><td>the factorisation behind every solve. <i>auto</i> takes Apple
+<tr><td valign="top"><b>Sparse solver</b></td><td>the factorisation behind every solve (<i>superlu</i>,
+  <i>pardiso</i> and <i>accelerate</i> force one; where a forced one cannot make a factorisation SuperLU does, and the run's
+  solver statistics say so). <i>auto</i> takes Apple
   Accelerate on a Mac (macOS 15.5 or later) and Intel MKL PARDISO on Windows when the <code>mkl</code> package is
   installed in the plugin's Python (<code>python -m pip install mkl</code> with that Python), else SuperLU, which is
   always there. The faster ones factorise 10-50x quicker in a third to a half of the memory, so more solves fit
@@ -2076,6 +2095,12 @@ In the plugin, <a href="#prefs">Preferences</a> sets the resolution and can repl
 <code>gpu</code>, <code>sparse</code>, <code>plane_screening</code>, <code>thermal.quality</code>, the electro-thermal
 settings, <code>thermal.capacity_c</code>, <code>safety.solder_mask</code> and <code>safety.esd_mm</code> on this
 computer; those choices are not written to the file.</p>
+<p><b>A board stacked on this one</b> (a logic board over a power board) is added with <code>stack:</code>:
+<code>- {name: logic, file: ../logic/logic.kicad_pcb, gap: 10, connectors: [[J5, J1]], side: above}</code>: its
+file, the gap between the facing surfaces in mm, the mating connectors (this board's, then its own; the boards are
+placed so their pins line up), <code>side</code> above or below, and <code>flip</code> auto, no or yes (whether
+its top faces this board). Its parts and nets get the name as a prefix (logic:U8); nets joined by a connector
+pin keep this board's name. Simulate then solves the stack as one board.</p>
 <p><a name="rules"></a>The checks' thresholds are under <code>rules:</code>: <code>stitch_distance_mm</code> 2 (a
 return via this close to a layer change), <code>decap_distance_mm</code> 5, <code>edge_factor</code> 3 (a trace
 closer to its plane's edge than this many heights above it), <code>min_gap_mm</code> 0.1,
