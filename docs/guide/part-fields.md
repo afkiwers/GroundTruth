@@ -66,6 +66,8 @@ On the switching controller's symbol; the Results tab's loop view of a buck or b
 | `Current Sense Gain` | controller | V/V | `0.0625` | peak current mode: dV(sense) / dV(COMP), instead of the two above | |
 | `Slope Compensation` | controller | V/µs | `50mV/us` | peak current mode: the internal slope ramp (empty: half the inductor's down-slope) | |
 | `Ramp` | controller | V | `1V` | voltage mode: the PWM ramp's amplitude (modulator gain 1 / Ramp) | |
+| `FB Ripple Min` | controller | mV | `25mV` | the least switching ripple its FB pin needs (a COT controller's datasheet gives it): below it the issue `fb_ripple` | |
+| `FB Ripple Max` | controller | mV | `100mV` | the most switching ripple its FB pin should see: above it the issue `fb_ripple` | |
 
 ## Bridges (motor bridges)
 
