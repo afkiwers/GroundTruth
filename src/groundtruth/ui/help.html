@@ -27,6 +27,7 @@ next one).</p>
 <li><a href="#fields">Part parameters from the schematic (HTTP lib fields)</a></li>
 <li><a href="#conducted">Conducted-emission limits: standards and classes</a></li>
 <li><a href="#efficiency">Efficiency over load current</a></li>
+<li><a href="#fbripple">Ripple at a controller's FB pin</a></li>
 <li><a href="#hotloop">The hot loop</a></li>
 <li><a href="#thermal">Thermal and Current capacity</a></li>
 <li><a href="#analog">Op-amp circuits and the transfer function</a></li>
@@ -298,6 +299,32 @@ in the schematic: see <a href="#siglabels">Labelling a signal path</a>.</p>
 <li><b>How nets are found</b> at the bottom, <b>Show</b> / <b>Hide</b>: the net and pin names detection looks
   for (the text can be selected and copied).</li>
 </ul>
+
+<hr><a name="fbripple"></a><h3>Ripple at a controller's FB pin</h3>
+<p>For every buck stage whose controller has an FB pin, Simulate works out the switching ripple that reaches that pin
+over one period and shows it as a view of its own (<b>… FB ripple</b> in the Results tab's list, after the stages): a
+constant-on-time controller needs a minimum ripple there to switch cleanly, and too much makes any controller jitter.
+It comes from:</p>
+<ul>
+<li>the <b>inductor's ripple current</b>, the triangle of ΔI p-p (from its L on the Parts tab), taken as a current
+  into the output (continuous conduction; at light load a note when the current would reach zero);</li>
+<li>the <b>output capacitors</b> with their C at DC bias, ESR and ESL (a low-ESR ceramic gives little of the in-phase
+  ripple a COT controller needs) and the <b>copper</b> between the inductor, the capacitors and the divider: the
+  output net(s) and the ground around the stage are solved, and every pad of the feedback network gets its potential
+  against the controller's own ground pin. Where the divider taps the output (at the capacitor or at the inductor)
+  and how far its ground is from the controller's both show; a pad the copper does not reach (unrouted) takes the
+  parts' value, with a note;</li>
+<li>the <b>feedback network</b>: every resistor, capacitor or inductor reached from the FB net (the divider, a
+  feed-forward capacitor, a ripple-injection RC from the switch node), solved as a circuit; the switch node drives
+  an injection network with its trapezoid (V_in to −V_f with a catch diode, to 0 V synchronous).</li>
+</ul>
+<p>The view shows the ripple at FB over two periods (around the controller's <b>Vref</b> when it has one), with the
+limits as dashed lines; below it, the output's ripple at the divider's tap and the inductor's ripple current. Its
+tiles: the ripple at FB, at the tap, the inductor's ripple and what an injection network brings. Give the controller
+<b>FB Ripple Min</b> (and <b>FB Ripple Max</b>) fields, or <code>loop: {fb_ripple_min: 25mV}</code> in the stage's
+settings, and a ripple outside them is an issue (<b>fb_ripple</b>). Not modelled: the inductor's own capacitance
+(the switch node's edges straight into the output), discontinuous conduction, and the hot loop's pulsed current in
+the ground.</p>
 
 <hr><a name="efficiency"></a><h3>Efficiency over load current</h3>
 <p>Every <b>Simulate</b> sweeps each power stage's load current and shows its <b>efficiency</b> and <b>losses</b>
@@ -1103,6 +1130,8 @@ settings file changes it or switches a check off):</p>
   limits (warn_c 85 °C, max_c 105 °C)</td></tr>
 <tr><td>loop_phase_margin, loop_crossover (warning)</td><td>a converter's control loop: under 45° of phase or 6 dB
   of gain margin (under 30°: an error); a crossover above f_sw/5</td></tr>
+<tr><td>fb_ripple (warning)</td><td>the switching ripple at a controller's FB pin below its FB Ripple Min or above
+  its FB Ripple Max (<a href="#fbripple">FB ripple</a>)</td></tr>
 </table>
 <p> Clicking one shows it in KiCad: the copper concerned
 is selected, its net highlighted and the view zoomed to it (nothing in the design changes); <b>Zoom to it</b> and

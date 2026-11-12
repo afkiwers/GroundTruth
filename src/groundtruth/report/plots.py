@@ -2178,6 +2178,79 @@ def draw_efficiency(fig: Figure, e) -> None:
     _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TICK) + 0.08 + _lh(FS_TEXT), header + 0.06, hspace=0.08)
 
 
+def _two_periods(r) -> tuple:
+    """The FB ripple result's time axis over two periods (µs) and a function repeating a waveform onto it."""
+    t = np.asarray(r.t)
+    period = 1.0 / r.f_sw if r.f_sw else (t[-1] if len(t) else 1.0)
+    t2 = np.concatenate([t, t + period]) * 1e6
+    return t2, (lambda x: np.concatenate([np.asarray(x), np.asarray(x)]))
+
+
+def draw_fb_ripple(fig: Figure, r) -> None:
+    """The switching ripple at a controller's FB pin over two periods (analysis/fb_ripple.FbRippleResult), around
+    its DC level (the controller's Vref when known), with the controller's FB Ripple Min / Max as a band of the
+    same peak-to-peak around the waveform's middle, and the switch's turn-on marked."""
+    fig.clear()
+    ax = fig.add_subplot(111)
+    if r.error or not r.t:
+        ax.text(0.5, 0.5, r.error or "no FB ripple", ha="center", va="center", transform=ax.transAxes,
+                fontsize=FS_TEXT)
+        ax.set_axis_off()
+        return
+    t2, rep = _two_periods(r)
+    v = rep(r.v_fb) * 1e3
+    ax.plot(t2, v, color=PDN_COLOURS[0], lw=1.5, label="at FB")
+    mid = (v.max() + v.min()) / 2
+    for key, colour in (("min", "#d62728"), ("max", "#ff7f0e")):
+        if key in r.limits:
+            half = r.limits[key][0] * 1e3 / 2
+            ax.axhline(mid + half, color=colour, lw=0.9, ls="--", label=f"FB Ripple {key.title()}")
+            ax.axhline(mid - half, color=colour, lw=0.9, ls="--")
+    for k in range(2):
+        ax.axvline(k * 1e6 / r.f_sw, color="#888888", lw=0.8, ls=":")
+    ax.grid(True, alpha=0.3)
+    ax.tick_params(labelsize=FS_TICK)
+    ax.set_xlabel("time (µs; dotted: the switch turns on)", fontsize=FS_TEXT)
+    ax.set_ylabel("ripple at FB (mV)" + (f", around {r.fb_dc:g} V" if r.fb_dc else ""), fontsize=FS_TEXT)
+    ax.legend(fontsize=FS_TICK, frameon=False, loc="upper right")
+    w_in, _ = fig.get_size_inches()
+    left_in, right_in = _lh(FS_TEXT) + _width_in("-100.0", FS_TICK) + 0.24, 0.25
+    lim = ", ".join(f"{k} {v_[0] * 1e3:.3g} mV" for k, v_ in sorted(r.limits.items()))
+    title = (f"{r.net}: {r.fb_pp * 1e3:.3g} mV p-p at {r.fb_pin}" + (f" (limits {lim})" if lim else "")
+             + ("" if r.copper else ", the parts alone"))
+    header = _title_and_key(ax, title, w_in - left_in - right_in)
+    _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TICK) + 0.08 + _lh(FS_TEXT), header + 0.06)
+
+
+def draw_fb_ripple_sources(fig: Figure, r) -> None:
+    """What drives the FB ripple, over the same two periods: the output's ripple at the divider's tap (mV) and the
+    inductor's ripple current (A, right axis)."""
+    fig.clear()
+    ax = fig.add_subplot(111)
+    if r.error or not r.t:
+        ax.set_axis_off()
+        return
+    t2, rep = _two_periods(r)
+    ax.plot(t2, rep(r.v_tap) * 1e3, color=PDN_COLOURS[1], lw=1.4, label="output at the divider's tap")
+    ax2 = ax.twinx()
+    ax2.plot(t2, rep(r.i_l), color=PDN_COLOURS[2], lw=1.0, ls="--", label="inductor ripple")
+    ax.grid(True, alpha=0.3)
+    for a_ in (ax, ax2):
+        a_.tick_params(labelsize=FS_TICK)
+    ax.set_xlabel("time (µs)", fontsize=FS_TEXT)
+    ax.set_ylabel("output ripple (mV)", fontsize=FS_TEXT)
+    ax2.set_ylabel("inductor ripple (A)", fontsize=FS_TEXT)
+    lines = ax.get_lines() + ax2.get_lines()
+    # on the twin axis (drawn over the first one: a legend on the first would be hidden behind it)
+    ax2.legend(lines, [x.get_label() for x in lines], fontsize=FS_TICK, frameon=False, loc="upper right")
+    w_in, _ = fig.get_size_inches()
+    left_in = _lh(FS_TEXT) + _width_in("-100.0", FS_TICK) + 0.24
+    right_in = _lh(FS_TEXT) + _width_in("-0.00", FS_TICK) + 0.24
+    title = f"at the tap {r.tap_pp * 1e3:.3g} mV p-p, inductor {r.delta_i:.3g} A p-p"
+    header = _title_and_key(ax, title, w_in - left_in - right_in)
+    _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TICK) + 0.08 + _lh(FS_TEXT), header + 0.06)
+
+
 def draw_efficiency_breakdown(fig: Figure, e) -> None:
     """The loss at the stage's own load current by cause, as bars (largest at the top), with each one's share."""
     fig.clear()

@@ -276,6 +276,25 @@ ADJ_RAIL as AC grounds; R46 ∥ R47 and R54 ∥ R55, 4 mΩ; slope compensation a
 `tools/dev/loop_check.py BOARD SETTINGS [--set conv1:ith_range=0.8] [--png DIR]` prints a stage's loop without a
 Simulate.
 
+## Ripple at a controller's FB pin
+
+For every buck stage whose controller has an FB pin, Simulate works out the switching ripple at that pin over one
+period (`analysis/fb_ripple.py`), shown as its own view (*… FB ripple*), with tiles, in the reports and in the JSON
+(`converters[].fb_ripple`). A constant-on-time controller needs a minimum ripple at FB to switch cleanly; too much
+makes any controller jitter.
+
+- **Source:** the inductor's ripple current, a triangle of ΔI p-p from its L (continuous conduction), into the output.
+- **Output and copper:** the output capacitors (C at DC bias, ESR, ESL and mounting) and the copper of the output
+  net(s) and the ground around the stage, solved for every feedback-network pad's potential against the controller's
+  ground pin. So the divider's tap position (at the capacitor or at the inductor) and the ground between the divider
+  and the controller count; an unrouted pad takes the parts' value, with a note.
+- **Feedback network:** every R, C or L reached from FB (the divider, a feed-forward capacitor, a ripple-injection RC
+  from the switch node), solved as a circuit; the switch node's trapezoid drives an injection network.
+- **Check:** the controller's `FB Ripple Min` / `FB Ripple Max` fields, or `loop: {fb_ripple_min: 25mV,
+  fb_ripple_max: 100mV}` in the stage's settings: outside them, the issue `fb_ripple`.
+- **Not modelled:** the inductor's own capacitance (edge spikes), discontinuous conduction, and the hot loop's pulsed
+  current in the ground.
+
 ## Temperatures (thermal solve)
 
 **Thermal** (Results tab, **Further analysis ▾**, with **Current capacity**), or `groundtruth simulate --thermal`, solves the copper and part temperatures of the power

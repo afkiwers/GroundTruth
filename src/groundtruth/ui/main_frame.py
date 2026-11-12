@@ -142,10 +142,13 @@ def result_views(res, config=None) -> list:
     effs = [cr.efficiency for cr in res.converters if getattr(cr, "efficiency", None) is not None
             and not getattr(cr, "bridge", None)]
     effs = [with_measured(e, config) if config is not None else e for e in effs]
+    # each stage's ripple at its controller's FB pin (analysis/fb_ripple.py)
+    ripples = [cr.fb_ripple for cr in res.converters if getattr(cr, "fb_ripple", None) is not None
+               and not cr.fb_ripple.error]
     loads = [d for d in getattr(res, "dc_loads", ()) if not d.error]
     rails = [p for p in getattr(res, "pdn", ()) if not p.error and p.ports]     # each PDN rail: its curves
     from ..analysis.transfer import bode_views
-    return stages + effs + loads + rails + views + bode_views(res)  # the responses' Bode and pole-zero views last
+    return stages + effs + ripples + loads + rails + views + bode_views(res)  # the responses' Bode and pole-zero views last
 
 
 def portable_keep(keep):

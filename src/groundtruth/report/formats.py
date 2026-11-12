@@ -360,6 +360,15 @@ def efficiency_text(e) -> list[str]:
     return out
 
 
+def fb_ripple_text(r) -> list[str]:
+    """A stage's ripple at its controller's FB pin in the console report: the line, then its notes."""
+    from ..analysis.fb_ripple import ripple_text
+    if r is None:
+        return []
+    word = {"low": "  BELOW the minimum", "high": "  ABOVE the maximum"}.get(r.status, "")
+    return [f"  {ripple_text(r)}{word}"] + [f"    {n}" for n in r.notes]
+
+
 def pdn_text(d) -> list[str]:
     """A PDN rail in the console report: the target, the source, per IC its worst |Z| (and margin), the highest
     peak and the inductance it sees, the decaps near it."""

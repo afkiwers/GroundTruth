@@ -1167,3 +1167,18 @@ def exact_response(name: str, owner: str, quantity: str, f, num, den) -> Respons
     """A Response of a rational model N(s)/D(s): its curve at f and its exact poles and zeros."""
     poles, zeros = exact_rational(num, den)
     return Response(name, owner, quantity, np.asarray(f, float), rational_eval(num, den, f), poles, zeros, exact=True)
+
+
+def periodic_wave(coeffs, points: int) -> np.ndarray:
+    """One period of a real periodic waveform from its complex Fourier coefficients c_n, n = 1 … N
+    (x(t) = Σ_{n≠0} c_n e^{jnωt}, so x = 2·Re Σ_{n≥1} c_n e^{jnωt}; no DC), on `points` samples from t = 0. The
+    series is cut at N, so each coefficient is weighted by the Lanczos factor sinc(n/(N+1)): without it a step in the
+    waveform (an ESL's voltage at a slope change) overshoots by Gibbs' 9 % of the step; with it by about 1 %
+    [Lanczos 1956]. Needs points > 2·N."""
+    c = np.asarray(coeffs, complex)
+    n = len(c)
+    if 2 * n >= points:
+        raise ValueError(f"{points} samples cannot hold {n} harmonics")
+    spec = np.zeros(points // 2 + 1, complex)
+    spec[1:n + 1] = c * points * np.sinc(np.arange(1, n + 1) / (n + 1))
+    return np.fft.irfft(spec, points)

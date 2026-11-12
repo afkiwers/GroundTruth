@@ -1697,6 +1697,33 @@ parameters could come straight from the schematic and are part of the symbol tha
   GM 22.6 dB; conv2 29 kHz, 91°, 20 dB (slope compensation assumed half the down-slope). The crossover scales
   with k = Vsense Max / ITH Range.
 
+## Ripple at a controller's FB pin (`analysis/fb_ripple.py`, branch `fb-ripple`)
+The user: "simulate the feedback ripple voltage arriving at the FB pin. This should consider the inductor, feedback
+network and any caps connected to it (especially any low ESR ones)"; asked: checked against controller fields, and
+the copper modelled (not the parts alone).
+- Per harmonic n·f_sw (up to 200 MHz, at most 600), superposition, then one period by Fourier synthesis with Lanczos
+  factors (`transfer.periodic_wave`) [Lanczos 1956].
+- Sources: the inductor's triangle as an ideal current (`ripple_current`, corners rounded over the edge) [A112]; the
+  switch node's trapezoid (`switch_voltage`) for an injection network.
+- Copper (`tap_impedances`): `power._region_build` around every pad involved (inductor, rectifier, feedback network,
+  controller ground, output capacitors), the output net(s) and the ground as plane nets (the capacitors become
+  branches with ESR, ESL and MOUNT_L), +1 A at the inductor's output pad and −1 A at the rectifier's ground pads
+  (`power._area_shares`); `Solution.V` at each pad's node (`victims.pad_node` / `ground_node`) less the controller's
+  ground pin's. A pad on another copper piece (`pdn.copper_pieces`: unrouted) takes the lumped value. Solved at the
+  first 6 harmonics and 8 log-spaced frequencies (within 0.05 % of 10 + 14), interpolated (log magnitude,
+  unwrapped phase); output capacitors within 20 mm (at least the nearest), at most 40 000 nodes; a pad on cut-off
+  copper reads the nearest joined copper of its net within 3 mm (a pin narrower than a cell).
+- Network (`feedback_network`, `network_transfers`): two-pin R/C/L/ferrite/short parts reached from FB within two
+  nets (an "open" or missing model: the footprint's value, as `loop._kind`), each pad on the output / ground / switch
+  node a source node; `emi.mna.Circuit` once per source (it takes one source) [A113].
+- Result `FbRippleResult` on `ConverterResult.fb_ripple` (summary in the JSON), its view after the efficiency views
+  (`ui/main_frame.result_views`), plots `draw_fb_ripple` / `draw_fb_ripple_sources`, tiles `kpi._fb_ripple`, HTML part
+  `fbripple`, the note via `ripple_text`; check `fb_ripple` from the fields FB Ripple Min / Max (`loop.find_loop`'s
+  params `fb_ripple_min` / `fb_ripple_max`).
+- Validation (tests/test_fb_ripple.py): coefficients against FFTs, the parts-alone ripple against the exact steady
+  state (1.5 %), ΔI/(8Cf), the network against closed forms and a nodal solve, the tap's copper against a track's
+  ρl/(wt) (15 %), grid convergence (2 %), a COT stage's check with and without an injection RC.
+
 ## Frequency responses, Bode and pole-zero (`analysis/transfer.py`, M4, branch `bode`)
 The user (2026-10-17): "can we add bode and phase plots as well as pole zero plots?"; all four kinds chosen (signal
 paths, power-stage filters, PDN, control loop: M5), as Results views and in the report.

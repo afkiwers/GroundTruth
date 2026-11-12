@@ -48,6 +48,8 @@ def kpis(rr, rules=None) -> list[Kpi]:
         return _pdn(rr)
     if rr.kind == "efficiency":                 # a power stage's efficiency sweep (analysis/efficiency.py)
         return _efficiency(rr)
+    if rr.kind == "fb_ripple":                  # the ripple at a controller's FB pin (analysis/fb_ripple.py)
+        return _fb_ripple(rr)
     if rr.kind == "bode":                       # responses with their poles and zeros (analysis/transfer.py)
         return _bode(rr)
     if rr.kind == "converter":
@@ -120,6 +122,30 @@ def _bode(rr) -> list[Kpi]:
                     (f"Q {p['q']:.2g}" if p["q"] else "real pole") + (f" · {how}" if how else ""), "",
                     "the response's dominant pole (its lowest natural frequency); every pole and zero is in the "
                     "map below and the report"))
+    return out
+
+
+def _fb_ripple_tile(r) -> Kpi:
+    """The FB ripple's tile: its peak-to-peak, judged against the controller's limits when it has them."""
+    status = {"low": "error", "high": "warn", "ok": "ok"}.get(r.status, "")
+    lim = ", ".join(f"{k} {v[0] * 1e3:.3g} mV" for k, v in sorted(r.limits.items())) or "no limit given"
+    return ("FB ripple", f"{r.fb_pp * 1e3:.3g} mV", f"p-p at {r.fb_pin}; {lim}", status,
+            "the switching ripple at the controller's FB pin (analysis/fb_ripple.py): the output's ripple through the "
+            "divider, the ground between the divider and the controller, and an injection network from the switch "
+            "node; checked against the controller's FB Ripple Min / Max fields")
+
+
+def _fb_ripple(r) -> list[Kpi]:
+    """A stage's FB ripple view: at FB, at the divider's tap, the inductor's ripple, the injection's share."""
+    out = [_fb_ripple_tile(r),
+           ("at the tap", f"{r.tap_pp * 1e3:.3g} mV", "p-p, the output where the divider takes it", "",
+            "the output's ripple at the divider's top pad against the controller's ground pin"
+            + (" (copper and parts)" if r.copper else " (the parts alone)")),
+           ("inductor ripple", f"{r.delta_i:.3g} A", f"p-p at {r.f_sw / 1e3:.0f} kHz", "",
+            "the inductor's ripple current, the triangle that drives it all")]
+    if r.paths.get("injection"):
+        out.append(("from the injection", f"{r.paths['injection'] * 1e3:.3g} mV", "p-p from the switch node", "",
+                    "what the ripple-injection network from the switch node brings to FB alone"))
     return out
 
 
@@ -307,6 +333,9 @@ def _converter(c, rules) -> list[Kpi]:
                     + (f", GM {lp['gm_db']:.0f} dB" if lp.get("gm_db") is not None else ""), status,
                     "the control loop's phase margin at its crossover (analysis/loop.py; aim for 45° or more): its "
                     "Bode view shows the loop gain"))
+    fr = getattr(c, "fb_ripple", None)
+    if fr is not None and not fr.error:
+        out.append(_fb_ripple_tile(fr))
     return out
 
 

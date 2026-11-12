@@ -535,6 +535,13 @@ def render_html(board: Board, issues: list[Issue], routes: list, mode: str, sett
              "losses are stacked by cause; the shaded band is where the controller may leave continuous conduction "
              "(the model stays continuous), open circles are measured points.",
              "".join(_efficiency(x, figs) for x in effs), [(_anchor("efficiency", x.net), x.net) for x in effs])
+    ripples = [c.fb_ripple for c in stages if getattr(c, "fb_ripple", None) is not None]
+    if ripples:
+        part("fbripple", "FB ripple", "The switching ripple at each buck controller's FB pin over a period: the "
+             "inductor's ripple current through the output capacitors and the copper to the divider's tap, the "
+             "ground between the divider and the controller, and an injection network from the switch node, "
+             "against the controller's FB Ripple Min / Max fields where it has them.",
+             "".join(_fb_ripple(x, figs) for x in ripples), [(_anchor("fbripple", x.net), x.net) for x in ripples])
     if pdn:
         part("pdn", "Power integrity", "Each checked supply rail's impedance as its ICs see it between their supply "
              "and ground pins, from 10 kHz to 1 GHz: the decaps, the planes' capacitance, the vias and the regulator "
@@ -1143,6 +1150,30 @@ def _cap_bias(rows) -> str:
                    + _num(change, "{:+.0f} %") + f"<td>{e(r.curve)}</td><td>{e(how.get(r.how, r.how))}</td></tr>")
     return _table(["Part", "Nets", "#Worst-case DC V", "Where the voltage comes from", "#C nominal", "#C used", "#Change",
                    "Cbias", "DC-bias loss"], out, paged=True)
+
+
+def _fb_ripple(x, figs) -> str:
+    """The article of one stage's FB ripple (analysis/fb_ripple.py): its figures, the waveform at FB, what drives
+    it, its notes."""
+    from .plots import draw_fb_ripple, draw_fb_ripple_sources
+    body = [f"<article class='item' id='{_anchor('fbripple', x.net)}'><header><h3>{e(x.net)}</h3>"
+            f"<span class='what'>{e(x.fb_pin)}</span></header>"]
+    if x.error or not x.t:
+        return "".join(body) + f"<p class='note'>{e(x.error or 'no FB ripple')}</p></article>"
+    status = {"low": "error", "high": "warn", "ok": "ok"}.get(x.status, "")
+    lim = ", ".join(f"{k} {v[0] * 1e3:.3g} mV" for k, v in sorted(x.limits.items())) or "no limit given"
+    cards = [_kpi("FB ripple", f"{x.fb_pp * 1e3:.3g} mV", f"p-p; {lim}", status),
+             _kpi("At the tap", f"{x.tap_pp * 1e3:.3g} mV", "p-p"),
+             _kpi("Inductor ripple", f"{x.delta_i:.3g} A", f"p-p at {x.f_sw / 1e3:.0f} kHz")]
+    if x.paths.get("injection"):
+        cards.append(_kpi("From the injection", f"{x.paths['injection'] * 1e3:.3g} mV", "p-p"))
+    body.append(_kpis(cards))
+    body.append(_img(figs.png(f"{x.net} FB ripple", draw_fb_ripple, x, size=(9.5, 3.6)),
+                     f"{x.net}: the ripple at {x.fb_pin} over two periods"))
+    body.append(_img(figs.png(f"{x.net} FB ripple sources", draw_fb_ripple_sources, x, size=(9.5, 3.0)),
+                     f"{x.net}: the output at the divider's tap and the inductor's ripple current"))
+    body.append(_notes(list(x.notes)))
+    return "".join(body) + "</article>"
 
 
 def _efficiency(x, figs) -> str:
