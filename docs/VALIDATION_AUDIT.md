@@ -910,6 +910,12 @@ converters, bridges and signal paths.
   speed-up and the memory guard on a real large model are untested.
 
 ## Final run
+- **Round 12, full suite** on `main` with every round 12 fix merged (2026-11-12, 124 files, 63 min): **1549 passed, 10
+  skipped, 4 failed**: tests/test_physics_audit.py's hand sum of the hot loop's RMS current (stale: P-3 added the
+  ripple; updated), and three tests of tests/test_report_filter.py that drive headless Edge, which returns no page on
+  this machine since 2026-11-12 (they fail on the code from before the round too: the environment, not the code;
+  to be run again when Edge answers). The compute server's update prompt and installable options were merged after
+  this run; their own files and the Preferences tests pass on the merged code (97 tests).
 - **Rounds 9 to 11, full suite** on `audit-11` (2026-11-11, `tools/dev/run_tests_split.py`, 122 files, 113 min):
   **1486 passed, 10 skipped, 1 failed**, then fixed: `tests/test_all_cores.py` asks that Use all cores solves
   more frequencies than the default, and with F11-2 its board's gaps above 1 GHz lie more than

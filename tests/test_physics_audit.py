@@ -118,7 +118,11 @@ def test_PA4_the_hot_loop_s_switching_current_heats_the_copper(tmp_path):
     hot = [p for p in res.dc if p.get("ac")]
     assert len(hot) == 1 and "C1" in hot[0]["name"]
     d = 5.0 / 24.0
-    assert hot[0]["current_a"] == pytest.approx(3.0 * math.sqrt(d * (1 - d)), rel=1e-6)
+    # with the inductor's ripple on the pulse's top: D(1−D)·I² + D·ΔI²/12, ΔI = (V_in − V_out)·D/(L·f_sw) (audit
+    # round 12, P-3; the flat pulse's 1.218 A before)
+    ripple = (24.0 - 5.0) * d / (cfg.model_for("L1").get("L") * 400e3)
+    assert hot[0]["current_a"] == pytest.approx(math.sqrt(d * (1 - d) * 9.0 + d * ripple ** 2 / 12), rel=1e-6)
+    assert hot[0]["current_a"] > 3.0 * math.sqrt(d * (1 - d))
     assert hot[0]["loss_w"] == pytest.approx(hot[0]["current_a"] ** 2 * hot[0]["r_mohm"] * 1e-3, rel=1e-9)
     # the heat of its variance maps (A²/mm⁴ per layer) over the copper: its own copper loss
     name = hot[0]["name"]
