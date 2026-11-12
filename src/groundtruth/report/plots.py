@@ -2241,7 +2241,8 @@ def draw_fb_ripple_sources(fig: Figure, r) -> None:
     ax.set_ylabel("output ripple (mV)", fontsize=FS_TEXT)
     ax2.set_ylabel("inductor ripple (A)", fontsize=FS_TEXT)
     lines = ax.get_lines() + ax2.get_lines()
-    ax.legend(lines, [x.get_label() for x in lines], fontsize=FS_TICK, frameon=False, loc="upper right")
+    # on the twin axis (drawn over the first one: a legend on the first would be hidden behind it)
+    ax2.legend(lines, [x.get_label() for x in lines], fontsize=FS_TICK, frameon=False, loc="upper right")
     w_in, _ = fig.get_size_inches()
     left_in = _lh(FS_TEXT) + _width_in("-100.0", FS_TICK) + 0.24
     right_in = _lh(FS_TEXT) + _width_in("-0.00", FS_TICK) + 0.24
