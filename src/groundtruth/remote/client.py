@@ -244,6 +244,15 @@ class Remote:
             return json.loads(body)
         raise RemoteError(f"{self.host}: {_error(body)}")
 
+    def option(self, name: str, action: str) -> dict:
+        """POST /v1/options: ask the server to install or remove one of its options (remote/options.py: a name of
+        its fixed list and "install" or "remove"). Its answer ({name, action, state}); RemoteError with its reason
+        when it refuses (not the installed service, not for this machine, another one under way)."""
+        st, body = self.request("POST", f"/v1/options?name={quote(name)}&action={quote(action)}")
+        if st == 202:
+            return json.loads(body)
+        raise RemoteError(f"{self.host}: {_error(body)}")
+
     def jobs(self) -> list[dict]:
         """This client's jobs on the server (GET /v1/jobs?client=...)."""
         st, data = self.request("GET", f"/v1/jobs?client={quote(self.client)}", timeout=POLL_TIMEOUT_S)

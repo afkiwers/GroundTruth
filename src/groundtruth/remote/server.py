@@ -21,6 +21,7 @@ Every request and answer is signed with the access key (protocol.py). Endpoints 
                                       (error) | cancelled
     GET    /v1/jobs/ID/result         the result, protocol.dumps-compatible bytes (zlib of the worker's pickle)
     DELETE /v1/jobs/ID                cancel it (queued or running), or forget it (finished: its result goes)
+    POST   /v1/options?name=&action=  install or remove one of the server's own options (remote/options.py)
     POST   /v1/update?sig=HEX         body: a signed server package (remote/release.py): taken when remote updates
                                       are on, the signature is the release key's and the build is newer; the server
                                       then starts no new job, and once none runs it exits for its runner to install it
@@ -49,7 +50,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
-from . import protocol, release
+from . import options, protocol, release
 from .protocol import ProtocolError
 
 MAX_BODY = 2 * 2 ** 30          # a job's body (a board and its settings: kB to a few MB; large what-if boards more)
@@ -236,6 +237,9 @@ class ComputeServer:
         self.address = str(address or "").strip()  # the address announced ("": every real one, local_addresses)
         self.home = Path(home) if home else protocol.default_key_file().parent
         self.update: Optional[dict] = None          # an update taken, waiting for the running jobs (then installing)
+        # an option being installed or removed (remote/options.py), or how the last one went: {name, action, state:
+        # waiting | installing | done | failed, since, error}
+        self.option: Optional[dict] = None
         self.exit_code: Optional[int] = None        # set when the server is to end (serve() returns it)
         self._restore()
 
@@ -353,7 +357,8 @@ class ComputeServer:
         while not self._stop.is_set():
             with self.lock:
                 # an update waiting (`self.update`): the queued jobs stay queued (on disk: they run after it)
-                while (not self.order or self.update is not None) and not self._stop.is_set():
+                # an option being installed (`self.option`): no job starts while pip changes the environment
+                while (not self.order or self.update is not None or self._option_busy()) and not self._stop.is_set():
                     self.lock.wait(timeout=1.0)
                     self._expire()
                 if self._stop.is_set():
@@ -486,6 +491,9 @@ class ComputeServer:
                 "remote_update": self.remote_update and self._release_key() is not None,
                 "update": ({k: v for k, v in self.update.items() if k != "zip"} if self.update
                            else self._last_update()),
+                # what the plugin can install here (remote/options.py): only as the installed service
+                "options": {"available": options.listing() if os.environ.get("GROUNDTRUTH_SERVICE") else [],
+                            "installed": options.installed(), "current": dict(self.option) if self.option else None},
                 "cluster": self.cluster.status() if self.cluster is not None else {"role": "standalone",
                                                                                     "discovery": False}}
 
@@ -696,6 +704,10 @@ class ComputeServer:
             h._json(201, {"id": jid, "position": ahead, "host": socket.gethostname(), "version": server_build()},
                     nonce)
             return
+        if method == "POST" and parts == ["options"]:
+            status, answer = self._take_option(q.get("name", ""), q.get("action", ""))
+            h._json(status, answer, nonce)
+            return
         if method == "POST" and parts == ["update"]:
             status, answer = self._take_update(body, q.get("sig", ""), q.get("busy", "wait"))
             h._json(status, answer, nonce)
@@ -723,6 +735,57 @@ class ComputeServer:
                 h._json(200, {"id": job.id, "state": job.state}, nonce)
                 return
         h._json(404, {"error": "unknown request"}, nonce)
+
+    # ------------------------------------------------------------------ options installed on request (options.py)
+    def _option_busy(self) -> bool:
+        """(under the lock) An option is waiting for the running jobs or being installed."""
+        return self.option is not None and self.option.get("state") in ("waiting", "installing")
+
+    def _take_option(self, name: str, action: str) -> tuple[int, dict]:
+        """POST /v1/options?name=..&action=install|remove: (HTTP status, answer). Only as the installed service,
+        only an option of options.OPTIONS that suits this machine, one at a time and not beside an update. It is
+        installed once no job runs (queued jobs wait, as for an update), in the background; the status's
+        "options" says how far it is."""
+        if not os.environ.get("GROUNDTRUTH_SERVICE"):
+            return 409, {"error": "this server runs in a window, not as the installed service: install the option "
+                                  "there by hand (install_server, tools/install_gpu.py)"}
+        if name not in options.OPTIONS or action not in options.ACTIONS:
+            log.warning("refused an option request: not one of the server's options")
+            return 400, {"error": "unknown option or action"}
+        why = options.unsuitable(name)
+        if why:
+            return 409, {"error": why}
+        with self.lock:
+            if self.update is not None:
+                return 409, {"error": "an update of this server is under way"}
+            if self._option_busy():
+                return 409, {"error": f"another option ({self.option['name']}: {self.option['action']}) is under "
+                                      "way: wait for it"}
+            self.option = {"name": name, "action": action, "state": "waiting", "since": time.time(), "error": ""}
+            answer = dict(self.option)
+            self.lock.notify_all()
+        log.info("option %s: %s asked for", name, action)
+        threading.Thread(target=self._run_option, name="gt-option", daemon=True).start()
+        return 202, answer
+
+    def _run_option(self):
+        """(background) Wait until no job runs, run the option's pip command (options.run, its output in
+        options.log in the server's folder), look for GPUs again, and release the queue."""
+        with self.lock:
+            while any(j.state == "running" for j in self.jobs.values()) and not self._stop.is_set():
+                self.lock.wait(timeout=1.0)
+            if self._stop.is_set() or self.option is None:
+                return
+            self.option["state"] = "installing"
+            name, action = self.option["name"], self.option["action"]
+        rc = options.run(name, action, self.home / "options.log")
+        with self.lock:
+            self.option.update(state="done" if rc == 0 else "failed", at=time.time(),
+                               error="" if rc == 0 else f"pip ended with code {rc}: see options.log at the server")
+            self.lock.notify_all()
+        log.info("option %s: %s %s", name, action, "done" if rc == 0 else f"failed (pip exit code {rc})")
+        if options.OPTIONS[name]["group"] == "gpu":
+            self._probe_gpus()                      # the new PyTorch's GPUs, for the status and the next jobs
 
     # ------------------------------------------------------------------ signed remote updates (remote/release.py)
     def addresses(self, announced: bool = False) -> list[str]:
@@ -784,6 +847,8 @@ class ComputeServer:
         with self.lock:
             if self.update is not None:
                 return 409, {"error": f"an update to {self.update.get('version')} is already waiting"}
+            if self._option_busy():
+                return 409, {"error": f"the option {self.option['name']} is being installed: update after it"}
             folder = self.home / "updates"
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / "update-{}.{}.{}.zip".format(*new)
