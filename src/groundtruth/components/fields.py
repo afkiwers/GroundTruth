@@ -80,6 +80,11 @@ PARAMS = (
           "inductor's down-slope)"),
     Param("Ramp", "controller", "the PWM ramp's amplitude (voltage mode)", "V", 1.0, "V", 0.1, 10.0, "1V",
           "voltage mode: the modulator gain 1 / Ramp"),
+    Param("FB Ripple Min", "controller", "the least switching ripple its FB pin needs (V p-p; a constant-on-time "
+          "controller's datasheet gives it)", "V", 1e-3, "mV", 1e-4, 1.0, "25mV",
+          "fb_ripple: the simulated ripple at FB below it is an issue (analysis/fb_ripple.py)"),
+    Param("FB Ripple Max", "controller", "the most switching ripple its FB pin should see (V p-p)", "V", 1e-3, "mV",
+          1e-4, 5.0, "100mV", "fb_ripple: the simulated ripple at FB above it is an issue"),
     Param("Vf", "diode", "diode_vf (a buck's catch diode)", "V", 1.0, "V", 0.0, 10.0, "0.55V",
           "catch-diode loss"),
     Param("Cj", "diode", "c_oss of a diode buck (the catch diode at the switch node)", "F", 1e-12, "pF", 1e-13, 1e-6,

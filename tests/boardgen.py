@@ -590,6 +590,64 @@ def hot_loop_board(length: float = 20.0, width: float = 4.0, caps: Sequence[tupl
     return g
 
 
+def cot_buck_board(tap: str = "cap", injection: bool = False, track_w: float = 0.4) -> BoardGen:
+    """A constant-on-time buck with an integrated switch (analysis/fb_ripple.py): U1 (VIN, SW, BST, VCC, FB, RTN;
+    Control Mode COT) at (6, 16), its SW pin, the catch diode D1 (cathode SW, anode GND) and the inductor L1 (22 µH)
+    joined by a SW pour; L1's output pad at (19.4, 12) to the output capacitor C2 (22 µF 1206, VOUT at (29.5, 12)) by
+    a 10 mm VOUT track of track_w mm on F.Cu; GND plane on In1 with vias at D1's anode, C2, U1's RTN and the divider.
+    The divider R1 100k (VOUT → FB) at (24, 18) and R2 25k (FB → GND) at (26, 18); R1's VOUT pad joined by a 0.3 mm
+    track to the VOUT track at C2's end (tap "cap", x = 29.5) or at L1's end (tap "inductor", x = 19.4).
+    injection: a ripple-injection network Rr 220k (SW → RI), Cr 3.3n (RI → VOUT, joined to the VOUT track at C2's
+    end) and Cac 100n (RI → FB)."""
+    g = BoardGen(layers=4, size=(36.0, 24.0))
+    g.plane("GND", "In1.Cu")
+    g.zone("VIN", "F.Cu", [(1.0, 18.5), (4.0, 18.5), (4.0, 23.0), (1.0, 23.0)])
+    g.zone("SW", "F.Cu", [(7.5, 9.0), (17.2, 9.0), (17.2, 13.5), (7.5, 13.5)])
+    pins = [("VIN", "VIN"), ("SW", "SW"), ("BST", "BST"), ("VCC", "VCC"), ("FB", "FB"), ("RTN", "GND")]
+    g.footprint("U1", "COT8", "Package_SO:Fake_MSOP8", (6.0, 16.0), [
+        {"number": k + 1, "at": (-2.5 + k, 0.0), "net": net, "size": (0.4, 0.6), "pinfunction": fn}
+        for k, (fn, net) in enumerate(pins)])
+    g.track((3.5, 16.0), (3.5, 18.6), "VIN", width=0.4)
+    g.track((4.5, 16.0), (8.0, 13.0), "SW", width=0.6)
+    g.via((8.5, 17.0), "GND")
+    g.track((8.5, 16.0), (8.5, 17.0), "GND", width=0.3)
+    g.footprint("C1", "4u7", "Capacitor_SMD:C_1206_3216Metric", (2.5, 21.0), [
+        {"number": 1, "at": (0.0, -0.9), "net": "VIN", "size": (1.6, 1.0)},
+        {"number": 2, "at": (0.0, 0.9), "net": "GND", "size": (1.6, 1.0)}])
+    g.via((2.5, 22.7), "GND")
+    g.footprint("D1", "SS36", "Diode_SMD:D_SMA", (12.0, 11.0), [
+        {"number": 1, "at": (0.0, -1.0), "net": "SW", "size": (1.5, 1.2)},
+        {"number": 2, "at": (0.0, 3.0), "net": "GND", "size": (1.5, 1.2)}])
+    for x in (11.5, 12.5):
+        g.via((x, 14.6), "GND")
+    g.footprint("L1", "22u", "Inductor_SMD:L_1210_3225Metric", (18.0, 12.0), [
+        {"number": 1, "at": (-1.4, 0.0), "net": "SW", "size": (1.0, 1.2)},
+        {"number": 2, "at": (1.4, 0.0), "net": "VOUT", "size": (1.0, 1.2)}])
+    g.track((19.4, 12.0), (29.5, 12.0), "VOUT", width=track_w)
+    g.two_pin("C2", "22u", (30.0, 12.0), "VOUT", "GND", package="1206", kind="C")
+    g.via((31.0, 12.0), "GND")
+    g.track((30.5, 12.0), (31.0, 12.0), "GND", width=0.6)
+    g.two_pin("R1", "100k", (24.0, 18.0), "VOUT", "FB")
+    g.two_pin("R2", "25k", (26.0, 18.0), "FB", "GND")
+    g.track((24.5, 18.0), (25.5, 18.0), "FB", width=0.2)
+    g.via((26.5, 19.0), "GND")
+    g.track((26.5, 18.0), (26.5, 19.0), "GND", width=0.3)
+    x_tap = 29.5 if tap == "cap" else 19.4
+    g.track((23.5, 18.0), (23.5, 16.0), "VOUT", width=0.3)
+    g.track((23.5, 16.0), (x_tap, 16.0), "VOUT", width=0.3)
+    g.track((x_tap, 16.0), (x_tap, 12.0), "VOUT", width=0.3)
+    if injection:
+        g.two_pin("RR", "220k", (14.0, 20.0), "SW", "RI")
+        g.two_pin("CR", "3.3n", (17.0, 20.0), "RI", "VOUT", kind="C")
+        g.two_pin("CAC", "100n", (20.0, 20.0), "RI", "FB", kind="C")
+        g.track((17.5, 20.0), (17.5, 21.5), "VOUT", width=0.3)
+        g.track((17.5, 21.5), (32.0, 21.5), "VOUT", width=0.3)
+        g.track((32.0, 21.5), (32.0, 13.0), "VOUT", width=0.3)
+        g.track((32.0, 13.0), (29.5, 13.0), "VOUT", width=0.3)
+        g.track((29.5, 13.0), (29.5, 12.0), "VOUT", width=0.3)
+    return g
+
+
 def discrete_buck_board(out_connector: bool | str = False, shunt: bool = False, surge_fet: bool = False,
                         post_stage: bool = False, victim: Optional[tuple] = None, bootstrap: bool = False,
                         loop: bool = False) -> BoardGen:

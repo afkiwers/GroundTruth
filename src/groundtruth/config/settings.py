@@ -200,7 +200,8 @@ class ConverterSpec:
     low_return: str = ""
     low_shunt: list[str] = field(default_factory=list)
     # the control loop (analysis/loop.py): overrides of what the board and the controller's symbol fields give:
-    # {mode, vref, gm, ro, ea_gain, ea_gbw, vsense_max, ith_range, cs_gain, slope, ramp, r_sense} (values with units)
+    # {mode, vref, gm, ro, ea_gain, ea_gbw, vsense_max, ith_range, cs_gain, slope, ramp, r_sense, fb_ripple_min,
+    #  fb_ripple_max} (values with units)
     loop: dict = field(default_factory=dict)
 
     @property

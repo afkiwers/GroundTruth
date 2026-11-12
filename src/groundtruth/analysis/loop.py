@@ -241,7 +241,8 @@ def find_loop(board, config, spec) -> Optional[LoopParts]:
     # the controller's figures: settings overrides, else its symbol fields
     names = {"vref": "Vref", "gm": "EA gm", "ro": "EA Ro", "ea_gain": "EA Gain", "ea_gbw": "EA GBW",
              "vsense_max": "Vsense Max", "ith_range": "ITH Range", "cs_gain": "Current Sense Gain",
-             "slope": "Slope Compensation", "ramp": "Ramp"}
+             "slope": "Slope Compensation", "ramp": "Ramp",
+             "fb_ripple_min": "FB Ripple Min", "fb_ripple_max": "FB Ripple Max"}
     for key, fname in names.items():
         if over.get(key) is not None:
             lp.params[key] = (float(parse_value(str(over[key])) if not isinstance(over[key], (int, float))

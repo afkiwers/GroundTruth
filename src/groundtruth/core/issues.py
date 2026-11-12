@@ -58,6 +58,7 @@ CHECKS: dict[str, tuple[str, str]] = {
     "tuning_delay": ("warning", "A KiCad tuning profile's unit delay differs from the board's cross-sections"),
     "loop_phase_margin": ("warning", "A converter's control loop has too little phase or gain margin"),
     "loop_crossover": ("warning", "A converter's control loop crosses over too close to its switching frequency"),
+    "fb_ripple": ("warning", "The switching ripple at a controller's FB pin is outside its FB Ripple Min / Max"),
 }
 
 

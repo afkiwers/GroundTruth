@@ -170,6 +170,7 @@ class ConverterResult(RouteResult):
     bridge: Optional[str] = None                        # a motor bridge's leg: the bridge's name and the phase
     phase: str = ""
     loop: Optional[dict] = None                         # the control loop (analysis/loop.py): fc, pm, gm_db, notes
+    fb_ripple: Optional[object] = None                  # the ripple at the controller's FB pin (analysis/fb_ripple.py)
     victims: list = field(default_factory=list)         # what the switching does to victim nets and parts (a stage of
                                                         # its own; a bridge's are on the bridge): victims.stage_rows
     # an interleaved stage (analysis/interleave.py): its phasor record until the group is combined (not in the
@@ -195,6 +196,8 @@ class ConverterResult(RouteResult):
         d.pop("switch_pins", None)
         if self.efficiency is not None:
             d["efficiency"] = self.efficiency.summary()
+        if self.fb_ripple is not None:
+            d["fb_ripple"] = self.fb_ripple.summary()
         d["kind"] = "converter"
         return d
 
@@ -1539,6 +1542,7 @@ def finish_converter(model: BoardModel, setup: ConverterSetup) -> ConverterResul
         _stage_victims(model, setup)
         res.responses = stage_responses(setup)
         _stage_loop(model, setup)
+        _stage_fb_ripple(model, setup)
     _converter_issues(setup, rules, a)
     if not spec.bridge:
         from .fix_advisor import stage_options
@@ -2958,6 +2962,32 @@ LOOP_PM_WARN, LOOP_PM_ERROR = 45.0, 30.0     # degrees of phase margin
 LOOP_GM_WARN = 6.0                           # dB of gain margin
 LOOP_FC_MAX = 0.2                            # the crossover above this share of f_sw: the sampling / ripple limit
 LOOP_RHP_MAX = 0.2                           # a boost's crossover above this share of its right-half-plane zero
+
+
+def _stage_fb_ripple(model: BoardModel, setup: ConverterSetup):
+    """The ripple at the controller's FB pin (analysis/fb_ripple.py), its note, and the issue fb_ripple when it is
+    outside the controller's FB Ripple Min / Max; never fails the stage (an error is a note)."""
+    from .fb_ripple import analyse, ripple_text
+    spec, res, rules = setup.spec, setup.res, model.config.rules
+    try:
+        r = analyse(model, spec, res)
+    except Exception as e:                          # noqa: BLE001 - a note, not a failed Simulate
+        res.notes.append(f"FB ripple not simulated: {e}")
+        return
+    if r is None:
+        return
+    res.fb_ripple = r
+    res.notes.append(ripple_text(r))
+    if r.status in ("low", "high"):
+        lim = r.limits["min" if r.status == "low" else "max"]
+        word = "below its minimum" if r.status == "low" else "above its maximum"
+        setup.issue(rules, "fb_ripple",
+                    f"{spec.name}: {r.fb_pp * 1e3:.3g} mV p-p of switching ripple at {r.fb_pin}, {word} "
+                    f"{lim[0] * 1e3:.3g} mV ({lim[1]})"
+                    + (": a constant-on-time controller may not switch cleanly (more ESR, or an injection RC from the "
+                       "switch node)" if r.status == "low" and r.mode == "cot" else ""),
+                    res.location, layer=res.layer, key=f"fb_ripple:{spec.name}",
+                    details={"fb_pp": r.fb_pp, "limits": r.limits})
 
 
 def _stage_loop(model: BoardModel, setup: ConverterSetup):
