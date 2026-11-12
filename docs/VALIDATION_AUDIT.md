@@ -868,6 +868,11 @@ converters, bridges and signal paths.
 | T-2 | A FET's R_DS(on) and a winding's DCR stayed at their entered values in Thermal and Current capacity while the copper followed its temperature: the capacity read high where conduction dominates. | Medium (optimistic) | Fixed: 0.5 %/K (a stage's `rds_on_tc`) and copper's 0.393 %/K from 25 °C in the coupled iteration [A108] |
 | T-5 | Gate-drive and controller losses counted in the efficiency but heated no part. | Low-Medium | Fixed: heat in the stage's controller IC in Thermal and Current capacity [A107] |
 | T-6 | `analysis.via_plating_um` changed a via's capacity and density, not its resistance, heat or heat conduction. | Low | Fixed: one setting for all of them (`peec.set_via_plating`) [A3] |
+| C-1 | A rail's voltage from its name misread the decimal form ("+1.8V" as 8 V, "+5.0V" as 0 V, "+3.3V" as 3 V): the PDN target, the capacitors' voltages and DC-bias derating followed. | High (boards whose rails are named that way) | Fixed (`pdn.rail_voltage`) |
+| C-2 | A part's Value with a rating or tolerance after a space was read with it: "1u 50V" as 1.5 µF, "10k 1%" as 10.1 kΩ, "0R 0603" as 0.06 Ω. | High (silent wrong part values) | Fixed (`values._leading_value`); also "10UF", "1meg" |
+| C-3 | Crosstalk was the matched-line closed forms only; an unterminated receiver sees about twice as much. | Medium (optimistic) | Fixed: 2·max(FEXT, NEXT/2) at the receiver is judged too [A109] |
+| C-4 | An inverting gain block's bandwidth was GBW/\|gain\|, not GBW/(1 + \|gain\|): a −1 inverter twice too wide. | Medium-Low | Fixed (`ComponentModel.amp_corner`) |
+| C-5 | A connector found as a rail's source gets the regulator's default 5 mΩ + 20 nH. | Low (suspicion) | Open: the values are settings and are named in the result |
 | names | Real net names and part designators of the reference board stood in comments, tests, docs and the help. | Repository rule | Replaced by generic ones in every tracked file (one consistent mapping) |
 
 - **Verified as shipped** (by the reviewers, by recomputation or against the sources they could see): the small

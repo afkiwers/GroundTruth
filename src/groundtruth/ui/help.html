@@ -760,7 +760,8 @@ seconds per net; the figures show on this tab and in the report, the issues on t
   DP/DM, X and X*), with the interface's impedance where the name tells it (USB 90 Ω, Ethernet, LVDS, HDMI
   100 Ω); CAN and RS-485 get none (their slow edges need none on the board).</li>
 <li><b>crosstalk</b>: a listed net (its edge and swing from the Signal paths tab) running beside another track on one
-  layer: near-end and far-end crosstalk as a share of its swing, from the coupled length, the spacing and the edge;
+  layer: near-end and far-end crosstalk as a share of its swing, from the coupled length, the spacing and the edge
+  (on matched lines), and what an unterminated receiver sees, about twice that (the wave doubles at an open end);
   above the limit (5 %) an issue on the victim.</li>
 <li><b>KiCad tuning profiles</b> (Board Setup &gt; Tuning Profiles, assigned to a net class): the profile's target
   impedance is its nets' target (a Differential profile's, its pairs'), and <b>tuning_delay</b> compares its unit

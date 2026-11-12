@@ -22,6 +22,25 @@ _FRACTION = re.compile(r"^(\d+)/(\d+)(?![\d.])(.*)$")     # "1/16W": a resistor'
 _PLAIN = re.compile(r"^(\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*([pnuµμmkKMGRrΩE]?)")
 
 
+_UNIT_WORD = re.compile(r"(?i)^(?:[pnuµμmkKMGRrΩE]|meg)?(?:f|h|ω|ohms?|r|farads?|henry|henries)?(?=$|[/@_])")
+_UPPER_FARADS = re.compile(r"^(\d+(?:\.\d+)?)([UNP])F")       # "10UF", "100NF": a shouted micro / nano / pico
+_MEG = re.compile(r"(?i)^(\d+(?:\.\d+)?)meg")                 # "1meg", "2.2MEG": mega, whatever its case
+
+
+def _leading_value(s: str) -> str:
+    """The value's own text of a part's Value, without spaces: what follows the first space counts only when it
+    is the value's unit ("4.7 k", "10 kOhm", "2.2 uF"); a rating or tolerance after it ("1u 50V", "10k 1%",
+    "0R 0603") is dropped. Before 2026-11-12 every space was removed first, and "1u 50V" read as the infix form
+    1u50 = 1.5 µF, "10k 1%" as 10.1 kΩ, "0R 0603" as 0.0603 Ω (audit round 12, C-2). Also "10UF" (as 10 µF, not
+    10 F) and "1meg" (mega, not milli)."""
+    tokens = s.split()
+    out = tokens[0] if tokens else ""
+    if len(tokens) > 1 and tokens[1] and not tokens[1][0].isdigit() and _UNIT_WORD.match(tokens[1]):
+        out += tokens[1]
+    out = _UPPER_FARADS.sub(lambda m: m.group(1) + m.group(2).lower() + "F", out)
+    return _MEG.sub(lambda m: m.group(1) + "M", out)
+
+
 def parse_value(text: str) -> Optional[float]:
     """Return the numeric value in base SI units, or None if it cannot be parsed."""
     if text is None:
@@ -29,7 +48,7 @@ def parse_value(text: str) -> Optional[float]:
     s = text.strip()
     if s.lower() in _NOT_A_VALUE:
         return None
-    s = s.replace(",", ".").replace(" ", "")          # "4,7k" (decimal comma) and "4.7 k" read as 4.7k
+    s = _leading_value(s.replace(",", "."))           # "4,7k" (decimal comma); "4.7 k" read as 4.7k
     s = re.sub(r"(?i)ohms?$|ohms?(?=[/@_\s])", "R", s)   # "10ohm", "10 Ohms/1%": the word as the R suffix
     # The infix form first ("4k7": the multiplier is the decimal point), else a plain number with an optional
     # multiplier; anything after it ("uF/16V", "R 1%") is ignored: the leading value is what counts.

@@ -165,7 +165,7 @@ Default class applies to the listed nets only.
 
 Issues: `impedance` (a net's Z0 outside its target, with the length and the worst cut), `diff_impedance` (a pair's
 Zdiff where its nets run together), `diff_skew` (the routed lengths' delay mismatch over max_skew, by default a tenth
-of the edge), `crosstalk` (a listed net into a track beside it: NEXT = K_b·min(1, 2·T_d/t_r), FEXT = |K_f|·T_d/t_r,
+of the edge), `crosstalk` (a listed net into a track beside it: NEXT = K_b·min(1, 2·T_d/t_r), FEXT = |K_f|·T_d/t_r on matched lines, and 2·max(FEXT, NEXT/2) at an unterminated receiver,
 from the pair's cross-section at its closest stretch and the coupled length), `via_stub` (a via's barrel past the
 layers its net uses, resonating at c/(4·l·sqrt(εr))). Listed nets without a target get their Z0 shown. Pairs are
 found by name (_P/_N, +/-, CAN_H/CAN_L, DP/DM, X and X*); USB gets 90 Ω, Ethernet / LVDS / HDMI / MIPI / SATA 100 Ω,
