@@ -310,6 +310,10 @@ class ServersPanel(wx.Panel):
         self.update_b.SetToolTip("update the selected server to this plugin's version")
         self.all_b = wx.Button(self, label="Update all")
         self.all_b.SetToolTip("update every out-of-date server, one after the other")
+        self.options_b = wx.Button(self, label="Options…")
+        self.options_b.SetToolTip("install or remove the selected server's options (a GPU build of PyTorch, the MKL "
+                                  "sparse solver); asks for this computer's password")
+        self.options_b.Bind(wx.EVT_BUTTON, lambda e: self.on_options())
         self.note = wx.StaticText(self, label="")
         self.note.SetName("muted")
         self.check_b.Bind(wx.EVT_BUTTON, lambda e: self.start_check())
@@ -318,7 +322,7 @@ class ServersPanel(wx.Panel):
         self.list.Bind(wx.EVT_LIST_ITEM_SELECTED, lambda e: self._enable())
         self.Bind(wx.EVT_WINDOW_DESTROY, self._destroyed)
         buttons = wx.BoxSizer(wx.HORIZONTAL)
-        for b in (self.check_b, self.update_b, self.all_b):
+        for b in (self.check_b, self.update_b, self.all_b, self.options_b):
             buttons.Add(b, 0, wx.RIGHT, self.FromDIP(GAP))
         s = wx.BoxSizer(wx.VERTICAL)
         s.Add(self.list, 1, wx.EXPAND)
@@ -389,6 +393,82 @@ class ServersPanel(wx.Panel):
         sel = self.list.GetFirstSelected()
         self.update_b.Enable(bool(self.bundle) and 0 <= sel < len(self.rows) and self.rows[sel] in can)
         self.all_b.Enable(bool(self.bundle) and bool(can))
+        self.options_b.Enable(0 <= sel < len(self.rows) and self.rows[sel]["state"] != "unreachable"
+                              and self.rows[sel]["address"] not in self.busy)
+
+    def on_options(self):
+        """Options…: this computer's password first (the one that guards Clear past jobs; checked off the GUI
+        thread), then the selected server's options as it lists them, one to install or remove after a
+        confirmation; its row says how far it is. The server takes only names of its own fixed list
+        (remote/options.py)."""
+        import threading
+        from . import jobs_password as jp
+        from .server_updates import follow_option, option_choices
+        sel = self.list.GetFirstSelected()
+        if not 0 <= sel < len(self.rows):
+            return
+        row = self.rows[sel]
+        title = "GroundTruth: server options"
+        rec = jp.record(theme.prefs())
+        if rec is None:
+            message_box("A server's options need this computer's password: set one with Set password… first.",
+                        title, wx.ICON_INFORMATION)
+            return
+        with wx.PasswordEntryDialog(self, f"Password for changing {row['name']}'s options:", title) as dlg:
+            pw = dlg.GetValue() if dlg.ShowModal() == wx.ID_OK else None
+        if pw is None:
+            return
+        _, key = self.settings()
+        self.options_b.Disable()
+
+        def look():
+            """(background) The password's check (~0.5 s), then the server's status."""
+            from ..remote.client import Remote
+            if not jp.matches(rec, pw):
+                return None
+            try:
+                return Remote(row["address"], key).status()
+            except Exception as e:                  # noqa: BLE001 - said in the message below
+                return str(e)
+
+        def chosen(status):
+            """(GUI thread) Offer the server's options; start the chosen one."""
+            self._enable()
+            if status is None:
+                message_box("Wrong password: nothing was changed.", title, wx.ICON_WARNING)
+                return
+            if isinstance(status, str):
+                message_box(f"{row['name']} can't be asked: {status}", title, wx.ICON_WARNING)
+                return
+            choices = option_choices(status)
+            if not choices:
+                message_box(f"{row['name']} offers no options to install from here: it runs an older version, or in "
+                            "a window instead of as the installed service.", title, wx.ICON_INFORMATION)
+                return
+            with wx.SingleChoiceDialog(self, f"Options of {row['name']}:", title, [c["text"] for c in choices]) as d:
+                pick = choices[d.GetSelection()] if d.ShowModal() == wx.ID_OK else None
+            if pick is None or message_box(pick["confirm"], title, wx.YES_NO | wx.ICON_QUESTION) != wx.YES:
+                return
+            self.busy.add(row["address"])
+            self._enable()
+
+            def work():
+                """(background) Ask the server, follow it, then check the servers again."""
+                _, text = follow_option(row["address"], key, pick["name"], pick["action"],
+                                        lambda t: wx.CallAfter(self._row_text, row["address"], t), stop=self.stop)
+                wx.CallAfter(self._row_text, row["address"], text)
+                if not self.stop.is_set():
+                    wx.CallAfter(self._options_done, row["address"], text)
+            threading.Thread(target=work, name="gt-server-option", daemon=True).start()
+        _off_thread(self, look, chosen)
+
+    def _options_done(self, address: str, text: str):
+        """(GUI thread) An option's install or removal ended: the row keeps what happened; the buttons are back."""
+        if not self:
+            return
+        self.busy.discard(address)
+        self._enable()
+        self._row_text(address, text)
 
     def on_update(self, all_: bool):
         """Update the selected (or every) out-of-date server, after asking, one after the other in the background;
@@ -403,6 +483,10 @@ class ServersPanel(wx.Panel):
         from . import server_info
         if not server_info.confirm_update(self, targets, self.bundle["version"]):
             return
+        # servers with jobs running: the user decides whether they finish first or are stopped (never by itself)
+        busy = server_info.ask_running_jobs(self, [r for r in targets if r.get("running")])
+        if busy is None:
+            return
         _, key = self.settings()
         self.busy |= {r["address"] for r in targets}
         self._enable()
@@ -412,7 +496,8 @@ class ServersPanel(wx.Panel):
             """(background) One server after the other; each row told every step."""
             for r in targets:
                 done, text = update(r["address"], key, bundle,
-                                    lambda t, a=r["address"]: wx.CallAfter(self._row_text, a, t), stop=self.stop)
+                                    lambda t, a=r["address"]: wx.CallAfter(self._row_text, a, t), stop=self.stop,
+                                    busy=busy)
                 wx.CallAfter(self._row_text, r["address"], text)
                 if self.stop.is_set():
                     return

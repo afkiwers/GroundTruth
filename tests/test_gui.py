@@ -3512,14 +3512,18 @@ def test_preferences_list_the_servers_and_update_the_old_ones(app, frame, monkey
     from groundtruth.ui import prefs_dialog, server_updates
     from groundtruth.ui.prefs_dialog import PreferencesDialog, defaults
     rows = [{"name": "build-pc", "address": "build-pc", "version": "0.1.5 (x)", "state": "older", "text": "out of date",
-             "can_update": True, "update": None},
+             "can_update": True, "update": None, "running": 2},
             {"name": "mac", "address": "10.0.0.3:8765", "version": "0.1.9 (y)", "state": "same", "text": "up to date",
              "can_update": False, "update": None}]
-    asked, updated = [], []
+    asked, updated, modes, busy_asked = [], [], [], []
     monkeypatch.setattr(server_updates, "check", lambda a, k: asked.append((a, k)) or [dict(r) for r in rows])
-    monkeypatch.setattr(server_updates, "update", lambda a, k, b, progress, stop=None:
-                        updated.append(a) or progress("installing…") or (True, "updated to 0.1.9 (y)"))
+    monkeypatch.setattr(server_updates, "update", lambda a, k, b, progress, stop=None, busy="wait":
+                        updated.append(a) or modes.append(busy) or progress("installing…")
+                        or (True, "updated to 0.1.9 (y)"))
     from groundtruth.ui import server_info
+    # jobs are running on build-pc: the user is asked what happens to them, and the answer goes to the server
+    monkeypatch.setattr(server_info, "ask_running_jobs",
+                        lambda parent, busy: busy_asked.append([(r["name"], r["running"]) for r in busy]) or "wait")
     confirmed = []
     monkeypatch.setattr(server_info, "confirm_update",
                         lambda parent, t, v: confirmed.append([r["name"] for r in t]) or True)
@@ -3537,6 +3541,7 @@ def test_preferences_list_the_servers_and_update_the_old_ones(app, frame, monkey
         p.on_update(all_=True)
         wait_for(app, lambda: len(asked) == 2)                        # asked again after the update
         assert updated == ["build-pc"] and not p.busy and confirmed == [["build-pc"]]
+        assert busy_asked == [[("build-pc", 2)]] and modes == ["wait"] and p.options_b.IsEnabled() is not None
         p.bundle = None
         p._enable()
         assert not p.all_b.IsEnabled() and not p.update_b.IsEnabled()

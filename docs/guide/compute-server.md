@@ -26,7 +26,7 @@ port, registers a scheduled task that starts the server at boot as SYSTEM, and s
 (`install_server.cmd status | key | stop | start | uninstall`, `--cuda cu126` for an NVIDIA GPU; its README.md).
 **Remote updates**: a server installed with `--remote-update on` (asked on a first install) is updated from the
 plugin: Preferences, Compute server, **Servers** lists the cluster's servers with their versions, and **Update** (one server) or **Update all**
-installs the plugin's own version on the out-of-date ones (their running jobs are cancelled at once and their owners told so; a new server that does
+installs the plugin's own version on the out-of-date ones (when jobs are running on one you are asked whether the update waits until they have finished or cancels them now; it never cancels a job unasked; a new server that does
 not stay up is rolled back by the service). Only packages signed with the release key of the build PC the server was
 last installed from by hand are taken (`tools/make_pcm_package.py` signs; the key is in
 `%LOCALAPPDATA%\GroundTruth\release\` of the build PC, or the release workflow's encrypted secret, never in the
@@ -53,3 +53,5 @@ settings are in `%LOCALAPPDATA%\GroundTruth\server.json` (made on the first star
 that can't be reached when a job starts offers to run it locally. Requests and results are signed (HMAC-SHA256 with the
 key, no replay) and only GroundTruth's own data is unpickled; the traffic is not encrypted (local network only). The
 server must run the same GroundTruth code (and NumPy major version) as the plugin, otherwise it refuses the job.
+
+**Options from the plugin.** Preferences, Compute server, **Options…** installs or removes the selected server's optional packages without anyone at the server: a GPU build of PyTorch (NVIDIA `cu118` / `cu126` / `cu128`, or AMD Radeon's build for its chip) and the Intel MKL sparse solver. It asks for this computer's password (Set password…), shows what the server offers and has, and asks again before starting. The server installs the package from its maker's own index once no job is running, then looks for its GPUs again; pip's output is in `options.log` in the server's folder. A server takes this only as the installed service and only for the names of its own fixed list (`remote/options.py`): the plugin sends an option's name, never a package name or an address, in a request signed with the server's key.
