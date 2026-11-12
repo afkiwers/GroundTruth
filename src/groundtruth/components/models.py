@@ -150,14 +150,24 @@ class ComponentModel:
             return complex(max(self.get("R"), SHORT_OHMS), w * self.get("L"))
         return None
 
-    def amp_gain(self, f) -> complex:
-        """An amplifier's voltage gain at f: `gain` (default 1), one pole at `bandwidth` (the closed-loop -3 dB), or
-        at gbw / |gain| (the gain-bandwidth product over the noise gain, taken as |gain|, at least 1)."""
+    def amp_corner(self) -> Optional[float]:
+        """The gain block's closed-loop −3 dB frequency: `bandwidth`, else gbw over the noise gain; None without
+        either. A voltage-feedback stage's noise gain is 1/β: its gain when non-inverting (at least 1, a follower),
+        1 + |gain| when inverting (gain < 0: the feedback divider is R1/(R1 + R2) for −R2/R1) [Franco 2015].
+        Before 2026-11-12 |gain| for both: an inverter of −1 read GBW where it has GBW/2 (audit round 12, C-4)."""
+        if self.params.get("bandwidth"):
+            return self.params["bandwidth"]
+        if not self.params.get("gbw"):
+            return None
         g = complex(self.params.get("gain", 1.0) if self.params.get("gain") is not None else 1.0)
-        bw = self.params.get("bandwidth")
-        if not bw and self.params.get("gbw"):
-            # a voltage-feedback op-amp's closed-loop bandwidth is its gain-bandwidth product over the noise gain
-            bw = self.params["gbw"] / max(abs(g), 1.0)
+        noise = 1.0 + abs(g) if g.real < 0 else max(abs(g), 1.0)
+        return self.params["gbw"] / noise
+
+    def amp_gain(self, f) -> complex:
+        """An amplifier's voltage gain at f: `gain` (default 1), one pole at its closed-loop corner (amp_corner:
+        `bandwidth`, or the gain-bandwidth product over the noise gain)."""
+        g = complex(self.params.get("gain", 1.0) if self.params.get("gain") is not None else 1.0)
+        bw = self.amp_corner()
         # a single-pole low-pass: g / (1 + j f / f_-3dB); no bandwidth given = an ideal, flat gain
         return g / (1 + 1j * f / bw) if bw else g
 
@@ -184,9 +194,7 @@ class ComponentModel:
         zo = self.params.get("z_out")
         if not zo:
             return complex(AMP_Z_OUT)
-        g = complex(self.params.get("gain", 1.0) if self.params.get("gain") is not None else 1.0)
-        bw = self.params.get("bandwidth") or (self.params["gbw"] / max(abs(g), 1.0) if self.params.get("gbw")
-                                              else None)
+        bw = self.amp_corner()
         if not bw:
             return complex(zo)
         return complex(zo) * 1j * f / (1j * f + bw)

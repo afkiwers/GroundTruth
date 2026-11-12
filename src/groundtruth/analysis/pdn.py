@@ -55,8 +55,15 @@ CONNECTOR_PREFIXES = ("J", "P", "X", "CN", "CON")
 
 
 def rail_voltage(name: str) -> Optional[float]:
-    """A rail's voltage from its name: "+3V3" 3.3, "+12V" 12, "VDD_1V8" 1.8, "/MCU/+5V_ISO" 5; None without one."""
-    m = re.search(r"(\d+)V(\d*)", name.upper().rsplit("/", 1)[-1])
+    """A rail's voltage from its name: "+3V3" 3.3, "+12V" 12, "VDD_1V8" 1.8, "/MCU/+5V_ISO" 5, and with a decimal
+    point as KiCad's power symbols also write it, "+3.3V" 3.3, "+1.8V" 1.8, "+5.0V" 5; None without one. (Before
+    2026-11-12 the decimal form read its digits after the point: "+1.8V" as 8 V, "+5.0V" as 0 V: audit round 12,
+    C-1.)"""
+    last = name.upper().rsplit("/", 1)[-1]
+    m = re.search(r"(?<![\d.])(\d+\.\d+)V(?!\d)", last)          # "3.3V": the point is the decimal point
+    if m:
+        return float(m.group(1))
+    m = re.search(r"(?<![\d.])(\d+)V(\d*)", last)                 # "3V3", "12V": the V is
     if not m:
         return None
     return float(f"{m.group(1)}.{m.group(2) or 0}")

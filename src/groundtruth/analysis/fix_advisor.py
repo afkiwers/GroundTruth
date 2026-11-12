@@ -217,7 +217,7 @@ def evaluate(setup, change: Optional[Change] = None) -> Outcome:
     """The stage's figures with a design change, on its own solves (see the module's note)."""
     from ..emi.conducted import conducted_arrays, frequency_range
     from ..emi.radiation import emission_arrays, limit_range
-    from .power import (_interp_loglog, _snubber_rc, _transfer, cm_estimate, pulse_harmonics, recovery,
+    from .power import (_interp_loglog, _snubber_rc, _transfer, cm_estimate, pulse_harmonics, pulse_ramp, recovery,
                         recovery_overshoot, spread_of, stage_spectrum)
     from .simulate import band_moments
     from .thermal import hard_edge_current
@@ -234,7 +234,8 @@ def evaluate(setup, change: Optional[Change] = None) -> Outcome:
     ripple = getattr(res, "pulse_ripple_a", 0.0) or 0.0          # the inductor's ripple on the pulse's top [A97]
     pulse = pulse_harmonics(freqs, spec.f_sw, res.pulse_a, res.duty, tr, rec, boost=spec.topology == "boost",
                             ripple=ripple)
-    currents, ring = stage_spectrum(spec, freqs, pulse, res.v_in, res.pulse_a, L, r_loop, tr, snub)
+    currents, ring = stage_spectrum(spec, freqs, pulse, res.v_in, res.pulse_a, L, r_loop, tr, snub,
+                                    ramp=pulse_ramp(spec, res))
     rec = recovery_overshoot(rec, L, spec.c_oss)
     out = Outcome(f_ring=ring["f"] if ring else None, q=ring["q"] if ring else None,
                   overshoot_v=max(L * (res.pulse_a + ripple / 2) / tr if tr > 0 else 0.0, (ring or {}).get("overshoot_v", 0.0),

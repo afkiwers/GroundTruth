@@ -131,7 +131,7 @@ PARAMS = (
     # field on the symbol in the schematic), the others are the op-amp's datasheet values (the HTTP lib)
     Param("Gain", "op-amp", "the amplifier model's gain (V/V; negative = inverting; 20dB = 10)", "gain", 1.0, "V/V",
           -1e6, 1e6, "10", "signal paths: the output side's source"),
-    Param("GBW", "op-amp", "the amplifier model's gbw: bandwidth = GBW / |gain|", "Hz", 1e6, "MHz", 1e3, 1e11,
+    Param("GBW", "op-amp", "the amplifier model's gbw: bandwidth = GBW / noise gain (the gain; 1 + |gain| inverting)", "Hz", 1e6, "MHz", 1e3, 1e11,
           "10MHz", "signal paths: the gain's roll-off"),
     Param("Bandwidth", "op-amp", "a gain block's closed-loop -3 dB bandwidth (wins over GBW); on an op-amp solved "
           "in its circuit: its stage's bandwidth limit", "Hz", 1e6, "MHz", 1e-1, 1e11, "1MHz",

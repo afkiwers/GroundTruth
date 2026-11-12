@@ -218,3 +218,65 @@ def test_F9_6_the_overshoot_is_at_the_ripple_s_peak(tmp_path):
     assert r.pulse_ripple_a == pytest.approx(di)
     assert r.overshoot_v == pytest.approx(r.loop_nh * 1e-9 * (3.0 + di / 2) / 5e-9, rel=1e-9)
     assert math.isfinite(r.overshoot_v) and r.overshoot_v > r.loop_nh * 1e-9 * 3.0 / 5e-9
+
+
+@pytest.mark.parametrize("duty, i_load", [(0.5, 5.0), (0.5, 1.0), (0.5, 0.2), (0.3, 1.0)])
+def test_P_2_the_nodes_charge_current_goes_on_the_flat_pulse_not_on_the_ripples_ramp(duty, i_load):
+    """The hot loop carries the load pulse with the inductor's ripple on its top plus C·dv/dt of the switch node,
+    whose voltage is a flat trapezoid. Sampled in time and Fourier-transformed (48 V, 500 kHz, 5 ns edges, 600 pF,
+    ΔI 4 A), every harmonic from 1 to 200 MHz equals pulse_harmonics × edge_charge_factor(shape) within 0.3 dB of
+    the strongest. Before, the factor multiplied the ramp too: the envelope read ΔI/(2·I) high at light load
+    (+6 dB at 1 A, +20 dB at 0.2 A) and the flat pulse's nulls far more."""
+    import numpy as np
+    from groundtruth.analysis.power import edge_charge_factor, pulse_harmonics
+    v, f_sw, tr, c, di = 48.0, 500e3, 5e-9, 600e-12, 4.0
+    m = 1 << 18
+    t = (np.arange(m) + 0.5) / m / f_sw
+    box = max(int(round(tr * f_sw * m)), 1)
+    on = (t < duty / f_sw).astype(float)
+    ramp = on * (i_load + di * ((t * f_sw) / duty - 0.5))                    # the pulse with its ripple
+    kernel = np.ones(box) / box
+
+    def edged(x):
+        """x with each jump made a linear edge of tr (a box average, periodic)."""
+        return np.real(np.fft.ifft(np.fft.fft(x) * np.fft.fft(np.concatenate([kernel, np.zeros(m - box)]))))
+    i_pulse, v_node = edged(ramp), edged(on * v)
+    i_charge = c * np.gradient(v_node, 1.0 / (m * f_sw))
+    n = np.arange(2, 401)
+    spec = 2 * np.abs(np.fft.rfft(i_pulse + i_charge)[n]) / m
+    got = pulse_harmonics(n * f_sw, f_sw, i_load, duty, tr, ripple=di)         * edge_charge_factor(n * f_sw, i_load, v, c, None, (n, duty, di / i_load))
+    big = spec > 0.05 * spec.max()
+    assert np.max(np.abs(20 * np.log10(got[big] / spec[big]))) < 0.3
+    # nowhere above the truth by more than a rounding (the old factor: up to 50 dB at the flat pulse's nulls)
+    assert np.max(20 * np.log10(np.maximum(got, 1e-12) / np.maximum(spec, 1e-12))[spec > 1e-4 * spec.max()]) < 1.0
+    old = pulse_harmonics(n * f_sw, f_sw, i_load, duty, tr, ripple=di) * edge_charge_factor(n * f_sw, i_load, v, c)
+    if i_load < di / 2:
+        assert 20 * np.log10(old[n * f_sw > 30e6].max() / spec[n * f_sw > 30e6].max()) > 5.0
+
+
+def test_P_1_a_snubber_on_the_board_loses_c_v_squared_f(tmp_path):
+    """An RC snubber across the switch node: its capacitor is charged to the switched voltage and discharged once
+    per period through its resistor: 2 nF at 48 V and 500 kHz is 2.30 W in the resistor (nothing before)."""
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from boardgen import discrete_buck_board
+    from conftest import make
+    from groundtruth.analysis import power
+    from groundtruth.analysis.thermal import part_losses
+    from groundtruth.config.settings import ConverterSpec
+    board, sc, _ = make(tmp_path, discrete_buck_board(), "x", nets=())
+    refs = [f.reference for f in board.footprints]
+    r_ref = next(r for r in refs if r.startswith("R")) if any(r.startswith("R") for r in refs) else "L1"
+    spec = ConverterSpec("buck", "VIN", "GND", high_side=["Q1"], low_side=["Q2"], switch_node="SW", f_sw=500e3,
+                         i_out=2.0, v_in=48.0, v_out=12.0, rise_time=5e-9, snubber=["C1", r_ref])
+    import pytest as _pytest
+    mp = _pytest.MonkeyPatch()
+    try:
+        mp.setattr(power, "_snubber_rc", lambda config, s: (2e-9, 2.0))
+        rows = {r["ref"]: r for r in part_losses(board, replace(sc.config, converters=[spec]),
+                                                 [SimpleNamespace(net=spec.name, duty=0.25, v_in=48.0, dc=[])])[0]}
+    finally:
+        mp.undo()
+    assert "snubber" in rows[r_ref]["what"]
+    by = rows[r_ref]["by"]["other"]
+    assert by == _pytest.approx(2e-9 * 48.0 ** 2 * 500e3)

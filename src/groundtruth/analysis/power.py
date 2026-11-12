@@ -1168,21 +1168,40 @@ def ringing_rational(L: float, r: float, c_oss: float, snub: Optional[tuple[floa
     return p, np.polyadd(p, np.polymul([L, r], y_num))
 
 
-def edge_charge_factor(f, i_pulse: float, v: float, c_node: float, snub: Optional[tuple[float, float]] = None
-                       ) -> np.ndarray:
-    """|1 + Y_node·V/I|: the switch node's charge current on top of the load-current pulse.
+def edge_charge_term(f, i_pulse: float, v: float, c_node: float, snub: Optional[tuple[float, float]] = None,
+                     shape: Optional[tuple] = None) -> np.ndarray:
+    """The complex factor the switch node's charge current puts on the load-current pulse's harmonics.
 
     The edges move the node by V in tr, so besides the pulse I the hot loop carries Y_node·V_sw (C_oss·dv/dt at a
     bare node; with an RC snubber also its current). KCL at the node with the loop equation gives
-    i = H·(I_pulse + Y_node·V_sw); both are trapezoids with the same duty and edges, so the sum is the pulse times
-    |1 + Y_node·V/I| (with Y = jωC: sqrt(1 + (ωCV/I)²), the two in quadrature). c_node: the charge per volt the
-    edge moves (C_oss, or Q_oss/V where the output charge is known: C_oss is larger at low voltage)."""
+    i = H·(I_pulse + Y_node·V_sw). The node's voltage is a flat trapezoid with the pulse's duty and edges, so for
+    a flat pulse the sum is the pulse times 1 + Y_node·V/I (with Y = jωC: sqrt(1 + (ωCV/I)²), the two in
+    quadrature). The inductor's ripple puts a ramp on the pulse's top [A97] that the voltage does not have:
+    shape = (harmonic numbers n, duty, ripple ratio k as pulse_shape's) gives
+    [flat·(1 + Y·V/I) + ramp] / [flat + ramp], the charge added to the flat part only. Before 2026-11-12 the whole
+    pulse was multiplied: where the flat part is null (the even harmonics near D = ½, what an interleaved pair
+    leaves) the ramp read sqrt(1 + (ωCV/I)²) high, and at light load (ΔI > 2·I) the whole envelope by ΔI/(2·I)
+    (audit round 12, P-2). c_node: the charge per volt the edge moves (C_oss, or Q_oss/V where the output charge
+    is known: C_oss is larger at low voltage)."""
     w = 2 * np.pi * np.asarray(f, float)
     y = 1j * w * c_node
     if snub is not None:
         c_s, r_s = snub
         y = y + 1.0 / (r_s + 1.0 / (1j * w * c_s))
-    return np.abs(1.0 + y * v / i_pulse)
+    plain = 1.0 + y * v / i_pulse
+    if shape is None or not shape[2]:
+        return plain
+    n, duty, k = shape
+    whole = pulse_shape(n, duty, k)
+    flat = duty * np.sinc(np.asarray(n, float) * duty)
+    live = np.abs(whole) > 1e-12
+    return np.where(live, (flat * plain + (whole - flat)) / np.where(live, whole, 1.0), plain)
+
+
+def edge_charge_factor(f, i_pulse: float, v: float, c_node: float, snub: Optional[tuple[float, float]] = None,
+                       shape: Optional[tuple] = None) -> np.ndarray:
+    """|edge_charge_term|: what the node's charge current multiplies the pulse's harmonic amplitudes by."""
+    return np.abs(edge_charge_term(f, i_pulse, v, c_node, snub, shape))
 
 
 NOMINAL_BIAS_V = 10.0       # from this DC bias on, a ceramic's nominal C is worth a note (class II loses ≥ 20 %)
@@ -1232,7 +1251,7 @@ def apply_ringing(setup: ConverterSetup):
     res.overshoot_v = L * (res.pulse_a + res.pulse_ripple_a / 2) / spec.rise_time
     snub = _snubber_rc(setup.config, spec)
     setup.currents, res.ringing = stage_spectrum(spec, setup.harmonics, setup.pulse, res.v_in, res.pulse_a, L,
-                                                 s_hi.Z_loop.real, spec.rise_time, snub)
+                                                 s_hi.Z_loop.real, spec.rise_time, snub, ramp=pulse_ramp(spec, res))
     if res.ringing is not None and snub is not None:
         res.ringing["snubber"] = {"c": snub[0], "r": snub[1], "parts": list(spec.snubber)}
     if res.ringing is not None:
@@ -1339,9 +1358,18 @@ def pulse_harmonics(freqs: np.ndarray, f_sw: float, amplitude: float, duty: floa
     return 2 * np.abs(x + y)
 
 
+def pulse_ramp(spec: ConverterSpec, res) -> Optional[tuple]:
+    """(duty, ripple ratio) of a stage's hot-loop pulse as pulse_shape takes them: ΔI over the pulse's height,
+    rising for a buck's high side, falling (negative) for a boost's rectifier; None for a flat pulse."""
+    ripple = getattr(res, "pulse_ripple_a", 0.0) or 0.0
+    if not ripple or not res.pulse_a or res.duty is None:
+        return None
+    return res.duty, (-ripple if spec.topology == "boost" else ripple) / res.pulse_a
+
+
 def stage_spectrum(spec: ConverterSpec, freqs: np.ndarray, pulse: np.ndarray, v: Optional[float], i_pulse: float,
-                   L: float, r_loop: float, rise_time: float, snub: Optional[tuple[float, float]] = None
-                   ) -> tuple[np.ndarray, Optional[dict]]:
+                   L: float, r_loop: float, rise_time: float, snub: Optional[tuple[float, float]] = None,
+                   ramp: Optional[tuple] = None) -> tuple[np.ndarray, Optional[dict]]:
     """(loop current per harmonic, the ringing) of a switching cell: the load pulse, shaped by the series resonance
     of the loop L with C_oss (damped by r_damp + the loop's resistance; with an RC snubber (C, R) across the node its
     own response, peak and Q), carrying the node's charge current (edge_charge_factor), and the overshoot of the
@@ -1362,7 +1390,9 @@ def stage_spectrum(spec: ConverterSpec, freqs: np.ndarray, pulse: np.ndarray, v:
     ring = {"f": f_ring, "q": q, "r_ohm": r}
     if v and i_pulse > 0:
         c_node = spec.q_oss / v if spec.q_oss else spec.c_oss
-        currents = currents * edge_charge_factor(freqs, i_pulse, v, c_node, snub)
+        # ramp = (duty, ripple ratio): the charge goes on the pulse's flat part only (edge_charge_term)
+        shape = (np.rint(freqs / spec.f_sw), ramp[0], ramp[1]) if ramp and spec.f_sw else None
+        currents = currents * edge_charge_factor(freqs, i_pulse, v, c_node, snub, shape)
         ring["charge_c"] = c_node
     if v and q > 0.5:
         zeta = 1 / (2 * q)
@@ -2131,7 +2161,11 @@ def dc_runs(model: BoardModel, setup: "ConverterSetup") -> tuple[list, list[str]
             if hot is not None:
                 inj, name = hot
                 i_l = res.pulse_a if spec.topology == "boost" else i_out
-                setup.dc_hot = (name, i_l * math.sqrt(duty * (1.0 - duty)),
+                # the pulse's AC RMS, its ramp included: D(1−D)·I² + D·ΔI²/12 (the ripple on its top [A97]; before
+                # 2026-11-12 the flat pulse's alone: audit round 12, P-3) [A43]
+                from .thermal import ripple_pp
+                di_hot = float(ripple_pp(board, config, spec, duty, spec.v_in) or 0.0) if not spec.bridge else 0.0
+                setup.dc_hot = (name, math.sqrt(duty * (1.0 - duty) * i_l ** 2 + duty * di_hot ** 2 / 12.0),
                                 ModelRun(st, RouteExcitation(st.plane, [], injections=inj), planned=[DC_F]))
     if (dst is not None or setup.standard != "none") and spec.input_connector:
         plus = board.find_pin(spec.input_connector[0])

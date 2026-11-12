@@ -868,6 +868,16 @@ converters, bridges and signal paths.
 | T-2 | A FET's R_DS(on) and a winding's DCR stayed at their entered values in Thermal and Current capacity while the copper followed its temperature: the capacity read high where conduction dominates. | Medium (optimistic) | Fixed: 0.5 %/K (a stage's `rds_on_tc`) and copper's 0.393 %/K from 25 °C in the coupled iteration [A108] |
 | T-5 | Gate-drive and controller losses counted in the efficiency but heated no part. | Low-Medium | Fixed: heat in the stage's controller IC in Thermal and Current capacity [A107] |
 | T-6 | `analysis.via_plating_um` changed a via's capacity and density, not its resistance, heat or heat conduction. | Low | Fixed: one setting for all of them (`peec.set_via_plating`) [A3] |
+| C-1 | A rail's voltage from its name misread the decimal form ("+1.8V" as 8 V, "+5.0V" as 0 V, "+3.3V" as 3 V): the PDN target, the capacitors' voltages and DC-bias derating followed. | High (boards whose rails are named that way) | Fixed (`pdn.rail_voltage`) |
+| C-2 | A part's Value with a rating or tolerance after a space was read with it: "1u 50V" as 1.5 µF, "10k 1%" as 10.1 kΩ, "0R 0603" as 0.06 Ω. | High (silent wrong part values) | Fixed (`values._leading_value`); also "10UF", "1meg" |
+| C-3 | Crosstalk was the matched-line closed forms only; an unterminated receiver sees about twice as much. | Medium (optimistic) | Fixed: 2·max(FEXT, NEXT/2) at the receiver is judged too [A109] |
+| C-4 | An inverting gain block's bandwidth was GBW/\|gain\|, not GBW/(1 + \|gain\|): a −1 inverter twice too wide. | Medium-Low | Fixed (`ComponentModel.amp_corner`) |
+| C-5 | A connector found as a rail's source gets the regulator's default 5 mΩ + 20 nH. | Low (suspicion) | Open: the values are settings and are named in the result |
+| P-1 | A converter's RC snubber on the board lost nothing in its resistor (a bridge leg's and a proposed one were counted): C·V²·f_sw, 2.3 W for 2 nF at 48 V and 500 kHz. | Medium (optimistic: Thermal, capacity, efficiency) | Fixed (`thermal.part_losses`) |
+| P-2 | The switch node's charge current (C·dv/dt) multiplied the whole pulse, the ripple's ramp included, though the node's voltage is a flat trapezoid: the flat pulse's nulls read up to 50 dB high, and at light load (ΔI > 2·I) the whole envelope ΔI/(2·I) high. | Medium (conservative, unbounded towards no load) | Fixed: the charge goes on the flat part only (`power.edge_charge_term`, also its phase in `interleave.loop_phase`); every harmonic within 0.3 dB of the sampled waveform's |
+| P-3 | The hot loop's RMS current for its copper heat was the flat pulse's, without the ripple on its top. | Low (optimistic) | Fixed: D(1−D)·I² + D·ΔI²/12 |
+| P-4 | At current reversal (I < ΔI/2) the overlap loss is zero while the output-charge loss stays whole and the dead-time loss drops to zero; a partial swing in the dead time would be between. | Low | Open: needs a time-domain reference before it is changed |
+| P-5 | A motor bridge's CISPR conducted reading uses the average detector only; the bus current's PWM groups read up to 14 dB higher on a peak detector at low speed, so the quasi-peak limit could bind by a few dB on some groups (E-2's rule is applied to converters only). | Low (suspicion) | Open |
 | names | Real net names and part designators of the reference board stood in comments, tests, docs and the help. | Repository rule | Replaced by generic ones in every tracked file (one consistent mapping) |
 
 - **Verified as shipped** (by the reviewers, by recomputation or against the sources they could see): the small
@@ -875,9 +885,7 @@ converters, bridges and signal paths.
   25's average table, CE102 and its LISN, the receiver bandwidths, the trapezoid spectrum and `pulse_shape`, the
   spread receiver's average detector (0.2 dB), the path line's limits, IPC-2221B's spacing table and capacity
   constants, copper's constants, the convection correlations.
-- **Open** (round 12 is not finished): the three areas named above have not been reviewed; of the help's
-  findings H-18 (stacked boards), H-21 to H-23 (settings without a form field, Preferences details, some form
-  fields) and the parts of the help the review did not read (menus, the results panels, the Server section, the
+- **Open** (round 12 is not finished): the three areas named above have not been reviewed; of the help, the parts of the help the review did not read (menus, the results panels, the Server section, the
   guides in full); MIL-STD-461's CE101 and RE102-1 / -2 figure values were not re-read; suspicions noted and not
   checked: a limit of the user's with CISPR bandwidths below 30 MHz, `edge_charge_factor` on the ripple ramp's
   harmonics, RE102 below 30 MHz (a rod antenna's vertical field).

@@ -86,11 +86,10 @@ def loop_phase(setup, freqs: np.ndarray) -> np.ndarray:
         u = u * _unit(np.polyval(num, s) / np.polyval(den, s))
         c_node = (res.ringing or {}).get("charge_c")
         if c_node and res.v_in and res.pulse_a > 0:
-            y = 1j * 2 * np.pi * f * c_node
-            if snub is not None:
-                c_s, r_s = snub
-                y = y + 1.0 / (r_s + 1.0 / (1j * 2 * np.pi * f * c_s))
-            u = u * _unit(1.0 + y * res.v_in / res.pulse_a)
+            # the node's charge current on the pulse's flat part (power.edge_charge_term), its phase
+            from .power import edge_charge_term
+            u = u * _unit(edge_charge_term(f, res.pulse_a, res.v_in, c_node, snub,
+                                           (n, res.duty, ratio) if ratio else None))
     return u
 
 

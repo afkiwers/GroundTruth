@@ -743,11 +743,13 @@ def _pi_section(ckt: Circuit, a: str, b: str, line, f_top: float, notes: list):
 
 
 def _gain_block(ckt: Circuit, name: str, inp: str, out: str, prm: dict):
-    """An amplifier as its gain block [A52]: v = gain·v(in) through one pole (bandwidth, else gbw/|gain|: a
+    """An amplifier as its gain block [A52]: v = gain·v(in) through one pole (bandwidth, else gbw over the noise gain: a
     voltage-feedback op-amp's closed-loop bandwidth [Franco 2015]; none: flat) and a buffer behind its output
     impedance (z_out), its input C to ground."""
     gain = float(prm.get("gain") if prm.get("gain") is not None else 1.0)
-    bw = prm.get("bandwidth") or (prm["gbw"] / max(abs(gain), 1.0) if prm.get("gbw") else None)
+    # gbw over the noise gain: the gain non-inverting, 1 + |gain| inverting (ComponentModel.amp_corner)
+    bw = prm.get("bandwidth") or (prm["gbw"] / (1.0 + abs(gain) if gain < 0 else max(abs(gain), 1.0))
+                                  if prm.get("gbw") else None)
     if prm.get("c_in"):
         ckt.c(inp, ckt.ground, prm["c_in"])
     node = ckt.internal(f"{name}.g")

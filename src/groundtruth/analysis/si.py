@@ -19,8 +19,10 @@ Run checks:
   on one layer: near-end NEXT = K_b·min(1, 2·T_d/t_r) and far-end FEXT = |K_f|·T_d/t_r of the swing [Hall 2000]
   [Johnson 1993], K_b and K_f
   from the pair's cross-section at its closest stretch and T_d the delay of the coupled length (all parallel runs of
-  the two nets together, at the closest spacing: an upper estimate). Above `crosstalk_max` (5 %) an issue on the
-  victim.
+  the two nets together, at the closest spacing: an upper estimate). Those two hold with every line end matched;
+  at an unterminated receiver (the usual CMOS input) the forward wave doubles and the backward wave arrives too,
+  reflected at the victim's driver: 2·max(FEXT, DRIVER_REFLECTION·NEXT) [A109]. Above `crosstalk_max` (5 %) for
+  any of the three an issue on the victim.
 - via_stub: a via of a listed net or pair whose barrel runs past the layers the net uses: the stub resonates at
   f = c/(4·l·sqrt(εr)) (a quarter wave, a notch in the transmission [Pozar 2012]); below `stub_factor` (3) times
   the signal's knee 0.35/t_r it eats into the edge's spectrum.
@@ -772,17 +774,21 @@ def check_crosstalk(board: Board, cache: SectionCache, aggressors: list, limit: 
             td = g["mm"] * 1e-3 * r.delay(0)
             nxt = r.kb(1, 0) * min(1.0, 2 * td / tr)
             fxt = abs(r.kf(1, 0)) * td / tr
+            # what an unterminated receiver at the victim's far end sees [A109]: the forward wave doubled at the
+            # open end, or the backward wave after its reflection at the victim's driver, doubled as well
+            rx = 2.0 * max(fxt, DRIVER_REFLECTION * nxt)
             row = {"aggressor": net, "victim": victim, "layer": layer, "coupled_mm": round(g["mm"], 2),
-                   "gap_mm": round(max(g["gap"], 0.0), 3), "next": nxt, "fext": fxt, "kb": r.kb(1, 0),
-                   "kf": r.kf(1, 0), "rise_time": tr, "swing_v": swing}
+                   "gap_mm": round(max(g["gap"], 0.0), 3), "next": nxt, "fext": fxt, "receiver": rx,
+                   "kb": r.kb(1, 0), "kf": r.kf(1, 0), "rise_time": tr, "swing_v": swing}
             out.append(row)
-            worst = max(nxt, fxt)
+            worst = max(nxt, fxt, rx)
             if worst <= limit:
                 continue
             add("crosstalk", victim,
                 f"{victim}: {net} runs beside it on {layer} for {g['mm']:.1f} mm, {max(g['gap'], 0):.2f} mm apart: "
                 f"near-end crosstalk {nxt * 100:.1f} % ({nxt * swing * 1e3:.0f} mV of {swing:g} V), far-end "
-                f"{fxt * 100:.1f} % ({fxt * swing * 1e3:.0f} mV) with its {tr * 1e9:g} ns edges; over "
+                f"{fxt * 100:.1f} % ({fxt * swing * 1e3:.0f} mV) with its {tr * 1e9:g} ns edges on matched "
+                f"lines; at an unterminated receiver up to {rx * 100:.1f} % ({rx * swing * 1e3:.0f} mV); over "
                 f"{limit * 100:g} %", g["at"], layer=layer, key=f"crosstalk:{net}:{victim}:{layer}", details=row)
     return out
 
@@ -824,6 +830,7 @@ def check_stubs(board: Board, nets: list, factor: float, add: Add) -> list[dict]
     return out
 
 
+DRIVER_REFLECTION = 0.5         # |Γ| of a victim's driver for the backward crosstalk wave: 17 Ω on 50 Ω [A109]
 DELAY_TOL = 0.10                # a profile's unit delay this far from the cross-sections' is an issue
 
 

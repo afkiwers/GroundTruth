@@ -341,7 +341,7 @@ def _amplifier_signal(config: Config, driver_net: str, pads: list, fp_of: dict, 
     make [A37]. An op-amp further along (a labelled path's later stage) does not limit the driver's signal: the
     path model applies its gain pole and slew cap there (emi/path.amplified_path). Its edge is the longer of the slew
     limit, SLEW_SWING·V / SR, and the bandwidth's, 0.35 / BW (a single pole's 10-90 % rise, ln 9 / 2π
-    [Johnson 1993]; BW = the model's `bandwidth`, else GBW / |gain|, as ComponentModel.amp_gain); its frequency
+    [Johnson 1993]; BW = the model's `bandwidth`, else GBW over the noise gain: ComponentModel.amp_corner); its frequency
     the lowest of `freq`, BW and the slew's full-power frequency SR / (π·V) (a sine of V peak to peak has the slope
     π·f·V). None when no op-amp there has either value (the generic `freq` / `rise` stay)."""
     found = []                          # (frequency, edge, ref, slew, bandwidth) per op-amp with a value
@@ -354,9 +354,7 @@ def _amplifier_signal(config: Config, driver_net: str, pads: list, fp_of: dict, 
         if pins is None:
             continue
         slew = m.params.get("slew")
-        bw = m.params.get("bandwidth")
-        if not bw and m.params.get("gbw"):
-            bw = m.params["gbw"] / max(abs(m.params.get("gain") or 1.0), 1.0)
+        bw = m.amp_corner()                 # `bandwidth`, else GBW over the noise gain
         if not slew and not bw:
             continue
         t = max(rise, 0.35 / bw if bw else 0.0, SLEW_SWING * AMP_SWING_V / slew if slew else 0.0)
