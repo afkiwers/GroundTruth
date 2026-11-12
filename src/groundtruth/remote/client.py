@@ -232,11 +232,14 @@ class Remote:
         """DELETE /v1/jobs/ID: cancel a queued or running job; remove a finished one (its result) from the server."""
         self.request("DELETE", f"/v1/jobs/{jid}")
 
-    def update(self, data: bytes, signature: str) -> dict:
+    def update(self, data: bytes, signature: str, busy: str = "wait") -> dict:
         """POST /v1/update: hand the server a signed server package (remote/release.py). Its answer ({state:
-        waiting | installing, version, running}); RemoteError with the server's reason when it refuses it (remote
-        updates off, another release key, not newer)."""
-        st, body = self.request("POST", f"/v1/update?sig={quote(signature)}", data, timeout=TRANSFER_TIMEOUT_S)
+        waiting | installing, version, running, mode}); RemoteError with the server's reason when it refuses it
+        (remote updates off, another release key, not newer). busy: "wait" lets the server's running jobs finish
+        before it installs, "cancel" stops them now."""
+        busy = "cancel" if busy == "cancel" else "wait"
+        st, body = self.request("POST", f"/v1/update?sig={quote(signature)}&busy={busy}", data,
+                                timeout=TRANSFER_TIMEOUT_S)
         if st == 202:
             return json.loads(body)
         raise RemoteError(f"{self.host}: {_error(body)}")

@@ -403,6 +403,10 @@ class ServersPanel(wx.Panel):
         from . import server_info
         if not server_info.confirm_update(self, targets, self.bundle["version"]):
             return
+        # servers with jobs running: the user decides whether they finish first or are stopped (never by itself)
+        busy = server_info.ask_running_jobs(self, [r for r in targets if r.get("running")])
+        if busy is None:
+            return
         _, key = self.settings()
         self.busy |= {r["address"] for r in targets}
         self._enable()
@@ -412,7 +416,8 @@ class ServersPanel(wx.Panel):
             """(background) One server after the other; each row told every step."""
             for r in targets:
                 done, text = update(r["address"], key, bundle,
-                                    lambda t, a=r["address"]: wx.CallAfter(self._row_text, a, t), stop=self.stop)
+                                    lambda t, a=r["address"]: wx.CallAfter(self._row_text, a, t), stop=self.stop,
+                                    busy=busy)
                 wx.CallAfter(self._row_text, r["address"], text)
                 if self.stop.is_set():
                     return

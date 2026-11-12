@@ -192,8 +192,8 @@ class ServerInfoDialog(wx.Dialog):
 
 # --------------------------------------------------------------------------- Update / Update all, confirmed
 UPDATE_COLUMNS = (("Server", "name", 220), ("Now", "now", 170), ("After the update", "after", 170))
-UPDATE_NOTES = ("A busy server cancels its running jobs and updates at once: their owners see why and run them again "
-                "on the new version. Queued jobs wait and run after the update.",
+UPDATE_NOTES = ("A server with jobs running: you are asked whether the update waits until they have finished, or "
+                "cancels them now. Queued jobs wait and run after the update.",
                 "It restarts by itself, and goes back to its old version if the new one does not start.",
                 "The servers are updated one after the other; the list shows how far each one is.")
 
@@ -253,6 +253,31 @@ class UpdateConfirmDialog(wx.Dialog):
         self.SetSizerAndFit(outer)
         theme.style_tree(self)
         self.CentreOnParent()
+
+
+def running_jobs_question(busy: list) -> str:
+    """The question for servers that have jobs running when an update is asked for (`busy`: their rows)."""
+    which = ", ".join(f"{r['name']} ({r['running']})" for r in busy)
+    n = sum(r["running"] for r in busy)
+    return (f"{n} job(s) are running on: {which}.\n\nUpdate after they have finished? The update then waits at the "
+            "server and installs by itself; no queued job starts before it.\n\nOr update now: the running job(s) "
+            "are cancelled and have to be run again on the new version.")
+
+
+def ask_running_jobs(parent: Optional[wx.Window], busy: list) -> Optional[str]:
+    """What to do with the jobs running on the servers to update: "wait" (also when none runs: nothing to ask),
+    "cancel", or None (don't update). The user, 2026-11-12: "do not automatically cancel the running sim, prompt
+    the user and let the user decide to continue or to pause the update until after the job has finished"."""
+    if not busy:
+        return "wait"
+    dlg = wx.MessageDialog(parent, running_jobs_question(busy), "Jobs are running on the server",
+                           wx.YES_NO | wx.CANCEL | wx.YES_DEFAULT | wx.ICON_QUESTION)
+    dlg.SetYesNoCancelLabels("Update after the jobs", "Update now, cancel the jobs", "Don't update")
+    try:
+        answer = dlg.ShowModal()
+    finally:
+        dlg.Destroy()
+    return {wx.ID_YES: "wait", wx.ID_NO: "cancel"}.get(answer)
 
 
 def confirm_update(parent: Optional[wx.Window], targets: list, version: str) -> bool:

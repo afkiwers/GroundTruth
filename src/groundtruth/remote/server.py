@@ -697,7 +697,7 @@ class ComputeServer:
                     nonce)
             return
         if method == "POST" and parts == ["update"]:
-            status, answer = self._take_update(body, q.get("sig", ""))
+            status, answer = self._take_update(body, q.get("sig", ""), q.get("busy", "wait"))
             h._json(status, answer, nonce)
             return
         if len(parts) >= 2 and parts[0] == "jobs":
@@ -751,11 +751,13 @@ class ComputeServer:
         except (OSError, ValueError):
             return None
 
-    def _take_update(self, data: bytes, signature: str) -> tuple[int, dict]:
+    def _take_update(self, data: bytes, signature: str, busy: str = "wait") -> tuple[int, dict]:
         """POST /v1/update: (HTTP status, answer). Taken only when remote updates are on, this server runs as the
         installed service (its runner installs the package), the package is signed with this server's release key
         and is a newer build than its own (remote/release.py); then kept in updates/ and installed once no job
-        runs."""
+        runs. busy: what happens to the jobs running now: "wait" (the default, and anything else) lets them
+        finish first (no queued job starts meanwhile: _slot), "cancel" stops them at once. The user decides in the
+        plugin; the server never cancels a job for an update unasked."""
         from .. import build_version
         if not self.remote_update:
             return 409, {"error": "remote updates are off on this server: turn them on once at the server "
@@ -786,20 +788,23 @@ class ComputeServer:
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / "update-{}.{}.{}.zip".format(*new)
             path.write_bytes(data)
-            # running jobs are cancelled, not waited for: an outdated server should not finish a long Simulate on old
-            # code (the user: "when the server is outdated and a sim is running, cancel that sim and update
-            # immediately"); their owners see why and run them again on the new version
-            busy = [j for j in self.jobs.values() if j.state == "running"]
-            for j in busy:
+            # the jobs running now: finished first, or (only when the request says so) cancelled. The user, 2026-11-12:
+            # "when updating the server, do not automatically cancel the running sim, prompt the user and let the
+            # user decide to continue or to pause the update until after the job has finished" (before: always
+            # cancelled). Their owners see why a cancelled one stopped and run it again on the new version
+            running = [j for j in self.jobs.values() if j.state == "running"]
+            cancel = running if busy == "cancel" else []
+            for j in cancel:
                 j.message = f"cancelled: the server is updating to {version}; run it again"
-            self.update = {"state": "waiting" if busy else "installing", "version": version,
-                           "from": build_version(), "zip": str(path), "since": time.time(), "running": len(busy),
-                           "cancelled": [j.id for j in busy]}
+            self.update = {"state": "waiting" if running else "installing", "version": version,
+                           "from": build_version(), "zip": str(path), "since": time.time(), "running": len(running),
+                           "mode": "cancel" if cancel else "wait", "cancelled": [j.id for j in cancel]}
             self.lock.notify_all()
             answer = {k: v for k, v in self.update.items() if k != "zip"}
-        log.info("update to %s taken; %s", version, f"cancelling {len(busy)} running job(s) first" if busy else
-                 "installing it now")
-        for j in busy:
+        log.info("update to %s taken; %s", version,
+                 f"cancelling {len(cancel)} running job(s) first" if cancel else
+                 f"waiting for {len(running)} running job(s) to finish" if running else "installing it now")
+        for j in cancel:
             self.cancel(j.id)                   # the slot stops it, then installs the update (_update_when_idle)
         self._update_when_idle()
         return 202, answer

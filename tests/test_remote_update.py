@@ -2,7 +2,8 @@
 update and roll-back, server_setup.py apply-update, make_server_package's signing, the Preferences list's logic).
 The user: "a feature that can be enabled when the server is installed for the first time that allows it to update
 remotely ... show the user which server is out of date and offers to update it through a button press"; asked:
-signed builds only, and a busy server cancels its running jobs and updates at once; "The signing key that is used to update the
+signed builds only; a busy server finishes its running jobs first unless the user chose to cancel them (2026-11-12;
+before: it cancelled them and updated at once); "The signing key that is used to update the
 server should be reset if the server is re-installed manually"."""
 import io
 import json
@@ -129,10 +130,38 @@ def test_the_server_takes_only_signed_newer_packages_when_allowed(home, signer, 
         srv.stop()
 
 
-def test_a_busy_server_cancels_its_running_job_and_updates_at_once(home, signer, monkeypatch):
-    """The user: "when the server is outdated and a sim is running, cancel that sim and update immediately". An update
-    taken while a long job runs cancels it (its message says why), and the server ends for the update well before the
-    job would have finished; the queued job is still queued (on disk: it runs after the update)."""
+def test_a_busy_server_lets_its_running_job_finish_before_it_updates(home, signer, monkeypatch):
+    """The user, 2026-11-12: "when updating the server, do not automatically cancel the running sim, prompt the user
+    and let the user decide to continue or to pause the update until after the job has finished". An update taken
+    while a job runs (no choice sent: the default) waits: nothing is cancelled, the job finishes, the queued job
+    does not start, and then the server ends for the update."""
+    import groundtruth
+    monkeypatch.setattr(groundtruth, "build_version", lambda: "GroundTruth 0.1.5 (old)")
+    srv = started(home)
+    try:
+        r = Remote(f"127.0.0.1:{srv.port}", KEY, client="tester@here")
+        running, _ = r.submit("sleep", (3.0,))
+        t0 = time.time()
+        while r.state(running)["state"] != "running" and time.time() - t0 < 10:
+            time.sleep(0.05)
+        queued, _ = r.submit("sleep", (0.1,))
+        data = package()
+        answer = r.update(data, release.sign(release.load_private(home.parent / "release" / "key.pem")[0], data))
+        assert answer["state"] == "waiting" and answer["cancelled"] == [] and answer["mode"] == "wait"
+        assert srv.exit_code is None and r.state(running)["state"] == "running"
+        t0 = time.time()
+        while srv.exit_code is None and time.time() - t0 < 30:
+            time.sleep(0.1)
+        assert srv.exit_code == release.UPDATE_EXIT
+        assert r.state(running)["state"] == "done" and r.state(queued)["state"] == "queued"
+    finally:
+        srv.stop()
+
+
+def test_a_busy_server_cancels_its_running_job_when_the_user_chose_that(home, signer, monkeypatch):
+    """busy="cancel" (the user's choice in the plugin, "Update now, cancel the jobs"): an update taken while a long
+    job runs cancels it (its message says why), and the server ends for the update well before the job would have
+    finished; the queued job is still queued (on disk: it runs after the update)."""
     import groundtruth
     monkeypatch.setattr(groundtruth, "build_version", lambda: "GroundTruth 0.1.5 (old)")
     srv = started(home)
@@ -144,8 +173,9 @@ def test_a_busy_server_cancels_its_running_job_and_updates_at_once(home, signer,
             time.sleep(0.05)
         queued, _ = r.submit("sleep", (0.1,))
         data = package()
-        answer = r.update(data, release.sign(release.load_private(home.parent / "release" / "key.pem")[0], data))
-        assert answer["state"] == "waiting" and answer["cancelled"] == [running]
+        answer = r.update(data, release.sign(release.load_private(home.parent / "release" / "key.pem")[0], data),
+                          busy="cancel")
+        assert answer["state"] == "waiting" and answer["cancelled"] == [running] and answer["mode"] == "cancel"
         t0 = time.time()
         while srv.exit_code is None and time.time() - t0 < 20:
             time.sleep(0.1)
@@ -340,15 +370,24 @@ def test_the_preferences_list_and_an_update_followed(tmp_path):
                 raise a
             return a
 
-        def update(self, data, sig):
+        def update(self, data, sig, busy="wait"):
             Fake.sent.append((data, sig))
-            return {"state": "waiting"}
+            Fake.busy = busy
+            return {"state": "waiting", "mode": busy, "running": 1}
     Fake.answers = [{"update": None}, {"update": {"state": "waiting"}, "running": [1]}, OSError("restarting"),
                     {"code": mine, "version": NEW}]
     steps = []
     done, text = su.update("build-pc", KEY, bundle, steps.append, remote=Fake, sleep=lambda s: None)
     assert done and "updated to 0.1.99999 (abc1234)" in text and Fake.sent == [(b"zip", "ab")]
-    assert "stopping 1 running job(s)" in steps and any("restarts" in s for s in steps)
+    assert "after 1 running job(s) have finished" in steps and any("restarts" in s for s in steps)
+    assert Fake.busy == "wait"
+    # the user chose to cancel the running jobs: sent so, and said so
+    Fake.answers = [{"update": None}, {"update": {"state": "waiting", "mode": "cancel"}, "running": [1]},
+                    {"code": mine, "version": NEW}]
+    steps = []
+    done, _ = su.update("build-pc", KEY, bundle, steps.append, remote=Fake, sleep=lambda s: None, busy="cancel")
+    assert done and Fake.busy == "cancel" and "stopping 1 running job(s)" in steps
+    Fake.sent = Fake.sent[:1]
     Fake.answers = [{"update": {"state": "failed", "at": 1.0}}, {"update": {"state": "failed", "at": 1.0}},
                     {"update": {"state": "rolled back", "at": 2.0, "error": "it ended after 3 s"}}]
     done, text = su.update("build-pc", KEY, bundle, steps.append, remote=Fake, sleep=lambda s: None)
@@ -541,7 +580,7 @@ def test_an_older_build_with_the_same_code_is_out_of_date_and_updated_to_the_bui
         def status(self):
             return Fake.answers.pop(0)
 
-        def update(self, data, sig):
+        def update(self, data, sig, busy="wait"):
             return {"state": "installing"}
     done, text = su.update("mac", KEY, bundle, lambda s: None, remote=Fake, sleep=lambda s: None)
     assert done and "0.1.41521" in text and Fake.answers == []
