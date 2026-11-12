@@ -38,12 +38,15 @@ import numpy as np
 
 F_TOP = 200e6                   # highest harmonic frequency taken (and at most HARMONICS_MAX harmonics)
 HARMONICS_MAX = 600
-EXACT_SOLVES = 10               # the first harmonics get a copper solve each; above them log-spaced solves
-LOG_SOLVES = 14
+EXACT_SOLVES = 6                # the first harmonics get a copper solve each; above them log-spaced solves
+LOG_SOLVES = 8                  # 6 + 8 solves: within 0.05 % of 10 + 14 on the test boards
 WAVE_POINTS = 2048              # samples per period for the peak-to-peak; the result keeps WAVE_KEPT of them
 WAVE_KEPT = 512
 INJECTION_DEPTH = 2             # nets walked from FB through two-pin parts
 REGION_MARGIN_MM = 4.0          # the copper model's margin around the parts involved
+CAP_NEAR_MM = 20.0              # output capacitors this close to the inductor or the divider are in the copper model
+NODE_BUDGET = 40000             # the copper model's nodes at most (it is solved 14 times)
+JOIN_MM = 3.0                   # a pad on cut-off copper reads the nearest joined copper of its net within this
 GND_FUNCTIONS = ("AGND", "SGND", "GND", "RTN", "VSS", "PGND")    # a controller's ground pin, preferred first
 
 
@@ -240,6 +243,27 @@ def _controller_ground(fp, ground: str):
     return pads[0] if pads else None
 
 
+def _region_model(model, pts, extra_layers: set, nets: set, side: str):
+    """The inductive copper model of the box around `pts` (+ REGION_MARGIN_MM, clipped to the outline), as
+    power._region_build makes it, at the pitch NODE_BUDGET allows (the model is solved EXACT_SOLVES + LOG_SOLVES times)."""
+    from shapely.geometry import box
+    from .simulate import _choose_pitch
+    a = model.config.analysis
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    m = REGION_MARGIN_MM
+    bbox = (min(xs) - m, min(ys) - m, max(xs) + m, max(ys) + m)
+    if not model.copper.outline.is_empty:
+        ob = model.copper.outline.bounds
+        bbox = (max(bbox[0], ob[0] - 0.5), max(bbox[1], ob[1] - 0.5), min(bbox[2], ob[2] + 0.5),
+                min(bbox[3], ob[3] + 0.5))
+    region = box(*bbox)
+    layers = model.plane_layers(region, extra_layers, set())
+    plane_nets = model.plane_nets(region, layers, set()) | nets
+    h_mm = min((model.board.stackup.distance(side, l) for l in layers if l != side), default=0.2)
+    d = _choose_pitch(h_mm, bbox, len(layers), min(a.max_nodes, NODE_BUDGET), a.grid_mm, a.resolution)
+    return model.build(bbox, layers, plane_nets, d, False)
+
+
 def tap_impedances(model, spec, inductor, sw_net: str, ctrl_gnd, sources: dict, out_nets: set, ground: str,
                    freqs: np.ndarray, caps: list = ()) -> tuple[dict, list]:
     """({source node: Z(f), or None for a pad the copper does not join}, notes): each tap / ground source pad's
@@ -251,9 +275,10 @@ def tap_impedances(model, spec, inductor, sw_net: str, ctrl_gnd, sources: dict, 
     harmonics and LOG_SOLVES log-spaced frequencies to the top, interpolated on log axes (magnitude) and linearly
     (unwrapped phase) between. Raises SolverError."""
     from ..solver.peec import RouteExcitation, SolverError
-    from .power import _area_shares, _region_build, _side
+    from .power import _area_shares, _side
     from .victims import ground_node, pad_node
     board = model.board
+    notes: list = []
     out_pads = [p for p in inductor.pads if p.net in out_nets]
     rect_refs = list(spec.low_side or [])
     rect_gnd = [p for r in rect_refs if board.footprint(r) is not None
@@ -266,12 +291,23 @@ def tap_impedances(model, spec, inductor, sw_net: str, ctrl_gnd, sources: dict, 
     taps = {s: v[0] for s, v in sources.items() if v[1] in ("tap", "gnd")}
     # the region holds every pad involved: the inductor's, the rectifier's, the network's, the controller's ground
     # and the output capacitors' (the current's way to ground: without them it has none in the model)
-    cap_pads = [p for c in caps if board.footprint(c["ref"]) is not None for p in board.footprint(c["ref"]).pads]
+    # the output capacitors near the stage (a rail's capacitors across the board would make the model the board's;
+    # beyond CAP_NEAR_MM their copper's impedance hides them at the ripple's frequencies)
+    anchors = [p.position for p in out_pads + [pad for s, pad in taps.items() if sources[s][1] == "tap"]]
+    near = [board.footprint(c["ref"]) for c in caps if board.footprint(c["ref"]) is not None]
+    dist = {fp.reference: min(math.dist(fp.position, a) for a in anchors) for fp in near}
+    keep = [fp for fp in near if dist[fp.reference] <= CAP_NEAR_MM]
+    # at least the nearest one: the ripple current needs a way to ground in the model
+    near = keep or sorted(near, key=lambda fp: dist[fp.reference])[:1]
+    cap_pads = [p for fp in near for p in fp.pads]
     involved = out_pads + rect_gnd + list(taps.values()) + [ctrl_gnd] + cap_pads
     pts = [p.position for p in involved]
     layers = {l for p in involved for l in p.layers}
     side = _side(inductor)
-    st, _ = _region_build(model, pts, layers, set(out_nets) | {ground}, side, REGION_MARGIN_MM)
+    st = _region_model(model, pts, layers, set(out_nets) | {ground}, side)
+    if len(near) < len(caps):
+        notes.append(f"{len(caps) - len(near)} output capacitor(s) farther than {CAP_NEAR_MM:g} mm from the stage "
+                     "left out of the copper model")
     inj = _area_shares(st, out_pads, side, 1.0) + _area_shares(st, rect_gnd, side, -1.0)
     from .pdn import copper_pieces
     plane = st.plane
@@ -282,16 +318,48 @@ def tap_impedances(model, spec, inductor, sw_net: str, ctrl_gnd, sources: dict, 
         """The node is on a piece of copper the current's injections of this sign are on."""
         return nd is not None and int(piece[plane.nid[nd]]) in {int(piece[plane.nid[n]]) for n, a in inj
                                                                  if (a > 0) == (sign > 0)}
-    notes = []
+    def nearest_joined(pad, net: str, sign: int):
+        """The nearest node of `net` within JOIN_MM of the pad on copper the injections of this sign are on, and
+        how far it is (a pin narrower than a cell may land on its own copper; its track joins it on the board)."""
+        best = None
+        for k, grid in enumerate(st.grids):
+            if grid.label is None or net not in grid.nets:
+                continue
+            r = int(math.ceil(JOIN_MM / st.d)) + 1
+            ci, cj = int(round((pad.position[0] - grid.x0) / st.d)), int(round((pad.position[1] - grid.y0) / st.d))
+            i0, i1, j0, j1 = max(ci - r, 0), min(ci + r + 1, grid.nx), max(cj - r, 0), min(cj + r + 1, grid.ny)
+            ii, jj = np.nonzero(grid.label[i0:i1, j0:j1] == grid.nets.index(net))
+            for i, j in zip(ii + i0, jj + j0):
+                nd = (k, int(i), int(j))
+                if plane.nid[nd] < 0 or not joined(nd, sign):
+                    continue
+                x, y = grid.xy(i, j)
+                dist = math.hypot(x - pad.position[0], y - pad.position[1])
+                if dist <= JOIN_MM and (best is None or dist < best[1]):
+                    best = (nd, dist)
+        return best
     ref = ground_node(st, board, ctrl_gnd, ground)
     if not joined(ref, -1):
-        ref = next(n for n, a in inj if a < 0)
-        notes.append(f"the controller's ground pin {ctrl_gnd.footprint}.{ctrl_gnd.number} is not joined to the "
-                     "rectifier's ground by copper in the model: the ripple is read against the rectifier's ground")
+        got = nearest_joined(ctrl_gnd, ground, -1)
+        if got is not None:
+            ref = got[0]
+            notes.append(f"the controller's ground pin {ctrl_gnd.footprint}.{ctrl_gnd.number} lands on copper the "
+                         f"model does not join: read at the joined ground {got[1]:.1f} mm from it")
+        else:
+            ref = next(n for n, a in inj if a < 0)
+            notes.append(f"the controller's ground pin {ctrl_gnd.footprint}.{ctrl_gnd.number} is not joined to the "
+                         "rectifier's ground by copper in the model: the ripple is read against the rectifier's "
+                         "ground")
     nodes = {}
     for s, pad in taps.items():
         tap = sources[s][1] == "tap"
         nd = pad_node(st, pad, pad.net) if tap else ground_node(st, board, pad, ground)
+        if not joined(nd, 1 if tap else -1):
+            got = nearest_joined(pad, pad.net if tap else ground, 1 if tap else -1)
+            if got is not None:
+                nd = got[0]
+                notes.append(f"{pad.footprint}.{pad.number} ({pad.net}) read at the joined copper {got[1]:.1f} mm "
+                             "from it")
         if not joined(nd, 1 if tap else -1):
             notes.append(f"{pad.footprint}.{pad.number} ({pad.net}) is not joined to the "
                          f"{'output' if tap else 'ground'} copper in the model (unrouted, or a break): "

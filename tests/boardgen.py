@@ -590,7 +590,8 @@ def hot_loop_board(length: float = 20.0, width: float = 4.0, caps: Sequence[tupl
     return g
 
 
-def cot_buck_board(tap: str = "cap", injection: bool = False, track_w: float = 0.4) -> BoardGen:
+def cot_buck_board(tap: str = "cap", injection: bool = False, track_w: float = 0.4, far_cap: bool = False
+                   ) -> BoardGen:
     """A constant-on-time buck with an integrated switch (analysis/fb_ripple.py): U1 (VIN, SW, BST, VCC, FB, RTN;
     Control Mode COT) at (6, 16), its SW pin, the catch diode D1 (cathode SW, anode GND) and the inductor L1 (22 µH)
     joined by a SW pour; L1's output pad at (19.4, 12) to the output capacitor C2 (22 µF 1206, VOUT at (29.5, 12)) by
@@ -598,7 +599,8 @@ def cot_buck_board(tap: str = "cap", injection: bool = False, track_w: float = 0
     The divider R1 100k (VOUT → FB) at (24, 18) and R2 25k (FB → GND) at (26, 18); R1's VOUT pad joined by a 0.3 mm
     track to the VOUT track at C2's end (tap "cap", x = 29.5) or at L1's end (tap "inductor", x = 19.4).
     injection: a ripple-injection network Rr 220k (SW → RI), Cr 3.3n (RI → VOUT, joined to the VOUT track at C2's
-    end) and Cac 100n (RI → FB)."""
+    end) and Cac 100n (RI → FB). far_cap: a second output capacitor C3 (22 µF) at (33, 21), joined to C2's VOUT pad
+    by a track."""
     g = BoardGen(layers=4, size=(36.0, 24.0))
     g.plane("GND", "In1.Cu")
     g.zone("VIN", "F.Cu", [(1.0, 18.5), (4.0, 18.5), (4.0, 23.0), (1.0, 23.0)])
@@ -630,6 +632,14 @@ def cot_buck_board(tap: str = "cap", injection: bool = False, track_w: float = 0
     g.two_pin("R1", "100k", (24.0, 18.0), "VOUT", "FB")
     g.two_pin("R2", "25k", (26.0, 18.0), "FB", "GND")
     g.track((24.5, 18.0), (25.5, 18.0), "FB", width=0.2)
+    if far_cap:
+        g.two_pin("C3", "22u", (33.0, 21.0), "VOUT", "GND", package="1206", kind="C")
+        g.track((29.5, 12.0), (29.5, 10.5), "VOUT", width=0.4)
+        g.track((29.5, 10.5), (34.5, 10.5), "VOUT", width=0.4)
+        g.track((34.5, 10.5), (34.5, 21.0), "VOUT", width=0.4)
+        g.track((34.5, 21.0), (32.5, 21.0), "VOUT", width=0.4)
+        g.via((34.0, 22.5), "GND")
+        g.track((33.5, 21.0), (34.0, 22.5), "GND", width=0.4)
     g.via((26.5, 19.0), "GND")
     g.track((26.5, 18.0), (26.5, 19.0), "GND", width=0.3)
     x_tap = 29.5 if tap == "cap" else 19.4

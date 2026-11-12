@@ -106,12 +106,12 @@ def test_the_divider_with_a_feed_forward_cap_and_an_injection_network():
             assert h[name][k] == pytest.approx(v[0], rel=1e-6), (name, fk)
 
 
-def _cot(tmp_path, tap="cap", injection=False, resolution=1.0, **fields):
+def _cot(tmp_path, tap="cap", injection=False, resolution=1.0, far_cap=False, **fields):
     """The COT board simulated: (its FbRippleResult, the Simulate result)."""
     from groundtruth.analysis.simulate import simulate
-    g = cot_buck_board(tap=tap, injection=injection)
+    g = cot_buck_board(tap=tap, injection=injection, far_cap=far_cap)
     g.fields("U1", **{"Control Mode": "COT", **fields})
-    b, sc, _ = make(tmp_path, g, f"cot_{tap}_{int(injection)}", nets=())
+    b, sc, _ = make(tmp_path, g, f"cot_{tap}_{int(injection)}_{int(far_cap)}", nets=())
     cfg = sc.config
     cfg.components["C2"].model.params.update(C=22e-6, ESR=0.002, ESL=0.5e-9)
     cfg.components["L1"].model.params.update(L=22e-6, R=0.0)
@@ -190,3 +190,15 @@ def test_the_ripple_is_shown_tiles_text_plots_and_report(tmp_path):
     from groundtruth.report.html import render_html
     page = render_html(r.model.board, r.issues, r.routes, "simulation", converters=r.converters)
     assert "id='fbripple" in page and "FB ripple" in page and "U1." in page
+
+
+def test_a_far_output_capacitor_is_left_out_of_the_copper_model(tmp_path, monkeypatch):
+    """Output capacitors farther than CAP_NEAR_MM from the stage stay out of the copper model, with a note (a rail's
+    capacitors across a large board would make the model the board's)."""
+    monkeypatch.setattr(fr, "CAP_NEAR_MM", 9.5)            # C2 8.9 mm from the divider, C3 10.0 mm
+    res, r = _cot(tmp_path, far_cap=True)
+    assert {c["ref"] for c in res.caps} == {"C2", "C3"}
+    assert res.copper and any("1 output capacitor(s) farther than 9.5 mm" in n for n in res.notes)
+    monkeypatch.setattr(fr, "CAP_NEAR_MM", 1.0)          # none near: the nearest one stays in
+    alone, _ = _cot(tmp_path)
+    assert alone.copper
