@@ -4,7 +4,7 @@ A path from a driver pin to a receiver pin may run through several nets joined b
 resistor, a ferrite bead, an AC-coupling capacitor). Each stretch of track between two parts is a line (its own Z0
 and εeff [A9]) with the copper's and the dielectric's loss when its width and stackup are known (PathLine.alpha;
 without them lossless, as before 2026-10-19: a quarter-wave stretch at a shunt's resonance then had an unbounded
-Q, refboard's ADC_I_RAIL_1 moving 13 dB for a 7 % change of Z0), each part a series impedance (components.models.ComponentModel.impedance). The source is
+Q, refboard's ADC_SENSE_1 moving 13 dB for a 7 % change of Z0), each part a series impedance (components.models.ComponentModel.impedance). The source is
 a voltage behind R + jωL with an optional output capacitance; the load a resistance (optional) in parallel with
 the receivers' capacitance. The cascade is solved per harmonic: from the load back to the source for the input
 impedances, then forward for the voltage and current at every element.
@@ -177,6 +177,7 @@ class PathResult:
     shunt_i: dict = field(default_factory=dict)      # shunt name -> complex current into it
     group_len: list = field(default_factory=list)    # each group's length (m)
     split: list = field(default_factory=list)        # at each shunt: the share of the current going on past it
+    i_rad: Optional[np.ndarray] = None   # |current| the path radiates with (radiating_current), A peak per harmonic
 
     def loop_currents(self) -> list[np.ndarray]:
         """The current of each loop, the shunts' in path order, then the receivers' (see the module docstring)."""
@@ -241,6 +242,7 @@ def path_currents(freqs, v_source, elements: list, source: PathSource, load: Pat
     total = sum(getattr(e, "length_m", 0.0) for e in elements)
     acc = np.zeros(len(f), complex)
     groups, g_acc, g_len, shunt_i, lens, split = [], np.zeros(len(f), complex), 0.0, {}, [], []
+    waves = []                  # the current along the route, piece by piece (radiating_current)
 
     def close_group():
         """End the current group (at a shunt or the path's end): its length-weighted mean current."""
@@ -267,18 +269,63 @@ def path_currents(freqs, v_source, elements: list, source: PathSource, load: Pat
             i_avg = i * np.sinh(x) / x - (v / zc) * (np.cosh(x) - 1) / x
             acc += e.length_m * i_avg
             g_acc = g_acc + e.length_m * i_avg
+            # the same I(z) as its two travelling waves, A e^{γz} + B e^{−γz}
+            waves.append((e.length_m, (i - v / zc) / 2, (i + v / zc) / 2, gl / e.length_m if e.length_m > 0 else gl))
             v, i = v * ch - i * zc * sh, i * ch - (v / zc) * sh
         else:
             # a series part: the same current through it, the voltage drops by I Z
             acc += e.length_m * i
             g_acc = g_acc + e.length_m * i
+            waves.append((e.length_m, i, None, None))
             v = v - i * parts_z[k]
     close_group()
     i_mean = acc / total if total > 0 else i_in
     names = {}
     for k, zp in parts_z.items():
         names[elements[k].name] = np.abs(zp)
-    return PathResult(f, i_mean, i_in, v, names, groups, shunt_i, lens, split)
+    return PathResult(f, i_mean, i_in, v, names, groups, shunt_i, lens, split,
+                      i_rad=radiating_current(f, waves) if total > 0 else np.abs(i_in))
+
+
+RAD_DIRECTIONS = 41            # directions cos θ in [−1, 1] along the route tried by radiating_current
+
+
+def radiating_current(f, pieces: list) -> np.ndarray:
+    """The current magnitude a path radiates with, per frequency: max over the direction u = cos θ along the route
+    of |∫ I(x)·e^{j·k0·x·u} dx| / length, k0 = 2πf/c in the air above the board [Balanis 2016, ch. 4: a line
+    source's radiation integral]. `pieces` in route order: (length m, A, B, γ) for a line carrying
+    I(z) = A·e^{γz} + B·e^{−γz}, or (length m, I, None, None) for a stretch of one current.
+
+    u = 0 (broadside) is the mean current, all the estimate took before 2026-11-12: right while the route is short
+    against the wavelength, but a standing or travelling wave on a longer one takes the mean through nulls while
+    the trace radiates towards its ends (the phase k0·x·u against the line's β·x), so the estimate read 8 to
+    20 dB low, at its nulls 40 dB, from about a quarter wavelength of route (audit round 12, E-1). The route is
+    taken as straight for the phase [A103]. Against the exact far field of a trace over a plane (image theory,
+    end posts and displacement current included): within 0.2 dB for 20 to 150 mm, 30 MHz to 6 GHz
+    (tests/test_signal_audit.py)."""
+    f = np.asarray(f, float)
+    u = np.linspace(-1.0, 1.0, RAD_DIRECTIONS)
+    q0 = 1j * (2 * np.pi * f / C0)[None, :] * u[:, None]            # j·k0·u, (directions, frequencies)
+
+    def integral(q, length):
+        """∫0..l e^{q z} dz = (e^{q l} − 1)/q, l where q·l is tiny."""
+        ql = q * length
+        small = np.abs(ql) < 1e-9
+        return np.where(small, length, (np.exp(ql) - 1.0) / np.where(small, 1.0, q))
+    total, x0, acc = 0.0, 0.0, np.zeros(q0.shape, complex)
+    for length, a, b, gamma in pieces:
+        if length <= 0:
+            continue
+        start = np.exp(q0 * x0)
+        if gamma is None:
+            acc += start * np.asarray(a, complex)[None, :] * integral(q0, length)
+        else:
+            g = np.asarray(gamma, complex)[None, :]
+            acc += start * (np.asarray(a, complex)[None, :] * integral(q0 + g, length)
+                            + np.asarray(b, complex)[None, :] * integral(q0 - g, length))
+        x0 += length
+        total += length
+    return np.abs(acc).max(axis=0) / total if total > 0 else np.zeros(len(f))
 
 
 @dataclass

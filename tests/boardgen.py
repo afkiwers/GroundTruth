@@ -307,7 +307,7 @@ def opamp_path_board(r_after: Optional[str] = None, **fields: str) -> BoardGen:
     """A signal path through an op-amp stage over a GND plane: U1.1 (SIG_A) → R1 33 Ω → SIG_B → U5 (+IN pin 3,
     OUT pin 1, GND pin 2 with a via to the plane) → SIG_C → U2.1. `fields`: U5's symbol fields as an HTTP lib would
     give them (Gain="10", GBW="10MHz" ...); a Gain field makes U5 an amplifier. r_after: a resistor R2 of this
-    value between U5's output and U2 (SIG_C → R2 → SIG_D → U2.1), as refboard's R303 after the buffer."""
+    value between U5's output and U2 (SIG_C → R2 → SIG_D → U2.1), as refboard's R41 after the buffer."""
     g = BoardGen(layers=2, size=(50.0, 20.0))
     y = 10.0
     last = "SIG_D" if r_after else "SIG_C"
@@ -600,7 +600,7 @@ def discrete_buck_board(out_connector: bool | str = False, shunt: bool = False, 
     pins, 1 mm holes, and no via: the GND pin's hole reaches the plane).
     shunt: a 10 mΩ current-sense resistor R10 in that track at x = 33 (J2.1 on VOUT_S behind it).
     surge_fet: J1.1 is on VBATT, which reaches VIN only through a surge stopper's series FET Q9 (D on VBATT, S on
-    VIN, its gate on Q9_G), like Q601 between J101 and +VDC on refboard.
+    VIN, its gate on Q9_G), like Q45 between J42 and +VDC on refboard.
     post_stage: a regulator fed from the buck's output (U9: VIN on VOUT, SW on SW9 to L9 and V3, GND with a via),
     like refboard's LT3970 on the LM5008's +12 V.
     victim (x0, x1, y): a reset line NRST on F.Cu (0.2 mm) from a 10k pull-up R5 at x0 to a microcontroller U5

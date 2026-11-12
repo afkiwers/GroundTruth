@@ -11,7 +11,7 @@ The voltage across a capacitor (cap_voltages) is the worst (largest) DC voltage 
 safety.voltage_model knows (grounds, signed rail names, PDN rails, the power stages' and bridges' voltages, the
 settings' `safety: voltages:`, through series parts; a bootstrap capacitor the gate drive), their difference; else
 the board's linear DC operating point (dc_operating_point: resistors, links and op-amp channels with the known nets
-and low-voltage ICs' signal pins as sources, each over its range; the user, of C304 at the ADC input: "Worst case the
+and low-voltage ICs' signal pins as sources, each over its range; the user, of C41 at the ADC input: "Worst case the
 opamp is a rail-to-rail IC so in this case it would be 3.3 V"), the largest end of the range of the difference; else
 unknown (no DC path: 0 V, the nominal C, listed in a note). The derated value is the small-signal capacitance at that
 operating point, as the makers measure it [Murata 2022] (1 kHz, 0.5-1 Vrms, 0 V to the rated voltage, 25 °C): right

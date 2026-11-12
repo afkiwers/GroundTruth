@@ -28,7 +28,7 @@ nets:                           # the signal paths (Signal paths tab)
     radiated_margin_db: 0       # the worst radiated estimate's margin to its limit, at least (dB)
     return_path_ratio: null     # the return loop's inductance against an ideal plane under the route, at most (1.0:
                                 # the return runs right under the track; e.g. 1.5)
-  # "/CPU/SPI_SCK":             # a path of its own (its name as on the Signal paths tab): replaces default's values
+  # "/MCU/SPI_SCK":             # a path of its own (its name as on the Signal paths tab): replaces default's values
   #   radiated_margin_db: 6
 
 converters:                     # the power stages (Converters tab)

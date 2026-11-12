@@ -610,9 +610,9 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   20 MHz at 1x / 2x / 4x, `out/converge/spi_sck_fixed.json`; |m| per ampere, the trace loop alone 19.7 mm²):
   - 740 MHz (In2-In3 cavity): 77 / 79 / 77 mm² at 750 / ~745 / ~730 MHz: converged (0.6 dB).
   - ~1 GHz plane mode: 1000 / 980 / 1020 MHz, 68 / 52 / 66 mm²: consistent.
-  - +3V3/GND pair (F.Cu-In1) with the decaps C1105, C1104, C1110: 1100 / 1220 / 1240 MHz, 93 / 183 / 59 mm².
-    The frequency settles; the height doesn't: at 2x the V_BATT pour around Q601 resonates near the same
-    frequency and the two reinforce (Q601 carries 2.4 A per A there), at 4x they are apart
+  - +3V3/GND pair (F.Cu-In1) with the decaps C54, C53, C55: 1100 / 1220 / 1240 MHz, 93 / 183 / 59 mm².
+    The frequency settles; the height doesn't: at 2x the V_SUPPLY pour around Q45 resonates near the same
+    frequency and the two reinforce (Q45 carries 2.4 A per A there), at 4x they are apart
     (`tools/dev/cavity_hotspots.py`).
   - 1440 MHz, GND F.Cu-In1, 142 mm²: at 1x only.
   4x needs 3-10x the GMRES iterations (200-900; once not converged at 980 MHz), and 8x would take hours per
@@ -633,7 +633,7 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
     | 0.5-1 GHz | 2.7 (7.8) → 6.3 (17.2) dB | 1.1 (3.3) → 1.5 (2.7) dB |
     | 1-1.5 GHz | 7.0 (16.7) → 4.0 (8.0) dB | 5.3 (8.3) → 4.4 (7.0) dB |
 
-    The largest mode, the F.Cu GND / In1 +3V3 pair at (119-121, 128-130) mm by C1105 / C1110
+    The largest mode, the F.Cu GND / In1 +3V3 pair at (119-121, 128-130) mm by C54 / C55
     (`out/converge/hot_new_*.log`), was at 1060 / 1100 / 1060 MHz (139 / 61 / 53 mm²) at 1x / 2x / 4x and is at
     940 / 1020 / 1020 MHz (113 / 69 / 78 mm²): 2x and 4x now agree on it (1.1 dB), 1x places it 8 % low, which moves
     it into the 0.5-1 GHz band there. Its stitching vias join the same layers on both grids. Above 1 GHz 4x has a
@@ -642,7 +642,7 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   - **8x (2026-10-18, round 4, `out/converge/spi_sck_widths_8x.json`, 256 152 nodes, 44 min on 4 threads).** 4x
     vs 8x: 0.8 dB rms (1.6 max) at 0.5-1 GHz, 2.9 dB rms (5.1 max) at 1-1.5 GHz. 4x is converged below 1 GHz. The
     F.Cu/In1 mode stays at 1020 MHz (62 mm² at 8x). 4x's 1260-1300 MHz peak is the +3V3 F.Cu pour against the In1
-    +3V3 plane near (120-123, 123) mm, excited on both grids through the same vias and C1104, only weaker at 8x:
+    +3V3 plane near (120-123, 123) mm, excited on both grids through the same vias and C53, only weaker at 8x:
     one mode a few per cent apart in frequency, not a missing connection.
   - **16x (2026-10-19, `out/converge/spi_sck_widths_16x.json`, 493 303 nodes, 1-1.5 GHz, ~3 h on 2 threads).** 8x vs
     16x 2.3 dB rms point by point (4x vs 8x 2.9): sharp resonances a few per cent apart keep the per-frequency
@@ -663,7 +663,7 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   EPC2306's source pin 2, a bar under three tabs, took 42 % of the source current for 34 % of the copper, so the GND
   vias beside it read high), evenly over the pin's nodes, each once.
 - **A lumped part is soldered over its whole pads** (2026-10-24, branch `pad-bond`, `simulate.part_lid`, [A65]; the
-  user, of refboard's Q601 drain pad at 54 A/mm² in a corner: "the pad is under a Mosfet surface can be assumed is
+  user, of refboard's Q45 drain pad at 54 A/mm² in a corner: "the pad is under a Mosfet surface can be assumed is
   equally conductive with a perfect bond to the copper. So I would expect the current density to go down towards
   the right as the current comes in from the left"). Each side's metal (a terminal, a FET's drain or source) is a
   node of its own, a `peec.LidNode` (numbered after the grid's nodes; as a tuple the cell over the pads' centre, so
@@ -681,12 +681,12 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   I₀·sinh((L−u)/λ)/sinh(L/λ) and the feed-to-part voltage within 0.01 % of R_strip + (R_sheet·λ/w)·coth(L/λ)).
   `transfers` leaves the bonds out (they are the part's own); the consumers that sum a part's `part` branches see
   one. From 2026-10-13 a part joined up to MAX_PART_BRANCHES = 8 nodes per side, farthest-point sampled (the
-  pads' corners first: each a point sink, Q601's corner), and before that one node per side. On the split strip
+  pads' corners first: each a point sink, Q45's corner), and before that one node per side. On the split strip
   (`test_a_part_is_joined_to_the_copper_over_its_whole_pads`, a 1 mΩ part over 0.8 mm deep pads) the part adds
   +0.78 mΩ at 0.1 mm cells against the contact model's 0.766 (the current hands over at the pads' outer edges, so
   their copper is bypassed); the 8 sampled nodes read +0.84 (about half of each pad's copper used), one node +1.45.
-  refboard at 2x, the stages' DC currents together (`tools/dev/pad_density.py --part Q601`, `out/speed/q601_*_2x.json`):
-  Q601's drain pad densest 67.7 → 22.5 A/mm² (a sampled corner → the edge the current arrives at, falling to ~0
+  refboard at 2x, the stages' DC currents together (`tools/dev/pad_density.py --part Q45`, `out/speed/q601_*_2x.json`):
+  Q45's drain pad densest 67.7 → 22.5 A/mm² (a sampled corner → the edge the current arrives at, falling to ~0
   across the pad), its drain fingers 59.6 → ≤ 10, the view's peak 66.4 → 57.6 A/mm² (now elsewhere).
   **Which nodes are under a pad** (2026-11-04, branch `pad-feed`, [A88]; audit round 8, P8-6): those of its net
   whose cell (the d × d square around the node) overlaps the pad, i.e. within d/2 of its outline in x and y
@@ -710,7 +710,7 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   0.82-0.86 nH at five offsets), which reads high and does not converge with the pitch.
   **A vertical FET's die is spread over its tab** (2026-10-25, branch `tab-spread`, `simulate.die_side`,
   `die_branches`, [A68]; the user, of that view: "the top layer under the fet is black and the vias glow which does
-  not make sense"). With one lid per side the drain tab was one node at one voltage, so the copper under Q601 handed
+  not make sense"). With one lid per side the drain tab was one node at one voltage, so the copper under Q45 handed
   its current over within ~0.14 mm of each via and of the pad's edge and read near zero between them. A transistor
   modelled as a resistor with a tab (one side's pad ≥ `TAB_MM` and wider than the other's) now has no drain lid: one
   `part` branch from each grid node under the tab to the source side's lid, N·Z plus that node's share of the solder
@@ -721,7 +721,7 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   A part's own joint: the pin value `bond` (µm of solder; 0 a perfect bond, taken as 0.1 µm; analysis/pins.py, its
   GT field, the Parts tab's Pins cell or Pin defaults…). `part_pairs` is left for the PDN's ideal source.
   **The terminal as a resistive sheet** (2026-10-26, [A70]; the user, of an inductor's pad dark inside with a bright
-  rim: "L501 seems to have an infinitly conductive edge like Q601 had before"): `part_lid(sheet=...)` puts a terminal
+  rim: "L43 seems to have an infinitly conductive edge like Q45 had before"): `part_lid(sheet=...)` puts a terminal
   node above every grid node under the pads (each bonded to its own), joins neighbours by the sheet resistance (a
   strip a pitch long and as wide as the pads across it, `sheet_widths` [A88]; one square inside the pads) and feeds
   the part evenly over the terminal (equal branches from the part's node to every
@@ -745,7 +745,7 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   largest pad (≥ 50 % of its area) or the pads' area-weighted centre; `die_branches` stands the die only on the
   sheet nodes inside it, `part_lid` feeds and centres the lid there (a fed tab's side_spread too). It counts only with
   a terminal sheet (Terminal Sheet Resistance / Metal): on a perfect plate the rectangle changes nothing. Validated
-  in tests/test_pad_bond.py (a die over half a tab against [Berger 1972]). refboard's Q601 (D=4.09x3.86): hottest spot
+  in tests/test_pad_bond.py (a die over half a tab against [Berger 1972]). refboard's Q45 (D=4.09x3.86): hottest spot
   unchanged at 17.9 A/mm², the copper under the tab's middle 1.2 → 1.9 A/mm².
   **Terminal current in the maps** (2026-10-26, the user: "F.CU has still a knive's edge", then "Can we add a
   setting under preferences that enables option 2?"): a terminal's in-plane branches have their own kind `sheet`
@@ -765,7 +765,7 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   (`power._area_shares`: DC paths, ripple, bridges' RMS, PDN ports, DC loads; `switch_filaments`: the hot loop's
   filament stands over the lid's cell), so the copper decides where it enters. Narrower pads keep the even spread
   over each pin's copper [A51]: a chip-scale GaN FET's bars (EPC2306: 0.37-0.47 mm) sit on a lateral die that
-  spreads the current over them. The pin value `entry: tab | even` overrides the size. On refboard only D501
+  spreads the current over them. The pin value `entry: tab | even` overrides the size. On refboard only D41
   (SOD-123F, 1.1 mm leads) becomes a tab. tests/test_pad_bond.py: a current taken out at a lid follows Berger's
   contact like one through a part; the test buck's Q1 drain pad (1.2 mm, fed from the left) at 1 A: 8.35 A/mm²
   at its left edge, 0.17 in its middle as a tab, against 8.49 / 4.16 spread evenly.
@@ -868,15 +868,15 @@ Both pitches are divided by √`analysis.resolution` and both budgets multiplied
   since 2026-10-21 the full telegrapher line, `PathLine.rlgc` / `zc` / `gamma_l`: Zc = √((R' + jωL')/(G' + jωC'))
   and γ = √((R' + jωL')(G' + jωC')), which is the low-loss line where R' ≪ ωL' and stays right towards DC, where the
   low-loss form made an open 86 mm track ~10 kΩ to ground at 1 Hz;
-  lossless, a quarter-wave stretch beside a capacitor's ESL resonated with an unbounded Q: refboard's ADC_I_RAIL_1
-  moved 13 dB for a 7 % Z0 change, C304 carrying 4.5 × the input current; with the loss about 1 ×, the margin +30.1 dB,
+  lossless, a quarter-wave stretch beside a capacitor's ESL resonated with an unbounded Q: refboard's ADC_SENSE_1
+  moved 13 dB for a 7 % Z0 change, C41 carrying 4.5 × the input current; with the loss about 1 ×, the margin +30.1 dB,
   the SPI nets +0.3 dB; the plane's share from Johnson's spread, `plane_resistance`, since the next day: it read
   +33.5 dB with the plane taken as lossy as the strip) (its
   own Z0 and εeff, `simulate._line_of`: since 2026-10-18 the 2D field solver's cut of the board across the
   stretch's longest track, at its middle (`line_cache`: analysis/si.SectionCache, the one Run checks' impedance
   checks use: every net's copper in the cut, the stackup's dielectrics and solder mask, equal cuts solved once),
   else a quarter from either end, else the same on the next two longest tracks (`LINE_CUT_TRACKS`, round 4: refboard's
-  Net-(U301--) had no cut at its longest track's middle);
+  Net-(U41--) had no cut at its longest track's middle);
   where no clean cut exists at any of them (the track widens into a pad or pour there, no reference copper) the closed forms: an
   outer layer a microstrip, Hammerstad & Jensen 1980 with thickness, on the dielectric height; an inner layer an
   offset stripline (Wheeler's for each half, combined) on the dielectric heights to both neighbours.
@@ -1221,7 +1221,9 @@ D = ½). L·di/dt is at the peak current, and the main switch's overlap loss at 
   - The standard's receiver bandwidth sums neighbouring harmonics, and the result is compared with the
     average limit.
   - CW harmonics read the same in peak, quasi-peak and average, as long as f_sw exceeds the receiver
-    bandwidth.
+    bandwidth. With spread spectrum they do not: the average reading falls far more than the quasi-peak one, so
+    a dithered stage is also read with the peak detector against the quasi-peak (CISPR 22 / 32) or peak
+    (CISPR 25) limit and the smaller margin counts [A104].
   - Limits: CISPR 32 class A/B (AC mains port), CISPR 25 voltage method classes 1–5 (band-limited), and
     MIL-STD-461 CE102 (basic curve plus the voltage relaxations). They were entered from the published tables:
     verify them against the edition in use.
@@ -1563,7 +1565,7 @@ check their design is sound").
   branches (part_impedance); the source `with_branches` as vrm_r + jωvrm_l between its pads (`_source_branch`).
   `copper_pieces`: the DC copper (strips, vias, tracks; not parts or capacitance) in pieces; the rail's main piece is
   the one its source feeds, else the one with most supply pads; an IC whose pads land elsewhere is left out with a
-  note before solving (refboard at 0.86 mm: U203's 0.25 mm QFN pads and U305 read 1.7 MΩ at 1 MHz, stray
+  note before solving (refboard at 0.86 mm: U55's 0.25 mm QFN pads and U44 read 1.7 MΩ at 1 MHz, stray
   capacitance; such a nearly floating port also slowed every solve: the first 40k-node run sat over an hour).
 - Ports (`PortSet`): one injection set per IC (+1 A over its supply pads by area, -1 A over its ground pads),
   solved together per frequency (one factorisation; GMRES 35-60 iterations each on refboard's board model);
@@ -1582,8 +1584,8 @@ check their design is sound").
   300 MHz; ΔL = Im(Z_fine - Z_coarse)/ω where both are inductive, median, added in series (jωΔL) to the IC's curve.
   Without a decap in the region none (a small plane capacitor: the pitches differ in capacitance). Test board:
   -43 % at 100 MHz on 1.26 mm cells, within 1 % with it (1.26 / 0.59 / 0.30 mm).
-- Real board (refboard +3V3, LDO U505 as source), corrected: 40k nodes (0.86 mm, 12 min here, 5 ICs: U203 and
-  U305 cut off) and 80k (0.59 mm, 29 min, all 7) agree at 100 MHz within 1-20 % (U1102 0.571 / 0.596 Ω, margins
+- Real board (refboard +3V3, LDO U49 as source), corrected: 40k nodes (0.86 mm, 12 min here, 5 ICs: U55 and
+  U44 cut off) and 80k (0.59 mm, 29 min, all 7) agree at 100 MHz within 1-20 % (U53 0.571 / 0.596 Ω, margins
   within ~1.5 dB); ΔL 0.04-0.9 nH. (A first comparison read "halves from 0.86 to 0.59 mm": it compared the curves by
   solve index, not by frequency, after different refinements; wrong.)
 - Not yet: warm starts across frequencies (measured: -20 % iterations only).
@@ -1597,7 +1599,7 @@ The plan's M2. No new solve: what each net's voltage asks of the copper and the 
   (short, inductor, ferrite, resistor <= SERIES_MAX_OHM 10 Ω; the stage inductors skipped: a switch node's peak is
   not its output's), each group taking its highest known voltage for its unknown nets. A model without `pins` on a
   FET (a pass FET given a short / resistor) joins its non-gate, non-Kelvin pads (`detect.GATE_FN`, `KELVIN_FN`):
-  refboard's V_BATT through Q601. Unknown nets are taken as 0 V.
+  refboard's V_SUPPLY through Q45. Unknown nets are taken as 0 V.
 - **Voltage ranges** (2026-10-17, the user: "Do it" to giving bootstrap nets the switch node's voltage):
   `voltage_model` -> `Volts` (peak = net_voltages, lo, rides). Switch nodes (converters, bridge phases) lo 0;
   `_riding`: a FET's (Q/M/T) gate rides its single source pin's net (GATE_FN / GATE_FN_SOURCE, not Kelvin); a
@@ -1608,9 +1610,9 @@ The plan's M2. No new solve: what each net's voltage asks of the copper and the 
   bootstrap capacitor sees the drive). `_without_own_pads`: a part's pads on both nets on the layer are left out of
   the gap one side at a time (min of a-without-them vs b, a vs b-without-them). refboard (out/audit): the 27 unknown-net
   warnings were mostly gate / bootstrap nets; now 42 errors and 13 warnings: the bootstrap / gate nets beside their
-  own switch nodes are gone, the swing shows SW1 / SW2 / D501-K 0.20 mm from +VDC, the gate and driver nets
+  own switch nodes are gone, the swing shows SW1 / SW2 / D41-K 0.20 mm from +VDC, the gate and driver nets
   (61.8 V at the top of a cycle) 0.20 mm from GND (the board's 0.2 mm default clearance against IPC's 0.60 mm at
-  52 V uncoated; coated: none), and C601 (10 nF, 50 V) from U601's GATE to ground now sees ~62 V (Q601's gate above
+  52 V uncoated; coated: none), and C52 (10 nF, 50 V) from U50's GATE to ground now sees ~62 V (Q45's gate above
   +VDC): a cap_voltage error worth checking.
 - `check_clearances` (Run checks, `run_checks` without a net subset): per copper layer the nets above CHECK_FROM_V
   (30 V); an STRtree over the layer's net geometries (`CopperMap.get`) queried with the hot net buffered by the
@@ -1625,7 +1627,7 @@ The plan's M2. No new solve: what each net's voltage asks of the copper and the 
 - `after_simulate` (in `finish_issues`, after `combine_dc`, so the combined DC paths are there; `split.merge_parts`
   and the server worker pass the board): `part_losses` (I_path² · the part's r_mohm of each DC path, combined, per
   stage, DC loads; bridges' RMS rms_a² · r_ohm; the largest per part) against `resistor_rating` (the Rated Power field, or Power;
-  else RESISTOR_WATTS by package, 0612 shunts 1 W; R references or Resistor libraries only: Q601's resistor model
+  else RESISTOR_WATTS by package, 0612 shunts 1 W; R references or Resistor libraries only: Q45's resistor model
   is a FET; unrated ones dissipating >= 50 mW listed in one info issue); `vds_rating`: peak = the rail the node swings to (v_in; a boost's v_out) + the
   larger of the stage's overshoot_v and its ringing's, against the smallest Vds field of its switches.
 - Run checks with no nets listed now runs (the board-wide checks); Simulate still needs something to solve.
@@ -1633,14 +1635,14 @@ The plan's M2. No new solve: what each net's voltage asks of the copper and the 
   known gaps on outer / inner layers, coated; an unknown net's warning and its voltage given; ratings from value and
   field, derating; ESD found, missing, unconnected pin skipped, named connectors; voltages through a 0R and a pass FET
   (not its gate); I²R against the path current; Vds warning and error.
-- refboard (out/audit settings, uncoated): 16 errors (+VDC / V_BATT / SW1 / SW2 / the diode buck's node,
+- refboard (out/audit settings, uncoated): 16 errors (+VDC / V_SUPPLY / SW1 / SW2 / the diode buck's node,
   51.8 V, 0.20-0.31 mm from GND, +12V, +5V, +3V3 and conv2's 5.4 V output; B2 asks 0.60 mm), 27 warnings (gate
-  drive, bootstrap and controller pins of unknown voltage), 0 coated; ESD infos J101, J104, J106, J1101; 23
+  drive, bootstrap and controller pins of unknown voltage), 0 coated; ESD infos J42, J43, J44, J41; 23
   cap_voltage warnings from the parts' Rated Voltage fields (100 V ceramics on +VDC at 52 %, 35 V ones on the 28 V
   output at 80 %, a 6.3 V one on +3V3 at 52 %), none over its rating. 5-10 s. Simulate conv1 + conv2 (286 s):
   vds_rating warnings, the nodes at 89.6 / 89.9 V (51.8 V + the ringing's 37.8 / 38.1 V; L·di/dt alone 7.5 / 3.8 V)
   against the EPC2306's Vds 100 V; the same overshoot the hot_loop check and the fix advisor's Vds target use. Losses:
-  R309 / R310 (8 mΩ, 0612) 0.21 / 0.19 W, Q601 0.19 W, R328 / R329 0.05 W: nothing over 50 % of a rating.
+  R46 / R47 (8 mΩ, 0612) 0.21 / 0.19 W, Q45 0.19 W, R54 / R55 0.05 W: nothing over 50 % of a rating.
 
 ## Control loop (`analysis/loop.py`, M5, branch `control-loop`; boosts at the user's "Add boost support too")
 The plan's M5, at the user's "Go for it"; the controller's figures as HTTP lib fields at the user's "Those
@@ -1685,13 +1687,13 @@ parameters could come straight from the schematic and are part of the symbol tha
   a note). Tests: `boardgen.boost_board(loop=True)` (U8, RS 10 mΩ at the input in series with L1, 10k + 10n + 100p,
   290k / 10k): the parts on VOUT, T against the model written out (1e-9), the RHP zero and the pole exact, Q_p,
   voltage mode's pair at D'/(2π·sqrt(LC)) with Q = D'·R·sqrt(C/L); Simulate: Rc 100k gives the RHP issue.
-- refboard (U303's fields set on 2026-10-17 with `tools/dev/label_project.py --field`, at the user's "add
+- refboard (U43's fields set on 2026-10-17 with `tools/dev/label_project.py --field`, at the user's "add
   those yourself"; backup `out/refboard_backup_2026-10-17/`): Control Mode peak current, Vref 0.8V, EA gm 1.8mmho,
   Vsense Max 50mV (ILIM floating: 45/50/55 mV), ITH Range 1V (first an estimate; then read off the datasheet's
   Figure 13 "Maximum Current Sense Threshold vs V_ITHx": every ILIM line from 0 mV at 0.4 V to its maximum at 1.4 V;
   analog.com and Mouser refuse automated downloads and the HTTP lib's copy needs a login, but
-  web.archive.org/web/2024id_/<the analog.com URL> serves the PDF, and r.jina.ai/<URL> its text); U502 COT,
-  U503 internal. `tools/dev/loop_check.py` (out/m5 settings from real_settings.py): conv1 f_c 11.2 kHz, PM 77°,
+  web.archive.org/web/2024id_/<the analog.com URL> serves the PDF, and r.jina.ai/<URL> its text); U46 COT,
+  U47 internal. `tools/dev/loop_check.py` (out/m5 settings from real_settings.py): conv1 f_c 11.2 kHz, PM 77°,
   GM 22.6 dB; conv2 29 kHz, 91°, 20 dB (slope compensation assumed half the down-slope). The crossover scales
   with k = Vsense Max / ITH Range.
 
@@ -1777,8 +1779,8 @@ section with a worked chart.
   `SimulationResult.cap_bias` carries the table to the JSON (`capacitors_at_bias`), the HTML report (`_cap_bias`)
   and `merge_parts`. The Parts tab works out `cap_voltages` in a `LatestOnly` worker when it loads (~10 ms on refboard)
   for its C in circuit column.
-- Refboard (2026-10-22): C304 / C342 at 3.3 V (U1102's +3V3) keep 99.9 nF, so the ADC corner goes back to ~339 Hz from
-  the flat 75 nF's 451 Hz; the 55 V input ceramics take their one-value Cbias at half their rating; U303's soft-start,
+- Refboard (2026-10-22): C41 / C50 at 3.3 V (U53's +3V3) keep 99.9 nF, so the ADC corner goes back to ~339 Hz from
+  the flat 75 nF's 451 Hz; the 55 V input ceramics take their one-value Cbias at half their rating; U43's soft-start,
   compensation and DRVCC capacitors are unknown (nominal) under the 18 V rule (the bound gave the soft-start 6 nF).
 - Help: section "cbias" (`help.py` `cbias_svg`: an inline SVG drawn from `c_at` with the page's CSS colours; wx's
   simple view `cbias_table`). Tests: `tests/test_bias.py`, the Parts tab GUI test.
@@ -1891,7 +1893,7 @@ The plan's M3, at the user's "Merge and continue with M3" (2026-10-17).
   class applies to the listed nets only. Nets of a profiled class are cut like listed nets. **tuning_delay**
   (`check_profile_delays`): with time-domain tuning on, each layer's unit delay against the cross-sections'
   length-weighted sqrt(εeff)/c (a pair: its differential mode), over 10 % an issue: KiCad turns lengths into delays
-  with the typed figure. refboard copy with Test on a class of /CPU/SPI_*: 100 ps/cm against 59.9-60.9 ps/cm, a tuned
+  with the typed figure. refboard copy with Test on a class of /MCU/SPI_*: 100 ps/cm against 59.9-60.9 ps/cm, a tuned
   delay comes out at 60 %.
 - **Output**: CheckResult.si (SiResult: NetProfile, PairResult, crosstalk and stub rows); `formats.si_text`, JSON
   "si", the HTML part "Signal integrity" (tables, `plots.draw_impedance`: a range bar per net / pair over its target
@@ -2077,11 +2079,11 @@ conducted emission or a ringing set by C_oss; design changes can.
 - `suggest_net(board, config, net)`: the same per-net logic (`_suggest`) for a net the user picked (KiCad
   selection), which never filters a signal out: no class gives the generic class `GENERIC` (10 MHz / 2 ns, to
   set; since 2026-10-19 an op-amp whose output is on the driver's net and that has a slew rate or a bandwidth
-  sets the fastest full swing it can make instead, `_amplifier_signal` [A37]: refboard's Net-(U301--) had 2 ns edges
+  sets the fastest full swing it can make instead, `_amplifier_signal` [A37]: refboard's Net-(U41--) had 2 ns edges
   on a current-sense output and its worst "emission" at 1.59 GHz), fewer than two logic parts fall back to all pads, a poured net is flagged; such doubts go into the
   reasons and make the confidence low. Refused with the reason: nets not on the board, reference nets, supply
   nets (`is_power_net`), and switch nodes of the configured power stages. A supply-looking net the user picks is
-  added after a question (`suggest_net(as_signal=True)`, `MainFrame.add_nets`): the user's /CPU/ADC_I_RAIL_1, an
+  added after a question (`suggest_net(as_signal=True)`, `MainFrame.add_nets`): the user's /MCU/ADC_SENSE_1, an
   ADC input measuring rail 1's current, was refused for the RAIL in its name. `is_power_net` now takes a name
   with a measuring word (`MEASURE_NAME`: ADC, SENSE, SNS, MEAS, MON, IMON, VMON, ISNS, FB, FEEDBACK) as a signal
   unless a power pin is on the net (detect_dump: the same detection on refboard and board2).
@@ -2094,7 +2096,7 @@ thermal need nothing: each switch node's variance stays in its own copper (VALID
   without it the group's n stages sit 360°·k/n apart in the settings' order, `group_phases`). Detection proposes a
   group named after the IC that switches two or more stages (`detect._stage_controller`: an integrated stage's own
   IC, else the one IC on the switch node or on the high-side gate, through a gate resistor at most), 360°/n apart,
-  with a reason that asks to check the datasheet. On refboard: conv1 0°, conv2 180°, "U303 phases".
+  with a reason that asks to check the datasheet. On refboard: conv1 0°, conv2 180°, "U43 phases".
 - **Per stage** (`stage_phasors`, end of `finish_converter`, only for a stage in a group): the hot-loop current's
   complex harmonics = its magnitudes (`setup.currents`, exactly the stage's own) × unit phasors of the trapezoid
   (signed sincs, delay e^(-j2πn(start + D/2)); a boost's high side starts at (1 − D_hs)·T) × the ringing rational
@@ -2238,10 +2240,10 @@ synthetic stacks (`tests/boardgen.py` `bridge_board(header_gnd_pins=)` + `logic_
   the HTML stage. Validated (tests/test_stage_victims.py, `discrete_buck_board(victim=(x0, x1, y))`: a 10k pull-up
   R5 to an STM32 U5): the noise is M·I/t_r at U5.4 (0.15 mV near the loop), the far line has under half the
   coupling, the stage's own loop_nh unchanged within 2 %, an issue over a lowered limit. refboard conv1
-  (out/audit settings): Simulate 169 s -> 221 s with the victims (the model then reaches U1102 / U1101 and their
-  reset and debug nets), loop 1.491 nH and the conducted margin -20.8 dB unchanged; noise 20.6 mV at U1102.28 on
-  SW_CLK (4.1 pH), 10.8 mV on the supervisor's reset, 4.1 mV on SW_DIO, 1.5 mV on NRST, all far under 0.3 V; U1102
-  and U1101's grounds 1.7-1.8 V peak against J101.1 (0.35 nH; information: no reference pin set). The debug pattern
+  (out/audit settings): Simulate 169 s -> 221 s with the victims (the model then reaches U53 / U52 and their
+  reset and debug nets), loop 1.491 nH and the conducted margin -20.8 dB unchanged; noise 20.6 mV at U53.28 on
+  SW_CLK (4.1 pH), 10.8 mV on the supervisor's reset, 4.1 mV on SW_DIO, 1.5 mV on NRST, all far under 0.3 V; U53
+  and U52's grounds 1.7-1.8 V peak against J42.1 (0.35 nH; information: no reference pin set). The debug pattern
   takes SW_CLK / SW_DIO since (it wanted SWCLK).
 - **Stack** (`stack.py`, settings `stack:`): the other board merged into one `Board`: placement from the joined
   connector pins (`fit_placement`: 2-D Kabsch, mirrored or not, the residual in the notes), its layers renamed
@@ -2277,8 +2279,8 @@ synthetic stacks (`tests/boardgen.py` `bridge_board(header_gnd_pins=)` + `logic_
 **Signal labels** (2026-10-11): `sig`, `sig:PIN`, `sig_drv:PIN`, `sig_rx:PIN` (`SIG`, `BoardTags.signals`,
 `signal_marks`: {net: drivers, receivers}, cached per board). A marked net is never a supply (`is_power_net`),
 is always suggested (Detect, Add KiCad selection, also when it carries a power stage's current), and its labelled
-driver and receivers replace the guessed ones. Labelled nets joined by 2-pin parts are one path (`_labelled_path`): the parts that don't pass a signal go into its `through`, and it is named after a net with a real name (refboard: U301's buffer output, sig_drv:4, through R303 4.7 kΩ to the ADC pin, sig_rx:9 on U1102: /CPU/ADC_I_RAIL_1, driver U301.4, through R303; C304 to GND is a shunt of the path). The user chose a symbol field over a KiCad net class (proposed:
-a `GT_SIGNAL` net class from a directive label) for the ADC input /CPU/ADC_I_RAIL_1, refused as a supply.
+driver and receivers replace the guessed ones. Labelled nets joined by 2-pin parts are one path (`_labelled_path`): the parts that don't pass a signal go into its `through`, and it is named after a net with a real name (refboard: U41's buffer output, sig_drv:4, through R41 4.7 kΩ to the ADC pin, sig_rx:9 on U53: /MCU/ADC_SENSE_1, driver U41.4, through R41; C41 to GND is a shunt of the path). The user chose a symbol field over a KiCad net class (proposed:
+a `GT_SIGNAL` net class from a directive label) for the ADC input /MCU/ADC_SENSE_1, refused as a supply.
 
 An optional `GT` field on schematic symbols says what a part is in a power stage (`conv_hs`, `conv1_L`, `hbA_ls`,
 `hb_out`, `ignore`; user docs in docs/guide/settings.md "Detection labels"). The user asked for "labels like hb_A … to make the
@@ -2416,7 +2418,7 @@ automatic recognition more robust"; options weighed:
   `LatestOnly` worker, writes it under `views_dir()` and calls `webbrowser.open`. CLI: `_write_pngs` writes
   `view3d_<stem>.html`, `render_html(view3d=True)` links it (`#board` selects the board-wide scene).
 - Checked in Edge (headless screenshots, see CLAUDE.md): the demo board, a stitched layer change, refboard
-  SPI_SCK (route model and the 740 MHz board-wide model) and its U503 hot loop. Page sizes 0.1–1.3 MB, built in
+  SPI_SCK (route model and the 740 MHz board-wide model) and its U47 hot loop. Page sizes 0.1–1.3 MB, built in
   0.4–1.6 s.
 
 ## HTML report (`report/html.py`)
@@ -2766,7 +2768,7 @@ a History tab with a comparison (and the CLI).
   settles it; the fresh solve then agrees to 0.5 K. Validation: linear case (α = 0, fixed h, no radiation) gives
   exactly 2x the current for 4x the rise; a fresh solve at the found current hits the limit; the cross term
   against copper_heat. On refboard (assumed 4 mΩ / 5 mΩ) a stage's capacity is ill-conditioned when the
-  other stage alone keeps a part near the limit (SW1: 1.1 A at draft, 0 A at normal: Q303 at 105 vs 107.8 °C
+  other stage alone keeps a part near the limit (SW1: 1.1 A at draft, 0 A at normal: Q43 at 105 vs 107.8 °C
   with SW1 off); the "all power stages" row is the meaningful number there: 44 % of both loads at normal
   quality, confirmed by a fresh solve to 0.01 K.
 - **Out of memory in parallel** (`simulate.run_parallel`): a solve that raises MemoryError beside others is
@@ -2892,13 +2894,13 @@ a History tab with a comparison (and the CLI).
   selected nets, lit; pours by the plane rule) and `stages_highlight` (the stages' parts plus the copper of their
   whole power flow, lit, from `power.stage_power_nets`; never ground).
   Issues named after no stage (2026-11-01, branch `issues-tab`; `tools/dev/issue_zoom_check.py RUN_DIR` lists what
-  each issue of a kept run would select): an interleaved group's issues (`interleave` = the group's name, U303)
+  each issue of a kept run would select): an interleaved group's issues (`interleave` = the group's name, U43)
   show every member stage's items (`_interleaved`); keys with `:dc:` / `:via:` (the combined DC view "all power
   stages" among them) go to `_spot`, the copper at the issue's location or the via within 1 mm; `_lit_nets` lights
   their nets. The Issues tab sorts by any column header (stable, the # numbers kept; severity errors first; ui.json
   `issues_sort`) and filters with its Show checks tick list (ui.json `issues_hidden`).
-- **Series pass FETs** (`detect.pass_switches`): a surge stopper's or reverse-polarity FET (Q601 between J101's
-  V_BATT and +VDC on refboard) has the default `open` model, so the connector search (`input_path`
+- **Series pass FETs** (`detect.pass_switches`): a surge stopper's or reverse-polarity FET (Q45 between J42's
+  V_SUPPLY and +VDC on refboard) has the default `open` model, so the connector search (`input_path`
   crosses only short/resistor/inductor/ferrite models) stopped at it. A FET with a gate pin, drain and source on
   two nets that are neither ground nor an inductor's (switching FETs always touch their switch node's inductor)
   is a pass switch. `_connector_for` searches again with those taken as closed (`_closed`: a config copy with
@@ -2910,9 +2912,9 @@ a History tab with a comparison (and the CLI).
   inductor's far side, the output path to the output connector (`input_path` through shunts, ferrites, 0R),
   the output return and ground, each with its role. `detect_nets` always skips them for the settings' stages
   (callers add the stages just detected through `skip=`), and `suggest_net` refuses them with the role.
-  Found on refboard: `Net-(U302-Vs+)` (L301 to the 8 mΩ shunts, a ZXCT1107's Vs+ input on it) was
+  Found on refboard: `Net-(U42-Vs+)` (L41 to the 8 mΩ shunts, a ZXCT1107's Vs+ input on it) was
   detected as a signal before. For an integrated stage, `switch_inductor` takes the IC's SW/LX pin net first:
-  the LT3970's V_OUT pin also shares L503 (from the +5V side), and "+5V" sorted before the SW net. `ui/listsel.SelectableRows` gives both tables multi-select, Delete/Ctrl+A, and sends the
+  the LT3970's V_OUT pin also shares L44 (from the +5V side), and "+5V" sorted before the SW net. `ui/listsel.SelectableRows` gives both tables multi-select, Delete/Ctrl+A, and sends the
   selected rows once the selection has not changed for `SHOW_SETTLE_MS` (300 ms, a restarted `wx.CallLater`; a
   Shift-click sends one event per row). Since 2026-10-17: the user saw the window lag clicking through the
   Converters tab in KiCad; every row passed over was shown (KiCad selected, highlighted and zoomed each), and
@@ -2941,7 +2943,7 @@ a History tab with a comparison (and the CLI).
 - **Unusual values** (`settings.implausible`, `rules/checks._unusual_values`): a converter's or bridge's value
   outside the usual range for its kind (c_oss, rise_time, f_sw, dcr ...; once found as the user's c_oss of 482 F,
   which made the ringing 0 Hz) is the info issue `unusual_value`, with what to write if a unit is missing. Until
-  2026-10-10 `validate` refused such values and so blocked Simulate; refboard's L503 (DCR field 1330 mΩ
+  2026-10-10 `validate` refused such values and so blocked Simulate; refboard's L44 (DCR field 1330 mΩ
   = 1.33 Ω, a real value) was refused that way. The user: "Remove the limits, if the user decides thats the value,
   it's the value". So nothing blocks a run; a schematic field outside `Param.lo … hi` is used too, with a note.
 - **Parts tab follows KiCad's selection** (`MainFrame._follow_kicad_selection`, `Session.selected_parts`,
@@ -3383,7 +3385,7 @@ the other powerful pc to do all the computation"; Windows 11 Pro server, local n
     colour; then arrow widths by current density on the board (the user found them more useful than contours);
   - the expected input current from an energy balance with the parts' losses, shown beside the connector;
   - a lumped part spread over its whole pads (up to 8 parallel branches of n·Z per side): one node per side
-    crowded Q601's current into one point and overstated the DC density (input path peak 113 → 63 A/mm²);
+    crowded Q45's current into one point and overstated the DC density (input path peak 113 → 63 A/mm²);
   - every stage's DC paths on one whole-board model and their currents added ("the currents are not added
     together"): the DC checks run on the total, since the copper carries all loads at once; the per-stage views
     stay. A whole-board heatmap for the other views was parked by the user.

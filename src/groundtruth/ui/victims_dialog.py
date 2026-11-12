@@ -33,7 +33,7 @@ class VictimsDialog(wx.Dialog):
 
         self.filter = wx.SearchCtrl(self)
         self.filter.ShowCancelButton(True)
-        self.filter.SetDescriptiveText("filter, e.g. RST or /CPU/")
+        self.filter.SetDescriptiveText("filter, e.g. RST or /MCU/")
         self.filter.Bind(wx.EVT_TEXT, lambda e: self._fill_nets())
         self.filter.Bind(wx.EVT_SEARCHCTRL_CANCEL_BTN, lambda e: (self.filter.SetValue(""), self._fill_nets()))
         self.nets = wx.ListBox(self, style=wx.LB_EXTENDED | wx.LB_NEEDED_SB, size=self.FromDIP(wx.Size(280, 340)))

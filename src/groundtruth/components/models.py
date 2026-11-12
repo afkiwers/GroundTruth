@@ -180,7 +180,7 @@ class ComponentModel:
         corner f_c, as in amp_gain) the feedback divides it by 1 + Aβ, A = GBW/jf, so Z_out = z_out·jf/(jf + f_c)
         [Franco 2015]: far below z_out up to f_c, inductive, z_out above it. Without a loop it is used as given;
         without z_out, AMP_Z_OUT flat. (Before 2026-10-21 z_out was taken as flat at every frequency: refboard's
-        TLV6001 followers put 2.3 kΩ in series with R303 and moved the ADC filter's corner from 451 to 303 Hz.)"""
+        TLV6001 followers put 2.3 kΩ in series with R41 and moved the ADC filter's corner from 451 to 303 Hz.)"""
         zo = self.params.get("z_out")
         if not zo:
             return complex(AMP_Z_OUT)

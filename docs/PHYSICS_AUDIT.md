@@ -323,7 +323,7 @@ first. A 100 mm track of 0.05 or 0.1 mm used it up 70 mm along: the last 30 mm k
 mm) and 5.4 % (0.1 mm) cool there, while the note estimated "up to 2.1 K" (it was 8 K). The tests' points (the
 middle) are in the refined part. Refining only the hot blocks instead of each with its eight neighbours covers the
 whole track in the same budget at the same accuracy there, but on refboard it read the hottest parts 1.5-3 K cooler
-than fine quality (Q303 122.7 against 126.0 °C; the eight neighbours resolve a FET's heat spreading into its pour), so
+than fine quality (Q43 122.7 against 126.0 °C; the eight neighbours resolve a FET's heat spreading into its pour), so
 the planner is unchanged: a board with long narrow hot tracks needs fine quality (it has the note).
 
 **Heat beside the copper (ISSUE-22, fixed).** The DC grid gives a cell at the copper's edge a node when one of its
@@ -526,15 +526,15 @@ TW-12).
 
 | Stage | Path | `main` | now | |
 |---|---|---|---|---|
-| conv1 | switch node → L301 | 0.297 | 0.291 | −1.9 %: the widths −3.9 %, the inductor's 4.9 A p-p ripple +2.0 % (its loss share on 10 A) |
-| conv1 | input J101.2 → Q301 | 9.253 | 9.218 | −0.4 % |
-| conv1 | output L301 → J104.2 | 5.662 | 5.628 | −0.6 % |
-| conv1 | ground J104.1 → Q302 + J101.1 | 0.223 | 0.213 | −4.5 % |
-| conv1 | hot loop C327+C332+C322… ↔ Q301/Q302 | – | 0.641 | new: 5.0 A RMS, 16.0 mW |
-| conv2 | output L302 → J106.2 | 5.674 | 5.650 | −0.4 % |
+| conv1 | switch node → L41 | 0.297 | 0.291 | −1.9 %: the widths −3.9 %, the inductor's 4.9 A p-p ripple +2.0 % (its loss share on 10 A) |
+| conv1 | input J42.2 → Q41 | 9.253 | 9.218 | −0.4 % |
+| conv1 | output L41 → J43.2 | 5.662 | 5.628 | −0.6 % |
+| conv1 | ground J43.1 → Q42 + J42.1 | 0.223 | 0.213 | −4.5 % |
+| conv1 | hot loop C48+C49+C45… ↔ Q41/Q42 | – | 0.641 | new: 5.0 A RMS, 16.0 mW |
+| conv2 | output L42 → J44.2 | 5.674 | 5.650 | −0.4 % |
 | conv2 | hot loop | – | 0.629 | new: 2.9 A RMS, 5.4 mW |
-| conv3 | input J101.2 → U502 | 22.770 | 22.204 | −2.5 % |
-| conv4 | switch node → L503 | 2.104 | 2.620 | +24.5 %: the loss-equivalent R (loss = R·I²) with the inductor's ripple: 0.18 A p-p on 0.1 A, I²·(1 + ΔI²/(12 I²)) = ×1.26 |
+| conv3 | input J42.2 → U46 | 22.770 | 22.204 | −2.5 % |
+| conv4 | switch node → L44 | 2.104 | 2.620 | +24.5 %: the loss-equivalent R (loss = R·I²) with the inductor's ripple: 0.18 A p-p on 0.1 A, I²·(1 + ΔI²/(12 I²)) = ×1.26 |
 
 The widths measured on the copper move the big paths by under 1 % and the short, wide ones (the ground paths, a
 fraction of a milliohm, many vias and pads) by 2-5 %; the GaN stages' sustained densities by −4 to +3 %, their
@@ -544,18 +544,18 @@ tracks' entries into pads); 13,600 of its 235,162 nodes (5.8 %) lie just outside
 put on it (ISSUE-22).
 
 **Thermal** (`tools/dev/dc_thermal_summary.py`, the same settings): hottest copper 124.27 → 124.54 °C (F.Cu,
-(139.34, 83.69), at Q303); copper heat at 20 °C 537.1 → 557.5 mW (+20.4 mW: the two GaN stages' hot loops 21.4 mW,
+(139.34, 83.69), at Q43); copper heat at 20 °C 537.1 → 557.5 mW (+20.4 mW: the two GaN stages' hot loops 21.4 mW,
 the via barrels and the inductors' ripple, less the widths' −1 %); at temperature 670.4 → 697.3 mW; the parts
 6.307 W in both. The combined DC view's loss now equals Thermal's heat (557.6 against 557.5 mW; `main`: 559.1
 against 537.1, the view weighting whole cells and leaving out the vias). The paths at temperature: copper +20 to
 +29 % (each path's copper at its heat-weighted 71-95 °C); the paths' totals less where a part's resistance is in
-them (the dc paths' series parts stay as they were): conv1's output L301 → J104.2 5.628 → 6.035 mΩ at 83.8 °C, its
-drop 56.3 → 60.4 mV and loss 563 → 604 mW; its input J101.2 → Q301 9.218 → 9.827 mΩ at 77.1 °C (drop 47.5 → 50.6 mV);
+them (the dc paths' series parts stay as they were): conv1's output L41 → J43.2 5.628 → 6.035 mΩ at 83.8 °C, its
+drop 56.3 → 60.4 mV and loss 563 → 604 mW; its input J42.2 → Q41 9.218 → 9.827 mΩ at 77.1 °C (drop 47.5 → 50.6 mV);
 its switch node 0.291 → 0.377 mΩ at 95.0 °C (`refboard_dc_thermal_final.txt`).
 
 **Emission.** The converters' conducted margins within 0.05 dB and their radiated worst within 0.21 dB. The nets'
 worst margins below 1 GHz within ±0.8 dB; above 1 GHz, where a board-wide plane resonance sets them, SPI_SCK
-+1.5 dB, SPI_MISO +3.8, SPI_MOSI +3.0 and Net-(U301--) +8.9 dB (its worst resonance moved from 1.59 to 1.29 GHz;
++1.5 dB, SPI_MISO +3.8, SPI_MOSI +3.0 and Net-(U41--) +8.9 dB (its worst resonance moved from 1.59 to 1.29 GHz;
 this net's settings describe a signal it does not carry, NEXT_STEPS item 2), and one plane_resonance issue fewer
 (9 → 8). Is that the model or the grid? The four nets alone at 1x and 2x, both trees (`out/audit5/run_converge.sh`;
 the nets alone at 1x reproduce the full run's figures exactly):
@@ -565,7 +565,7 @@ the nets alone at 1x reproduce the full run's figures exactly):
 | SPI_SCK | 11.67 dB @ 0.94 GHz | 13.20 @ 1.22 | 18.81 @ 1.14 | 18.40 @ 0.74 |
 | SPI_MISO | 15.07 @ 1.25 | 18.91 @ 1.25 | 15.54 @ 1.21 | 14.19 @ 1.21 |
 | SPI_MOSI | 15.69 @ 1.23 | 18.66 @ 1.25 | 18.11 @ 1.21 | 16.60 @ 1.21 |
-| Net-(U301--) | 22.12 @ 1.59 | 31.03 @ 1.29 | 47.95 @ 1.29 | 46.62 @ 1.29 |
+| Net-(U41--) | 22.12 @ 1.59 | 31.03 @ 1.29 | 47.95 @ 1.29 | 46.62 @ 1.29 |
 
 At 2x the two trees agree within 0.4-1.5 dB, while each tree's 1x is 0.5-26 dB from its own 2x: above 1 GHz the 1x
 grid has not converged in either (the grid note asks for 4x there, SP-19), and the 1x shifts between the trees are

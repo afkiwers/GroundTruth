@@ -88,7 +88,7 @@ class Response:
 
 def response_label(r, owner: str) -> str:
     """A response's short name in a view of `owner`'s: its name without the owner's prefix ("receiver / source"), a
-    response of another part kept whole ("U301: output")."""
+    response of another part kept whole ("U41: output")."""
     return r.name[len(owner) + 2:] if r.name.startswith(owner + ": ") else r.name
 
 

@@ -7,7 +7,7 @@ have to guess it from part names, pin names and connectivity.
     GT = conv1_in, conv2_in   one connector, two converters   GT = ignore    never a power-stage part
 
 Signal labels (the Nets tab): a net detection would take for a supply (an ADC input measuring a rail, named
-ADC_I_RAIL_1), or one whose driver it guesses wrong, is marked on a symbol:
+ADC_SENSE_1), or one whose driver it guesses wrong, is marked on a symbol:
 
     GT = sig              every net of this 2-pin part (a filter resistor, a test point) is a signal
     GT = sig:9            the net on pin 9 (pad number or pin name, sig:PA3) is a signal
@@ -129,7 +129,7 @@ HELP = {
         "Supplies, grounds and power-stage nodes are never listed here: converters and motor bridges have their own "
         "tabs (their parts can be labelled with a GT field, see those tabs). Any other net: select it in KiCad and "
         "press Add (the plugin), or Add with the net's name.\n"
-        "A signal that looks like a supply (ADC_I_RAIL_1: a name with RAIL, VIN …), or one whose driver Detect "
+        "A signal that looks like a supply (ADC_SENSE_1: a name with RAIL, VIN …), or one whose driver Detect "
         "guesses wrong, can be labelled in the schematic: a field named GT on a symbol with\n"
         "  sig          every net of this 2-pin part (a filter resistor) is a signal\n"
         "  sig:9        the net on pin 9 (pad number or pin name, sig:PA3) is a signal\n"
@@ -606,11 +606,11 @@ _STAGE_IN_NAME = re.compile(r"conv([a-z0-9.+]*)$", re.I)            # "buck conv
 
 
 def follow_labels(board: Board, converters: list) -> tuple[list, list[str]]:
-    """Converters whose switches no longer sit where their roles need them (the board was re-annotated: U502
-    became U501) take the parts their GT labels now name (the user's refboard after 2026-10-23: "I can't simulate the
+    """Converters whose switches no longer sit where their roles need them (the board was re-annotated: U46
+    became U45) take the parts their GT labels now name (the user's refboard after 2026-10-23: "I can't simulate the
     converters anymore"). A converter is matched to the labelled stage by the id in its name ("buck conv3" ->
     conv3_*); one whose parts still fit, or without a labelled stage, is left as it is; the new parts must fit too.
-    Returns (the converters, one note per converter changed: "buck conv3: U502 → U501")."""
+    Returns (the converters, one note per converter changed: "buck conv3: U46 → U45")."""
     from dataclasses import replace
     stages = {st.ident.lower(): st for st in board_tags(board).of("conv")}
     nets = set(board.nets)
@@ -636,8 +636,8 @@ def follow_labels(board: Board, converters: list) -> tuple[list, list[str]]:
         if old_l and st.refs("l") and old_l.group(1) != st.refs("l")[0]:
             moved[old_l.group(1)] = st.refs("l")[0]
         note = c.note or ""
-        if moved:                                       # every old reference at once, so U502 -> U501 and
-            note = re.sub(r"\b(" + "|".join(map(re.escape, moved)) + r")\b",   # U503 -> U502 don't chain
+        if moved:                                       # every old reference at once, so U46 -> U45 and
+            note = re.sub(r"\b(" + "|".join(map(re.escape, moved)) + r")\b",   # U47 -> U46 don't chain
                           lambda k: moved[k.group(1)], note)
         if new.switch_node != c.switch_node:
             note = note.replace(c.switch_node or "", new.switch_node)

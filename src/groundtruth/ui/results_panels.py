@@ -1127,7 +1127,7 @@ class ResultsPanel(wx.Panel):
         shown."""
         self.board, self.routes, self.issues = board, routes, issues
         # a power stage's (or bridge leg's) main view says what it is beside its DC and Bode views (the user: "should
-        # Q301->Q302 have some comment behind it like (EMI results)?"): the hot loop's current and its emission
+        # Q41->Q42 have some comment behind it like (EMI results)?"): the hot loop's current and its emission
         _set_items(self.choice, [r.label() if r.kind in ("thermal", "bridge", "pdn", "bode", "efficiency")
                                  else f"{r.net}  RMS currents" if getattr(r, "rms_of", None)
                                  else f"{r.net}  DC {r.view_of}" if getattr(r, "view_of", None)

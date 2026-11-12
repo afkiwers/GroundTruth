@@ -170,6 +170,7 @@ class ConverterSpec:
     qg: Optional[float] = None            # C, total gate charge of one FET (its Qg field); none: no gate-drive loss
     v_gate: Optional[float] = None        # V, the gate-drive voltage (default EFF_V_GATE, assumed)
     iq: Optional[float] = None            # A, the controller's supply current from the input (none: left out)
+    rds_on_tc: Optional[float] = None     # per K: R_DS(on)'s rise with temperature for Thermal (none: 0.005) [A108]
     # the inductor's core loss (thermal.core_loss [A98]): the loss at one point of the maker's data (its tool or
     # curves), scaled to the stage's frequency and ripple by the Steinmetz exponents. core_loss alone: the loss at
     # this operating point
@@ -400,7 +401,7 @@ class AnalysisSettings:
     margin_mm: float = 10.0
     solve_points: int = 4
     max_nodes: int = 100_000
-    via_plating_um: float = 25.0          # via barrel plating (current density, IPC-2221 capacity)
+    via_plating_um: float = 25.0          # via barrel plating (resistance, heat, density, IPC-2221 capacity) [A3]
     limit_class: str = "B"
     distance_m: Optional[float] = None    # None = the limit's own (CISPR 32: 10 m < 1 GHz, 3 m above)
     # a radiated limit of the user's instead of CISPR 32 (emi/radiation.RadiatedLimit: MIL-STD-461 RE102 for the
@@ -1489,6 +1490,7 @@ def config_from_data(data: Any) -> Config:
                 qg=_opt(c.get("qg"), f"{where}.qg", "C"),
                 v_gate=_opt(c.get("v_gate"), f"{where}.v_gate", "V"),
                 iq=_opt(c.get("iq"), f"{where}.iq", "A"),
+                rds_on_tc=_opt(c.get("rds_on_tc"), f"{where}.rds_on_tc"),
                 core_loss=_opt(c.get("core_loss"), f"{where}.core_loss", "W"),
                 core_loss_f=_opt(c.get("core_loss_f"), f"{where}.core_loss_f", "Hz"),
                 core_loss_di=_opt(c.get("core_loss_di"), f"{where}.core_loss_di", "A"),
@@ -1531,6 +1533,8 @@ def config_from_data(data: Any) -> Config:
             problems.append("dead_rise, dead_fall (dead_time), v_sd and q_rr must not be negative")
         if any(v is not None and v < 0 for v in (spec.qg, spec.v_gate, spec.iq)):
             problems.append("qg, v_gate and iq must not be negative")
+        if spec.rds_on_tc is not None and not 0 <= spec.rds_on_tc <= 0.02:
+            problems.append("rds_on_tc is a share per kelvin, 0 to 0.02 (0.005 = 0.5 %/K)")
         if spec.core_loss is not None and spec.core_loss < 0:
             problems.append("core_loss must not be negative")
         if any(v is not None and v <= 0 for v in (spec.core_loss_f, spec.core_loss_di)):
@@ -1836,7 +1840,7 @@ class SettingsFile:
                 updated.append(ref)
             # The symbol says the part is an op-amp stage (GT amp_in / amp_out labels, or a Gain field) while its
             # model is still the default 'open', from before it said so: it becomes that amplifier. (refboard's
-            # U301 / U305 got their labels after the settings were made, then a new value: 'open' with "check model",
+            # U41 / U44 got their labels after the settings were made, then a new value: 'open' with "check model",
             # and the ADC paths could not pass them.) A logic buffer the same (its buf labels or threshold fields).
             if entry.get("model") == "open" and suggestion.kind in ("amplifier", "buffer"):
                 for k in [k for k in entry if k not in ("value", "footprint", "tht")]:
@@ -2004,6 +2008,8 @@ class SettingsFile:
                 d["v_sd"] = c.v_sd
             if c.q_rr is not None:
                 d["q_rr"] = format_si(c.q_rr, "C")
+            if c.rds_on_tc is not None:
+                d["rds_on_tc"] = c.rds_on_tc
             for key, unit in (("qg", "C"), ("v_gate", ""), ("iq", "A"), ("core_loss", "W"), ("core_loss_f", "Hz"),
                               ("core_loss_di", ""), ("core_alpha", ""), ("core_beta", "")):
                 if getattr(c, key) is not None:
@@ -2465,7 +2471,7 @@ def _natural_key(s: str):
 
 
 def guess_reference_nets(board: Board) -> list[str]:
-    """The board's ground nets by name (GND, AGND, PGND, GND_ISO, VSS, 0V ...; only the last part of a
+    """The board's ground nets by name (GND, AGND, PGND, GND2, VSS, 0V ...; only the last part of a
     hierarchical name is looked at), or ["GND"] when none matches."""
     nets = [n for n in board.nets if GND_PATTERN.search(n.split("/")[-1])]
     return nets or ["GND"]
@@ -2524,7 +2530,7 @@ def implausible(c: Union[ConverterSpec, BridgeSpec]) -> list[str]:
 def missing_reference_nets(config: Config, board: Board) -> tuple[list[str], list[str]]:
     """(the settings' reference nets the board no longer has, the list to keep instead): those still on the board,
     or, when none is, the ones guessed from the board (guess_reference_nets), so the analyses keep a return plane.
-    The plugin offers to write it (the user, 2026-11-01, after deleting GND_ISO from a board: "offer an option to
+    The plugin offers to write it (the user, 2026-11-01, after deleting GND2 from a board: "offer an option to
     remove it automatically")."""
     nets = set(board.nets)
     gone = [r for r in config.reference_nets if r not in nets]

@@ -135,7 +135,7 @@ def opamp_channels(fp: Footprint, model) -> list[OpAmpChannel]:
         return found[0] if len(found) == 1 else None
     if groups:
         # the labels name each stage's input and output; IN− by its own label, else by its pin name (refboard's
-        # TLV6001 U301: amp_in:1, amp_out:4, pin 3 named "−"; a quad has four, so its channels need amp_inv)
+        # TLV6001 U41: amp_in:1, amp_out:4, pin 3 named "−"; a quad has four, so its channels need amp_inv)
         out = []
         for k, g in enumerate(groups):
             a, b = pad(g["in"]), pad(g["out"])

@@ -32,7 +32,7 @@ def test_cispr_25_classes_step_up_from_class_5_per_band():
     the steps TI WEBENCH's curves show too (its peak lines: LW 70/80/90/100/110 dBµV for classes 5 to 1)."""
     for k in range(1, 6):
         bands = band_limits("cispr25", str(k))
-        for (lo, hi, v, _), (lo5, hi5, v5, step) in zip(bands, CISPR25_AV5):
+        for (lo, hi, v, _), (lo5, hi5, v5, step, _up) in zip(bands, CISPR25_AV5):
             assert (lo, hi) == (lo5, hi5) and v == v5 + (5 - k) * step
     assert band_limits("cispr25", "1")[0][2] == 90.0 and band_limits("cispr25", "5")[0][2] == 50.0
     assert np.isnan(limit_line([3e6], "cispr25", "5")[0])     # between MW and SW: no limit
@@ -116,7 +116,7 @@ def test_a_stages_class_moves_its_limit_by_the_class_steps_and_nothing_else(tmp_
     rows5 = {round(x["f"]): x for x in r5.conducted}
     assert r3.conducted and len(rows5) == len(r3.conducted)
     assert any(row["limit_dbuv"] is not None for row in r3.conducted)
-    steps = {(lo, hi): step for lo, hi, _, step in CISPR25_AV5}
+    steps = {(lo, hi): step for lo, hi, _, step, _up in CISPR25_AV5}
     for row in r3.conducted:
         other = rows5[round(row["f"])]
         assert row["v_dbuv"] == pytest.approx(other["v_dbuv"], abs=1e-6)
@@ -167,3 +167,16 @@ def test_the_plotted_limit_spans_each_band_not_only_its_harmonics():
     ax2 = Figure().add_subplot(111)
     _conducted_limit(ax2, NS(), f, lim)                        # an old result: through the harmonics
     assert np.allclose(np.asarray(ax2.lines[0].get_xdata(), float), f)
+
+
+def test_cispr25_peak_limits_are_20_db_over_the_average_ones_except_tv_band_i():
+    """CISPR 25's voltage method, class 5, peak detector: 70, 54, 53, 44, 44, 38, 38 dBµV in LW, MW, SW, CB, VHF,
+    VHF and FM (20 dB over the average limits), and 34 dBµV in TV band I (41-88 MHz), 10 dB over its 24 [A10]
+    (audit round 12, R-1: the chart's peak line had 44 there). Every class keeps the band's own distance."""
+    peak = {(lo, hi): v for lo, hi, v, _ in band_limits("cispr25", "5", "peak")}
+    assert peak == {(0.15e6, 0.30e6): 70.0, (0.53e6, 1.8e6): 54.0, (5.9e6, 6.2e6): 53.0, (26e6, 28e6): 44.0,
+                    (30e6, 54e6): 44.0, (41e6, 88e6): 34.0, (68e6, 87e6): 38.0, (76e6, 108e6): 38.0}
+    for cls in ("1", "3"):
+        av = {(lo, hi): v for lo, hi, v, _ in band_limits("cispr25", cls)}
+        pk = {(lo, hi): v for lo, hi, v, _ in band_limits("cispr25", cls, "peak")}
+        assert {b: pk[b] - av[b] for b in av} == {b: (10.0 if b == (41e6, 88e6) else 20.0) for b in av}

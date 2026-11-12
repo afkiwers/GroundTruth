@@ -1,5 +1,5 @@
 """A copy of a board with one stage's vias mirrored onto its mirrored twin where the twin has none: for a pair of
-power stages laid out as mirror images (refboard's conv1 / conv2 about the controller U303, x = 141.84 mm),
+power stages laid out as mirror images (refboard's conv1 / conv2 about the controller U43, x = 141.84 mm),
 so the twin gets the same ground (or other) vias. Writes only OUT, never next to the board.
 
     .venv/Scripts/python tools/dev/mirror_vias.py BOARD OUT.kicad_pcb --axis-x 141.84 --region 142,86,168,95

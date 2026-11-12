@@ -264,7 +264,7 @@ SERIES_MAX_OHM = 10.0           # a resistor up to this joins two nets at (nearl
 def _through_series_parts(board: Board, config, out: dict, skip: set = frozenset()):
     """Nets joined by a series part with (nearly) no drop take the voltage of a known net they reach: shorts, 0R
     and resistors up to SERIES_MAX_OHM (current shunts, a surge stopper's pass FET modelled as one), inductors and
-    ferrites. refboard's V_BATT (+VDC through the surge stopper Q601) and its current-sense amplifiers'
+    ferrites. refboard's V_SUPPLY (+VDC through the surge stopper Q45) and its current-sense amplifiers'
     supply nets (+VDC through milliohm shunts) were taken as unknown, 0 V, next to +VDC: false clearance errors.
     `skip`: the power stages' own inductors (a switch node's peak is not its output's voltage)."""
     from .detect import GATE_FN, KELVIN_FN
@@ -667,7 +667,7 @@ def after_simulate(board: Board, config, result) -> list:
         model = config.model_for(name)
         if fp is None or model is None or model.kind != "resistor":
             continue
-        # a resistor model on another part (a pass FET's R_DS(on), Q601 on refboard) has no power rating
+        # a resistor model on another part (a pass FET's R_DS(on), Q45 on refboard) has no power rating
         if not (re.match(r"R\d", fp.reference) or "resistor" in f"{fp.lib_id}".lower()):
             continue
         rating, source = resistor_rating(fp)

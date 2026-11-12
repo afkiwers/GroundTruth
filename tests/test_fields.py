@@ -59,7 +59,7 @@ def test_a_part_reads_its_fields_with_the_assumed_unit_even_outside_the_usual_ra
 
 
 def test_an_unusual_value_never_blocks_simulate_and_is_listed_as_info(tmp_path):
-    """refboard's L503 (33 µH) has DCR 1330 mΩ = 1.33 Ω, above the usual range of a power inductor's DCR:
+    """refboard's L44 (33 µH) has DCR 1330 mΩ = 1.33 Ω, above the usual range of a power inductor's DCR:
     it is the user's value, so it is used (no settings error that blocks Simulate) and listed as an info issue
     that says what to write if a unit is missing."""
     from groundtruth.config.settings import validate

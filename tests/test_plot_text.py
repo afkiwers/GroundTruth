@@ -398,7 +398,7 @@ def test_the_usual_characters_are_measured_in_a_worker_before_the_page_needs_the
     plots._ADVANCE.clear()
     plots.warm_text()
     assert {(c, b) for c in plots.WARM_CHARS for b in (False, True)} <= set(plots._ADVANCE)
-    text = "SPI_SCK  U1102.12→U1103.6  return current @ 140 MHz (▲ via / ■ part, µΩ ≈ 2×)"
+    text = "SPI_SCK  U53.12→U54.6  return current @ 140 MHz (▲ via / ■ part, µΩ ≈ 2×)"
     warm = plots._width_in(text, 10)
     plots._ADVANCE.clear()
     assert plots._width_in(text, 10) == warm > 0
@@ -411,14 +411,14 @@ def test_each_view_of_a_power_stage_marks_only_its_own_issues():
     from groundtruth.report.plots import view_issues
     issue = lambda key, net="buck conv1": NS(net=net, key=key)                    # noqa: E731
     loop = issue("power:buck conv1:loop")
-    out_dc = issue("power:buck conv1:dc:output L301 → J104.2")
-    out_via = issue("power:buck conv1:via:output L301 → J104.2")
-    sw_dc = issue("power:buck conv1:dc:switch node → L301")
+    out_dc = issue("power:buck conv1:dc:output L41 → J43.2")
+    out_via = issue("power:buck conv1:via:output L41 → J43.2")
+    sw_dc = issue("power:buck conv1:dc:switch node → L41")
     other = issue("power:buck conv2:loop", net="buck conv2")
     issues = [loop, out_dc, out_via, sw_dc, other]
     assert view_issues(NS(net="buck conv1", view_of=None), issues) == [loop]
-    assert view_issues(NS(net="buck conv1", view_of="switch node → L301"), issues) == [sw_dc]
-    assert view_issues(NS(net="buck conv1", view_of="output L301 → J104.2"), issues) == [out_dc, out_via]
+    assert view_issues(NS(net="buck conv1", view_of="switch node → L41"), issues) == [sw_dc]
+    assert view_issues(NS(net="buck conv1", view_of="output L41 → J43.2"), issues) == [out_dc, out_via]
     assert view_issues(NS(net="SPI_SCK"), [issue("route:SPI_SCK:x", "SPI_SCK")])[0].net == "SPI_SCK"
 
 

@@ -75,9 +75,9 @@ def test_the_other_board_sits_above_with_its_nets_joined_by_the_pins(stacked):
 def test_stack_and_victims_settings():
     cfg = config_from_data({"stack": [{"name": "logic", "file": "logic.kicad_pcb", "gap": "3.2mm",
                                        "connectors": [["J7", "J1"]], "side": "above"}],
-                            "victims": {"nets": ["logic:/CPU/NRST"], "drive_ohms": "40k", "input_pf": "10pF"}})
+                            "victims": {"nets": ["logic:/MCU/NRST"], "drive_ohms": "40k", "input_pf": "10pF"}})
     assert cfg.stack[0].gap == pytest.approx(3.2) and cfg.stack[0].flip == "auto"
-    assert cfg.victims.nets == ["logic:/CPU/NRST"] and cfg.victims.drive_ohms == pytest.approx(40e3)
+    assert cfg.victims.nets == ["logic:/MCU/NRST"] and cfg.victims.drive_ohms == pytest.approx(40e3)
     assert cfg.victims.input_pf == pytest.approx(10.0)
     with pytest.raises(ConfigError) as e:
         config_from_data({"stack": [{"name": "x y", "gap": -1, "connectors": [["J7"]], "side": "left"}]})

@@ -163,7 +163,7 @@ the 10-90 % edge of the trapezoid whose harmonics drive the emission estimate (e
 They are not a sampling rate, a sampling period, an acquisition or a conversion time: GroundTruth does not model the
 ADC's sampling (its receiver is a load C, 5 pF by default). 1 kHz is the user's max_bandwidth for the path (the
 measured current's band); 2 µs is read off the ZXCT1107's typical pulse responses at R_GAIN 10 kΩ (DS35033 p. 8,
-measured on the ZXCT1110 test circuit), refboard's R304 / R334. A 1 kHz trapezoid with 2 µs edges has its spectrum
+measured on the ZXCT1110 test circuit), refboard's R42 / R59. A 1 kHz trapezoid with 2 µs edges has its spectrum
 corner at 1/(π·2 µs) = 159 kHz, far below CISPR's 30 MHz start: consistent with the run's "no radiated worst case".
 Status: verified with limitations (typical data, read from a plot; the ADC itself not modelled) (AA-11).
 
@@ -212,9 +212,9 @@ comparisons, 0 FAIL** (DC bias 20, MNA 26, loop 11, transfer 2, step 6, bandwidt
 branch: 1117 passed, 1 skipped, 0 failed.
 
 Refboard (refboard, the user's settings and the estimated Cbias curves, read only; `tools/dev/cap_bias_dump.py`, main
-fa9fa4f in a worktree against the branch): of 89 capacitors with a curve, one moved by more than 0.5 V: C515
+fa9fa4f in a worktree against the branch): of 89 capacitors with a curve, one moved by more than 0.5 V: C51
 (the LM5008's feedback network, fed from the 0-55 V switch node through resistors) 55 V → 52.5 V (−2.48 … 52.5 V),
-5.21 → 5.52 nF. C304 / C342 stay at ≤ 3.3 V (99.3 nF, now set by U1102's ADC pins rail to rail); U303's soft-start,
+5.21 → 5.52 nF. C41 / C50 stay at ≤ 3.3 V (99.3 nF, now set by U53's ADC pins rail to rail); U43's soft-start,
 compensation and DRVCC capacitors stay unknown (a 55 V controller's pins are not sources). The board has no op-amp
 feedback capacitor, divider capacitor or ± rail with a curve, so AA-1 / AA-2 change little there; their benchmarks
 are the circuits where they matter.

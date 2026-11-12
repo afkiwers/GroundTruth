@@ -1,7 +1,7 @@
 """A stack of boards as one board model: a logic board above the power board, joined by board-to-board connectors.
 
 The other board's copper goes where it sits: its layers at their height above (or below) this board, air in the gap
-between the facing surfaces. Its parts and nets get its name as prefix (logic:U8, logic:/CPU/NRST), except the nets
+between the facing surfaces. Its parts and nets get its name as prefix (logic:U8, logic:/MCU/NRST), except the nets
 a connector pin joins to one of ours: those take our name, since they are one net. Each joined pin becomes a vertical
 conductor through the gap, from the other board's pad to ours (its inductance is the pin's), so a ground that crosses
 on a few pins shows the voltage across them.

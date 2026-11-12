@@ -55,7 +55,7 @@ CONNECTOR_PREFIXES = ("J", "P", "X", "CN", "CON")
 
 
 def rail_voltage(name: str) -> Optional[float]:
-    """A rail's voltage from its name: "+3V3" 3.3, "+12V" 12, "VDD_1V8" 1.8, "/CPU/+5V_ISO" 5; None without one."""
+    """A rail's voltage from its name: "+3V3" 3.3, "+12V" 12, "VDD_1V8" 1.8, "/MCU/+5V_ISO" 5; None without one."""
     m = re.search(r"(\d+)V(\d*)", name.upper().rsplit("/", 1)[-1])
     if not m:
         return None
@@ -63,7 +63,7 @@ def rail_voltage(name: str) -> Optional[float]:
 
 
 def _prefix(ref: str) -> str:
-    """A reference's letters ("U1102" -> "U")."""
+    """A reference's letters ("U53" -> "U")."""
     return re.match(r"[A-Za-z_]*", ref).group(0).upper()
 
 
@@ -74,7 +74,7 @@ def supply_parts(board: Board, rail: str, ground: str) -> list[tuple[Footprint, 
     typed = any(p.pin_type for fp in board.footprints for p in fp.pads)
     out = []
     for fp in board.footprints:
-        # connectors are not ICs to decouple, even with a power_in pin (refboard's Tag-Connect J1101)
+        # connectors are not ICs to decouple, even with a power_in pin (refboard's Tag-Connect J41)
         if fp.dnp or _prefix(fp.reference) in CONNECTOR_PREFIXES:
             continue
         on_rail = [p for p in fp.pads if p.net == rail]
@@ -271,7 +271,7 @@ def copper_pieces(st, plane) -> tuple[np.ndarray, dict]:
     """The model's pieces of copper joined by copper (grid strips, vias, tracks bridged, pins; not parts and not
     the planes' capacitance): a piece number per node, and per net the piece holding most of its nodes (its main
     copper). A pad landing elsewhere is cut off from its net in this model: a pad smaller than a cell whose thin
-    track the grid did not join (a QFN's 0.25 mm pads on a 0.86 mm whole-board grid: refboard's U203 read
+    track the grid did not join (a QFN's 0.25 mm pads on a 0.86 mm whole-board grid: refboard's U55 read
     1.7 MΩ at 1 MHz, the stray capacitance of its pads), or a real break in the copper."""
     from scipy.sparse import coo_matrix
     from scipy.sparse.csgraph import connected_components

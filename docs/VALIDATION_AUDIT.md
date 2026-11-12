@@ -421,7 +421,7 @@ The user: "continue with fixing the other issues as well a continue your audit",
   |---|---|---|---|
   | Line Z0, outer / inner | 52.7 / 54.5 Ω | 44.8 / 38.6 Ω | field-solved cut: 43.1-43.8 / 35.6-41.7 Ω |
   | Worst margin SPI_SCK / SPI_MISO / SPI_MOSI | +15.3 / +18.8 / +18.8 dB | +13.9 / +18.1 / +17.8 dB | +11.4 / +14.8 / +15.4 dB; with lossy path lines (round 4) +11.7 / +15.1 / +15.7 dB |
-  | Other nets' worst margins | – | within −0.7 to +0.6 dB of old | SW_CLK +32.8 → +40.5 dB; Net-(U301--) +45.7 → +22.1 and ADC_I_RAIL_1 +34.2 → +21.4 dB, a lossless line at a resonance: with the lines' loss (round 4) +30.1, ADC_I_RAIL_2 +33.6; the rest within −1.5 to +2.1 dB |
+  | Other nets' worst margins | – | within −0.7 to +0.6 dB of old | SW_CLK +32.8 → +40.5 dB; Net-(U41--) +45.7 → +22.1 and ADC_SENSE_1 +34.2 → +21.4 dB, a lossless line at a resonance: with the lines' loss (round 4) +30.1, ADC_SENSE_2 +33.6; the rest within −1.5 to +2.1 dB |
   | conv1 switch-node copper loss, sustained density | 19.5 mW, 28.5 A/mm² | 27.7 mW, 35.9 A/mm² | 29.7 mW, 37.4 A/mm² |
   | conv2 switch-node copper loss | 17.6 mW | 20.3 mW | 21.5 mW |
   | Hot-loop L, radiated and conducted margins, other DC paths | – | unchanged | hot loops +6 % (conv1 1.48 → 1.57 nH), margins within 0.2 dB, control loops unchanged |
@@ -445,7 +445,7 @@ The user: "Fix this" (inner-layer Z0 and solder mask), "Is that a bad thing?" (i
   solder mask), once per model (`simulate.line_cache`); the closed forms remain the fallback where no cut can be
   made. Test: the cut against a hand-built section within 1 % on In1.Cu and on B.Cu with its mask; the closed form
   differs by more. On refboard (read-only) the closed forms had read 3-4 % high on the outer layers
-  (43.0-43.6 Ω by the cut) and −7.5 to +8.3 % on the inner ones (35.6-41.7 Ω); one stretch (U301−) has no cut there
+  (43.0-43.6 Ω by the cut) and −7.5 to +8.3 % on the inner ones (35.6-41.7 Ω); one stretch (U41−) has no cut there
   and keeps the closed form.
 - **MIL-STD-461H** (17 April 2026, supersedes 461G; the full standard is in the downloads). Against 461G, for what
   the code uses: RE102-3 now has "Space and Helicopters" from 10 kHz, fixed wing external from 2 MHz in both
@@ -483,7 +483,7 @@ The user: "Fix this" (inner-layer Z0 and solder mask), "Is that a bad thing?" (i
     | 0.5-1 GHz | 2.7 (7.8) → 6.3 (17.2) dB | 1.1 (3.3) → 1.5 (2.7) dB |
     | 1-1.5 GHz | 7.0 (16.7) → 4.0 (8.0) dB | 5.3 (8.3) → 4.4 (7.0) dB |
 
-    The largest mode (F.Cu GND / In1 +3V3 at (119-121, 128-130) mm by C1105 / C1110) was at 1060 / 1100 / 1060 MHz
+    The largest mode (F.Cu GND / In1 +3V3 at (119-121, 128-130) mm by C54 / C55) was at 1060 / 1100 / 1060 MHz
     (139 / 61 / 53 mm²) and is at 940 / 1020 / 1020 MHz (113 / 69 / 78 mm²): 2x and 4x agree on it now, 1x places it
     8 % low, inside 0.5-1 GHz, hence that band's 1x-vs-2x number. Above 1 GHz 4x has a peak at 1260-1300 MHz that 2x
     has not. `grid_sensitive_note` now applies from 600 MHz (it was 1 GHz), so the mode is flagged at 1x too. The
@@ -514,26 +514,26 @@ the last digit or two.
 
   Below 1 GHz 4x is converged. Above it the differences keep shrinking but ~3 dB remain. 4x's peak at 1260-1300 MHz
   (45-52 mm²) is not at 8x (25-35 mm²): at 1280 MHz both grids excite the same mode, the +3V3 pour on F.Cu against
-  the +3V3 plane on In1 around (120-123, 123) mm through the same vias and C1104, with 11.6 vs 8.5 A/A of
+  the +3V3 plane on In1 around (120-123, 123) mm through the same vias and C53, with 11.6 vs 8.5 A/A of
   displacement current (`hot_1280_4x.log`, `hot_1280_8x.log`): one mode a few per cent apart in frequency, no
-  connection that exists on one grid only. The F.Cu/In1 mode by C1105/C1110 stays at 1020 MHz at 2x, 4x and 8x
+  connection that exists on one grid only. The F.Cu/In1 mode by C54/C55 stays at 1020 MHz at 2x, 4x and 8x
   (69 / 78 / 62 mm²). `grid_sensitive_note` now names 4x for a peak below 1 GHz (none from 4x on) and 8x above it
   (from 8x on it says the height is good to a few dB). 16x would need ~4x the nodes again, more than this
   machine's memory alongside the solve.
 - **ISSUE-5's remainder (line cuts).** `tools/dev/line_cut_check.py` on all 14 nets: one path fell back on the
-  closed forms, Net-(U301--) (1.8 mm of track: the middle of its longest track is in a pad's copper). `_line_of` now
+  closed forms, Net-(U41--) (1.8 mm of track: the middle of its longest track is in a pad's copper). `_line_of` now
   tries the longest track at its middle, then a quarter from either end, then the next two longest tracks
-  (`LINE_CUT_TRACKS`); U301- reads 43.8 Ω (closed form 44.8), and no path falls back. Test: a track that widens
+  (`LINE_CUT_TRACKS`); U41- reads 43.8 Ω (closed form 44.8), and no path falls back. Test: a track that widens
   into a pour of its own net at its middle reads the line of the same track without the pour within 1 %
   (`test_SP26_a_stretch_without_a_cut_at_its_middle_takes_one_further_along`; it fails on the old code).
-  Net-(U1001-VIB) reads 60.6 Ω against the closed form's 38.6 (In1.Cu): a cut that sees its real neighbourhood,
+  Net-(U51-VIB) reads 60.6 Ω against the closed form's 38.6 (In1.Cu): a cut that sees its real neighbourhood,
   not a fallback.
 - **Open items after round 4 (the user: "finish those").** Interleaving: CE101 combined per group (each stage's
   harmonics in the limit's range times its complex CE101 transfer; the limit at the stages' input current together),
   tested end to end on a 2 kHz pair (180°: the fundamental cancels, 2·f_sw +6.02 dB) and on two boosts (their
   ripple, the same). GPU: a model larger than 80 % of the device's free memory is solved on the CPU before any
   upload (`DeviceTooSmall`; test: a forced tiny device, the CPU's results). Path loss: the plane from Johnson's
-  spread (above). README: the safety figures (38 errors / 13 warnings, C601 over its rating, the switch nodes at
+  spread (above). README: the safety figures (38 errors / 13 warnings, C52 over its rating, the switch nodes at
   95.5 / 95.9 V of 100 V) and the PDN grids (0.86 vs 0.59 mm within 1-5 % at 100 MHz, margins within 0.4 dB) from the
   current board.
 - **SP-19 at 16x.** SPI_SCK's board-wide model at 16x (493 303 nodes, 1-1.5 GHz, `spi_sck_widths_16x.json`): 8x
@@ -550,16 +550,16 @@ the last digit or two.
   skin depth, strip and plane alike [A36]; dielectric G = ωC tan δ with the filling factor), γ = α + jβ in the
   cascade. Verified: a matched 100 mm microstrip's end voltage against e^(-αl) with Pozar's α at 0.3 / 1 / 3 GHz
   within 0.5 %, an open quarter-wave stub's input against Z0·tanh(αl) within 0.5 % (tests/test_path.py). On refboard:
-  ADC_I_RAIL_1 +21.4 → +33.5 dB (C304 carries 1.0 × the input current, not 4.5 ×), ADC_I_RAIL_2 +30.1 → +35.4,
+  ADC_SENSE_1 +21.4 → +33.5 dB (C41 carries 1.0 × the input current, not 4.5 ×), ADC_SENSE_2 +30.1 → +35.4,
   the SPI nets +0.4 dB, the converters and the issue counts unchanged (`out/path_loss/full/`). With the return
   plane's loss from Johnson's spread instead of "as much as the strip" (A36 revised, `plane_resistance`, the closed
-  form within 0.1 % of the integrated spread): +30.1, +33.6, +0.3 dB (`out/path_loss/johnson/`). Net-(U301--) stays at
+  form within 0.1 % of the integrated spread): +30.1, +33.6, +0.3 dB (`out/path_loss/johnson/`). Net-(U41--) stays at
   +22.1 dB: its worst is a board-wide plane resonance at 1590 MHz, not the path (the grid note applies).
-- **What the analog nets' numbers mean.** Net-(U301--), /CPU/ADC_I_RAIL_1 and _2 ran on detection's generic
+- **What the analog nets' numbers mean.** Net-(U41--), /MCU/ADC_SENSE_1 and _2 ran on detection's generic
   10 MHz / 2 ns (`class: Signal`, unreviewed): a current-sense signal of a few kHz behind a TLV6001 (0.5 V/µs) has
-  nothing near 310 MHz or 1.59 GHz, so their margins there (and the line-loss change on ADC_I_RAIL_1) describe a
+  nothing near 310 MHz or 1.59 GHz, so their margins there (and the line-loss change on ADC_SENSE_1) describe a
   signal that does not exist. Their real concern is susceptibility (victims.py). Detection now gives a net its
-  driving op-amp's fastest full swing where the op-amp has the data [A37]: Net-(U301--) 5.28 µs at 48.2 kHz; the
+  driving op-amp's fastest full swing where the op-amp has the data [A37]: Net-(U41--) 5.28 µs at 48.2 kHz; the
   ADC paths start at the ZXCT1107 (no such data), so they keep 10 MHz / 2 ns until their signal is set by hand.
   Set by hand on 2026-10-22: 1 kHz, 2 µs (the ZXCT1107's pulse response at R_GAIN 10 kΩ; 540 ns from its 650 kHz
   bandwidth at 2.5 kΩ already ended the spectrum at 5.9 MHz), so they have no radiated worst case (CISPR starts at
@@ -576,7 +576,7 @@ the last digit or two.
   REFERENCES A35). Verified: the phasors against the DFT of sampled trapezoids and triangles (0.002 rad, 0.2 %),
   the ringing rational against `ringing_response`; 180° and 120° sums exactly; two identical stages end to end
   (180°: the fundamental falls by > 60 dB, 2·f_sw +6.02 dB; in phase +6.02 dB conducted and radiated). On refboard,
-  conv1 + conv2 (detection proposes "U303 phases", 0° / 180°): conducted worst −38.6 dB together, −39.6 in phase,
+  conv1 + conv2 (detection proposes "U43 phases", 0° / 180°): conducted worst −38.6 dB together, −39.6 in phase,
   −38.8 / −27.9 alone (conv1's D = 0.51 fundamental dominates; conv2's D = 0.095 adds little); radiated −21.6 dB
   together at 161 MHz, −25.4 in phase, −19.8 / −21.0 alone (`out/interleave/`).
 
@@ -646,7 +646,7 @@ symbolic nodal analysis in its own venv; no SPICE simulator is installed here). 
   unstable step has no final value; doublets cancel only within 0.1 % of |Re p| (a Q 2000 pair hid 12 dB).
 - Documented: roots below 1 mHz listed at the origin (AA-9), the derating's small-signal scope (AA-10, Murata's
   measurement conditions), the ADC settings' meaning (AA-11).
-- Refboard: one of 89 capacitors with a curve moved by more than 0.5 V (C515, 55 → 52.5 V); C304 / C342 unchanged.
+- Refboard: one of 89 capacitors with a curve moved by more than 0.5 V (C51, 55 → 52.5 V); C41 / C50 unchanged.
 
 ## Round 8 (2026-11-04, branch `peec-audit`)
 
@@ -842,6 +842,45 @@ harmonics' sum, and a look at what the test site and the receiver do with the nu
   (below 1 GHz) and average limit (above): for a signal that repeats slower than about 1 kHz a quasi-peak detector
   reads several dB to tens of dB less than the peak, so slow signals read conservatively; the estimate is
   differential mode only and quasi-static (rows above the board's quasi-static limit are marked indicative).
+
+## Round 12 (2026-11-11 / 12, branch `audit-12`)
+
+A round across the whole tool, asked for as "another full audit of the physics", with the help and the references
+checked against the code and their sources. Independent reviewers read one area each and reported findings; every
+finding was then checked against the code or recomputed before anything was changed. Done so far: the
+references, the help, the field solver's and the emission estimates' physics. **Not done yet** (see "Open" below):
+the thermal and DC models, power integrity / signal integrity / the circuit solver, and a second pass over the
+converters, bridges and signal paths.
+
+| ID | Finding | Severity | Status |
+|---|---|---|---|
+| E-1 | A signal path radiated as a small loop carrying its MEAN current, also when the route is not short against the wavelength. The mean is the broadside radiation integral only: on a standing wave it goes through nulls while the trace radiates towards its ends. Against the exact far field of a trace over a plane (image theory, end posts and displacement current included) the estimate read 8 to 20 dB low from about a quarter wavelength of route (50 mm from 0.9 GHz, 100 mm from 0.45 GHz), 30 dB and more at the nulls. | High (optimistic; fast nets on long routes) | Fixed: the current's phase along the route counts, the maximum over direction of the radiation integral (`emi.path.radiating_current`, `PathResult.i_rad`) [A103]; within 0.2 dB of the exact field for 20-150 mm, 30 MHz-6 GHz |
+| E-2 | With spread spectrum a CISPR conducted estimate was judged on the average detector against the average limit only. That is the strictest for undithered harmonics, but a dithered one's average reading falls by about RBW / sweep while its quasi-peak reading hardly falls when the modulation is slower than the bandwidth: the quasi-peak limit binds. A 10 % triangle at 1 kHz was credited 3 to 7 dB too much from 0.8 MHz up (class B). | Medium (optimistic; stages with a slow dither) | Fixed: both detectors are read (the second with the simulated peak detector, 0.9-1.5 dB over a quasi-peak one) and the smaller margin kept (`conducted.conducted_arrays`) [A104]; checked against an independent quasi-peak detector in time |
+| E-3 | The loop moment's height is foil centre to foil centre at every frequency, while the inductance uses the facing surfaces [A79]: 0.9 to 2.3 dB high for 35 µm foils on 0.1-0.2 mm dielectrics. | Low (conservative) | Documented [A105], not changed |
+| R-1 | CISPR 25's peak limit was taken as the average one + 20 dB in every band; TV band I (41-88 MHz) is + 10 dB. Only the help chart's peak line used it. | Low | Fixed (`conducted.CISPR25_AV5`'s last column) [A10] |
+| R-2, R-3 | The recovered-charge loss was cited as Erickson §4.6 (the 2nd edition has no such section: §4.3.2) and the diode's recovery as Mohan §20-3 (the breakdown-voltage section: §20-5). | Low (citations) | Fixed |
+| R-5, R-6 | Peaceman's equivalent radius of a source cell (0.198·Δx, the thermal solver's via model) had no source; the FR-4 and foil defaults of a board without stackup data and the tied-cell cluster's radius were not listed as assumptions. | Low | Added: [Peaceman 1978], [A101], [A102] |
+| R-4, R-7 to R-12, R-15 | Table numbers, editions and details of the list (CISPR 32's tables, CISPR 16-1-1 / 16-1-2 / 25 editions, the V-network's band, Jackson §5.4, a proceedings' year). | Low | Fixed in docs/REFERENCES.md |
+| H-1 to H-17, H-19, H-20, H-24 | The help against the code: it denied a common-mode estimate the tool makes; the loss lists lacked the dead times, the recovered charge, the core loss and connector pins; the power-integrity and control-loop issues' thresholds; the floor rule's exception for a limit of the user's and the refinement's choice were missing; 18 of the 45 checks were never named; the rules' thresholds had no numbers. | Documentation | Fixed in `ui/help.html` |
+| T-1 | A series part in several stages' input paths (the input pass FET, a common fuse or shunt) was heated with the sum of each path's I²R, not with the summed current: half the heat for two equal stages; the reference board's pass FET 0.18 W where its 6.16 A give 0.25 W. | Medium-High (optimistic) | Fixed: the cross terms are added (`thermal.part_losses`) [A106] |
+| T-3 | An integrated switch with an external catch diode was charged conduction for the whole period, and the diode its share as well: 1/D too much (4× at D = ¼). | Medium (pessimistic) | Fixed: the whole period only when both switches are inside |
+| T-4 | The current-capacity search scaled a DC rail's path currents but not its loads, so the connector pins' joint and contact heat stayed at the operating point's. | Low-Medium (optimistic above the operating point) | Fixed (`thermal._scaled`) |
+| T-2 | A FET's R_DS(on) and a winding's DCR stayed at their entered values in Thermal and Current capacity while the copper followed its temperature: the capacity read high where conduction dominates. | Medium (optimistic) | Fixed: 0.5 %/K (a stage's `rds_on_tc`) and copper's 0.393 %/K from 25 °C in the coupled iteration [A108] |
+| T-5 | Gate-drive and controller losses counted in the efficiency but heated no part. | Low-Medium | Fixed: heat in the stage's controller IC in Thermal and Current capacity [A107] |
+| T-6 | `analysis.via_plating_um` changed a via's capacity and density, not its resistance, heat or heat conduction. | Low | Fixed: one setting for all of them (`peec.set_via_plating`) [A3] |
+| names | Real net names and part designators of the reference board stood in comments, tests, docs and the help. | Repository rule | Replaced by generic ones in every tracked file (one consistent mapping) |
+
+- **Verified as shipped** (by the reviewers, by recomputation or against the sources they could see): the small
+  loop's field and its constant, the loop moment's terms, the CISPR 32 / 22 radiated and conducted tables, CISPR
+  25's average table, CE102 and its LISN, the receiver bandwidths, the trapezoid spectrum and `pulse_shape`, the
+  spread receiver's average detector (0.2 dB), the path line's limits, IPC-2221B's spacing table and capacity
+  constants, copper's constants, the convection correlations.
+- **Open** (round 12 is not finished): the three areas named above have not been reviewed; of the help's
+  findings H-18 (stacked boards), H-21 to H-23 (settings without a form field, Preferences details, some form
+  fields) and the parts of the help the review did not read (menus, the results panels, the Server section, the
+  guides in full); MIL-STD-461's CE101 and RE102-1 / -2 figure values were not re-read; suspicions noted and not
+  checked: a limit of the user's with CISPR bandwidths below 30 MHz, `edge_charge_factor` on the ripple ramp's
+  harmonics, RE102 below 30 MHz (a rod antenna's vertical field).
 
 ## Remaining risks and unverified items
 - SP-19: above 1 GHz a board-wide resonance's worst margin moves about ±2 dB between the 4x, 8x and 16x grids on

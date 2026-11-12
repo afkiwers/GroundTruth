@@ -20,13 +20,13 @@ rules: {stitch_distance_mm: 2.0, decap_distance_mm: 5.0, edge_factor: 3.0, min_g
         detour_warning: 1.25, detour_error: 2.0, emi_margin_db: 6.0, resonance_db: 10.0,
         severity: {reference_net: off}}          # per-check override: error | warning | info | off
 nets:                                            # nets to analyse: typed in, or suggested by `groundtruth detect`
-  - {name: /CPU/SPI_SCK, driver: U1102.12, receivers: [U1103.6], freq: 20MHz, rise_time: 2ns, amplitude_v: 3.3,
+  - {name: /MCU/SPI_SCK, driver: U53.12, receivers: [U54.6], freq: 20MHz, rise_time: 2ns, amplitude_v: 3.3,
      driver_ohms: 33}                            # optional per net: driver_ohms, load_pf, current_a ...
   - {name: /USB_D_A, driver: U1.5, receivers: [U9.2], freq: 50MHz, rise_time: 1ns, fall_time: 1.5ns,
      driver_nh: 1.5, driver_pf: 3, load_ohms: 50, through: [C12]}   # a path through an AC-coupling C12
-  - {name: /CPU/SPI_MISO, driver: U1103.2, receivers: [U1102.13], freq: 10MHz, rise_time: 2ns, amplitude_v: 3.3,
+  - {name: /MCU/SPI_MISO, driver: U54.2, receivers: [U53.13], freq: 10MHz, rise_time: 2ns, amplitude_v: 3.3,
      source: auto, reviewed: false, class: SPI data}   # suggestion, not yet confirmed
-  - {name: /CPU/SW_CLK, driver: J1101.4, receivers: [U1102.28], freq: 10MHz, rise_time: 3ns,
+  - {name: /MCU/SW_CLK, driver: J41.4, receivers: [U53.28], freq: 10MHz, rise_time: 3ns,
      enabled: false}                             # switched off: kept, but not analysed (the tick box in the plugin)
 components:                                      # one line per part, pre-filled with a suggested model
   R12: {value: 0R, footprint: R_0402_1005Metric, model: short}
@@ -102,7 +102,7 @@ thermal and what-if keys are listed in their own sections below.
 | `analysis.conducted`, `analysis.conducted_class` | `cispr32`, `B` | Conducted limit of power stages and bridges: `cispr22` or `cispr32` (`A`/`B`; CISPR 32 replaced CISPR 22 with the same conducted limits), `cispr25` (`1`–`5`), `mil461` (`basic` = `28V`, `115V`, `220V`, `270V`, `440V`), `none`; the classes TI WEBENCH offers. A class the standard doesn't have is an error; left out, the standard's strictest (`B`, `5`, `basic`). A stage or bridge can name its own `conducted` and `conducted_class` (see [Power stages](power.md)). The plugin's help, *Conducted-emission limits*, charts every class and when each applies. |
 | `analysis.mil461` | `G` | The MIL-STD-461 revision: `G` (11 December 2015) or `H` (17 April 2026, which supersedes G). Only CE101 differs between them here: under `H` the ships' limit runs to 20 kHz (Figure CE101-1 continued to 66 dBµA) and its relaxation is capped at 35 dB; CE102, RE102, the LISN and the bandwidths are the same in both. |
 | `analysis.ce101` | `none` | MIL-STD-461 CE101, the power leads' current from 30 Hz to 10 kHz, for ships under 461H to 20 kHz (dBµA, current probe, 10 Hz / 100 Hz / 1 kHz bandwidths): `aircraft` (Figure CE101-4: Army aircraft including flight line, Navy ASW aircraft; curve #1 above 28 V, #2 at 28 V or below) or `ships` (Figure CE101-1: surface ships and submarines, DC, relaxed by 20·log(I/3) above 3 A, at most 35 dB). Needs a conducted model at the input (`conducted`, e.g. `mil461`). A motor bridge's commutation (lines every electrical frequency, strongest at 6·f_e) and a converter switching within the range are read (between 10 and 20 kHz from the CE102 band's solves, the LISN as specified at the input); below 10 kHz the leads (2 × (50 µH + 50 mΩ) to a stiff source) can resonate with the bus capacitors in this band. `ce101_source_v` and `ce101_load_a` override each stage's own input voltage (curve) and current (relaxation). |
-| `analysis.via_plating_um` | 25 | Via barrel plating, for the via current density and IPC-2221 capacity. |
+| `analysis.via_plating_um` | 25 | Via barrel plating, for a via's resistance, its heat and heat conduction, its current density and its IPC-2221 capacity. |
 | `analysis.threads` | `auto` | Parallel solves: `auto` (physical cores, at most 4) or a number. |
 | `analysis.gpu` | `auto` | `auto`, `on` or `off` (see "GPU acceleration"). |
 | `rules.stitch_distance_mm` | 2.0 | A layer change between planes of one net needs a via of that net this close (`layer_change_stitch`). Also the distance for power-stage via fixes. |
@@ -205,7 +205,7 @@ a warning; `off` drops the check's issues entirely. `--fail-on` then decides whi
 ## Finding the nets to analyse
 
 `groundtruth detect board.kicad_pcb` (or **Detect…** on the plugin's Signal paths tab) suggests nets with their driver, receivers and default timing:
-- **Signal class** comes from the net name and the schematic pin names, for example SPI clock (20 MHz / 2 ns), RMII (50 MHz / 1 ns), USB, SDIO/QSPI, debug clocks, crystals and switching nodes. A net with no class gets 10 MHz / 2 ns, unless an op-amp with a `Slew Rate` or `GBW` / `Bandwidth` field drives it (its output on the driver's net): then the fastest full 3.3 V swing that op-amp can make, edge max(0.8·3.3 V / SR, 0.35 / BW) and frequency min(10 MHz, BW, SR / (π·3.3 V)). refboard's U301 (TLV6001, 0.5 V/µs) gives Net-(U301--) 5.28 µs at 48.2 kHz instead of GHz content on a current-sense signal.
+- **Signal class** comes from the net name and the schematic pin names, for example SPI clock (20 MHz / 2 ns), RMII (50 MHz / 1 ns), USB, SDIO/QSPI, debug clocks, crystals and switching nodes. A net with no class gets 10 MHz / 2 ns, unless an op-amp with a `Slew Rate` or `GBW` / `Bandwidth` field drives it (its output on the driver's net): then the fastest full 3.3 V swing that op-amp can make, edge max(0.8·3.3 V / SR, 0.35 / BW) and frequency min(10 MHz, BW, SR / (π·3.3 V)). refboard's U41 (TLV6001, 0.5 V/µs) gives Net-(U41--) 5.28 µs at 48.2 kHz instead of GHz content on a current-sense signal.
 - **Driver** comes from the schematic pin types: an output beats a bidirectional pin, which beats a connector/passive pin, which beats an input.
 - **Series parts:** suggestions follow 0R/termination resistors and ferrites, so a series-terminated line is one net.
 - **Excluded:** power nets.

@@ -83,7 +83,7 @@ class DetectedNet:
 
 
 def _leaf(net: str) -> str:
-    """A hierarchical net's last part, upper case ("/CPU/spi_sck" -> "SPI_SCK")."""
+    """A hierarchical net's last part, upper case ("/MCU/spi_sck" -> "SPI_SCK")."""
     return net.split("/")[-1].upper()
 
 
@@ -101,7 +101,7 @@ def classify(net: str, pin_functions: list[str]) -> Optional[tuple[SignalClass, 
 
 def is_power_net(board: Board, net: str, config: Config) -> bool:
     """A supply net: a reference net, a net with a power pin, or a supply name (POWER_NAME) unless the name says
-    it measures something (MEASURE_NAME: /CPU/ADC_I_RAIL_1, the ADC input measuring rail 1's current, contains
+    it measures something (MEASURE_NAME: /MCU/ADC_SENSE_1, the ADC input measuring rail 1's current, contains
     RAIL but is a sensitive signal: the user's board, 2026-10-11)."""
     if net in config.reference_nets:
         return True
@@ -387,8 +387,8 @@ def _labelled_path(board: Board, config: Config, net: str, marks: dict, by_net: 
     net to its output's, components.models.amplifier_pins), never into a supply or reference net. Unlabelled nets
     count only where they lie between labelled ones: branches ending in an unlabelled net (a filter capacitor's
     ground side, a load resistor) are trimmed off, one dead end at a time. refboard's current sense: the
-    ZXCT1107 U302's output (sig_drv:3) through the buffer U301 (amp_in:1, amp_out:4) and R303, 4.7 kΩ, to the ADC
-    input /CPU/ADC_I_RAIL_1 (sig_rx:9 on U1102): one path, R303 in `through`."""
+    ZXCT1107 U42's output (sig_drv:3) through the buffer U41 (amp_in:1, amp_out:4) and R41, 4.7 kΩ, to the ADC
+    input /MCU/ADC_SENSE_1 (sig_rx:9 on U53): one path, R41 in `through`."""
     from ..components.models import amplifier_pins
     refs = set(config.reference_nets)
     edges: dict[str, dict[str, Footprint]] = {net: {}}       # net -> {neighbouring net: the part joining them}
@@ -499,8 +499,8 @@ def refreshes(found: list[DetectedNet], nets: list[NetSpec]) -> tuple[list[tuple
     updates: (suggestion, the listed entry) where an entry of the same name is still detection's own and unreviewed
     (source auto, reviewed false) but its path differs (driver, receivers or pass-through parts). fragments: other
     unreviewed detected entries whose net lies inside a suggestion's path. A reviewed or hand-made entry is never
-    touched. refboard after its op-amp labels: /CPU/ADC_I_RAIL_1 was listed from C304.1, and its pieces
-    Net-(U301-+) and Net-(U301--) on their own; detection now finds one path from U302.3, which replaces the first
+    touched. refboard after its op-amp labels: /MCU/ADC_SENSE_1 was listed from C41.1, and its pieces
+    Net-(U41-+) and Net-(U41--) on their own; detection now finds one path from U42.3, which replaces the first
     and covers the other two."""
     by_name = {n.name: n for n in nets}
 
@@ -679,7 +679,7 @@ def _leg_nodes(board: Board, config: Config, fets: Optional[dict] = None, ground
 
 def pass_switches(board: Board, config: Config) -> dict[str, tuple[str, str]]:
     """Series pass FETs: (drain net, source net) of each FET that only connects two supply nets when on, like a
-    surge stopper's or a reverse-polarity FET (Q601 between J101's V_BATT and +VDC on refboard): a gate
+    surge stopper's or a reverse-polarity FET (Q45 between J42's V_SUPPLY and +VDC on refboard): a gate
     pin, drain and source on two different nets, neither ground nor carrying an inductor (a switching FET always
     touches its switch node's inductor) nor a half-bridge's switch node (a motor bridge's high side), and no series
     model yet (the default 'open')."""
@@ -866,7 +866,7 @@ def _stage_controller(board: Board, spec: ConverterSpec, by_net: dict) -> Option
 
 def _interleave_proposals(board: Board, found: list[DetectedConverter], by_net: dict):
     """Stages switched by one IC (the channels of a dual or multiphase controller, like refboard's LTC7890
-    U303 for SW1 and SW2) become an interleave group named after it, 360°/n apart in name order: what most such
+    U43 for SW1 and SW2) become an interleave group named after it, 360°/n apart in name order: what most such
     controllers do, but some run their channels in phase or set the phase by a pin, so a reason asks to check the
     datasheet (analysis/interleave.py)."""
     by_ic: dict[str, list[DetectedConverter]] = {}
@@ -904,7 +904,7 @@ def _tagged_converter(board: Board, config: Config, st, tags, by_net: dict, zone
         return None
     ind = inds[0]
     shared = sorted(n for n in ind.nets() if n in sw_nets)
-    if len(shared) > 1:          # an IC with a pin on both ends (U503: SW, and OUT sensing the output): its SW pin's
+    if len(shared) > 1:          # an IC with a pin on both ends (U47: SW, and OUT sensing the output): its SW pin's
         on_sw_pin = [n for n in shared if any(p.net == n and SW_PIN.search(p.pin_function or "")
                                               for fp in switches for p in fp.pads)]
         shared = on_sw_pin if len(on_sw_pin) == 1 else shared

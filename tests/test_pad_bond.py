@@ -1,6 +1,6 @@
 """A part's pads soldered to its metal (simulate.part_lid, peec.LidNode, [A65]): the current hands over to the part
 where the copper brings it, as a transmission-line contact [Berger 1972], not at a few sampled points (the user, of
-refboard's Q601: 54 A/mm² in a pad corner the current only reached by crowding)."""
+refboard's Q45: 54 A/mm² in a pad corner the current only reached by crowding)."""
 import math
 
 import numpy as np
@@ -221,9 +221,9 @@ def test_a_transistor_modelled_as_a_resistor_spreads_its_die_over_its_wider_side
     pad = lambda w, h: N(size=(w, h))                                  # noqa: E731
     sides = [[pad(0.6, 0.8)] * 3, [pad(5.2, 6.9)]]
     fet = N(kind="resistor", params={"R": 6.5e-3})
-    assert die_side(N(reference="Q601"), fet, sides, None) == 1
-    assert die_side(N(reference="Q601"), fet, sides[::-1], None) == 0
-    assert die_side(N(reference="Q601"), fet, sides, "tab") is None
+    assert die_side(N(reference="Q45"), fet, sides, None) == 1
+    assert die_side(N(reference="Q45"), fet, sides[::-1], None) == 0
+    assert die_side(N(reference="Q45"), fet, sides, "tab") is None
     assert die_side(N(reference="U1"), fet, sides, None) is None
     assert die_side(N(reference="Q1"), N(kind="short", params={}), sides, None) is None
     assert die_side(N(reference="Q1"), fet, [[pad(0.6, 0.8)], [pad(0.6, 0.8)]], None) is None

@@ -184,7 +184,7 @@ class Reading:
     and a note (why it was not used, or what unit was assumed)."""
     value: Optional[float]   # SI units; None: the field is there but unusable (see note)
     text: str                # the field as written
-    source: str              # "Q301 Rds(on) 3.8milliohm"
+    source: str              # "Q41 Rds(on) 3.8milliohm"
     note: str = ""           # why it is not used, or "mΩ assumed"
 
 

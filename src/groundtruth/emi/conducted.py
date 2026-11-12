@@ -8,7 +8,9 @@ Each LISN's receiver reads the voltage across its 50 ohm port [Paul 2006].
 A switching waveform is a set of phase-locked CW harmonics. While f_sw exceeds the receiver bandwidth each reading
 holds one harmonic, and peak, quasi-peak and average detectors all read its RMS value [CISPR 16-1-1], so the estimate is
 compared with the average limit (the strictest). Below that, neighbouring harmonics add up in one reading
-(`receiver_sum`, [A12]).
+(`receiver_sum`, [A12]). A dithered switching frequency (spread spectrum) is the exception: the detectors then
+read differently, and the limit's other detector (quasi-peak for CISPR 22 / 32, peak for CISPR 25) can be the
+one that binds: both are read and the smaller margin kept (`conducted_arrays`, [A104]).
 
 Not modelled [A11]: common-mode emission (switch-node dV/dt through stray capacitance to the chassis or heatsink),
 which often dominates above a few MHz.
@@ -78,7 +80,7 @@ BANDS = {
 
 # Limits: [(f_lo, f_hi, dBµV at f_lo, dBµV at f_hi)], linear in log f within a band; the lowest applies where
 # bands meet or overlap.
-CISPR32_AV = {   # CISPR 32 Table A.10 / A.11, AC mains port, average detector [CISPR 32, Annex A]
+CISPR32_AV = {   # CISPR 32's tables for the AC mains power port, average detector [CISPR 32, Annex A]
     "B": [(0.15e6, 0.5e6, 56.0, 46.0), (0.5e6, 5e6, 46.0, 46.0), (5e6, 30e6, 50.0, 50.0)],
     "A": [(0.15e6, 0.5e6, 66.0, 66.0), (0.5e6, 30e6, 60.0, 60.0)],
 }
@@ -100,18 +102,19 @@ CLASSES = {"cispr22": ("A", "B"), "cispr25": ("1", "2", "3", "4", "5"), "cispr32
 DEFAULT_CLASS = {"cispr22": "B", "cispr25": "5", "cispr32": "B", "mil461": "basic"}
 # CISPR 25 voltage method, average detector, class 5 and the step to each lower class (class 1 = class 5 + 4 steps)
 # [CISPR 25] [A10]
-CISPR25_AV5 = [   # (f_lo, f_hi, class 5 dBµV, dB per class)
-    (0.15e6, 0.30e6, 50.0, 10.0),     # LW
-    (0.53e6, 1.8e6, 34.0, 8.0),       # MW
-    (5.9e6, 6.2e6, 33.0, 6.0),        # SW
-    (26e6, 28e6, 24.0, 6.0),          # CB
-    (30e6, 54e6, 24.0, 6.0),          # VHF
-    (41e6, 88e6, 24.0, 6.0),          # TV band I
-    (68e6, 87e6, 18.0, 6.0),          # VHF
-    (76e6, 108e6, 18.0, 6.0),         # FM
+CISPR25_AV5 = [   # (f_lo, f_hi, class 5 dBµV, dB per class, peak limit above the average one in dB)
+    (0.15e6, 0.30e6, 50.0, 10.0, 20.0),     # LW
+    (0.53e6, 1.8e6, 34.0, 8.0, 20.0),       # MW
+    (5.9e6, 6.2e6, 33.0, 6.0, 20.0),        # SW
+    (26e6, 28e6, 24.0, 6.0, 20.0),          # CB
+    (30e6, 54e6, 24.0, 6.0, 20.0),          # VHF
+    (41e6, 88e6, 24.0, 6.0, 10.0),          # TV band I: peak 34 dBµV in class 5, the one band 10 dB apart
+    (68e6, 87e6, 18.0, 6.0, 20.0),          # VHF
+    (76e6, 108e6, 18.0, 6.0, 20.0),         # FM
 ]
-CISPR25_PEAK_DB = 20.0     # the peak limits are the average ones + 20 dB in every band and class [CISPR 25]: TI WEBENCH's
-                           # CISPR 25 lines (class 5: LW 70, MW 54, SW 53 dBµV); for the help's charts only
+# The last column: the peak limits are the average ones + 20 dB in every class [CISPR 25] (TI WEBENCH's CISPR 25
+# lines; class 5: LW 70, MW 54, SW 53 dBµV), except TV band I, + 10 dB [A10]; for the help's charts only. Before
+# 2026-11-12 + 20 dB there too (audit round 12, R-1).
 # CE102's relaxation for sources above 28 V, dB [MIL-STD-461G, Figure CE102-1]
 MIL461_RELAX = {"basic": 0.0, "28v": 0.0, "115v": 6.0, "220v": 9.0, "270v": 10.0, "440v": 12.0}
 
@@ -127,8 +130,9 @@ def band_limits(standard: str, cls: str = "B", detector: str = "average") -> lis
         return table["A" if c == "a" else "B"]
     if std == "cispr25":
         k = int(c) if c.isdigit() and 1 <= int(c) <= 5 else 5
-        up = CISPR25_PEAK_DB if detector == "peak" else 0.0
-        return [(lo, hi, v + (5 - k) * step + up, v + (5 - k) * step + up) for lo, hi, v, step in CISPR25_AV5]
+        peak = detector == "peak"
+        return [(lo, hi, v + (5 - k) * step + (up if peak else 0.0), v + (5 - k) * step + (up if peak else 0.0))
+                for lo, hi, v, step, up in CISPR25_AV5]
     if std == "mil461":       # CE102 basic curve: 94 dBµV at 10 kHz falling 20 dB/decade to 60 dBµV at 500 kHz
         r = MIL461_RELAX.get(c.replace(" ", ""), 0.0)
         return [(10e3, 500e3, 94.0 + r, 60.0 + r), (500e3, 10e6, 60.0 + r, 60.0 + r)]
@@ -225,12 +229,23 @@ def detector(standard: str) -> str:
     return "peak" if standard.lower() == "mil461" else "average"
 
 
+SECOND_DETECTOR = {"cispr22": "qp", "cispr32": "qp", "cispr25": "peak"}    # band_limits' name of the other limit line
+
+
 def conducted_arrays(freqs, line_current, standard: str, cls: str = "B", spread=None) -> dict[str, np.ndarray]:
     """Receiver reading at each harmonic (RMS dBµV, receiver bandwidth applied) from the peak differential-mode
     line current per harmonic, the limit and the margin (NaN where no limit applies). spread = (f0, Spread): the
     switching frequency is dithered; the receiver is simulated (emi/spread.py) within the standard's range. That
     model takes one harmonic per receiver bandwidth; for f0 at or below the bandwidth the spread is ignored and
-    the harmonics add coherently as without it (conservative)."""
+    the harmonics add coherently as without it (conservative).
+
+    With spread on a CISPR limit the detectors no longer read alike: a dithered harmonic's average reading falls by
+    about the bandwidth over the sweep's width, its quasi-peak and peak readings far less while the modulation is
+    slower than the bandwidth, so the quasi-peak limit (CISPR 22 / 32: 10 dB over the average one in class B, 13 in
+    A) or CISPR 25's peak limit becomes the one that binds. Both are read, the second with the simulated peak
+    detector (it is at most ~1.5 dB over a quasi-peak one here [A104]), and per harmonic the reading, limit and
+    margin of the smaller margin are returned; "second_detector" is True there. Before 2026-11-12 the average
+    reading alone: up to 7 dB of margin too many for a 10 % triangle at 1 kHz (audit round 12, E-2)."""
     from .spread import spread_readings
     f = np.asarray(freqs, float)
     i_pk = np.abs(np.asarray(line_current, complex))
@@ -245,11 +260,25 @@ def conducted_arrays(freqs, line_current, standard: str, cls: str = "B", spread=
         f0, sp = spread
         reading = spread_readings(f, v_pk, f0, sp, lambda x: float(receiver_bandwidth([x], bands)[0]),
                                   detector(std), rng[1] if rng else math.inf) / math.sqrt(2)
+        second = SECOND_DETECTOR.get(std)
     else:
         reading = receiver_sum(f, v_pk, bands) / math.sqrt(2)
+        second = None
     v_db = 20 * np.log10(np.maximum(reading, 1e-30) / 1e-6)
     lim = limit_line(f, standard, cls)
-    return {"f": f, "current_a": i_pk, "v_dbuv": v_db, "limit_dbuv": lim, "margin_db": lim - v_db}
+    margin = lim - v_db
+    binds = np.zeros(f.shape, bool)
+    if second is not None:
+        f0, sp = spread
+        peak = spread_readings(f, v_pk, f0, sp, lambda x: float(receiver_bandwidth([x], bands)[0]), "peak",
+                               rng[1] if rng else math.inf) / math.sqrt(2)
+        v2 = 20 * np.log10(np.maximum(peak, 1e-30) / 1e-6)
+        lim2 = limit_line(f, standard, cls, second)
+        with np.errstate(invalid="ignore"):
+            binds = (lim2 - v2) < margin                 # False where either is NaN (no limit there)
+        v_db, lim, margin = np.where(binds, v2, v_db), np.where(binds, lim2, lim), np.where(binds, lim2 - v2, margin)
+    return {"f": f, "current_a": i_pk, "v_dbuv": v_db, "limit_dbuv": lim, "margin_db": margin,
+            "second_detector": binds}
 
 
 def conducted_table(freqs, line_current, standard: str, cls: str = "B", per_decade: Optional[int] = None,
@@ -267,6 +296,8 @@ def conducted_table(freqs, line_current, standard: str, cls: str = "B", per_deca
         rows.append({"f": float(f[j]), "current_a": float(a["current_a"][j]), "v_dbuv": float(a["v_dbuv"][j]),
                      "limit_dbuv": None if np.isnan(lim) else float(lim),
                      "margin_db": None if np.isnan(lim) else float(a["margin_db"][j])})
+        if a["second_detector"][j]:           # read against the limit's other detector (spread spectrum [A104])
+            rows[-1]["detector"] = SECOND_DETECTOR[standard.lower()]
     return rows
 
 

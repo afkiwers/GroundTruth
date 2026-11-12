@@ -6,7 +6,7 @@ Op-amp circuits and frequency responses, capacitance at DC bias, DC loads, power
 
 A signal path is solved as the circuit it is on the board (`analysis/analog_net.py`, `emi/mna.py`): every part with a model and every op-amp channel on its nets and beyond, up to ground and the supply rails, in any topology (inverting, non-inverting, differential, integrators, transimpedance stages, Sallen-Key / MFB / state-variable filters, instrumentation amplifiers, several op-amps with feedback between them). Every track is a transmission line of its own, every via R + L; an unrouted net is joined as the netlist says. An op-amp is its datasheet's small-signal model (Aol, GBW, a second pole or PM, R_O, Cin, Rin; pins from their names or GT labels); a `Gain` field keeps the old fixed gain block.
 
-The Bode views (Simulate, the Signal paths tab's **Bode**, `groundtruth bode`) show the path's response, each op-amp's output and each op-amp's loop gain with its crossover and phase margin (a tile: amber below 45°, red below 20°), the exact poles and zeros, and the **transfer function**: in the part names for the ideal circuit (SymPy; e.g. a Sallen-Key's `1 / (C1·C2·R1·R2·s² + C2·(R1 + R2)·s + 1)`), and numerically for the full circuit in the normal form `K · Π(1 + s/ω) · Π(1 + s/(Q·ω) + s²/ω²) / […]` with each frequency and Q. Each response also has its **step response** (1 V at the driver: final value, 10-90 % rise, overshoot and undershoot, settling into ±2 %; a plot under the Bode plot, a `step` tile, `--plots` writes `<path>_step.png`). The JSON report's responses carry `transfer_function` (`numeric`, `symbolic`), `step` (its figures and the curve) and a loop gain's `phase_margin`. Simulate's emission estimate takes the path's currents from the same circuit. On refboard's ADC path (ZXCT1107 → TLV6001 follower → 4.7 kΩ / 100 nF → ADC): `H(s) = 1 / (C304·R303·s + 1)`, numerically K 0.9975, poles 451 Hz (the filter), 686 kHz (the follower), the loop's crossover 671 kHz with 89° of margin.
+The Bode views (Simulate, the Signal paths tab's **Bode**, `groundtruth bode`) show the path's response, each op-amp's output and each op-amp's loop gain with its crossover and phase margin (a tile: amber below 45°, red below 20°), the exact poles and zeros, and the **transfer function**: in the part names for the ideal circuit (SymPy; e.g. a Sallen-Key's `1 / (C1·C2·R1·R2·s² + C2·(R1 + R2)·s + 1)`), and numerically for the full circuit in the normal form `K · Π(1 + s/ω) · Π(1 + s/(Q·ω) + s²/ω²) / […]` with each frequency and Q. Each response also has its **step response** (1 V at the driver: final value, 10-90 % rise, overshoot and undershoot, settling into ±2 %; a plot under the Bode plot, a `step` tile, `--plots` writes `<path>_step.png`). The JSON report's responses carry `transfer_function` (`numeric`, `symbolic`), `step` (its figures and the curve) and a loop gain's `phase_margin`. Simulate's emission estimate takes the path's currents from the same circuit. On refboard's ADC path (ZXCT1107 → TLV6001 follower → 4.7 kΩ / 100 nF → ADC): `H(s) = 1 / (C41·R41·s + 1)`, numerically K 0.9975, poles 451 Hz (the filter), 686 kHz (the follower), the loop's crossover 671 kHz with 89° of margin.
 
 ## Capacitance at DC bias
 
@@ -70,9 +70,9 @@ HTML report and the plugin's **Power integrity** tab (Find rails lists the rails
 shows each rail's curves and what holds it at each frequency). An IC whose pads the model's grid cannot join to the
 rail's copper (pads smaller than a cell) is left out with a note: raise the resolution. Each IC's pins are also solved
 on a fine model of their own surroundings (the inductance at small pads and vias), added to its board-wide curve: on
-refboard (+3V3, a 0.3 A step, source U505; 2026-10-19, `tools/dev/pdn_check.py --budgets 40000,80000`) the
-0.86 mm and 0.59 mm board-wide grids then agree within 1-5 % at 100 MHz (margins within 0.4 dB; U1102 0.62 Ω against
-the 0.55 Ω target); U203 and U305 join only at 0.59 mm (their pads do not reach the rail's copper on the coarser
+refboard (+3V3, a 0.3 A step, source U49; 2026-10-19, `tools/dev/pdn_check.py --budgets 40000,80000`) the
+0.86 mm and 0.59 mm board-wide grids then agree within 1-5 % at 100 MHz (margins within 0.4 dB; U53 0.62 Ω against
+the 0.55 Ω target); U55 and U44 join only at 0.59 mm (their pads do not reach the rail's copper on the coarser
 grid, which a note says).
 
 ## Voltage-aware safety checks
@@ -85,7 +85,7 @@ short or resistor model: its drain and source, not its gate). Your own win:
 
 ```yaml
 safety:
-  voltages: {/Surge/V_BATT: 58V, Net-(U303-BOOST1): 57V}   # peak, V
+  voltages: {/Surge/V_SUPPLY: 58V, Net-(U43-BOOST1): 57V}   # peak, V
   coated: false             # a conformally coated assembly: IPC-2221B A5 / A7 where the solder mask is open
   solder_mask: ipc          # ipc: the mask counts as coating where it covers a gap (B4); bare: left out
   clearance_mm: [[50, 0.6], [100, 1.5]]   # your own table for external layers ([V, mm], e.g. B3 above 3050 m)
@@ -130,8 +130,8 @@ safety:
 
 On refboard (2026-10-19, the current board, +VDC 55 V as in the scratch settings, uncoated): clearance 38
 errors and 13 warnings (since the voltage ranges and riding nets of 2026-10-17 the gate-drive and bootstrap nets carry
-their switch node's voltage, so most of the earlier warnings became errors), none coated; ESD infos at J101, J104,
-J106, J1101; C601 (10 nF, 50 V) over its rating (65 V between GND and the surge stopper's gate), 23 capacitors over
+their switch node's voltage, so most of the earlier warnings became errors), none coated; ESD infos at J42, J43,
+J44, J41; C52 (10 nF, 50 V) over its rating (65 V between GND and the surge stopper's gate), 23 capacitors over
 the 50 % ceramic derating. Simulate of conv1 and conv2: the switch nodes peak at 95.5 / 95.9 V (55 V + the ringing's
 ~40 V, as the hot-loop check estimates it with the default damping) against the EPC2306's 100 V: over 80 % of it, a
 warning each; no resistor over its derated power. (Before, with +VDC 51.8 V: 16 errors, 27 warnings, 89.6 / 89.9 V.)
@@ -148,7 +148,7 @@ of two tracks side by side.
 ```yaml
 si:
   impedance:                       # targets: nets by name or pattern, or a KiCad net class (the .kicad_pro)
-    - {nets: [/CPU/SPI_*], z0: 50Ω, tol: 10%}
+    - {nets: [/MCU/SPI_*], z0: 50Ω, tol: 10%}
     - {class: HighSpeed, z0: 45Ω, layers: [F.Cu, B.Cu]}
   pairs:                           # `groundtruth detect` suggests them by name (unreviewed)
     - {p: /USB/D_P, n: /USB/D_N, zdiff: 90Ω, tol: 10%, rise_time: 500ps, max_skew: 10ps}
@@ -174,6 +174,6 @@ pairs, each row's result after Run checks); the console, JSON and HTML reports c
 
 On refboard (6 layers, 0.1 mm to the planes): the SPI nets 43.1-43.7 Ω (SPI_MISO up to 62 Ω over 0.27 mm
 where In1 has a void under it), SW_CLK 35.6-36.7 Ω on its inner layer, CAN_H / CAN_L 88-98 Ω differential, routed
-13.0 / 15.6 mm (17 ps apart), the strongest crosstalk 1.7 % (ADC_I_RAIL_2 into ADC_V_RAIL_2, 42 mm side by side),
+13.0 / 15.6 mm (17 ps apart), the strongest crosstalk 1.7 % (ADC_SENSE_2 into ADC_V_RAIL_2, 42 mm side by side),
 the lowest via stub resonance 25 GHz. Run checks with these 8 nets and the pair: about 10 s more (156 cuts, solved in
 the solver threads).

@@ -489,9 +489,9 @@ def test_a_leg_on_its_own_return_net_passes_the_board_check():
     board = loads_board(bridge_board(phase_shunts="ABC", kelvin=True).text())
     (d,) = detect_bridges(board, Config())
     assert validate(Config(bridges=[d.spec]), board) == []
-    leg = replace(d.spec.legs[0], ground_return="NOPE", shunt=["R999"])
+    leg = replace(d.spec.legs[0], ground_return="NOPE", shunt=["R60"])
     errors = validate(Config(bridges=[replace(d.spec, legs=[leg] + d.spec.legs[1:])]), board)
-    assert any("'NOPE' does not exist" in e for e in errors) and any("shunt 'R999' not found" in e for e in errors)
+    assert any("'NOPE' does not exist" in e for e in errors) and any("shunt 'R60' not found" in e for e in errors)
 
 
 def test_a_kelvin_shunt_joins_its_force_pads_only():

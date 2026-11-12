@@ -515,7 +515,7 @@ def test_detects_the_discrete_buck(tmp_path):
 
 
 def test_a_surge_stopper_fet_does_not_hide_the_input_connector(tmp_path):
-    """refboard: the surge stopper's FET Q601 sits between J101's V_BATT and +VDC, and with its default
+    """refboard: the surge stopper's FET Q45 sits between J42's V_SUPPLY and +VDC, and with its default
     'open' model no input connector was found. A gate-driven FET whose drain and source are on two supply nets
     (no ground, no inductor: not a switching FET) is a series pass switch: detection crosses it closed, names it,
     and suggests a short model for it, which is set only where the model is still 'open'."""
@@ -546,7 +546,7 @@ def test_detects_an_integrated_converter(tmp_path):
 
 
 def test_a_stages_power_path_is_never_suggested_as_a_signal(tmp_path):
-    """Net-(U302-Vs+) on refboard: the copper between the inductor and the current-sense shunts, with a
+    """Net-(U42-Vs+) on refboard: the copper between the inductor and the current-sense shunts, with a
     sense amplifier's input pin on it, was auto-detected as a signal net. Every net of a stage's power flow (input
     path, rail, switch node, the inductor's output side, the output path through the shunt) is the stage's, with
     its role; detection skips them and 'Add selected net' refuses them with that role."""
@@ -566,7 +566,7 @@ def test_a_stages_power_path_is_never_suggested_as_a_signal(tmp_path):
 
 
 def test_an_integrated_stage_takes_its_sw_pin_as_the_switch_node(tmp_path):
-    """The LT3970 (U503) on refboard has a V_OUT pin on the inductor's far side (+5V): the switch node is
+    """The LT3970 (U47) on refboard has a V_OUT pin on the inductor's far side (+5V): the switch node is
     the net of its SW pin, not whichever of its inductor nets sorts first."""
     from groundtruth.analysis.power import switch_inductor
     g = hot_loop_board(20.0, sw_pin=True, out_pin=True)
@@ -793,7 +793,7 @@ def test_the_stages_dc_currents_add_up_on_one_board_model(tmp_path):
     is exactly twice one stage's total (all its paths' vectors added), every via carries twice its current, the
     input current is the sum; the current-density and via checks run on the total (net "all power stages") instead of
     each stage's own paths. The user: "the currents are not added together. So one plot shows 5.15 A the other says
-    1 A" (refboard's two bucks share J101, Q601, the +VDC pours and the ground)."""
+    1 A" (refboard's two bucks share J42, Q45, the +VDC pours and the ground)."""
     from dataclasses import replace
     from groundtruth.analysis.power import COMBINED_NET, COMBINED_VIEW, dc_view
     board, sc, _ = make(tmp_path, discrete_buck_board(out_connector=True), "twins", nets=())

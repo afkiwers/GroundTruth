@@ -3,7 +3,7 @@ convergence), without touching the board or its settings: the settings are copie
 rail's pdn entry.
 
     .venv/Scripts/python tools/dev/pdn_check.py BOARD SETTINGS --rail +3V3 [--i-step 1] [--ripple 5%]
-        [--source U504 | none] [--vrm-r 5m] [--vrm-l 20n] [--parts U1102,U1103] [--budgets 40000,80000]
+        [--source U48 | none] [--vrm-r 5m] [--vrm-l 20n] [--parts U53,U54] [--budgets 40000,80000]
         [--json OUT.json]
 
 Prints per budget and IC: |Z| at a few frequencies, the peaks, the inductance above the decaps, the worst margin

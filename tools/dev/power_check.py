@@ -5,8 +5,8 @@ hot-loop results, capacitor sharing, conducted/radiated worst cases and timing. 
 board; the settings is only read.
 
     .venv/Scripts/python tools/dev/power_check.py BOARD SETTINGS [--only SW1,SW2] [--f-sw 500k] [--i-out 5]
-        [--v-in 24] [--c-oss 600p] [--rise 2n] [--cap] [--budget 100000] [--series Q601] [--connector J101.2,J101.1]
-        [--output J104.2,J104.1]
+        [--v-in 24] [--c-oss 600p] [--rise 2n] [--cap] [--budget 100000] [--series Q45] [--connector J42.2,J42.1]
+        [--output J43.2,J43.1]
 
 --series REF gives a series switch (e.g. a surge-stopper FET between the battery input and the rail) a 5 mOhm
 resistor model in memory, so the conducted path from --connector (plus, minus) reaches the converters.

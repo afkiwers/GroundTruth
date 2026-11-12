@@ -2,7 +2,7 @@
 earlier rounds left open. Every expected value is made here (a time-domain simulation, a sum written out, the
 textbook formula with exact constants), never with GroundTruth's own functions.
 
-    .venv/Scripts/python tools/dev/signal_audit.py [--only line,field,receiver,buffer] [--json OUT.json]
+    .venv/Scripts/python tools/dev/signal_audit.py [--only line,long,field,receiver,buffer] [--json OUT.json]
 
 - line: a trapezoid source behind a resistance, a lossless line and a capacitive load simulated in time (travelling
   waves on a lattice of unit-delay sections, the method of characteristics), its steady state Fourier-transformed:
@@ -123,6 +123,56 @@ def line():
             big = np.abs(want) > 0.02 * np.abs(want).max()
             err = float(np.max(np.abs(have[big] - want[big]) / np.abs(want[big])))
             check("line", f"{what}, harmonics 1-15 (complex, worst)", 0.0, err, 0.02, rel=False)
+
+
+def trace_far_field(f: float, length: float, h: float = 0.2e-3, z0: float = 50.0, eeff: float = 3.0,
+                    r_s: float = 25.0, c_load: float = 5e-12, n: int = 4001) -> float:
+    """The current a small loop of the trace's area (length × 2h with its image) would need for the trace's exact
+    far field, per volt of source: a trace along x at height h over an infinite ground plane with its real current
+    I(x) (a source behind r_s, a lossless line, a capacitor), by image theory [Balanis 2016, ch. 4]: the image
+    trace at −h with −I, the vertical currents (the end posts, the displacement current −dI/dx between trace and
+    plane) imaged over −h..h; the radiation vector N(r̂) = Σ I dl e^{j k r̂·r′}, its part across r̂, the maximum
+    over the upper half space, over k·length·2h. For a short trace it is |mean I|."""
+    w = 2 * np.pi * f
+    beta = w * math.sqrt(eeff) / C0
+    zl = 1 / (1j * w * c_load)
+    t = np.tan(beta * length)
+    zin = z0 * (zl + 1j * z0 * t) / (z0 + 1j * zl * t)
+    i0 = 1.0 / (r_s + zin)
+    v0 = i0 * zin
+    x = np.linspace(0, length, n)
+    i = i0 * np.cos(beta * x) - 1j * v0 / z0 * np.sin(beta * x)
+    k = w / C0
+    dx = x[1] - x[0]
+    wts = np.full(n, dx)
+    wts[0] = wts[-1] = dx / 2
+    didx = np.gradient(i, dx)
+    best = 0.0
+    for th in np.linspace(0, np.pi / 2, 46):               # polar angle from the plane's normal
+        for ph in np.linspace(0, np.pi, 73):
+            r = np.array([np.sin(th) * np.cos(ph), np.sin(th) * np.sin(ph), np.cos(th)])
+            px = np.exp(1j * k * r[0] * x)
+            nx = np.sum(i * px * wts) * (np.exp(1j * k * r[2] * h) - np.exp(-1j * k * r[2] * h))
+            sz = 2 * h * np.sinc(k * r[2] * h / np.pi)
+            nz = sz * (i[0] * px[0] - i[-1] * px[-1] + np.sum(didx * px * wts))
+            vec = np.array([nx, 0.0, nz])
+            best = max(best, float(np.linalg.norm(vec - np.dot(vec, r) * r)))
+    return best / (k * length * 2 * h)
+
+
+def long_trace():
+    """The current a path radiates with (emi.path.radiating_current) against the exact far field of the trace."""
+    from groundtruth.emi.path import PathLine, PathLoad, PathSource, path_currents
+    for length in (0.02, 0.05, 0.10, 0.15):
+        print(f"Long trace: {length * 1e3:.0f} mm, 50 Ω, εeff 3, 25 Ω driver, 5 pF")
+        fs = np.geomspace(30e6, 6e9, 60)
+        got = path_currents(fs, np.ones(len(fs)), [PathLine(50.0, 3.0, length)], PathSource(25.0), PathLoad(5e-12))
+        want = np.array([trace_far_field(float(f), length) for f in fs])
+        err = 20 * np.log10(got.i_rad / want)
+        check("long", "radiating current against the exact field, 30 MHz-6 GHz (dB, worst)", 0.0,
+              float(np.max(np.abs(err))), 0.3, rel=False)
+        low = 20 * np.log10(want / np.maximum(np.abs(got.i_mean), 1e-30))
+        print(f"      (the mean current alone reads up to {low.max():.1f} dB low)")
 
 
 # ------------------------------------------------------------------------------------------------ the field
@@ -252,10 +302,10 @@ def buffer():
 def main():
     """Run the chosen areas; exit 1 when a case fails."""
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--only", default="line,field,receiver,buffer")
+    ap.add_argument("--only", default="line,long,field,receiver,buffer")
     ap.add_argument("--json")
     args = ap.parse_args()
-    areas = {"line": line, "field": field, "receiver": receiver, "buffer": buffer}
+    areas = {"line": line, "long": long_trace, "field": field, "receiver": receiver, "buffer": buffer}
     for name in args.only.split(","):
         areas[name.strip()]()
     bad = [r for r in ROWS if not r["ok"]]

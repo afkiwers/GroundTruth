@@ -41,7 +41,7 @@ FIELD_TIPS = {
                  "switch inside.",
     "Low side": "The switch(es) or catch diode between the switch node and ground, e.g. Q2 or D1. A FET here makes "
                 "the stage synchronous: only the turn-on edge costs overlap loss. A diode: both edges do.",
-    "Integrated stage": "An IC with both switches inside, e.g. U502. High side, low side and switch node are then "
+    "Integrated stage": "An IC with both switches inside, e.g. U46. High side, low side and switch node are then "
                         "greyed: not used.",
     "Switching frequency": "f_sw, e.g. 750kHz (from the controller's R_T / R_FREQ formula). Sets where the "
                            "harmonics of the conducted and radiated estimates fall, the capacitor sharing at f_sw, "
@@ -596,7 +596,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
 
     def _integrated_state(self):
         """High side, Low side and Switch node greyed while Integrated stage names an IC (the user: "when entering
-        Integrated stage = U502, should you grey out the High side, Low side and Switch node then"): both switches
+        Integrated stage = U46, should you grey out the High side, Low side and Switch node then"): both switches
         are inside it, so those three are not used and _form saves none of them; their text stays, for a stage
         turned back into discrete switches. Several stages selected keep all four greyed (OWN)."""
         if getattr(self, "_multi", None) is not None:
@@ -776,7 +776,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             old = self.converters[i]
             # what the form does not show stays as it was (the spread spectrum is on the form since 2026-10-17)
             new = replace(spec, source=old.source, reviewed=True, enabled=old.enabled, r_damp=old.r_damp,
-                          duty=old.duty, note=old.note,
+                          duty=old.duty, note=old.note, rds_on_tc=old.rds_on_tc,
                           snubber=list(old.snubber), snubber_c=old.snubber_c, snubber_r=old.snubber_r,
                           loop=dict(old.loop))
             link_form(self.board, self.settings.config, new, old)

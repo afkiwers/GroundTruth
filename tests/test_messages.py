@@ -19,9 +19,9 @@ def app():
 
 
 def test_problems_are_named_by_their_row_and_numbers_read_as_engineers_write_them():
-    """split_problem: "nets[0] (/CPU/X): ..." is the Signal path /CPU/X, a field after it is named too; a short
+    """split_problem: "nets[0] (/MCU/X): ..." is the Signal path /MCU/X, a field after it is named too; a short
     "head: rest" splits; anything else stays whole. tidy: 6.67e-07 s -> 667ns, 7.5e+05 Hz -> 750kHz."""
-    assert messages.split_problem("nets[0] (/CPU/ADC): the edges don't fit") == ("Signal path /CPU/ADC",
+    assert messages.split_problem("nets[0] (/MCU/ADC): the edges don't fit") == ("Signal path /MCU/ADC",
                                                                                   "the edges don't fit")
     assert messages.split_problem("converters[2].f_sw: must be above 0") == ("Converter #3 · f_sw", "must be above 0")
     assert messages.split_problem("Could not read the board: file gone") == ("Could not read the board", "file gone")

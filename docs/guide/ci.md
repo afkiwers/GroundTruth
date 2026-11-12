@@ -116,7 +116,7 @@ issues:
   checks: {gap_crossing: 0, layer_change_stitch: 0, clearance_voltage: 0}
 nets:
   default: {radiated_margin_db: 6}
-  /CPU/SPI_SCK: {radiated_margin_db: 10, return_path_ratio: 1.3}
+  /MCU/SPI_SCK: {radiated_margin_db: 10, return_path_ratio: 1.3}
 converters:
   default: {conducted_margin_db: 3, loop_inductance_nh: 5}
   buck conv3: {efficiency_pct: 85}
@@ -133,7 +133,7 @@ The job log ends with a summary:
 ```
 verify: 14 passed, 2 failed, 1 skipped
   FAIL  [issues] issues: layer_change_stitch <= 0: measured 1, above the limit 0
-  FAIL  [nets] /CPU/SPI_SCK: radiated_margin_db >= 10 dB: measured 7.2 dB, below the limit 10
+  FAIL  [nets] /MCU/SPI_SCK: radiated_margin_db >= 10 dB: measured 7.2 dB, below the limit 10
   skip  [converters] buck conv4: conducted_margin_db >= 3 dB: not measured in this run
 results: emi/groundtruth-verify-junit.xml
 ```

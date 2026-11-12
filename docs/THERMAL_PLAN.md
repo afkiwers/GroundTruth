@@ -18,7 +18,7 @@ The folder has no licence file; this plan assumes the code is yours to reuse.
 | Dark theme, cards, KPI tiles | The plugin restyled in its palette | M1 |
 | Hover readout | Value under the mouse on every heatmap | M1 |
 | Via loading vs IPC-2221 capacity | Pass/fail per via on the DC paths GroundTruth already solves | M1 |
-| Coupled electro-thermal solve (3D conduction, convection, radiation, adaptive mesh) | **Copper and part temperatures of each power stage at its operating point**, so "131 A/mm² at the L301 → J104 neck" becomes a temperature rise you can judge | M2 |
+| Coupled electro-thermal solve (3D conduction, convection, radiation, adaptive mesh) | **Copper and part temperatures of each power stage at its operating point**, so "131 A/mm² at the L41 → J43 neck" becomes a temperature rise you can judge | M2 |
 | Its roadmap: current-capacity solve, A/B difference maps, sweeps | "Max current for ΔT = 20 K", what a layout change bought | M3, optional |
 
 ## M1: styling and quick wins (no new physics)
@@ -101,7 +101,7 @@ saved file may be out of date.
 
 - Per stage, on the Converters tab: high- and low-side R_DS(on); inductor DCR; switching loss from what is
   already there (½·V·I·(t_r + t_f)·f_sw + C_oss·V²·f_sw). Shunts and the surge-stopper FET use their part
-  models (Q601: 6.5 mΩ, I_in²·R). θJB per part, optional.
+  models (Q45: 6.5 mΩ, I_in²·R). θJB per part, optional.
 - A `thermal:` settings section, PCB Thermal's environment as is: ambient, board orientation,
   natural / forced / fixed convection, radiation, optional enclosure, mesh quality (draft / normal / fine), and
   the limits for the issues.
