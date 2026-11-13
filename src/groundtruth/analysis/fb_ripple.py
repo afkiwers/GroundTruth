@@ -45,7 +45,7 @@ WAVE_KEPT = 512
 INJECTION_DEPTH = 2             # nets walked from FB through two-pin parts
 REGION_MARGIN_MM = 4.0          # the copper model's margin around the parts involved
 CAP_NEAR_MM = 20.0              # output capacitors this close to the inductor or the divider are in the copper model
-NODE_BUDGET = 40000             # the copper model's nodes at most (it is solved 14 times)
+NODE_BUDGET = 20000             # the copper model's nodes at most, at any resolution (solved 14 times; 13k gave the same)
 JOIN_MM = 3.0                   # a pad on cut-off copper reads the nearest joined copper of its net within this
 GND_FUNCTIONS = ("AGND", "SGND", "GND", "RTN", "VSS", "PGND")    # a controller's ground pin, preferred first
 
@@ -245,7 +245,10 @@ def _controller_ground(fp, ground: str):
 
 def _region_model(model, pts, extra_layers: set, nets: set, side: str):
     """The inductive copper model of the box around `pts` (+ REGION_MARGIN_MM, clipped to the outline), as
-    power._region_build makes it, at the pitch NODE_BUDGET allows (the model is solved EXACT_SOLVES + LOG_SOLVES times)."""
+    power._region_build makes it, at the pitch NODE_BUDGET allows whatever the run's resolution (the ripple at FB
+    is the same at 1x and 2x to 0.01 %, and the model is solved EXACT_SOLVES + LOG_SOLVES times: at 4x it took
+    8 GB more than the rest of the stage's finishing). Built outside the model's cache (BoardModel._make_build),
+    so it is freed when the ripple is done."""
     from shapely.geometry import box
     from .simulate import _choose_pitch
     a = model.config.analysis
@@ -260,8 +263,8 @@ def _region_model(model, pts, extra_layers: set, nets: set, side: str):
     layers = model.plane_layers(region, extra_layers, set())
     plane_nets = model.plane_nets(region, layers, set()) | nets
     h_mm = min((model.board.stackup.distance(side, l) for l in layers if l != side), default=0.2)
-    d = _choose_pitch(h_mm, bbox, len(layers), min(a.max_nodes, NODE_BUDGET), a.grid_mm, a.resolution)
-    return model.build(bbox, layers, plane_nets, d, False)
+    d = _choose_pitch(h_mm, bbox, len(layers), min(a.max_nodes, NODE_BUDGET), a.grid_mm, 1.0)
+    return model._make_build(bbox, layers, plane_nets, d, False)
 
 
 def tap_impedances(model, spec, inductor, sw_net: str, ctrl_gnd, sources: dict, out_nets: set, ground: str,
@@ -371,10 +374,15 @@ def tap_impedances(model, spec, inductor, sw_net: str, ctrl_gnd, sources: dict, 
     tail = np.geomspace(exact[-1] * 1.5, freqs[-1], LOG_SOLVES) if freqs[-1] > exact[-1] * 1.5 else np.zeros(0)
     solve_f = np.unique(np.concatenate([exact, tail]))
     z = {s: [] for s in taps}
-    for f in solve_f:
-        sol = exc.solve(float(f))
-        for s, nd in nodes.items():
-            z[s].append(complex(sol.V[nd] - sol.V[ref]) if nd is not None else 0j)
+    try:
+        for f in solve_f:
+            sol = exc.solve(float(f))
+            for s, nd in nodes.items():
+                z[s].append(complex(sol.V[nd] - sol.V[ref]) if nd is not None else 0j)
+    finally:
+        # this model is used once: its factorisations go now, not when the cache would evict them
+        with plane._lock:
+            plane._ops.clear()
     out = {s: None for s, nd in nodes.items() if nd is None}
     for s, vals in z.items():
         if nodes[s] is None:
