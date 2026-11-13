@@ -26,7 +26,7 @@ import numpy as np
 from ..emi.pwm_lines import line_spectrum
 from ..solver.peec import RouteExcitation, SolverError
 from .power import (DC_F, POWER_MARGINS_MM, _area_shares, _region_build, _side, input_path, path_parts, rail_caps,
-                    peak_density, sustained)
+                    peak_density, sustained, whole_pin)
 from .simulate import ModelRun, via_groups
 
 BANDS = 3                       # PWM harmonics with a field of their own (the leg's solves at n·f_pwm)
@@ -83,12 +83,12 @@ def rms_runs(model, bs) -> tuple[list, list[str]]:
             nets.add(s.spec.low_return)
             parts += [fp for fp in (board.footprint(r) for r in s.spec.low_shunt) if fp is not None]
         own = [p for el in s.elements for p in el.a + el.b]
-        pads += own + ([out] if out is not None else [])
+        pads += own + (whole_pin(board, out) if out is not None else [])
         layers |= {_side(el.fp) for el in s.elements}
         centre = (float(np.mean([p.position[0] for p in own])), float(np.mean([p.position[1] for p in own])))
         pads += [p for fp in rail_caps(board, config, s.spec, centre) for p in fp.pads]
         legs.append((s, out))
-    pads += [p for p in conn if p is not None] + [p for fp in parts for p in fp.pads]
+    pads += [q for p in conn if p is not None for q in whole_pin(board, p)] + [p for fp in parts for p in fp.pads]
     layers |= {_side(fp) for fp in parts} | {p.layers[0] for p in pads if p.layers}
 
     def injections(st, s, out, source):
@@ -101,11 +101,11 @@ def rms_runs(model, bs) -> tuple[list, list[str]]:
         battery = conn[0 if hs else 1]
         inj = []
         if battery is not None:     # battery pin -> the side's bus or ground pads
-            inj += _area_shares(st, [battery], _side(board.footprint(battery.footprint)), 1.0)
+            inj += _area_shares(st, whole_pin(board, battery), _side(board.footprint(battery.footprint)), 1.0)
             inj += [x for el in els for x in _area_shares(st, el.a if hs else el.b, _side(el.fp), -el.weight)]
         if out is not None:         # the side's node pads -> the motor pin
             inj += [x for el in els for x in _area_shares(st, el.b if hs else el.a, _side(el.fp), el.weight)]
-            inj += _area_shares(st, [out], _side(board.footprint(out.footprint)), -1.0)
+            inj += _area_shares(st, whole_pin(board, out), _side(board.footprint(out.footprint)), -1.0)
         return inj
 
     side = _side(bs.legs[0].elements[0].fp)

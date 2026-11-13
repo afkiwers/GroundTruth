@@ -27,7 +27,7 @@ from ..config.settings import DcLoadSpec
 from ..core.issues import Issue, resolve_severity
 from ..solver.peec import RouteExcitation, SolverError
 from .power import (DC_F, SUSTAINED_MM, ConverterResult, _area_shares, _side, dc_board_build, dc_board_of,
-                    dc_summary, dc_vector_maps)
+                    dc_summary, dc_vector_maps, whole_pin)
 from .simulate import BoardModel, ModelRun, StackBuild, terminal_vectors
 
 
@@ -160,7 +160,7 @@ def _injections(model: BoardModel, st, spec: DcLoadSpec) -> tuple[list, dict]:
         if pad is None:
             raise SolverError(f"pin {pin} is not on the board")
         fp = model.board.footprint(pin.split(".")[0])
-        new = _area_shares(st, [pad], _side(fp) if fp is not None else "F.Cu", amps)
+        new = _area_shares(st, whole_pin(model.board, pad), _side(fp) if fp is not None else "F.Cu", amps)
         if pin in feeds:
             # the same pad gives the same nodes with the same weights: add the currents node by node
             old = dict(feeds[pin])
