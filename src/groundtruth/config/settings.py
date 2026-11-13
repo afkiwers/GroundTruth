@@ -180,6 +180,11 @@ class ConverterSpec:
     core_alpha: Optional[float] = None    # the frequency exponent (default thermal.CORE_ALPHA)
     core_beta: Optional[float] = None     # the flux (ripple) exponent (default thermal.CORE_BETA)
     efficiency_currents: list = field(default_factory=list)   # A, the sweep's load currents (default: 5-120 % of i_out)
+    # an operating-point sweep (analysis/converter_sweep.py): V_in values at the nominal load, I_out values at the
+    # nominal V_in, and what to work out at each (CONVERTER_SWEEP_OUTPUTS; empty: emissions, losses, ripple)
+    sweep_v_in: list = field(default_factory=list)            # V
+    sweep_i_out: list = field(default_factory=list)           # A
+    sweep_outputs: list = field(default_factory=list)
     efficiency_measured: str = ""         # a CSV of measured efficiency (current A, efficiency %[, loss W]), relative to
                                           # the board's groundtruth/ folder: drawn over the model's curve
     # keys taken from the parts' schematic fields (components/fields.py): refreshed from them on every open and run;
@@ -231,6 +236,7 @@ class ConverterSpec:
 PWM_SCHEMES = ("hpwm_lon", "hon_lpwm", "bipolar")
 DRIVE_MODES = ("motoring", "generating")
 SWEEP_MAX = 64                                 # operating points of a bridge sweep (currents × speeds)
+CONVERTER_SWEEP_OUTPUTS = ("emissions", "losses", "ripple", "thermal")   # a converter sweep's outputs
 CONNECTIONS = ("star", "delta")
 EMF_SHAPES = ("trapezoidal", "sinusoidal")
 
@@ -868,6 +874,16 @@ def _converter_snubber(v: Any, where: str) -> dict:
     return {"snubber": refs}
 
 
+def _converter_sweep(sw, where: str) -> dict:
+    """A converter's `sweep: {v_in: [...], i_out: [...], outputs: [...]}` as ConverterSpec fields."""
+    sw = sw or {}
+    if not isinstance(sw, dict):
+        raise ConfigError([f"{where}.sweep: must be a mapping (v_in: [...], i_out: [...], outputs: [...])"])
+    return {"sweep_v_in": [_num(x, f"{where}.sweep.v_in", "V") for x in _refs(sw.get("v_in"))],
+            "sweep_i_out": [_num(x, f"{where}.sweep.i_out", "A") for x in _refs(sw.get("i_out"))],
+            "sweep_outputs": [str(x).strip().lower() for x in _refs(sw.get("outputs"))]}
+
+
 def _bridge_from_data(b: dict, where: str, i: int) -> BridgeSpec:
     """A `bridges:` entry as a BridgeSpec (numbers with or without units); raises ConfigError for unreadable values."""
     legs = []
@@ -1500,6 +1516,7 @@ def config_from_data(data: Any) -> Config:
                 efficiency_currents=[_num(x, f"{where}.efficiency_currents", "A")
                                      for x in (c.get("efficiency_currents") or [])],
                 efficiency_measured=str(c.get("efficiency_measured") or ""),
+                **_converter_sweep(c.get("sweep"), where),
                 # "dead_time" in a list of 2026-10-20 (one dead time for both edges) is both edges now
                 from_schematic=list(dict.fromkeys(k for r in _refs(c.get("from_schematic"))
                                                   for k in (("dead_rise", "dead_fall") if r == "dead_time" else (r,)))),
@@ -1544,6 +1561,13 @@ def config_from_data(data: Any) -> Config:
             problems.append("core_alpha and core_beta (Steinmetz exponents) must be between 0.5 and 4")
         if any(x <= 0 for x in spec.efficiency_currents):
             problems.append("efficiency_currents must be positive currents (A)")
+        if any(x <= 0 for x in spec.sweep_v_in) or any(x <= 0 for x in spec.sweep_i_out):
+            problems.append("sweep: v_in and i_out must be positive (V, A)")
+        if len(spec.sweep_v_in) + len(spec.sweep_i_out) > SWEEP_MAX:
+            problems.append(f"sweep: at most {SWEEP_MAX} points in all")
+        bad = [o for o in spec.sweep_outputs if o not in CONVERTER_SWEEP_OUTPUTS]
+        if bad:
+            problems.append(f"sweep outputs: {', '.join(bad)} unknown ({', '.join(CONVERTER_SWEEP_OUTPUTS)})")
         elif spec.f_sw > 0 and dead_sum * spec.f_sw >= 0.5:
             problems.append(f"the dead times ({dead_sum * 1e9:g} ns per period together) are half of the "
                             f"{1e6 / spec.f_sw:g} µs period or more: check their unit (ns)")
@@ -1775,6 +1799,8 @@ class SettingsFile:
                                  "  (a silicon body diode's recovery)\n"
                                  "  efficiency sweep: qg (one FET's gate charge), v_gate, iq (the controller's supply\n"
                                  "  current), efficiency_currents [0.5, 1, 2, ...], efficiency_measured: bench.csv\n"
+                                 "  operating-point sweep: sweep: {v_in: [36, 48, 65], i_out: [0.1, 1], outputs:\n"
+                                 "  [emissions, losses, ripple, thermal]} (each list at the other's nominal value)\n"
                                  "  inductor core loss: core_loss: 150mW (at this operating point), or the maker's\n"
                                  "  point with core_loss_f: 300kHz, core_loss_di: 2 (A p-p), core_alpha, core_beta\n"
                                  "  output_connector: the load's + and - pins (DC output path and ground return)")
@@ -2017,6 +2043,15 @@ class SettingsFile:
                     d[key] = format_si(getattr(c, key), unit) if unit else getattr(c, key)
             if c.efficiency_currents:
                 d["efficiency_currents"] = _flow_seq([float(f"{x:.6g}") for x in c.efficiency_currents])
+            if c.sweep_v_in or c.sweep_i_out:
+                sw = {}
+                if c.sweep_v_in:
+                    sw["v_in"] = _flow_seq(float(f"{x:.6g}") for x in c.sweep_v_in)
+                if c.sweep_i_out:
+                    sw["i_out"] = _flow_seq(float(f"{x:.6g}") for x in c.sweep_i_out)
+                if c.sweep_outputs:
+                    sw["outputs"] = _flow_seq(list(c.sweep_outputs))
+                d["sweep"] = _flow(sw)
             if c.efficiency_measured:
                 d["efficiency_measured"] = c.efficiency_measured
             if c.snubber:

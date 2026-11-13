@@ -535,6 +535,13 @@ def render_html(board: Board, issues: list[Issue], routes: list, mode: str, sett
              "losses are stacked by cause; the shaded band is where the controller may leave continuous conduction "
              "(the model stays continuous), open circles are measured points.",
              "".join(_efficiency(x, figs) for x in effs), [(_anchor("efficiency", x.net), x.net) for x in effs])
+    sweeps = [c.sweep for c in stages if getattr(c, "sweep", None) is not None]
+    if sweeps:
+        part("sweep", "Operating-point sweeps", "Each stage with sweep values at other input voltages (at its load) "
+             "and load currents (at its input voltage), worked out on the stage's own solves: the emission margins, "
+             "losses and efficiency, the ripple at the FB pin and the control loop, and (when asked for) the "
+             "temperatures, a draft thermal solve per point.",
+             "".join(_converter_sweep(x, figs) for x in sweeps), [(_anchor("sweep", x.net), x.net) for x in sweeps])
     ripples = [c.fb_ripple for c in stages if getattr(c, "fb_ripple", None) is not None]
     if ripples:
         part("fbripple", "FB ripple", "The switching ripple at each buck controller's FB pin over a period: the "
@@ -1150,6 +1157,20 @@ def _cap_bias(rows) -> str:
                    + _num(change, "{:+.0f} %") + f"<td>{e(r.curve)}</td><td>{e(how.get(r.how, r.how))}</td></tr>")
     return _table(["Part", "Nets", "#Worst-case DC V", "Where the voltage comes from", "#C nominal", "#C used", "#Change",
                    "Cbias", "DC-bias loss"], out, paged=True)
+
+
+def _converter_sweep(x, figs) -> str:
+    """The article of one stage's operating-point sweep: its plot and its table."""
+    from ..analysis.converter_sweep import sweep_text
+    from .plots import draw_converter_sweep, sweep_height_in
+    body = [f"<article class='item' id='{_anchor('sweep', x.net)}'><header><h3>{e(x.net)}</h3>"
+            f"<span class='what'>{len(x.rows)} points</span></header>"]
+    if x.error or not x.rows:
+        return "".join(body) + f"<p class='note'>{e(x.error or 'no points')}</p></article>"
+    body.append(_img(figs.png(f"{x.net} sweep", draw_converter_sweep, x, size=(9.5, sweep_height_in(x))),
+                     f"{x.net}: the outputs over V in (left) and I out (right)"))
+    body.append("<pre class='table'>" + e("\n".join(sweep_text(x))) + "</pre>")
+    return "".join(body) + "</article>"
 
 
 def _fb_ripple(x, figs) -> str:

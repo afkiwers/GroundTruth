@@ -148,7 +148,9 @@ def result_views(res, config=None) -> list:
     loads = [d for d in getattr(res, "dc_loads", ()) if not d.error]
     rails = [p for p in getattr(res, "pdn", ()) if not p.error and p.ports]     # each PDN rail: its curves
     from ..analysis.transfer import bode_views
-    return stages + effs + ripples + loads + rails + views + bode_views(res)  # the responses' Bode and pole-zero views last
+    # each stage's operating-point sweep (analysis/converter_sweep.py)
+    sweeps = [cr.sweep for cr in res.converters if getattr(cr, "sweep", None) is not None and not cr.sweep.error]
+    return stages + effs + ripples + sweeps + loads + rails + views + bode_views(res)  # the responses' Bode and pole-zero views last
 
 
 def portable_keep(keep):

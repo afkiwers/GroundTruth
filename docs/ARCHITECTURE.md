@@ -1724,6 +1724,28 @@ the copper modelled (not the parts alone).
   state (1.5 %), ΔI/(8Cf), the network against closed forms and a nodal solve, the tap's copper against a track's
   ρl/(wt) (15 %), grid convergence (2 %), a COT stage's check with and without an injection RC.
 
+## Operating-point sweep of a power stage (`analysis/converter_sweep.py`, branch `converter-sweep`)
+The user: "add a voltage/current sweep option to the converters"; asked: input voltage and load current as two
+separate 1-D sweeps (each at the other's nominal), the outputs selectable per stage, run with every Simulate (as a
+bridge's sweep).
+- Settings `ConverterSpec.sweep_v_in` / `sweep_i_out` / `sweep_outputs` (YAML `sweep: {v_in, i_out, outputs}`,
+  checked at load: positive, at most `SWEEP_MAX` points, known outputs); the form's Sweep group (`SweepOutputs`: four
+  three-state check boxes, their text "emissions, losses" for the multi-stage form).
+- Called from `power.finish_converter` after `_stage_fb_ripple` (`_stage_sweep`: a failure is a note); no field
+  solve, as f_sw, V_out and the board stay: per point `spec_at = replace(spec, v_in, i_out)`, its pulse and duty.
+  Emissions: `fix_advisor.evaluate` on a copy of the setup and result with the point's pulse, duty, V_in and ripple
+  (a boost's ripple harmonics recomputed). Losses: `efficiency.losses_at` (the efficiency sweep's per-current step
+  factored out; DC paths scaled by `scaled_paths`: input by I_in, output by I_out, the rest by I/I_ref) [A114].
+  Ripple: `fb_ripple.at_point` on the transfers `analyse` keeps in `_prep` (freed after the sweep), the loop by
+  `loop.analyse_loop` at the point. Thermal: `thermal.run_thermal` per point at draft quality on a probe with the
+  scaled paths and the point's losses.
+- Result `ConverterSweep` on `ConverterResult.sweep` (rows as dicts with `axis` "v_in" | "i_out"; JSON via
+  `summary`), its view after the FB ripple views (`ui/main_frame.result_views`), plots `draw_converter_sweep` /
+  `draw_sweep_table`, tiles `kpi._converter_sweep`, text `converter_sweep_text`, HTML part `sweep`.
+- Validation (tests/test_converter_sweep.py): the nominal rows equal the stage's own numbers; swept points against a
+  fresh Simulate there (margins 0.5 dB, overshoot 1 %, losses 2 %, FB ripple 2 %, phase margin 1°); the I_out rows
+  equal `efficiency.sweep`; the temperatures rise with the load.
+
 ## Frequency responses, Bode and pole-zero (`analysis/transfer.py`, M4, branch `bode`)
 The user (2026-10-17): "can we add bode and phase plots as well as pole zero plots?"; all four kinds chosen (signal
 paths, power-stage filters, PDN, control loop: M5), as Results views and in the report.

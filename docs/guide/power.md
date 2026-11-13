@@ -54,6 +54,7 @@ rules: {overshoot_warning: 0.25, overshoot_error: 0.5}   # switch-node overshoot
 | `core_loss`, `core_loss_f`, `core_loss_di`, `core_alpha`, `core_beta` | –, f_sw, the stage's ripple, 1.3, 2.2 | The inductor's core loss: the loss at one point of the maker's data (its loss tool or core-loss curves), scaled to the stage's frequency and ripple, P = `core_loss`·(f_sw/`core_loss_f`)^α·(ΔI/`core_loss_di`)^β. `core_loss` alone is the loss at this operating point. |
 | `qg`, `v_gate`, `iq` | –, 5 V, – | The efficiency sweep's fixed losses: one FET's gate charge (its Qg field) driven every cycle from `v_gate`, and the controller's supply current from the input. |
 | `efficiency_currents`, `efficiency_measured` | 5–120 % of `i_out`, – | The sweep's load currents (A), and a CSV of measured points (current A, efficiency % or 0–1, optional loss W) in the board's `groundtruth/` folder, drawn over the model's curve. |
+| `sweep` | – | The operating-point sweep: `{v_in: [36, 48, 60], i_out: [0.5, 2], outputs: [emissions, losses, ripple]}` (see "Operating-point sweep" below; outputs also `thermal`). |
 | `source`, `reviewed`, `note` | `manual`, true | Set by detection (`auto`, unreviewed) and its note. |
 
 - **Topologies:** discrete stages use `high_side` and `low_side` (a catch diode counts as the low side), and the high side can be an IC with its own switch. An IC with both switches inside is listed as `switch`; its hot loop runs from its input pins to its ground pins. A boost's hot loop sits on its output, so `rail` is VOUT. A boost's conducted emission comes from its inductor ripple (ΔI = V_in·D/(L·f_sw), with `v_in`, `v_out` and the inductor's L), drawn from the inductor's input net.
@@ -294,6 +295,24 @@ makes any controller jitter.
   fb_ripple_max: 100mV}` in the stage's settings: outside them, the issue `fb_ripple`.
 - **Not modelled:** the inductor's own capacitance (edge spikes), discontinuous conduction, and the hot loop's pulsed
   current in the ground.
+
+## Operating-point sweep: input voltage and load current
+
+A stage's `sweep` (the Converters tab's **Sweep** group) runs it at other operating points with every Simulate: the
+input voltages in `v_in` (each at the nominal load current) and the load currents in `i_out` (each at the nominal
+input voltage), two separate sweeps with the nominal point in each, at most 64 points in all
+(`analysis/converter_sweep.py`). Shown as its own view (*… sweep (V in, I out)*: a row of plots per output, input
+voltage left and load current right, and a table of every point), with tiles, in the reports and in the JSON
+(`converters[].sweep`).
+
+- **Outputs** (`outputs`, the form's check boxes): `emissions` (radiated and conducted margins, overshoot, the
+  common-mode budget), `losses` (losses, efficiency, input current, the largest loss), `ripple` (the FB pin's ripple
+  and the control loop's phase margin, crossover and gain margin), `thermal` (a draft thermal solve per point: the
+  hottest copper and part; slow, so only when listed). The first three when `outputs` is not given.
+- **Quick:** only V in and I out change, so every field solve Simulate made holds and nothing is solved again
+  except the temperatures. The switch node's DC current pattern keeps the nominal duty's share between the
+  switches (a note when V in is more than 30 % from the nominal) [A114].
+- **No issues** are raised for the swept points; the stage's own operating point raises them.
 
 ## Temperatures (thermal solve)
 

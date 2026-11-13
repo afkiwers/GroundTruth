@@ -498,6 +498,12 @@ def analyse(model, spec, res, use_copper: bool = True) -> Optional[FbRippleResul
     v_fb_inj = h["SW"] * v_sw if "SW" in sources else np.zeros(len(freqs), complex)
     # the output's ripple where the divider taps it (the first tap pad of the network: its top resistor's)
     tap0 = next((s for s in sources if sources[s][1] == "tap"), None)
+    # what at_point needs to evaluate another operating point on these transfers (f_sw is the same): kept on the
+    # result as a plain attribute (not a dataclass field: not in its summary), dropped by the caller after use
+    out._prep = {"n": n, "edge": edge, "v_low": v_low, "per_amp": sum((h[s] * z_src[s] for s in tap_like),
+                                                                       np.zeros(len(freqs), complex)),
+                 "h_sw": h["SW"] if "SW" in sources else None,
+                 "tap_per_amp": z_src[tap0] if tap0 is not None else None}
     v_tap = z_src[tap0] * i_l if tap0 is not None else np.zeros(len(freqs), complex)
     waves = {k: periodic_wave(c, WAVE_POINTS) for k, c in
              (("fb", v_fb_out + v_fb_inj), ("tap", v_tap), ("il", i_l), ("out", v_fb_out), ("inj", v_fb_inj))}
@@ -519,6 +525,27 @@ def analyse(model, spec, res, use_copper: bool = True) -> Optional[FbRippleResul
         out.notes.append("a constant-on-time controller needs a minimum ripple at FB: give the controller its "
                          "datasheet's figure as an FB Ripple Min field to have it checked")
     return out
+
+
+def at_point(r: FbRippleResult, v_in: float, duty: float, delta_i: float) -> Optional[dict]:
+    """The ripple at FB at another operating point of the same stage (the same f_sw, network and copper: analyse's
+    transfers, `r._prep`): {fb_pp, tap_pp, injection_pp, status}; None without them (an error, or not kept)."""
+    from .transfer import periodic_wave
+    prep = getattr(r, "_prep", None)
+    if prep is None or r.error:
+        return None
+    n, f_sw = prep["n"], r.f_sw
+    i_l = ripple_current(n, delta_i, duty, f_sw, prep["edge"])
+    v_out = prep["per_amp"] * i_l
+    v_inj = (prep["h_sw"] * switch_voltage(n, v_in, prep["v_low"], duty, f_sw, prep["edge"])
+             if prep["h_sw"] is not None else np.zeros(len(n), complex))
+    tap = prep["tap_per_amp"] * i_l if prep["tap_per_amp"] is not None else np.zeros(len(n), complex)
+    fb_pp = float(np.ptp(periodic_wave(v_out + v_inj, WAVE_POINTS)))
+    lo, hi = r.limits.get("min"), r.limits.get("max")
+    status = ("low" if lo is not None and fb_pp < lo[0] else "high" if hi is not None and fb_pp > hi[0]
+              else "ok" if lo is not None or hi is not None else "")
+    return {"fb_pp": fb_pp, "tap_pp": float(np.ptp(periodic_wave(tap, WAVE_POINTS))),
+            "injection_pp": float(np.ptp(periodic_wave(v_inj, WAVE_POINTS))), "status": status}
 
 
 def ripple_text(r: FbRippleResult) -> str:

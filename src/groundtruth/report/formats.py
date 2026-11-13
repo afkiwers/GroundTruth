@@ -300,6 +300,7 @@ def converter_text(c) -> list[str]:
         pair = f" ({r['pair'][0]}–{r['pair'][1]})" if r.get("pair") else ""
         out.append(f"    plane resonance: loop moment {r['rise_db']:+.1f} dB at {r['f'] / 1e6:.4g} MHz{pair}")
     out += [line.replace("  ", "    ", 1) for line in efficiency_text(getattr(c, "efficiency", None))]
+    out += ["  " + line for line in converter_sweep_text(getattr(c, "sweep", None))]
     nodes = sum(int(g.node.sum()) for g in c.layer_grids.values()) if c.layer_grids else 0
     out.append(f"    model: {nodes} nodes at {c.grid.d:.2f} mm on {', '.join(c.plane_layers)}"
                + (f"; board-wide {c.cavity['nodes']} nodes at {c.cavity['d_mm']:.2f} mm" if c.cavity else ""))
@@ -358,6 +359,12 @@ def efficiency_text(e) -> list[str]:
         out.append(f"    {e.currents[j]:7.3g} A  {100 * e.efficiency[j]:5.1f} %  {e.p_loss[j]:7.3g} W"
                    + (f"  (most: {top})" if top else ""))
     return out
+
+
+def converter_sweep_text(s) -> list[str]:
+    """A stage's operating-point sweep in the console report (converter_sweep.sweep_text, indented)."""
+    from ..analysis.converter_sweep import sweep_text
+    return [] if s is None else ["  " + line for line in sweep_text(s)]
 
 
 def fb_ripple_text(r) -> list[str]:

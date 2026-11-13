@@ -50,6 +50,8 @@ def kpis(rr, rules=None) -> list[Kpi]:
         return _efficiency(rr)
     if rr.kind == "fb_ripple":                  # the ripple at a controller's FB pin (analysis/fb_ripple.py)
         return _fb_ripple(rr)
+    if rr.kind == "converter_sweep":            # a stage's operating-point sweep (analysis/converter_sweep.py)
+        return _converter_sweep(rr, rules)
     if rr.kind == "bode":                       # responses with their poles and zeros (analysis/transfer.py)
         return _bode(rr)
     if rr.kind == "converter":
@@ -133,6 +135,53 @@ def _fb_ripple_tile(r) -> Kpi:
             "the switching ripple at the controller's FB pin (analysis/fb_ripple.py): the output's ripple through the "
             "divider, the ground between the divider and the controller, and an injection network from the switch "
             "node; checked against the controller's FB Ripple Min / Max fields")
+
+
+def _converter_sweep(s, rules=None) -> list[Kpi]:
+    """A stage's operating-point sweep: its points, and over them the worst of each output it has."""
+    ok = [r for r in s.rows if not r.get("error")]
+    out = [("points", f"{len(ok)}", f"of {len(s.rows)}; V in and I out swept", "" if len(ok) == len(s.rows) else "warn",
+            "the operating points worked out on this Simulate's solves (a failed point says why in the tooltip)")]
+
+    def worst(key, low=True):
+        """The row with the lowest (or highest) value of key, None without one."""
+        rows = [r for r in ok if r.get(key) is not None]
+        return (min if low else max)(rows, key=lambda r: r[key]) if rows else None
+
+    def where(r):
+        """A row's operating point in words."""
+        return f"at {r['v_in']:g} V, {r['i_out']:g} A"
+    warn = s.limits.get("margin_db", 6.0)
+    for key, title in (("radiated_db", "worst radiated"), ("conducted_db", "worst conducted")):
+        r = worst(key)
+        if r is not None:
+            status = "error" if r[key] < 0 else "warn" if r[key] < warn else "ok"
+            out.append((title, f"{r[key]:+.1f} dB", where(r), status, f"the smallest {title.split()[1]} margin over "
+                        "the sweep's points"))
+    r = worst("efficiency")
+    if r is not None:
+        out.append(("lowest efficiency", f"{r['efficiency'] * 100:.1f} %", where(r), "",
+                    "the lowest efficiency over the points (the losses at each: the tooltip's table)"))
+    lo, hi = worst("fb_pp"), worst("fb_pp", low=False)
+    if lo is not None:
+        bad = (s.limits.get("fb_min") is not None and lo["fb_pp"] < s.limits["fb_min"]) or \
+            (s.limits.get("fb_max") is not None and hi["fb_pp"] > s.limits["fb_max"])
+        out.append(("FB ripple", f"{lo['fb_pp'] * 1e3:.3g}–{hi['fb_pp'] * 1e3:.3g} mV",
+                    "p-p over the points", "error" if bad else ("ok" if any(k in s.limits for k in ("fb_min", "fb_max"))
+                                                                 else ""),
+                    "the ripple at the controller's FB pin over the points, against its FB Ripple Min / Max"))
+    r = worst("pm_deg")
+    if r is not None:
+        out.append(("lowest phase margin", f"{r['pm_deg']:.0f}°", where(r),
+                    "error" if r["pm_deg"] < 30 else "warn" if r["pm_deg"] < 45 else "ok",
+                    "the control loop's smallest phase margin over the points"))
+    r = worst("t_max_c", low=False)
+    if r is not None:
+        status = ("error" if r["t_max_c"] >= s.limits.get("max_c", 105) else "warn"
+                  if r["t_max_c"] >= s.limits.get("warn_c", 85) else "ok")
+        out.append(("hottest copper", f"{r['t_max_c']:.0f} °C", where(r), status,
+                    "the hottest copper over the points (a draft-mesh thermal solve each)"))
+    return out
 
 
 def _fb_ripple(r) -> list[Kpi]:

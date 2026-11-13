@@ -2186,6 +2186,92 @@ def _two_periods(r) -> tuple:
     return t2, (lambda x: np.concatenate([np.asarray(x), np.asarray(x)]))
 
 
+_SWEEP_PANELS = (           # (output, row key(s), label, scale, limit keys)
+    ("emissions", ("radiated_db", "conducted_db"), "margin (dB)", 1.0),
+    ("emissions", ("overshoot_v",), "overshoot (V)", 1.0),
+    ("losses", ("p_loss_w",), "loss (W)", 1.0),
+    ("losses", ("efficiency",), "efficiency (%)", 100.0),
+    ("ripple", ("fb_pp",), "FB ripple (mV p-p)", 1e3),
+    ("ripple", ("pm_deg",), "phase margin (°)", 1.0),
+    ("thermal", ("t_max_c", "t_part_c"), "temperature (°C)", 1.0),
+)
+_SWEEP_NAMES = {"radiated_db": "radiated", "conducted_db": "conducted", "t_max_c": "copper", "t_part_c": "hottest part"}
+
+
+def draw_converter_sweep(fig: Figure, s) -> None:
+    """A stage's operating-point sweep (analysis/converter_sweep.ConverterSweep): one row of panels per quantity
+    it has, the input-voltage sweep on the left and the load-current sweep on the right, the nominal point dotted,
+    the limits as dashed lines (the warning margin, the FB ripple's min / max, 45° of phase margin, warn_c / max_c)."""
+    fig.clear()
+    panels = [p for p in _SWEEP_PANELS if p[0] in s.outputs
+              and any(r.get(k) is not None for r in s.rows for k in p[1])]
+    axes_kind = [a for a in ("v_in", "i_out") if s.axis(a)]
+    if s.error or not panels or not axes_kind:
+        ax = fig.add_subplot(111)
+        ax.text(0.5, 0.5, s.error or "nothing swept", ha="center", va="center", transform=ax.transAxes,
+                fontsize=FS_TEXT)
+        ax.set_axis_off()
+        return
+    gs = fig.add_gridspec(len(panels), len(axes_kind), hspace=0.12, wspace=0.18)
+    top = None
+    for i, (_, keys, label, scale) in enumerate(panels):
+        for j, axis in enumerate(axes_kind):
+            ax = fig.add_subplot(gs[i, j])
+            top = top or ax
+            rows = [r for r in s.axis(axis) if not r.get("error")]
+            x = [r[axis] for r in rows]
+            for k, key in enumerate(keys):
+                y = [r.get(key) * scale if r.get(key) is not None else np.nan for r in rows]
+                ax.plot(x, y, "o-", ms=3, lw=1.3, color=PDN_COLOURS[k % len(PDN_COLOURS)],
+                        label=_SWEEP_NAMES.get(key, ""))
+            ax.axvline(s.v_in if axis == "v_in" else s.i_out, color="#888888", lw=0.8, ls=":")
+            if keys[0] == "radiated_db":
+                ax.axhline(s.limits.get("margin_db", 6.0), color="#ff7f0e", lw=0.8, ls="--")
+                ax.axhline(0.0, color="#d62728", lw=0.8, ls="--")
+            elif keys[0] == "fb_pp":
+                for lim, colour in (("fb_min", "#d62728"), ("fb_max", "#ff7f0e")):
+                    if s.limits.get(lim) is not None:
+                        ax.axhline(s.limits[lim] * 1e3, color=colour, lw=0.8, ls="--")
+            elif keys[0] == "pm_deg":
+                ax.axhline(45.0, color="#ff7f0e", lw=0.8, ls="--")
+            elif keys[0] == "t_max_c":
+                ax.axhline(s.limits.get("warn_c", 85), color="#ff7f0e", lw=0.8, ls="--")
+                ax.axhline(s.limits.get("max_c", 105), color="#d62728", lw=0.8, ls="--")
+            ax.grid(True, alpha=0.3)
+            ax.tick_params(labelsize=FS_TICK)
+            if j == 0:
+                ax.set_ylabel(label, fontsize=FS_TICK)
+            if i == len(panels) - 1:
+                ax.set_xlabel("V in (V)" if axis == "v_in" else "I out (A)", fontsize=FS_TEXT)
+            else:
+                ax.tick_params(labelbottom=False)
+            if len(keys) > 1 and i == 0 and j == len(axes_kind) - 1 or (len(keys) > 1 and keys[0] == "t_max_c"
+                                                                        and j == len(axes_kind) - 1):
+                ax.legend(fontsize=FS_TICK, frameon=False, loc="best")
+    w_in, _ = fig.get_size_inches()
+    left_in, right_in = _lh(FS_TEXT) + _width_in("-100.0", FS_TICK) + 0.24, 0.25
+    title = (f"{s.net}: {len(s.rows)} operating points around {s.v_in:g} V, {s.i_out:g} A "
+             "(dotted: the nominal; dashed: the limits)")
+    header = _title_and_key(top, title, w_in - left_in - right_in)
+    _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TICK) + 0.08 + _lh(FS_TEXT), header + 0.06, hspace=0.12)
+
+
+def draw_sweep_table(fig: Figure, s) -> None:
+    """The sweep's points as a table of text (converter_sweep.sweep_text), in a monospaced font."""
+    from ..analysis.converter_sweep import sweep_text
+    fig.clear()
+    ax = fig.add_subplot(111)
+    ax.set_axis_off()
+    ax.text(0.0, 1.0, "\n".join(sweep_text(s)), ha="left", va="top", family="monospace", fontsize=FS_TICK,
+            transform=ax.transAxes)
+
+
+def sweep_height_in(s) -> float:
+    """The sweep figure's height (inches): a row of panels per quantity shown."""
+    n = sum(1 for p in _SWEEP_PANELS if p[0] in s.outputs and any(r.get(k) is not None for r in s.rows for k in p[1]))
+    return 1.0 + 1.6 * max(n, 1)
+
+
 def draw_fb_ripple(fig: Figure, r) -> None:
     """The switching ripple at a controller's FB pin over two periods (analysis/fb_ripple.FbRippleResult), around
     its DC level (the controller's Vref when known), with the controller's FB Ripple Min / Max as a band of the
