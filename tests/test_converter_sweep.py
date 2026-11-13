@@ -41,9 +41,28 @@ def swept(tmp_path_factory):
 
 
 def _ref(tmp_path, v_in, i_out):
-    """A fresh Simulate of the stage at that point (re-solved)."""
-    b, cfg = _stage(tmp_path, f"ref_{v_in:g}_{i_out:g}", v_in=v_in, i_out=i_out)
+    """A fresh Simulate of the stage at that point (re-solved), its switches' C_oss as a datasheet would give it at
+    that bus voltage (a junction's C ∝ 1/√V from the stage's 1 nF at 12 V)."""
+    b, cfg = _stage(tmp_path, f"ref_{v_in:g}_{i_out:g}", v_in=v_in, i_out=i_out, c_oss=1e-9 * (V_IN / v_in) ** 0.5)
     return simulate(b, cfg).converters[0]
+
+
+def test_the_switches_charge_follows_the_input_voltage_as_a_junctions():
+    """C_oss and Q_oss at another V in: C ∝ 1/√V, and Q the integral of that C from 0 (checked numerically); a boost's
+    switches see V out, which the sweep keeps, so theirs stay."""
+    import numpy as np
+    from groundtruth.analysis.converter_sweep import switch_charge_at
+    spec = ConverterSpec("buck", "VIN", "GND", f_sw=500e3, i_out=2.0, v_in=48.0, v_out=12.0, c_oss=600e-12,
+                         q_oss=40e-9)
+    at = switch_charge_at(spec, 48.0, 24.0)
+    assert at["c_oss"] == pytest.approx(600e-12 * 2 ** 0.5)
+    v = np.linspace(0.0, 48.0, 400001)[1:]
+    c = 600e-12 * (48.0 / v) ** 0.5                                        # C(V) through the nominal point
+    q = lambda top: float(np.trapezoid(c[v <= top], v[v <= top]))         # noqa: E731
+    assert at["q_oss"] / spec.q_oss == pytest.approx(q(24.0) / q(48.0), rel=2e-3)
+    assert switch_charge_at(spec, 48.0, 48.0) == {}
+    boost = ConverterSpec("b", "VIN", "GND", topology="boost", c_oss=1e-9, v_in=12.0, v_out=24.0)
+    assert switch_charge_at(boost, 12.0, 9.0) == {}
 
 
 def test_the_nominal_row_is_the_stages_own_result(swept):

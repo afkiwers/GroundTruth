@@ -76,6 +76,22 @@ def points(spec) -> list[tuple[str, float, float]]:
     return out
 
 
+def switch_charge_at(spec, v_nom: float, v_in: float) -> dict:
+    """The switches' C_oss and Q_oss at another input voltage, as replace() arguments ({} when nothing changes).
+    The stage's values are those at its nominal bus voltage (settings: C_oss at the bus voltage, Q_oss from 0 to it);
+    a switch's output capacitance is close to a junction's, C(V) ∝ 1/√V, so its charge Q(V) = ∫C dV ∝ √V
+    [Erickson 2001] [A114]. Only where the switches see V in: a boost's see V out, which the sweep keeps."""
+    if spec.topology == "boost" or not v_nom or not v_in or abs(v_in - v_nom) < 1e-12:
+        return {}
+    k = (v_in / v_nom) ** 0.5
+    out = {}
+    if spec.c_oss:
+        out["c_oss"] = spec.c_oss / k
+    if spec.q_oss:
+        out["q_oss"] = spec.q_oss * k
+    return out
+
+
 def _emissions(setup, spec_at, i_pulse: float, duty: float, v_in: float, ripple: float) -> dict:
     """The emission figures at the point: fix_advisor.evaluate on a copy of the stage's setup whose result carries
     the point's pulse (the solved transfers and moments are the setup's own) [A114]."""
@@ -141,6 +157,9 @@ def sweep(model, setup, fb=None) -> Optional[ConverterSweep]:
     if not out.v_in or not spec.f_sw:
         out.error = "the sweep needs the stage's V in and f_sw"
         return out
+    if switch_charge_at(spec, out.v_in, 2 * out.v_in) and any(a == "v_in" for a, _, _ in pts):
+        out.notes.append("C_oss and Q_oss at each V in by a junction's C ∝ 1/√V (Q ∝ √V) from the stage's values at "
+                         "its nominal V in [Erickson 2001] [A114]")
     if any(abs(v - out.v_in) > V_IN_FAR * out.v_in for a, v, _ in pts if a == "v_in"):
         out.notes.append(f"V in more than {V_IN_FAR * 100:.0f} % from the nominal: the switch node's DC path keeps the "
                          "nominal duty's share between the switches [A114]")
@@ -155,7 +174,8 @@ def sweep(model, setup, fb=None) -> Optional[ConverterSweep]:
         row = {"axis": axis, "v_in": v_in, "i_out": i_out,
                "nominal": abs(v_in - out.v_in) < 1e-12 and abs(i_out - spec.i_out) < 1e-12}
         out.rows.append(row)
-        spec_at = replace(spec, v_in=v_in, i_out=i_out, duty=None if spec.v_out else spec.duty)
+        spec_at = replace(spec, v_in=v_in, i_out=i_out, duty=None if spec.v_out else spec.duty,
+                          **switch_charge_at(spec, out.v_in, v_in))
         if spec.topology == "buck" and spec.v_out and v_in <= spec.v_out:
             row["error"] = f"V in {v_in:g} V is not above V out {spec.v_out:g} V"
             continue

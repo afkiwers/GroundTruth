@@ -310,7 +310,8 @@ voltage left and load current right, and a table of every point), with tiles, in
   and the control loop's phase margin, crossover and gain margin), `thermal` (a draft thermal solve per point: the
   hottest copper and part; slow, so only when listed). The first three when `outputs` is not given.
 - **Quick:** only V in and I out change, so every field solve Simulate made holds and nothing is solved again
-  except the temperatures. The switch node's DC current pattern keeps the nominal duty's share between the
+  except the temperatures. At another V in the switches' C_oss and Q_oss follow a junction's C ∝ 1/√V, Q ∝ √V
+  [Erickson 2001]. The switch node's DC current pattern keeps the nominal duty's share between the
   switches (a note when V in is more than 30 % from the nominal) [A114].
 - **No issues** are raised for the swept points; the stage's own operating point raises them.
 
