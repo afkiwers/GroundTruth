@@ -194,6 +194,18 @@ class Pad:
         return f"{self.footprint}.{self.number}"
 
 
+def _pad_area(pad: Pad) -> float:
+    """A pad's copper area for ranking the pads of one pin (mm²): its polygon's (shoelace) when it has one (a custom
+    pad's anchor can be far smaller than its primitives), else its bounding size's."""
+    def ring(pts: list) -> float:
+        """A closed ring's area (shoelace formula)."""
+        return abs(sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(pts, pts[1:] + pts[:1]))) / 2.0
+    if pad.polygon is not None and len(pad.polygon[0]) >= 3:
+        outer, holes = pad.polygon
+        return max(ring(list(outer)) - sum(ring(list(h)) for h in holes), 0.0)
+    return pad.size[0] * pad.size[1]
+
+
 @dataclass
 class Footprint:
     """A placed part: its reference, value and library footprint, its pads, the schematic symbol's own fields
@@ -221,11 +233,21 @@ class Footprint:
         return self.lib_id.split(":", 1)[-1]
 
     def pad(self, number: str) -> Optional[Pad]:
-        """The pad with this number ("1", "A3" ...), or None. With several pads of one number, the first."""
+        """The pad with this number ("1", "A3" ...), or None. With several pads of one number, the largest (the
+        first of equal ones): the pin's main copper. A wire tab drawn as an SMD tab plus a grid of 0.5 mm plated
+        holes, all pad "1", listed a hole at the tab's corner first, and the first pad stood for the whole tab: a
+        bridge's 250 A phase current entered the copper through that one hole (the user, 2026-11-13: "there is no
+        reason for current to pile up in that point"). Every pad of the pin: pins()."""
+        best = None
         for pad in self.pads:
-            if pad.number == number:
-                return pad
-        return None
+            if pad.number == number and (best is None or _pad_area(pad) > _pad_area(best)):
+                best = pad
+        return best
+
+    def pins(self, number: str) -> list[Pad]:
+        """Every pad with this number, in their order: one pin's copper (a tab and its plated holes, a power FET's
+        source bar and the tabs over it, an exposed pad and its via pads)."""
+        return [pad for pad in self.pads if pad.number == number]
 
     def nets(self) -> set[str]:
         """The nets its pads connect to (unconnected pads, net "", left out)."""
@@ -312,13 +334,23 @@ class Board:
         return [pad for fp in self.footprints for pad in fp.pads]
 
     def find_pin(self, pin: str) -> Optional[Pad]:
-        """Look up a pad by "REF.NUMBER" (e.g. "U1.12")."""
+        """Look up a pad by "REF.NUMBER" (e.g. "U1.12"); with several pads of that number, the largest
+        (Footprint.pad). Where a current enters or leaves at the pin, feed all of them: pin_pads."""
         if "." not in pin:
             return None
         # the pad number is what follows the last dot: a pad number with a dot of its own cannot be named this way
         ref, number = pin.rsplit(".", 1)
         fp = self.footprint(ref)
         return fp.pad(number) if fp else None
+
+    def pin_pads(self, pin: str) -> list[Pad]:
+        """Every pad of "REF.NUMBER" (Footprint.pins), [] when there is none: the copper a current fed at the pin
+        enters through (power._area_shares spreads it over their union)."""
+        if "." not in pin:
+            return []
+        ref, number = pin.rsplit(".", 1)
+        fp = self.footprint(ref)
+        return fp.pins(number) if fp else []
 
     def fingerprint(self) -> str:
         """A digest of everything the analyses read from the board: the stackup, the nets, every track, via, pad and

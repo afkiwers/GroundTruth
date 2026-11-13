@@ -1641,6 +1641,14 @@ def pad_weights(pads: list[Pad]) -> list[float]:
     return [out[id(p)] for p in pads]
 
 
+def whole_pin(board: Board, pad: Pad) -> list[Pad]:
+    """Every pad of `pad`'s pin (Board.pin_pads), the pad alone when the board has no such pin: where a connector's
+    current is fed. find_pin gives one pad of the pin; a wire tab drawn as an SMD tab and a grid of plated holes, all
+    pad "1", fed through the hole listed first took the whole phase current in a 0.5 mm circle at the tab's corner
+    (the user, 2026-11-13: "there is no reason for current to pile up in that point") [A51]."""
+    return board.pin_pads(pad.pin) or [pad]
+
+
 def _area_shares(st: StackBuild, pads: list[Pad], side: str, total: float) -> list[tuple]:
     """Injections spreading `total` A over the pads' pins by their copper area (pin_area: overlapping pads of one pin
     count once [A51]) and over each pin's own grid nodes by the part of the pin each node's cell holds (cell_areas
@@ -2175,7 +2183,7 @@ def dc_runs(model: BoardModel, setup: "ConverterSetup") -> tuple[list, list[str]
         plus = board.find_pin(spec.input_connector[0])
         ist = dst or setup.cond.build                   # the input path's model (the hot loop's when not split)
         try:
-            inj = _area_shares(ist, [plus], _side(board.footprint(plus.footprint)), 1.0)
+            inj = _area_shares(ist, whole_pin(board, plus), _side(board.footprint(plus.footprint)), 1.0)
             if spec.topology == "boost" and res.ripple and inductor is not None:
                 vin_pads = [p for p in inductor.pads if p.net == res.ripple["input_net"]]
                 inj += _area_shares(ist, vin_pads, _side(inductor), -1.0)
@@ -2315,7 +2323,7 @@ def _output_runs(model: BoardModel, setup: "ConverterSetup", sw_net: Optional[st
         """The output path's DC injections: the load current enters at the inductor's (or the rectifier's) far
         side, leaves at the output connector's + pin (1 A in all)."""
         inj = [x for pads, side, w in src for x in _area_shares(st, pads, side, w)]
-        return inj + _area_shares(st, [plus], _side(board.footprint(plus.footprint)), -1.0)
+        return inj + _area_shares(st, whole_pin(board, plus), _side(board.footprint(plus.footprint)), -1.0)
 
     # the input current per ampere of output current (a buck: d = D without losses), or the output current per
     # ampere of input current (a boost: its rectifier's share d = 1 - D = V_in/V_out without losses; d is the high
@@ -2329,14 +2337,14 @@ def _output_runs(model: BoardModel, setup: "ConverterSetup", sw_net: Optional[st
         load's and the low side's in, the input connector's out, per ampere of input current)."""
         side_of = _side(board.footprint(minus.footprint))
         if boost:          # normalised to the input current
-            inj = _area_shares(st, [minus], side_of, out_per_in)
+            inj = _area_shares(st, whole_pin(board, minus), side_of, out_per_in)
             inj += [x for el in low for x in _area_shares(st, el.b, _side(el.fp), (1 - out_per_in) * el.weight)]
-            return inj + _area_shares(st, [inp], _side(board.footprint(inp.footprint)), -1.0)
+            return inj + _area_shares(st, whole_pin(board, inp), _side(board.footprint(inp.footprint)), -1.0)
         share = 1 - ratio if inp is not None else 1.0
-        inj = _area_shares(st, [minus], side_of, 1.0)
+        inj = _area_shares(st, whole_pin(board, minus), side_of, 1.0)
         inj += [x for el in low for x in _area_shares(st, el.b, _side(el.fp), -share * el.weight)]
         if inp is not None:
-            inj += _area_shares(st, [inp], _side(board.footprint(inp.footprint)), -ratio)
+            inj += _area_shares(st, whole_pin(board, inp), _side(board.footprint(inp.footprint)), -ratio)
         return inj
 
     wanted = []
