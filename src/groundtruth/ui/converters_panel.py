@@ -13,6 +13,7 @@ import wx
 from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 
 from ..components.values import format_si
+from ..analysis.converter_sweep import DEFAULT_OUTPUTS
 from ..config.settings import TOPOLOGIES, ConfigError, ConverterSpec
 from . import limit_choice as lc
 from . import theme
@@ -135,6 +136,11 @@ FIELD_TIPS = {
     "Measured efficiency": "A CSV of bench measurements drawn over the model's efficiency curve: columns load "
                            "current (A), efficiency (% or 0-1) and optionally the loss (W); a header row is "
                            "skipped. A file name relative to the board's groundtruth/ folder, or a full path.",
+    "Sweep V in (V)": "Input voltages to sweep at the nominal load current, e.g. 36, 48, 65. Empty: none.",
+    "Sweep I out (A)": "Load currents to sweep at the nominal input voltage, e.g. 0.1, 0.5, 2. Empty: none.",
+    "Sweep outputs": "What to work out at each point: emissions (radiated, conducted, overshoot), losses (and "
+                     "efficiency), ripple (at the FB pin, and the control loop), temperatures (a thermal solve per "
+                     "point: slow).",
 }
 BUTTON_TIPS = {
     "Add": "Add a new power stage from the form.",
@@ -176,6 +182,51 @@ class ConverterDetectDialog(PickDialog):
                          lambda d: d.confidence != "low",
                          "Ticked stages are added as unreviewed: set the switching frequency, load current, "
                          "voltages and edge time before relying on results.")
+
+
+class SweepOutputs(wx.Panel):
+    """The sweep's outputs as check boxes, with a text control's interface for the form (GetValue / SetValue:
+    "emissions, losses"; the form's MIXED shows every box undetermined, and reads back as MIXED until one is
+    clicked)."""
+    NAMES = (("emissions", "Emissions"), ("losses", "Losses"), ("ripple", "FB ripple, loop"),
+             ("thermal", "Temperatures"))
+
+    def __init__(self, parent):
+        """Four three-state check boxes in a row."""
+        super().__init__(parent)
+        self.boxes = {k: wx.CheckBox(self, label=label, style=wx.CHK_3STATE) for k, label in self.NAMES}
+        self.mixed = False
+        s = wx.BoxSizer(wx.HORIZONTAL)
+        for b in self.boxes.values():
+            s.Add(b, 0, wx.RIGHT, 8)
+            b.Bind(wx.EVT_CHECKBOX, self._clicked)
+        self.SetSizer(s)
+
+    def _clicked(self, event):
+        """A box clicked: the value is the boxes' now (no longer the several stages' mixed one)."""
+        if self.mixed:
+            self.mixed = False
+            for b in self.boxes.values():
+                if b.Get3StateValue() == wx.CHK_UNDETERMINED:
+                    b.Set3StateValue(wx.CHK_UNCHECKED)
+        event.Skip()
+
+    def GetValue(self) -> str:
+        """The ticked outputs, comma-separated (ConvertersPanel.MIXED while several stages differ)."""
+        if self.mixed:
+            return ConvertersPanel.MIXED
+        return ", ".join(k for k, b in self.boxes.items() if b.Get3StateValue() == wx.CHK_CHECKED)
+
+    def SetValue(self, text: str):
+        """Tick the outputs named in text (MIXED: every box undetermined)."""
+        self.mixed = text == ConvertersPanel.MIXED
+        names = {x.strip() for x in text.split(",")}
+        for k, b in self.boxes.items():
+            b.Set3StateValue(wx.CHK_UNDETERMINED if self.mixed else wx.CHK_CHECKED if k in names
+                             else wx.CHK_UNCHECKED)
+
+    def SetHint(self, _hint: str):
+        """No hint for check boxes (the text controls' interface)."""
 
 
 class ConvertersPanel(SelectableRows, wx.Panel):
@@ -275,6 +326,11 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self.eff_currents.SetHint("5-120 % of the load")
         self.eff_measured = wx.TextCtrl(fw)
         self.eff_measured.SetHint("none (a CSV in groundtruth/)")
+        self.sweep_v_in = wx.TextCtrl(fw)       # the operating-point sweep (analysis/converter_sweep.py)
+        self.sweep_v_in.SetHint("none")
+        self.sweep_i_out = wx.TextCtrl(fw)
+        self.sweep_i_out.SetHint("none")
+        self.sweep_outputs = SweepOutputs(fw)
         self.inp = wx.TextCtrl(fw)
         self.out = wx.TextCtrl(fw)
         self.standard = wx.Choice(fw, choices=STANDARD_CHOICES)
@@ -339,6 +395,9 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             ("Efficiency", "The curve over load current: fixed losses, bench data.",
              [("Q_g", self.qg), ("Gate drive (V)", self.v_gate), ("Controller I_q (A)", self.iq),
               ("Efficiency currents (A)", self.eff_currents), ("Measured efficiency", self.eff_measured)]),
+            ("Sweep", "Optional: other operating points, each list at the other's nominal value.",
+             [("Sweep V in (V)", self.sweep_v_in), ("Sweep I out (A)", self.sweep_i_out),
+              ("Sweep outputs", self.sweep_outputs)]),
         ]
 
     def _form_rows(self):
@@ -429,7 +488,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
              "interleave": ("text", ""), "qg": ("num", "C"), "v_gate": ("num", "V"), "iq": ("num", "A"),
              "core_loss": ("num", "W"), "core_loss_f": ("num", "Hz"), "core_loss_di": ("num", "A"),
              "core_alpha": ("num", ""), "core_beta": ("num", ""),
-             "efficiency_currents": ("nums", "A"), "efficiency_measured": ("text", "")}
+             "efficiency_currents": ("nums", "A"), "efficiency_measured": ("text", ""),
+             "sweep_v_in": ("nums", "V"), "sweep_i_out": ("nums", "A"), "sweep_outputs": ("outputs", "")}
 
     def _ctrls(self) -> dict:
         """ConverterSpec field -> its control on the form."""
@@ -444,7 +504,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
                 "interleave": self.interleave, "phase_deg": self.phase_deg, "qg": self.qg, "v_gate": self.v_gate,
                 "core_loss": self.core_loss, "core_loss_f": self.core_loss_f, "core_loss_di": self.core_loss_di,
                 "core_alpha": self.core_alpha, "core_beta": self.core_beta,
-                "iq": self.iq, "efficiency_currents": self.eff_currents, "efficiency_measured": self.eff_measured}
+                "iq": self.iq, "efficiency_currents": self.eff_currents, "efficiency_measured": self.eff_measured,
+                "sweep_v_in": self.sweep_v_in, "sweep_i_out": self.sweep_i_out, "sweep_outputs": self.sweep_outputs}
 
     def _texts(self, c: ConverterSpec) -> dict:
         """Every field of stage c as the form shows it."""
@@ -474,7 +535,10 @@ class ConvertersPanel(SelectableRows, wx.Panel):
                 "core_loss": si(c.core_loss, "W"), "core_loss_f": si(c.core_loss_f, "Hz"),
                 "core_loss_di": g(c.core_loss_di), "core_alpha": g(c.core_alpha), "core_beta": g(c.core_beta),
                 "efficiency_currents": ", ".join(f"{x:g}" for x in c.efficiency_currents),
-                "efficiency_measured": c.efficiency_measured}
+                "efficiency_measured": c.efficiency_measured,
+                "sweep_v_in": ", ".join(f"{x:g}" for x in c.sweep_v_in),
+                "sweep_i_out": ", ".join(f"{x:g}" for x in c.sweep_i_out),
+                "sweep_outputs": ", ".join(c.sweep_outputs or DEFAULT_OUTPUTS)}
 
     def _set(self, ctrl, text: str):
         """Show text in a control; a list (wx.Choice) gets a MIXED entry at the top while it shows one."""
@@ -549,6 +613,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
                 return None, f"'{text}' is not a list of positive numbers"
             return vals, ""
         if kind == "pins":
+            return [r.strip() for r in text.split(",") if r.strip()], ""
+        if kind == "outputs":                    # the sweep's outputs (SweepOutputs)
             return [r.strip() for r in text.split(",") if r.strip()], ""
         if kind == "pct":
             if not text:
@@ -710,6 +776,12 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             efficiency_currents=[v for v in (parse_field(x.strip(), "A") for x in self.eff_currents.GetValue()
                                              .split(",") if x.strip()) if v],
             efficiency_measured=self.eff_measured.GetValue().strip(),
+            sweep_v_in=[v for v in (parse_field(x.strip(), "V") for x in self.sweep_v_in.GetValue().split(",")
+                                    if x.strip()) if v],
+            sweep_i_out=[v for v in (parse_field(x.strip(), "A") for x in self.sweep_i_out.GetValue().split(",")
+                                     if x.strip()) if v],
+            sweep_outputs=[x.strip() for x in self.sweep_outputs.GetValue().split(",") if x.strip()
+                           and x.strip() != self.MIXED],
             input_connector=refs(self.inp), output_connector=refs(self.out),
             conducted=lc.standard_key(std), conducted_class=cls,
             spread=(parse_field(self.spread.GetValue().replace("%", ""), "") or 0.0) / 100 or None,

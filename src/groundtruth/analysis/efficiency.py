@@ -90,10 +90,65 @@ def fixed_losses(spec, v_in: float) -> tuple[float, float]:
     return p_gate, (spec.iq * v_in if spec.iq else 0.0)
 
 
+def scaled_paths(paths: list, i_out: float, i_in: float, i_ref: float) -> list:
+    """The stage's solved DC paths at another operating point (a DC solve is linear in its current): the input
+    paths at I_in, the output paths at I_out, any other path with the load (ref·I_out/I_ref)."""
+    out = []
+    for p in paths:
+        ref = p.get("current_a") or 0.0
+        if p["name"].startswith("input"):
+            amps = i_in
+        elif p["name"].startswith("output"):
+            amps = i_out
+        else:                                   # another path: with the load
+            amps = ref * i_out / i_ref if i_ref else ref
+        out.append(dict(p, current_a=amps))
+    return out
+
+
+def losses_at(board, config, spec, res, i_out: float, v_in: float, duty: float, i_ref: Optional[float] = None
+              ) -> dict:
+    """The stage's losses at the load current i_out, input voltage v_in and duty (its own V_out and f_sw), on its
+    solved DC paths scaled to the point (scaled_paths): {p_out, p_loss, efficiency, i_in, by {category: W},
+    rows (part_losses' rows), copper, missing}. i_ref: the load current the paths were solved at (default
+    spec.i_out: the stage's own; a sweep passes its nominal one). The input current from the energy balance,
+    EFF_ROUNDS rounds
+    (V_in·I_in = P_out + losses). Shared by the efficiency sweep and the operating-point sweep
+    (analysis/converter_sweep.py)."""
+    from .thermal import part_losses
+    boost = spec.topology == "boost"
+    v_out = spec.v_out or (None if boost or duty is None else duty * v_in)
+    p_out = (v_out or 0.0) * i_out
+    s_i = replace(spec, i_out=i_out, v_in=v_in, name=res.net)
+    one_cfg = replace(config, converters=[s_i])
+    p_gate, p_ctrl = fixed_losses(s_i, v_in)
+    paths = list(getattr(res, "dc", []) or [])
+    i_in = p_out / v_in                         # lossless, then the energy balance's rounds
+    rows, missing, copper, p_loss, scaled = [], [], 0.0, 0.0, []
+    for _ in range(EFF_ROUNDS):
+        scaled = scaled_paths(paths, i_out, i_in, spec.i_out if i_ref is None else i_ref)
+        probe = SimpleNamespace(net=res.net, duty=duty, v_in=v_in, dc=scaled, input={"i_in_a": i_in},
+                                kind="converter")
+        rows, missing = part_losses(board, one_cfg, [probe])
+        copper = sum(p.get("r_copper_mohm", 0.0) * 1e-3 * p["current_a"] ** 2 for p in scaled)
+        p_loss = sum(r["power_w"] for r in rows) + copper + p_gate + p_ctrl
+        i_in = (p_out + p_loss) / v_in
+    cats = {c: 0.0 for c in CATEGORIES}
+    for r in rows:
+        for c, w in (r.get("by") or {"other": r["power_w"]}).items():
+            cats[c if c in cats else "other"] += w
+    cats["copper"] += copper
+    cats["gate drive"] += p_gate
+    cats["controller"] += p_ctrl
+    return {"p_out": p_out, "p_loss": p_loss, "efficiency": p_out / (p_out + p_loss) if p_out + p_loss > 0 else 0.0,
+            "i_in": i_in, "by": cats, "rows": rows, "copper": copper, "missing": missing, "paths": scaled,
+            "config": one_cfg}
+
+
 def sweep(board, config, spec, res, currents: Optional[list] = None) -> Optional[EfficiencyResult]:
     """The stage's efficiency over load current (see the module), or None without an input voltage, an output
     voltage (or duty) or an output current. res: its ConverterResult (duty, v_in, its solved DC paths)."""
-    from .thermal import part_losses, ripple_pp
+    from .thermal import ripple_pp
     v_in = spec.v_in or res.v_in
     if not v_in or not spec.i_out:
         return None
@@ -104,43 +159,15 @@ def sweep(board, config, spec, res, currents: Optional[list] = None) -> Optional
     currents = sorted(currents or spec.efficiency_currents or default_currents(spec.i_out))
     out = EfficiencyResult(res.net, v_in, v_out, spec.i_out, currents)
     by = {c: [] for c in CATEGORIES}
-    paths = list(getattr(res, "dc", []) or [])
-    p_gate, p_ctrl = fixed_losses(spec, v_in)
-    one_cfg = None
+    one_cfg, missing = None, []
     for i in currents:
-        p_out = v_out * i
-        s_i = replace(spec, i_out=i, name=res.net)
-        one_cfg = replace(config, converters=[s_i])
-        i_in = p_out / v_in                         # lossless, then the energy balance's rounds
-        for _ in range(EFF_ROUNDS):
-            scaled = []
-            for p in paths:
-                ref = p.get("current_a") or 0.0
-                if p["name"].startswith("input"):
-                    amps = i_in
-                elif p["name"].startswith("output"):
-                    amps = i
-                else:                               # another path: with the load
-                    amps = ref * i / spec.i_out
-                scaled.append(dict(p, current_a=amps))
-            probe = SimpleNamespace(net=res.net, duty=res.duty, v_in=v_in, dc=scaled, input={"i_in_a": i_in},
-                                    kind="converter")
-            rows, missing = part_losses(board, one_cfg, [probe])
-            copper = sum(p.get("r_copper_mohm", 0.0) * 1e-3 * p["current_a"] ** 2 for p in scaled)
-            p_loss = sum(r["power_w"] for r in rows) + copper + p_gate + p_ctrl
-            i_in = (p_out + p_loss) / v_in
-        cats = {c: 0.0 for c in CATEGORIES}
-        for r in rows:
-            for c, w in (r.get("by") or {"other": r["power_w"]}).items():
-                cats[c if c in cats else "other"] += w
-        cats["copper"] += copper
-        cats["gate drive"] += p_gate
-        cats["controller"] += p_ctrl
+        at = losses_at(board, config, spec, res, i, v_in, res.duty)
+        one_cfg, missing = at["config"], at["missing"]
         for c in CATEGORIES:
-            by[c].append(cats[c])
-        out.p_out.append(p_out)
-        out.p_loss.append(p_loss)
-        out.efficiency.append(p_out / (p_out + p_loss) if p_out + p_loss > 0 else 0.0)
+            by[c].append(at["by"][c])
+        out.p_out.append(at["p_out"])
+        out.p_loss.append(at["p_loss"])
+        out.efficiency.append(at["efficiency"])
     out.by = {c: v for c, v in by.items() if any(x > 0 for x in v)}
     # continuous conduction ends where the inductor current's valley reaches zero: I_L = ΔI/2 (a buck's I_L is
     # I_out, a boost's I_out/(1 - D_sw) = I_out/d) [Erickson 2001]

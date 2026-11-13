@@ -28,6 +28,7 @@ next one).</p>
 <li><a href="#conducted">Conducted-emission limits: standards and classes</a></li>
 <li><a href="#efficiency">Efficiency over load current</a></li>
 <li><a href="#fbripple">Ripple at a controller's FB pin</a></li>
+<li><a href="#convsweep">Operating-point sweep: input voltage and load current</a></li>
 <li><a href="#hotloop">The hot loop</a></li>
 <li><a href="#thermal">Thermal and Current capacity</a></li>
 <li><a href="#analog">Op-amp circuits and the transfer function</a></li>
@@ -366,6 +367,36 @@ resistance).</p>
   model's curves, and a tile gives the largest difference. The file is read on the computer that shows the result,
   so it also works with a compute server.</li>
 </ul>
+<hr><a name="convsweep"></a><h3>Operating-point sweep: input voltage and load current</h3>
+<p>A power stage is designed for a range: an input from a battery's empty to its full voltage, a load from standby
+to full. The Converters tab's <b>Sweep</b> group runs the stage at other operating points with every
+<b>Simulate</b>: <b>Sweep V in (V)</b> lists input voltages (each at the nominal load current) and <b>Sweep I out
+(A)</b> load currents (each at the nominal input voltage); two separate sweeps, the nominal point is added to each.
+The check boxes pick what is worked out at each point:</p>
+<ul>
+<li><b>Emissions</b>: the radiated and conducted margins (the worst over frequency, and where), the switch node's
+  overshoot and the common-mode budget, from the hot loop's pulse at the point (its current, duty, the inductor's
+  ripple, the recovery) through the loop Simulate solved.</li>
+<li><b>Losses &amp; efficiency</b>: the parts' and the copper's losses, the efficiency, the input current and the
+  largest loss, as the <a href="#efficiency">efficiency view</a> works them out (at the swept load currents its
+  numbers are the efficiency curve's).</li>
+<li><b>FB ripple &amp; loop</b>: the ripple at the controller's FB pin (<a href="#fbripple">FB ripple</a>) against
+  its FB Ripple Min / Max, and the control loop's phase margin, crossover and gain margin.</li>
+<li><b>Temperatures</b> (off unless ticked: slow): a draft thermal solve per point with the losses there, the
+  hottest copper and the hottest part. It needs the thermal extra.</li>
+</ul>
+<p>Only V in and I out change: the switching frequency, V out and the board stay, so the field solves Simulate made
+hold at every point and nothing is solved again (except the temperatures), which keeps the sweep quick. One
+approximation: the DC current pattern of the switch node's copper keeps the nominal duty's share between the
+switches; a note says so when an input voltage is more than 30 % from the nominal [A114]. At most 64 points in all.
+The result is a Results view of its own, <i>&lt;stage&gt;  sweep (V in, I out)</i>: a row of plots per output, the
+input-voltage sweep on the left and the load-current sweep on the right, the nominal point dotted and the limits
+drawn; the second plot is the table of every point. Its tiles give the number of points, the worst radiated and
+conducted margins, the lowest efficiency, the FB ripple's range, the lowest phase margin and the hottest copper.
+The report has a part <i>Operating-point sweeps</i>, the console a table, the JSON every row. No issues are raised
+for the swept points: the stage's own operating point raises them. In the settings file:
+<code>sweep: {v_in: [36, 48, 60], i_out: [0.5, 2], outputs: [emissions, losses, ripple]}</code> (outputs:
+emissions, losses, ripple, thermal; the first three when not given).</p>
 <hr><a name="hotloop"></a><h3>The hot loop</h3>
 <p>In a buck, the on-time loop (input capacitor, high-side switch, inductor, output capacitor) and the off-time loop
 (low-side switch, inductor, output capacitor) both carry trapezoidal currents: the inductor current never stops.
@@ -416,7 +447,7 @@ controller's datasheet: how fast the sweep runs against the EMI receiver's bandw
 decides how much the reading drops (a slow sweep hardly lowers it, a fast one by several dB), so there is no safe
 default; the field's grey hint says so when triangle is chosen. <b>Q_g</b>, <b>Gate drive (V)</b>, <b>Controller
 I_q (A)</b>, <b>Efficiency currents (A)</b> and <b>Measured efficiency</b> feed the efficiency sweep (<a
-href="#efficiency">Efficiency over load current</a>). <b>Interleave group</b> and <b>Phase (°)</b> mark
+href="#efficiency">Efficiency over load current</a>). <b>Sweep V in (V)</b>, <b>Sweep I out (A)</b> and <b>Sweep outputs</b> run the stage at other operating points with every Simulate (<a href="#convsweep">Operating-point sweep</a>). <b>Interleave group</b> and <b>Phase (°)</b> mark
 the phases of one controller (<a href="#interleave">Interleaved stages</a> below). The buttons are those of the Signal paths
 tab, and the rows show in KiCad the same way: clicking a row selects the stage's switches and hot-loop capacitors
 and highlights its switch node (<b>Zoom KiCad to the selected power stages</b> also zooms). KiCad shows the row
@@ -426,7 +457,7 @@ side / low side, or "integrated" and the IC), <b>Rail</b>, <b>f_sw</b>, <b>I out
 (? where not set), <b>Edge</b>, <b>Input</b> and <b>Output</b> (the connector pins). The form scrolls when the window
 is short. The form is grouped, each group with a line saying what it is for: <b>Stage</b>, <b>Switches</b>,
 <b>Operating point</b> and <b>Connectors</b> are what every stage needs; <b>Switching edges</b>, <b>Conducted
-emission</b>, <b>Interleaving</b>, <b>Losses</b> and <b>Efficiency</b> refine it (an empty value is left out and
+emission</b>, <b>Interleaving</b>, <b>Losses</b>, <b>Efficiency</b> and <b>Sweep</b> refine it (an empty value is left out and
 the run says so). <b>Topology</b> is buck, boost or custom; <b>Integrated stage</b> takes an IC with both
 switches inside (High side, Low side and Switch node are then greyed: not used); <b>Conducted standard</b> and <b>Conducted
 class</b> pick the limit (CISPR 22 CLASS A / B, CISPR 25 CLASS 1-5 as in TI WEBENCH, CISPR 32, MIL-STD-461 CE102;
@@ -1192,7 +1223,7 @@ more than a quarter of a second to draw (a big board, a resized window) shows a 
 bar in the middle of each plot that waits; it goes when the picture arrives.</p>
 <ul>
 <li><b>View</b> lists a signal route as its net and driver → receiver, a converter's DC path as "DC" and the
-  path's name, a bridge's RMS map as "RMS currents", and the bridge, sweep and thermal views by name.
+  path's name, a bridge's RMS map as "RMS currents", and the bridge, sweep (a bridge's, a power stage's <a href="#convsweep">operating-point sweep</a>) and thermal views by name.
   <b>Layer</b>: <i>main layers</i> (the four carrying most of the current, at least 2 % each), <i>all layers</i>
   (every copper layer of the board, top to bottom, also those carrying almost nothing; smaller maps), or one copper
   layer with its share of the current in %, busiest first (the drawing buttons use the busiest layer for <i>main

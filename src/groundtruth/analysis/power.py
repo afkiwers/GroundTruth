@@ -171,6 +171,7 @@ class ConverterResult(RouteResult):
     phase: str = ""
     loop: Optional[dict] = None                         # the control loop (analysis/loop.py): fc, pm, gm_db, notes
     fb_ripple: Optional[object] = None                  # the ripple at the controller's FB pin (analysis/fb_ripple.py)
+    sweep: Optional[object] = None                      # the operating-point sweep (analysis/converter_sweep.py)
     victims: list = field(default_factory=list)         # what the switching does to victim nets and parts (a stage of
                                                         # its own; a bridge's are on the bridge): victims.stage_rows
     # an interleaved stage (analysis/interleave.py): its phasor record until the group is combined (not in the
@@ -198,6 +199,8 @@ class ConverterResult(RouteResult):
             d["efficiency"] = self.efficiency.summary()
         if self.fb_ripple is not None:
             d["fb_ripple"] = self.fb_ripple.summary()
+        if self.sweep is not None:
+            d["sweep"] = self.sweep.summary()
         d["kind"] = "converter"
         return d
 
@@ -1543,6 +1546,7 @@ def finish_converter(model: BoardModel, setup: ConverterSetup) -> ConverterResul
         res.responses = stage_responses(setup)
         _stage_loop(model, setup)
         _stage_fb_ripple(model, setup)
+        _stage_sweep(model, setup)
     _converter_issues(setup, rules, a)
     if not spec.bridge:
         from .fix_advisor import stage_options
@@ -2962,6 +2966,24 @@ LOOP_PM_WARN, LOOP_PM_ERROR = 45.0, 30.0     # degrees of phase margin
 LOOP_GM_WARN = 6.0                           # dB of gain margin
 LOOP_FC_MAX = 0.2                            # the crossover above this share of f_sw: the sampling / ripple limit
 LOOP_RHP_MAX = 0.2                           # a boost's crossover above this share of its right-half-plane zero
+
+
+def _stage_sweep(model: BoardModel, setup: ConverterSetup):
+    """The stage's operating-point sweep (analysis/converter_sweep.py) when it has sweep values; never fails the
+    stage (an error is a note). The FB ripple's transfers it reuses are dropped after it (they are not results)."""
+    res = setup.res
+    try:
+        if setup.spec.sweep_v_in or setup.spec.sweep_i_out:
+            from .converter_sweep import sweep
+            res.sweep = sweep(model, setup, res.fb_ripple)
+            if res.sweep is not None:
+                res.notes.append(f"operating-point sweep: {len(res.sweep.rows)} points"
+                                 + (f" ({res.sweep.error})" if res.sweep.error else ""))
+    except Exception as e:                          # noqa: BLE001 - a note, not a failed Simulate
+        res.notes.append(f"operating-point sweep not made: {e}")
+    finally:
+        if res.fb_ripple is not None and hasattr(res.fb_ripple, "_prep"):
+            del res.fb_ripple._prep
 
 
 def _stage_fb_ripple(model: BoardModel, setup: ConverterSetup):

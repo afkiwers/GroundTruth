@@ -4210,6 +4210,52 @@ def test_simulate_shows_each_stage_s_efficiency_sweep(app, conv_frame):
     assert "load current (A)" in got["fig"] and "efficiency (%)" in got["fig"] and "loss (W)" in got["fig"]
 
 
+def test_the_converters_form_sets_a_sweep_and_simulate_shows_it(app, conv_frame):
+    """The user: "add a voltage/current sweep option to the converters". The form's Sweep section takes the V in
+    and I out values and the outputs (check boxes), Update stores them, a selected stage shows them back, and after
+    Simulate the stage has a view "<stage>  sweep (V in, I out)" with its tiles."""
+    from types import SimpleNamespace as NS
+    from groundtruth.config.settings import ConverterSpec
+    f = conv_frame
+    spec = ConverterSpec("buck", "VIN", "GND", switch=["U1"], f_sw=500e3, i_out=5.0, v_in=48.0, v_out=12.0,
+                         rise_time=2e-9, c_oss=600e-12, rds_on=5e-3, qg=10e-9, iq=3e-3,
+                         input_connector=["J1.1", "J1.2"])
+    got = {}
+
+    def setup():
+        f.settings.set_converters([spec])
+        p = f.converters
+        p.load(f.board, f.settings)
+        p.list.Select(0)
+        p.on_select(NS(GetIndex=lambda: 0))
+        got["empty"] = (p.sweep_v_in.GetValue(), p.sweep_i_out.GetValue(), p.sweep_outputs.GetValue())
+        p.sweep_v_in.SetValue("36, 60V")
+        p.sweep_i_out.SetValue("1, 2.5")
+        p.sweep_outputs.SetValue("emissions, losses")
+        p.on_update(None)
+        got["spec"] = f.settings.config.converters[0]
+        p.on_select(NS(GetIndex=lambda: 0))
+        got["shown"] = (p.sweep_v_in.GetValue(), p.sweep_i_out.GetValue(), p.sweep_outputs.GetValue())
+
+    def pick():
+        rp = f.results_panel
+        names = [rp.choice.GetString(k) for k in range(rp.choice.GetCount())]
+        got["names"] = names
+        k = next(k for k, n in enumerate(names) if n.endswith("sweep (V in, I out)"))
+        rp.choice.SetSelection(k)
+        rp._route_changed()
+
+    def look():
+        got["tiles"] = f.results_panel.tile_text()
+    run_steps(app, f, [setup, lambda: f.run(True) and None, pick, look])
+    assert got["empty"][:2] == ("", "")
+    s = got["spec"]
+    assert (s.sweep_v_in, s.sweep_i_out, s.sweep_outputs) == ([36.0, 60.0], [1.0, 2.5], ["emissions", "losses"])
+    assert got["shown"][2] == "emissions, losses" and "36" in got["shown"][0] and "2.5" in got["shown"][1]
+    assert "buck  sweep (V in, I out)" in got["names"]
+    assert "points" in got["tiles"] and "lowest efficiency" in got["tiles"]
+
+
 def test_a_paint_of_an_undrawn_canvas_asks_for_a_background_render_and_does_not_draw(app, monkeypatch):
     """gui_probe saw matplotlib draw a figure inside the canvas' paint handler (394 ms with the window frozen). With
     its owner's `defer` / `undrawn` set, a paint that finds the canvas not drawn and no render on its way paints the
