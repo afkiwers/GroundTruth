@@ -1711,7 +1711,7 @@ the copper modelled (not the parts alone).
   (`power._area_shares`); `Solution.V` at each pad's node (`victims.pad_node` / `ground_node`) less the controller's
   ground pin's. A pad on another copper piece (`pdn.copper_pieces`: unrouted) takes the lumped value. Solved at the
   first 6 harmonics and 8 log-spaced frequencies (within 0.05 % of 10 + 14), interpolated (log magnitude,
-  unwrapped phase); output capacitors within 20 mm (at least the nearest), at most 40 000 nodes; a pad on cut-off
+  unwrapped phase); output capacitors within 20 mm (at least the nearest), at most 20 000 nodes at any resolution (built outside the model cache, its factorisations freed after); a pad on cut-off
   copper reads the nearest joined copper of its net within 3 mm (a pin narrower than a cell).
 - Network (`feedback_network`, `network_transfers`): two-pin R/C/L/ferrite/short parts reached from FB within two
   nets (an "open" or missing model: the footprint's value, as `loop._kind`), each pad on the output / ground / switch
