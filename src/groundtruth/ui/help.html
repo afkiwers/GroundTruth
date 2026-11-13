@@ -386,7 +386,9 @@ The check boxes pick what is worked out at each point:</p>
   hottest copper and the hottest part. It needs the thermal extra.</li>
 </ul>
 <p>Only V in and I out change: the switching frequency, V out and the board stay, so the field solves Simulate made
-hold at every point and nothing is solved again (except the temperatures), which keeps the sweep quick. One
+hold at every point and nothing is solved again (except the temperatures), which keeps the sweep quick. At another input
+voltage the switches' C_oss and Q_oss (those given for the nominal V in) follow a junction's law, C ∝ 1/√V
+and Q ∝ √V [Erickson 2001]: the edge's charge current, the ringing and the output-charge loss move with V in. One
 approximation: the DC current pattern of the switch node's copper keeps the nominal duty's share between the
 switches; a note says so when an input voltage is more than 30 % from the nominal [A114]. At most 64 points in all.
 The result is a Results view of its own, <i>&lt;stage&gt;  sweep (V in, I out)</i>: a row of plots per output, the

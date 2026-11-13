@@ -2222,8 +2222,10 @@ def draw_converter_sweep(fig: Figure, s) -> None:
             x = [r[axis] for r in rows]
             for k, key in enumerate(keys):
                 y = [r.get(key) * scale if r.get(key) is not None else np.nan for r in rows]
+                # labelled in the right-hand column only: its legend names them for the row, and the top-left
+                # panel's title line (which spans both columns) stays free of a legend drawn over it
                 ax.plot(x, y, "o-", ms=3, lw=1.3, color=PDN_COLOURS[k % len(PDN_COLOURS)],
-                        label=_SWEEP_NAMES.get(key, ""))
+                        label=_SWEEP_NAMES.get(key, "") if j == len(axes_kind) - 1 else "_")
             ax.axvline(s.v_in if axis == "v_in" else s.i_out, color="#888888", lw=0.8, ls=":")
             if keys[0] == "radiated_db":
                 ax.axhline(s.limits.get("margin_db", 6.0), color="#ff7f0e", lw=0.8, ls="--")
@@ -2253,6 +2255,11 @@ def draw_converter_sweep(fig: Figure, s) -> None:
     title = (f"{s.net}: {len(s.rows)} operating points around {s.v_in:g} V, {s.i_out:g} A "
              "(dotted: the nominal; dashed: the limits)")
     header = _title_and_key(top, title, w_in - left_in - right_in)
+    # wrapped to the figure's width but set on the top-left panel: left-aligned, so it runs over both columns
+    # instead of spilling past the figure's left edge from the panel's centre
+    text = top.get_title()
+    top.set_title("")
+    top.set_title(text, loc="left", fontsize=FS_TITLE)
     _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TICK) + 0.08 + _lh(FS_TEXT), header + 0.06, hspace=0.12)
 
 

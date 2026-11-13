@@ -1732,7 +1732,9 @@ bridge's sweep).
   checked at load: positive, at most `SWEEP_MAX` points, known outputs); the form's Sweep group (`SweepOutputs`: four
   three-state check boxes, their text "emissions, losses" for the multi-stage form).
 - Called from `power.finish_converter` after `_stage_fb_ripple` (`_stage_sweep`: a failure is a note); no field
-  solve, as f_sw, V_out and the board stay: per point `spec_at = replace(spec, v_in, i_out)`, its pulse and duty.
+  solve, as f_sw, V_out and the board stay: per point `spec_at = replace(spec, v_in, i_out)`, its pulse and duty,
+  and at another V in the switches' C_oss / Q_oss by `switch_charge_at` (C ∝ 1/√V, Q ∝ √V [Erickson 2001]; without
+  it Q_oss, often the largest edge current, kept the refboard's first buck's radiated margin flat over V in).
   Emissions: `fix_advisor.evaluate` on a copy of the setup and result with the point's pulse, duty, V_in and ripple
   (a boost's ripple harmonics recomputed). Losses: `efficiency.losses_at` (the efficiency sweep's per-current step
   factored out; DC paths scaled by `scaled_paths`: input by I_in, output by I_out, the rest by I/I_ref) [A114].
