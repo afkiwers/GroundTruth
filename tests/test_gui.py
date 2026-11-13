@@ -4092,6 +4092,79 @@ def test_clear_past_jobs_asks_for_its_password(app, frame, monkeypatch):
         assert not dlg.clear_past.IsEnabled()
 
 
+def test_the_access_key_shows_only_after_windows_hello(app, frame, monkeypatch):
+    """Preferences › Compute server › Access key (the user: "add an eye icon to display the server key passwords ...
+    guard it behind windows hello ... only if it's correct it will be shown"): masked at first; the eye shows it
+    only when Windows Hello verifies (cancelled or failed: still hidden); hiding needs nothing. Without Windows
+    Hello this computer's password (Set password…) stands in: a wrong one keeps it hidden, with none set it is
+    refused. The key typed while shown is the one saved."""
+    from groundtruth.ui import hello, jobs_password as jp, secret_field, theme
+    from groundtruth.ui.prefs_dialog import PreferencesDialog, defaults
+    told, answers = [], []
+    monkeypatch.setattr(wx, "MessageBox", lambda text, *a, **k: (told.append(text), wx.OK)[1])
+    state = {"avail": hello.AVAILABLE, "result": hello.CANCELED, "asked": 0}
+
+    def verify(hwnd, message, **k):
+        state["asked"] += 1
+        assert hwnd and "access key" in message
+        return state["result"]
+    monkeypatch.setattr(hello, "supported", lambda: True)
+    monkeypatch.setattr(hello, "availability", lambda: state["avail"])
+    monkeypatch.setattr(hello, "verify", verify)
+
+    class Entry:
+        """Stands in for the password entry: the next answer."""
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def ShowModal(self):
+            return wx.ID_OK
+
+        def GetValue(self):
+            return answers.pop(0)
+    monkeypatch.setattr(wx, "PasswordEntryDialog", Entry)
+    with PreferencesDialog(frame, dict(defaults({}), compute="server", server_key="k" * 20)) as dlg:
+        field = dlg.server_key
+        assert isinstance(field, secret_field.SecretField) and not field.shown() and field.GetValue() == "k" * 20
+        field.on_eye()                                          # Hello cancelled: hidden, nothing said
+        wait_for(app, lambda: state["asked"] == 1 and field.eye.IsEnabled(), timeout=20)
+        assert not field.shown() and not told
+        state["result"] = hello.RETRIES_EXHAUSTED
+        field.on_eye()
+        wait_for(app, lambda: told and "did not verify" in told[-1], timeout=20)
+        assert not field.shown()
+        state["result"] = hello.VERIFIED
+        field.on_eye()
+        wait_for(app, lambda: field.shown(), timeout=20)
+        assert field.plain.GetValue() == "k" * 20 and field.eye.shown
+        field.plain.SetValue("new-key-0123456789")              # edited while shown: that one is saved
+        assert dlg.values()["server_key"] == "new-key-0123456789"
+        field.on_eye()                                          # hiding asks nothing
+        assert not field.shown() and state["asked"] == 3 and field.masked.GetValue() == "new-key-0123456789"
+
+        state["avail"] = hello.NOT_CONFIGURED                   # no Windows Hello: this computer's password
+        n = len(told)
+        field.on_eye()
+        wait_for(app, lambda: len(told) > n, timeout=20)
+        assert "Set password" in told[-1] and not field.shown()
+        theme.save_prefs(**{jp.PREF_KEY: jp.make_record("s3cret-pw")})
+        answers[:] = ["wrong-pw"]
+        field.on_eye()
+        wait_for(app, lambda: "Wrong password" in told[-1], timeout=20)
+        assert not field.shown()
+        wait_for(app, lambda: field.eye.IsEnabled(), timeout=20)
+        answers[:] = ["s3cret-pw"]
+        field.on_eye()
+        wait_for(app, lambda: field.shown(), timeout=20)
+        assert state["asked"] == 3                              # Hello was not asked without it
+
+
 def test_clearing_past_jobs_keeps_the_current_ones(app, frame):
     """The window's clear_past_jobs: shown, failed, cancelled and lost jobs leave the list (remembered as removed,
     so the rebuild from the servers leaves them out); queued, running and ready ones stay."""

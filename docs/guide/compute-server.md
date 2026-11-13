@@ -38,8 +38,9 @@ boot) with a Python 3.11 or newer (KiCad for macOS brings 3.9: install Python 3.
 macOS firewall and shows the address and key; `./install_server.command status | log | key | stop | start | uninstall`,
 `install --key` joins a cluster. A Mac solves on its CPU only (no CUDA; Apple GPUs have no double precision).
 **Or in a window:** on the server, double-click `groundtruth_server.cmd` in the installed plugin's folder (it runs the server with the Python environment KiCad made for the plugin; KiCad itself need not run; the plugin's Help, "Compute server: set up and run", has the steps). Every start shows the access key (made on the first start, kept in `%LOCALAPPDATA%\GroundTruth\server.key`), the addresses to enter and a READY line. In the plugin:
-Preferences, **Compute server**: run analyses on a GroundTruth compute server, its address and the key; **Test
-connection**. Simulate and Suggest fixes are **handed over**: the window is free at once, the **Server jobs** tab
+Preferences, **Compute server**: run analyses on a GroundTruth compute server, its address and the key (masked: the
+eye beside it shows it after Windows Hello verifies you, or, without Windows Hello, after the password of Set
+password…); **Test connection**. Simulate and Suggest fixes are **handed over**: the window is free at once, the **Server jobs** tab
 lists the job, and its result comes back by itself whenever the server can be reached (a sleeping laptop or a night at
 home only delay it) and is shown, or offered there (Show results). Only the user cancels a job (Cancel job, or
 Remove from list, which also takes it off the list; a job whose server can't be reached any more is removed after a

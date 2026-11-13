@@ -2407,7 +2407,9 @@ power stages: one big item can't be split further.</p>
 <ol>
 <li><b>Preferences…</b> (top bar), group <b>Compute server</b>: <i>Run analyses on</i> = <i>A GroundTruth compute
   server</i>; <i>Server address</i> = its name or IP address (optionally <code>:port</code>); <i>Access key</i> = the
-  key from the server.</li>
+  key from the server. It is masked; the <b>eye</b> beside it shows it, after <b>Windows Hello</b> (your PIN,
+  fingerprint or face) has checked that it is you. Without Windows Hello on this computer it asks the password set
+  with <b>Set password…</b> under Past jobs instead (with none set, the key stays hidden). The eye again hides it.</li>
 <li><b>Test connection</b>: shows the server laid out: its version and code (the same as this plugin's, or not),
   addresses, cores, memory, GPU, its jobs (at a time, running, queued), remote updates, and its cluster as a table
   (every server's role, address, cores, memory, GPU and time in the cluster); <b>Copy details</b> copies it. Or why

@@ -688,10 +688,14 @@ class PreferencesDialog(wx.Dialog):
         self.server.SetHint("e.g. 192.0.2.20 or bigpc:8765")
         row(comp, "Server address", self.server, "the compute server's name or IP address on the local network, "
                                                  "optionally :port (default 8765)")
-        self.server_key = wx.TextCtrl(self, value=p["server_key"], style=wx.TE_PASSWORD)
+        # masked, with an eye that shows it after Windows Hello (or this computer's password) says it is the user
+        # (ui/secret_field.py; the user: "add an eye icon to display the server key ... guard it behind windows hello")
+        from .secret_field import SecretField
+        self.server_key = SecretField(self, p["server_key"])
         row(comp, "Access key", self.server_key,
             "the key the server's window shows when it starts (groundtruth_server.cmd). Every job and result is "
-            "signed with it; kept in this computer's ui.json")
+            "signed with it; kept in this computer's ui.json. The eye shows it after Windows Hello verifies you "
+            "(without Windows Hello: this computer's password, Set password… under Past jobs)")
         self.test = wx.Button(self, label="Test connection")
         row(comp, "Connection", self.test, "ask the server for its version, GPUs, memory and queue")
         self.test.Bind(wx.EVT_BUTTON, self.on_test)
