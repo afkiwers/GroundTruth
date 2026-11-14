@@ -125,6 +125,12 @@ def test_a_harness_and_load_capacitance_add_a_load_node(tmp_path):
     assert load.metrics["final"] == pytest.approx(-1.0 * 0.02, rel=0.02)
     assert abs(out.metrics["final"]) < 0.05 * abs(load.metrics["final"])
     assert [x.name.split(": ", 1)[1] for x in r.responses] == ["Z_out open loop", "Z_out closed loop", "Z at the load"]
+    # the plotted currents are absolute: the load's 2 A from t = 0 (an ideal step), the converter's from its 1 A
+    # to 2 A through the harness and the load capacitance; the analysis keeps the change
+    i_load, i_conv = r.responses[-1].step["i"], r.responses[1].step["i_conv"]
+    assert i_load[0] == pytest.approx(2.0) and i_load[-1] == pytest.approx(2.0, rel=1e-3)
+    assert i_conv[0] == pytest.approx(1.0, abs=1e-6) and i_conv[-1] == pytest.approx(2.0, rel=1e-2)
+    assert r.current["i_load"][-1] == pytest.approx(1.0, rel=1e-3)
 
 
 def test_the_ramp_tends_to_the_step(tmp_path):

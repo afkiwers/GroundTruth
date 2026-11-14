@@ -336,13 +336,17 @@ def analyse_load_step(board, config, spec: ConverterSpec, ls: Optional[LoadStep]
         owner = f"{spec.name} load step"
         r = Response(f"{owner}: {name}", owner, "impedance", f, h(2j * np.pi * f), poles, zeros, exact=True)
         res.responses.append(r)
-    # the time responses beside the closed loop's curves (plots.draw_step: kind "load")
+    # the time responses beside the closed loop's curves (plots.draw_step: kind "load"). The plot's currents are
+    # absolute (the operating point i_from plus the step's change, so a 5 → 10 A step reads 5 → 10 A); res.current
+    # keeps the change alone, which the slew and the figures above use.
+    i_load_abs = ls.i_from + i_load if i_load is not None else None
+    i_conv_abs = ls.i_from + i_conv if i_conv is not None else None
     for node in res.nodes:
         target = res.responses[1] if node.node == "output" else res.responses[-1]
         target.step = {"t": node.t, "y": node.v, "metrics": node.metrics, "kind": "load", "v_nom": v
                        if node.node == "output" else v_load, "max_dev": ls.max_dev,
-                       "i": i_load if node.node == ("load" if cable else "output") else None,
-                       "i_conv": i_conv if node.node == "output" else None}
+                       "i": i_load_abs if node.node == ("load" if cable else "output") else None,
+                       "i_conv": i_conv_abs if node.node == "output" else None, "i_from": ls.i_from}
     w = res.worst
     res.figures.update(dip=w.metrics["dip"], dip_pct=w.metrics["dip_pct"], node=w.node, back=w.metrics["back"],
                        peak=w.metrics["peak"], peak_pct=100 * w.metrics["peak"] / v,
