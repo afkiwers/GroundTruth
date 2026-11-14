@@ -1,9 +1,12 @@
 """Power integrity tab: supply rails whose PDN impedance Simulate checks (analysis/pdn.py; the plan's M1).
 
-A rail is its net, its ground, the allowed ripple and the load step (they give the target impedance), and the part
-feeding it (found by itself: a regulator's power_out pin or a connector) with its output resistance and inductance.
-Simulate gives each IC's impedance curve against the target (Results tab: the curves and what holds the rail at each
-frequency), and issues where it is over the target or a supply pin has no decap close by.
+A rail is its net, its ground, the allowed ripple and the load step (they give the target impedance), and what
+feeds it: a power stage of the Converters tab in closed loop (found by itself when the rail is its output; the user:
+"Why are converters not listed under Power integrity"), else a part (a regulator's power_out pin or a connector) with
+its output resistance and inductance. It is read at its ICs' supply pins, or at ports (a connector the load hangs
+on). Simulate gives each port's impedance curve against the target and the rail's voltage there over time when the
+load steps (Results tab: the curves, what holds the rail at each frequency, the step), and issues where it is over
+the target or the ripple, or a supply pin has no decap close by.
 """
 from __future__ import annotations
 
@@ -14,7 +17,7 @@ import wx
 from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
 
 from ..components.values import format_si
-from ..config.settings import ConfigError, PdnSpec
+from ..config.settings import ConfigError, LoadStep, PdnSpec
 from .listsel import SelectableRows
 from .widgets import button_row, fit_scroll_width, scroll_form, section_form, section_rows
 
@@ -27,17 +30,31 @@ FIELD_TIPS = {
     "Ripple (%)": "The voltage ripple allowed, in % of the voltage (default 5 %).",
     "Load step (A)": "The current step the ICs draw (e.g. 0.3). With it the target impedance is voltage x ripple / "
                      "step; empty: the curves without a target.",
-    "Source": "The part feeding the rail: found by itself (a regulator's power_out pin on it, else a connector), "
-              "none, or a part with a pad on the rail.",
+    "Source": "What feeds the rail: found by itself (a power stage of the Converters tab whose output it is, in closed "
+              "loop; else a regulator's power_out pin on it, else a connector), none, a stage (stage:NAME), or a "
+              "part with a pad on the rail.",
     "Source R (Ω)": "The source's output resistance (a regulator's flat output impedance), default 5m.",
     "Source L (H)": "Its output inductance above its loop bandwidth, default 20n (an LDO or a buck: tens of nH).",
     "ICs": "The ICs to check, e.g. U1, U2; empty: every IC with supply pins on the rail.",
+    "Ports": "Pin pairs to read the rail at besides the ICs, supply / return, e.g. J2.2/J2.1: a connector the load "
+             "hangs on (a converter's output to an off-board load). Comma-separated.",
+    "Step rise": "How fast the load current ramps, e.g. 1us. Empty: an ideal step (the copper above Check up to is "
+                 "left to the IC's package and die).",
+    "Load before (A)": "The current the load draws before the step (a resistor in the model). Empty: none.",
+    "Harness R": "Leads from the port to the load (both conductors), e.g. 20mΩ. Empty: the load at the port.",
+    "Harness L": "Their inductance, e.g. 500nH (about 0.5-1 µH per metre).",
+    "Load C": "Capacitance at the load (a downstream board's input capacitors), e.g. 100uF.",
+    "Load C ESR": "Its ESR, e.g. 10mΩ.",
+    "Coil R": "A load switched on instead of the step: its resistance (a heater coil). With Coil L: R + sL.",
+    "Coil L": "The switched load's inductance, e.g. 1mH.",
     "Check up to (Hz)": "The target applies up to here (default 100M: above, the package and the die decouple).",
     "Note": "Your own note (kept in the settings file).",
 }
 BUTTON_TIPS = {
-    "Find rails": "add every rail ICs draw supply from that is not listed yet (its source found by itself); then "
-                  "set each one's load step for a target",
+    "Power tree…": "A flow chart of the board's power: sources, links, converters and regulators, rails, their "
+                       "loads and capacitors (Fit, Refresh, Copy, Save image in its window).",
+    "Find rails": "add every rail ICs draw supply from and every power stage's output that is not listed yet (its "
+                  "source found by itself: the stage in closed loop); then set each one's load step for a target",
     "Add": "add the form's rail to the list (and the settings file)",
     "Update selected": "replace the selected rail with the form's values",
     "Remove selected": "remove the selected rails (Delete does the same)",
@@ -91,11 +108,18 @@ class PdnPanel(SelectableRows, wx.Panel):
         self.vrm_r = wx.TextCtrl(fw)
         self.vrm_l = wx.TextCtrl(fw)
         self.parts = wx.TextCtrl(fw)
+        self.ports = wx.TextCtrl(fw)
         self.check_to = wx.TextCtrl(fw)
         self.note = wx.TextCtrl(fw)
+        # the step over time (analysis/load_step.sampled_step): its ramp and the load network at the port
+        self.ls = {key: wx.TextCtrl(fw) for key in ("rise", "i_from", "cable_r", "cable_l", "c_load", "esr_load",
+                                                     "r_load", "l_load")}
+        for key, hint in (("rise", "ideal step"), ("i_from", "none"), ("cable_r", "none"), ("cable_l", "none"),
+                          ("c_load", "none"), ("esr_load", "0"), ("r_load", "none (the step)"), ("l_load", "none")):
+            self.ls[key].SetHint(hint)
         for ctrl, hint in ((self.voltage, "from the name"), (self.ripple, "5"), (self.step, "e.g. 0.3 (for a target)"),
                            (self.vrm_r, "5m"), (self.vrm_l, "20n"), (self.parts, "every IC on the rail"),
-                           (self.check_to, "100M")):
+                           (self.ports, "none (e.g. J2.2/J2.1)"), (self.check_to, "100M")):
             ctrl.SetHint(hint)
         self.rail.Bind(wx.EVT_TEXT, self._rail_changed)
         section_rows(fw, form, [            # sections as on the Converters tab (widgets.section_rows)
@@ -103,10 +127,15 @@ class PdnPanel(SelectableRows, wx.Panel):
              [("Rail", self.rail), ("Ground", self.ground), ("Voltage (V)", self.voltage), ("Note", self.note)]),
             ("Target", "The impedance the rail must stay below: its allowed ripple at a load step.",
              [("Ripple (%)", self.ripple), ("Load step (A)", self.step), ("Check up to (Hz)", self.check_to)]),
-            ("Regulator", "What feeds the rail. Empty: defaults.",
+            ("Source", "What feeds the rail: a power stage in closed loop, or a part (R and L: a part's only).",
              [("Source", self.source), ("Source R (Ω)", self.vrm_r), ("Source L (H)", self.vrm_l)]),
             ("Read at", "Where the impedance is read. Empty: every IC on the rail.",
-             [("ICs", self.parts)])], FIELD_TIPS)
+             [("ICs", self.parts), ("Ports", self.ports)]),
+            ("Load step", "The rail over time when the load steps by Load step (A). Empty: an ideal step at the port.",
+             [("Step rise", self.ls["rise"]), ("Load before (A)", self.ls["i_from"]),
+              ("Harness R", self.ls["cable_r"]), ("Harness L", self.ls["cable_l"]), ("Load C", self.ls["c_load"]),
+              ("Load C ESR", self.ls["esr_load"]), ("Coil R", self.ls["r_load"]), ("Coil L", self.ls["l_load"])])],
+            FIELD_TIPS)
         inner = wx.BoxSizer(wx.VERTICAL)
         inner.Add(form, 0, wx.EXPAND | wx.RIGHT, 12)        # room for the scroll bar
         fw.SetSizer(inner)
@@ -116,11 +145,14 @@ class PdnPanel(SelectableRows, wx.Panel):
         """The buttons, the note and the tab's layout (the last build step)."""
         fw = self._fw
         del self._fw
-        btns = button_row(self, [("Find rails", self.on_find), ("Add", self.on_add),
+        btns = button_row(self, [("Power tree…", self.on_power_tree), ("Find rails", self.on_find),
+                                 ("Add", self.on_add),
                                  ("Update selected", self.on_update), ("Remove selected", self.on_remove)], BUTTON_TIPS)
-        about = wx.StaticText(self, label="Simulate solves each rail on the whole board: the impedance every IC sees "
-                                          "at its supply pins from 10 kHz to 1 GHz against the target (Results tab: "
-                                          "the curves, and what holds the rail at each frequency).")
+        about = wx.StaticText(self, label="Simulate solves each rail on the whole board: the impedance every IC (and "
+                                          "port) sees from 10 kHz to 1 GHz (from below a power stage's loop "
+                                          "crossover when one feeds it) against the target, and the rail's voltage "
+                                          "there when the load steps (Results tab: the curves, what holds the rail "
+                                          "at each frequency, the step).")
         about.SetName("muted")
         right = wx.BoxSizer(wx.VERTICAL)
         right.Add(fw, 1, wx.EXPAND)                 # the height left, scrolling within it
@@ -143,9 +175,13 @@ class PdnPanel(SelectableRows, wx.Panel):
 
     def load(self, board, settings):
         """Show this board's rails; the form's lists: the rails ICs draw from, the board's nets as grounds."""
-        from ..analysis.pdn import rails_with_ics
+        from ..analysis.pdn import converter_rails, rails_with_ics
         self.board, self.settings = board, settings
         self.rails = rails_with_ics(board, self._ground()) if board is not None else {}
+        # the power stages' outputs (Converters tab): rails too, ICs on them or not
+        self.conv_rails = converter_rails(board, settings.config) if board is not None else {}
+        for net in self.conv_rails:
+            self.rails.setdefault(net, [])
         # filling the lists fires the rail's text event: _rail_changed then ran once more (scanning the parts and
         # setting the Source list again): it runs once, at the end (the load stalled the window 211 ms on
         # refboard with the module's import, 45 ms without it)
@@ -175,8 +211,10 @@ class PdnPanel(SelectableRows, wx.Panel):
         by_net = self.board.parts_by_net() if self.board is not None else {}
         parts = sorted({fp.reference for fp in by_net.get(rail, ())
                         if not fp.reference.upper().startswith(("C", "R"))})
+        stages = [f"stage:{c.name}" for c in (self.settings.config.converters if self.settings else [])
+                  if c.enabled and not c.bridge]
         keep = self.source.GetValue()
-        _set_items(self.source, [AUTO_SOURCE, NO_SOURCE] + parts)
+        _set_items(self.source, [AUTO_SOURCE, NO_SOURCE] + stages + parts)
         self.source.SetValue(keep or AUTO_SOURCE)
 
     def refresh(self):
@@ -190,12 +228,14 @@ class PdnPanel(SelectableRows, wx.Panel):
                 from ..analysis.pdn import rail_voltage
                 v = rail_voltage(d.rail)
             target = v * d.ripple / d.i_step if v and d.i_step else None
+            # a source found by itself: the power stage whose output the rail is, named
+            stage = getattr(self, "conv_rails", {}).get(d.rail)
+            source = d.source or (f"found: {stage[0]}" if stage else AUTO_SOURCE)
             i = self.list.InsertItem(self.list.GetItemCount(), d.label)
             for col, text in enumerate([format_si(v, "V") if v else "?", f"{d.ripple * 100:g} %",
                                         format_si(d.i_step, "A") if d.i_step else "–",
-                                        format_si(target, "Ω") if target else "–",
-                                        d.source or AUTO_SOURCE,
-                                        ", ".join(d.parts) if d.parts else
+                                        format_si(target, "Ω") if target else "–", source,
+                                        ", ".join(d.parts + d.ports) if d.parts or d.ports else
                                         f"all ({len(self.rails.get(d.rail, []))})"], 1):
                 self.list.SetItem(i, col, text)
             self._show_enabled(i, d)
@@ -213,8 +253,13 @@ class PdnPanel(SelectableRows, wx.Panel):
         self.vrm_r.SetValue(format_si(d.vrm_r, ""))
         self.vrm_l.SetValue(format_si(d.vrm_l, ""))
         self.parts.SetValue(", ".join(d.parts))
+        self.ports.SetValue(", ".join(d.ports))
         self.check_to.SetValue(format_si(d.check_to, ""))
         self.note.SetValue(d.note)
+        ls = d.load_step
+        for key, ctrl in self.ls.items():
+            v = getattr(ls, key) if ls is not None else None
+            ctrl.SetValue("" if v is None or (v == 0 and key not in ("i_from", "r_load")) else format_si(v, ""))
 
     def _form(self) -> Optional[PdnSpec]:
         """The form as a PdnSpec, or None after telling the user what is wrong (the settings' own parsing and the
@@ -232,7 +277,13 @@ class PdnPanel(SelectableRows, wx.Panel):
                 "source": "" if src in ("", AUTO_SOURCE) else src,
                 "vrm_r": self.vrm_r.GetValue().strip() or "5m", "vrm_l": self.vrm_l.GetValue().strip() or "20n",
                 "parts": self.parts.GetValue().strip(), "check_to": self.check_to.GetValue().strip() or "100M",
-                "note": self.note.GetValue().strip()}
+                "note": self.note.GetValue().strip(),
+                "ports": [p.strip() for p in self.ports.GetValue().split(",") if p.strip()]}
+        # the load step's keys as the settings write them (from: the load before the step)
+        step = {("from" if key == "i_from" else key): ctrl.GetValue().strip() for key, ctrl in self.ls.items()
+                if ctrl.GetValue().strip()}
+        if step:
+            data["load_step"] = step
         try:
             spec = _pdn_from_data(data, "the form")
         except ConfigError as e:
@@ -265,12 +316,29 @@ class PdnPanel(SelectableRows, wx.Panel):
         """The rails of these rows."""
         return [self.pdn[i].label for i in rows if i < len(self.pdn)]
 
+    def on_power_tree(self, _=None):
+        """Power tree…: the board's power tree in a window of its own (ui/power_tree_window.py)."""
+        from .power_tree_window import open_power_tree
+        open_power_tree(self)
+
     def on_find(self, _=None):
         """Find rails: every rail ICs draw supply from that is not listed yet, added with its defaults."""
         if self.board is None:
             return
         listed = {d.rail for d in self.pdn}
-        new = [PdnSpec(rail) for rail in self.rails if rail not in listed]
+        new = []
+        for rail in self.rails:
+            if rail in listed:
+                continue
+            stage = self.conv_rails.get(rail)
+            if stage is None:
+                new.append(PdnSpec(rail))
+                continue
+            # a power stage's output: read at its output connector when no IC draws from it, the step half its load
+            spec = next((c for c in self.settings.config.converters if c.name == stage[0]), None)
+            ports = [stage[1]] if stage[1] and not self.rails.get(rail) else []
+            new.append(PdnSpec(rail, voltage=spec.v_out if spec else None,
+                               i_step=0.5 * spec.i_out if spec and spec.i_out else None, ports=ports))
         if not new:
             message_box("Every rail the ICs draw supply from is listed already." if self.rails else
                           "No IC on this board has a supply pin (schematic pin type power_in) on a rail with a pad on "

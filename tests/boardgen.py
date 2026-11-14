@@ -660,7 +660,7 @@ def cot_buck_board(tap: str = "cap", injection: bool = False, track_w: float = 0
 
 def discrete_buck_board(out_connector: bool | str = False, shunt: bool = False, surge_fet: bool = False,
                         post_stage: bool = False, victim: Optional[tuple] = None, bootstrap: bool = False,
-                        loop: bool = False) -> BoardGen:
+                        loop: bool = False, ldo: bool = False) -> BoardGen:
     """A synchronous buck with discrete FETs: VIN pour, Q1 (high side) and Q2 (low side) joined by a SW pour,
     inductor L1 to VOUT, input capacitor C1 (VIN-GND), output capacitor C2, input connector J1; GND plane on In1.
     out_connector: an output connector J2 at the right edge, its VOUT pin fed from L1 by a 1 mm track on F.Cu
@@ -678,7 +678,9 @@ def discrete_buck_board(out_connector: bool | str = False, shunt: bool = False, 
     loop: a controller U8 (pins SW1 on SW, ITH1, V_FB1, SENSE1+ / SENSE1-, GND) like refboard's LTC7890
     channel 1 (analysis/loop.py): L1's far side on VL, a 10 mΩ sense shunt RS from VL to VOUT with 10R filters RF1 /
     RF2 to the SENSE pins; on ITH1 a 2.2k (RC1) to a 22n (CC1) to GND and 22p (CH1) to GND; on V_FB1 100k (RT1) from
-    VOUT and 25k (RB1) to GND."""
+    VOUT and 25k (RB1) to GND.
+    ldo: a linear regulator U10 (VIN power_in on VOUT, VOUT power_out on V18, GND) at the lower left, a 1 µF C10 on
+    V18 and an IC U11 drawing from V18 (power_in) (analysis/power_tree.py: buck -> LDO -> load)."""
     g = BoardGen(layers=4, size=(40.0, 30.0))
     g.plane("GND", "In1.Cu")
     g.zone("VIN", "F.Cu", [(6.0, 6.0), (16.0, 6.0), (16.0, 12.0), (6.0, 12.0)])
@@ -753,6 +755,21 @@ def discrete_buck_board(out_connector: bool | str = False, shunt: bool = False, 
             {"number": 1, "at": (-1.4, 0.0), "net": "SW9", "size": (1.0, 1.2)},
             {"number": 2, "at": (1.4, 0.0), "net": "V3", "size": (1.0, 1.2)}])
         g.track((32.5, 21.5), (34.0, 21.5), "SW9", width=0.6)
+    if ldo:
+        g.footprint("U10", "LDO", "Package_TO_SOT_SMD:Fake_SOT-23", (6.0, 20.0), [
+            {"number": 1, "at": (-1.0, 0.0), "net": "VOUT", "size": (0.6, 0.6), "pintype": "power_in",
+             "pinfunction": "VIN"},
+            {"number": 2, "at": (1.0, 0.0), "net": "V18", "size": (0.6, 0.6), "pintype": "power_out",
+             "pinfunction": "VOUT"},
+            {"number": 3, "at": (0.0, 1.0), "net": "GND", "size": (0.6, 0.6), "pintype": "power_in",
+             "pinfunction": "GND"}])
+        g.via((6.0, 22.0), "GND")
+        g.two_pin("C10", "1u", (9.0, 20.0), "V18", "GND", package="0603", kind="C")
+        g.footprint("U11", "MCU", "Package_SO:Fake_SOIC", (10.0, 24.0), [
+            {"number": 1, "at": (-1.0, 0.0), "net": "V18", "size": (0.6, 0.6), "pintype": "power_in",
+             "pinfunction": "VDD"},
+            {"number": 2, "at": (1.0, 0.0), "net": "GND", "size": (0.6, 0.6), "pintype": "power_in",
+             "pinfunction": "VSS"}])
     if victim:
         x0, x1, y = victim
         g.footprint("R5", "10k", "Resistor_SMD:R_0402_1005Metric", (x0, y), [

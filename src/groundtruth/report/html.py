@@ -549,6 +549,11 @@ def render_html(board: Board, issues: list[Issue], routes: list, mode: str, sett
              "ground between the divider and the controller, and an injection network from the switch node, "
              "against the controller's FB Ripple Min / Max fields where it has them.",
              "".join(_fb_ripple(x, figs) for x in ripples), [(_anchor("fbripple", x.net), x.net) for x in ripples])
+    tree = _power_tree(board, config, stages) if (stages or pdn) and config is not None else ""
+    if tree:
+        part("powertree", "Power tree", "Where each supply rail comes from and what it feeds, read from the board "
+             "and the settings: sources, series links, switching stages and linear regulators, each rail with its "
+             "loads and capacitors under it.", tree)
     if pdn:
         part("pdn", "Power integrity", "Each checked supply rail's impedance as its ICs see it between their supply "
              "and ground pins, from 10 kHz to 1 GHz: the decaps, the planes' capacitance, the vias and the regulator "
@@ -1220,6 +1225,25 @@ def _efficiency(x, figs) -> str:
                      f"{x.net}: the loss at {x.currents[k]:.3g} A by cause"))
     body.append(_notes(([x.measured_note] if x.measured_note else []) + list(x.notes)))
     return "".join(body) + "</article>"
+
+
+def _power_tree(board, config, stages: list) -> str:
+    """The power tree's part (analysis/power_tree.py, report/power_tree.py): the flow chart as an embedded PNG (the
+    stages' efficiency at their load from this run), its notes; "" when there is nothing to draw, a note when it
+    can't be drawn (no reason to fail the report)."""
+    from types import SimpleNamespace
+
+    from ..analysis.power_tree import power_tree
+    from .power_tree import image
+    try:
+        tree = power_tree(board, config, SimpleNamespace(converters=stages))
+        if not tree.nodes:
+            return ""
+        png = image(tree, "png")
+    except (ValueError, KeyError, AttributeError) as ex:
+        return f"<p class='note'>The power tree could not be drawn: {e(str(ex))}</p>"
+    notes = "".join(f"<p class='note'>{e(n)}</p>" for n in tree.notes)
+    return _img(png, "The board's power tree") + notes
 
 
 def _pdn(d, issues, figs) -> str:

@@ -161,6 +161,8 @@ LOAD_STEP_FIELDS = (("Step from (A)", "i_from", "A"), ("Step to (A)", "i_to", "A
                     ("Harness R", "cable_r", "Ω"), ("Harness L", "cable_l", "H"), ("Load C", "c_load", "F"),
                     ("Load C ESR", "esr_load", "Ω"), ("Coil R", "r_load", "Ω"), ("Coil L", "l_load", "H"))
 BUTTON_TIPS = {
+    "Power tree…": "A flow chart of the board's power: sources, links, converters and regulators, rails, their "
+                       "loads and capacitors (Fit, Refresh, Copy, Save image in its window).",
     "Add": "Add a new power stage from the form.",
     "Update selected": "Replace the selected power stage with the form's values (settings the form does not show "
                        "are kept). With several selected: the fields you changed go into each of them; a field "
@@ -449,7 +451,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         fw.SetMinSize(wx.Size(inner.GetMinSize().width + wx.SystemSettings.GetMetric(wx.SYS_VSCROLL_X), 120))
         btns = button_row(self, [("Add", self.on_add), ("Update selected", self.on_update),
                                  ("Remove selected", self.on_remove), ("Mark reviewed", self.on_reviewed),
-                                 ("Use schematic values", self.on_schematic), ("Detect…", self.on_detect)],
+                                 ("Use schematic values", self.on_schematic), ("Detect…", self.on_detect),
+                                 ("Power tree…", self.on_power_tree)],
                           BUTTON_TIPS)
         right = wx.BoxSizer(wx.VERTICAL)
         right.Add(fw, 1, wx.EXPAND)
@@ -974,6 +977,11 @@ class ConvertersPanel(SelectableRows, wx.Panel):
                 self.converters[i] = replace(self.converters[i], reviewed=True)
             if self._commit():
                 self.reselect(rows)
+
+    def on_power_tree(self, _=None):
+        """Power tree…: the board's power tree in a window of its own (ui/power_tree_window.py)."""
+        from .power_tree_window import open_power_tree
+        open_power_tree(self)
 
     def on_detect(self, _):
         """Find power stages as a background job."""

@@ -4214,6 +4214,79 @@ def test_the_spread_rate_hint_follows_the_spread_mode(app, conv_frame):
     assert (s.spread, s.spread_mode, s.spread_rate) == (pytest.approx(0.2), "random", None)
 
 
+def test_the_converters_load_step_section(app, conv_frame):
+    """The Converters tab's Load step section (analysis/load_step.py): its fields go into the stage's load_step
+    (empty: none, the default step); a coil (Coil R / L) greys Step to and Step rise; a selected stage fills it back;
+    several selected grey it (one stage at a time)."""
+    f = conv_frame
+    got = {}
+
+    def check():
+        p = f.converters
+        got["empty"] = p._read_load_step([])
+        for ctrl, v in ((p.name, "ls"), (p.rail, "VIN"), (p.ground, "GND"), (p.integrated, "U1"),
+                        (p.f_sw, "400kHz"), (p.i_out, "2"), (p.rise, "5ns")):
+            ctrl.SetValue(v)
+        for key, v in (("i_from", "1"), ("i_to", "2"), ("cable_r", "20m"), ("cable_l", "500n")):
+            p.ls_ctrls[key].SetValue(v)
+        p.ls_max_dev.SetValue("3")
+        p.on_add(None)
+        got["saved"] = f.settings.config.converters[-1].load_step
+        p.ls_ctrls["l_load"].SetValue("1m")                # a coil: Step to and Step rise not used
+        got["coil"] = (p.ls_ctrls["i_to"].IsEnabled(), p.ls_ctrls["rise"].IsEnabled())
+        p._fill_load_step(got["saved"])
+        got["filled"] = {k: c.GetValue() for k, c in p.ls_ctrls.items()}
+        got["enabled"] = p.ls_ctrls["i_to"].IsEnabled()
+    run_steps(app, f, [check])
+    assert got["empty"] is None
+    s = got["saved"]
+    assert (s.i_from, s.i_to, s.cable_r, s.cable_l, s.max_dev) == pytest.approx((1.0, 2.0, 0.02, 5e-7, 0.03))
+    assert got["coil"] == (False, False) and got["enabled"]
+    assert got["filled"]["cable_l"] == "500nH" and got["filled"]["c_load"] == ""
+
+
+def test_power_integrity_lists_a_stages_output_and_draws_the_power_tree(app, tmp_path, monkeypatch):
+    """The user: "Why are converters not listed under Power integrity". Find rails adds the buck's output VOUT (no
+    IC on it: read at its output connector J2, the step half its load current), its source the stage (named in the
+    list); the Load step fields go into the rail's load_step; Power tree… opens the flow chart."""
+    from boardgen import discrete_buck_board
+    from groundtruth.config.settings import ConverterSpec
+    from groundtruth.ui import main_frame
+    monkeypatch.setattr(wx, "MessageBox", lambda *a, **k: wx.YES)
+    _, sc, path = make(tmp_path, discrete_buck_board(out_connector=True), "pibuck", nets=())
+    sc.add_detected_converters([ConverterSpec("buck", "VIN", "GND", switch_node="SW", high_side=["Q1"],
+                                              low_side=["Q2"], f_sw=500e3, i_out=2.0, v_in=12.0, v_out=3.3,
+                                              output_connector=["J2.1", "J2.2"])], {})
+    sc.save()
+    f = main_frame.MainFrame(main_frame.Session(file_path=str(path)))
+    f.Show()
+    try:
+        run_steps(app, f, [])
+        tab = f.pdn
+        assert "VOUT" in tab.rails and tab.conv_rails["VOUT"][0] == "buck"
+        tab.on_find()
+        (d,) = [x for x in f.settings.config.pdn if x.rail == "VOUT"]
+        assert d.ports == ["J2.1/J2.2"] and d.i_step == pytest.approx(1.0) and d.voltage == pytest.approx(3.3)
+        row = [x.rail for x in f.settings.config.pdn].index("VOUT")
+        assert tab.list.GetItemText(row, 5) == "found: buck"
+        tab.list.Select(row)
+        wx.Yield()
+        tab.on_select(type("E", (), {"GetIndex": lambda self: row})())
+        tab.ls["cable_l"].SetValue("1u")
+        tab.ls["c_load"].SetValue("100u")
+        tab.on_update(None)
+        ls = f.settings.config.pdn[row].load_step
+        assert ls is not None and ls.cable_l == pytest.approx(1e-6) and ls.c_load == pytest.approx(1e-4)
+        before = set(wx.GetTopLevelWindows())
+        tab.on_power_tree()
+        win = next(w for w in wx.GetTopLevelWindows() if w not in before)
+        wait_for(app, lambda: win.png is not None, timeout=60)
+        assert "smps:buck" in {n.id for n in win.tree.nodes}
+        close_window(win)
+    finally:
+        close_window(f)
+
+
 def test_an_integrated_stage_greys_the_discrete_switch_fields(app, conv_frame):
     """The user: "when entering Integrated stage = U46, should you grey out the High side, Low side and Switch node
     then. It is very confusing otherwise". Typing an IC greys the three (their text kept), clearing it enables them

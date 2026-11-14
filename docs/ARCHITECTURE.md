@@ -1697,6 +1697,59 @@ parameters could come straight from the schematic and are part of the symbol tha
   GM 22.6 dB; conv2 29 kHz, 91°, 20 dB (slope compensation assumed half the down-slope). The crossover scales
   with k = Vsense Max / ITH Range.
 
+## Load step (`analysis/load_step.py`, branch `converter-load-step`)
+
+The user: "Why are converters not listed under Power integrity. It would be good to see how the react on step loads
+with let's say LCR loads attached to them under load", the load: "Cable + load caps or load inductor ... a heating
+coil", COT / internal controllers: "Bandwidth + PM fields".
+- `loop.analyse_loop` keeps its model (`LoopResult.model`, `LoopModel`): T, Z_ol, Y_o, the output capacitors'
+  Y_caps and **Y_conv**, the converter in closed loop as a Norton admittance at its output node, written out per case
+  from the same averaged equations (PCM buck T_s·q/L + G_c·F_h/R_i, VM buck (1 + G_c·V_in/V_ramp)/Z_L, the boost's
+  two). Y_conv holds no Y_o, so whatever hangs on the output (a load network, the PDN's copper) goes beside it [A117];
+  checked Y_conv + Y_o = (1 + T)/Z_ol to 10⁻⁹. `analyse_loop(..., y_load=)` replaces the load resistor (a step from
+  0 A). `output_admittance` sums equal capacitors as one term (ten equal ceramics were ten coincident poles).
+- No loop model (COT, internal): T₀ = K(1 + s/ω_z)/(s²(1 + s/ω_p)), ω_z, ω_p a factor m = tan(45° + PM/2) either
+  side of ω_c [Venable 1983], the controller a current source into Y_o₀: Y_conv = T₀·Y_o₀ [A115]. Fields Loop
+  Bandwidth / Loop Phase Margin (components/fields.py), or `loop: {fc, pm}`.
+- The network: Y_A = Y_conv + Y_caps, a harness Z_c to a load node with C_load / ESR and the load before the step as
+  V/I_from; Z_22, Z_21 by nodal analysis as rationals (`Rat`); a current step ΔI·(−Z), or a branch switched on by the
+  compensation theorem i_b = (V_2/s)/(Z_b + Z_22). Steps via `transfer.exact_step` (partial fractions), the ramp
+  from its integral (final·t + Σ a/p·(e^{pt} − 1)); figures `step_figures` (dip the way the step pushes, ring-back,
+  peak, recovery into ±1 %; `exact_settling` for an ideal step). Notes [A116]: the converter current's slew against
+  (V_in − V_out)/L, a node moving > 10 %.
+- Simulate: `power._stage_load_step` after the loop (analytic, milliseconds): `res.load_step` (LoadStepResult), its
+  own Bode view "<stage> load step" (`transfer.bode_views`), `plots._draw_load_step` (volts, the ±max_dev band,
+  the currents on a second axis), tile, console line, issue `load_step`. Settings `load_step:` (config.LoadStep,
+  shared with the PDN); the Converters form's Load step section (one stage at a time; a coil greys Step to / rise).
+- PDN (`pdn.py`): `converter_rails`, `stage_outputs` (the load's net: the output connector's, else the one the
+  divider senses, else the most capacitors), `find_stage`; `_stage_branch` puts 1/Y_conv(j2πf) from the first
+  candidate pad on its net's main copper (the divider's top pad, the output capacitors on the sensed net, the
+  inductor; a divider's 0402 pad was its own piece at 0.37 mm and read 7 Ω at 1 kHz; at the inductor, before a sense
+  shunt, it read the shunt's droop, which the loop takes out); `res.f_min` = max(min(10 kHz, f_c/30), 100 Hz);
+  `ports` (pin pairs) for rails without ICs. The step at each port: `load_step.sampled_step` fits the port's
+  response (with the load network, per frequency) by vector fitting and steps the pole-residue form; the board's
+  current passes a first-order low-pass at check_to [A19] (a fit of the samples below check_to alone left the top to
+  the fit: −6 V at t = 0; with use_e and a 1.6 ns edge the copper's 1 nH read 0.8 V). `dip_late`: the dip after 10
+  time constants of that low-pass. Test board: |Z| within 1-4 % of the analytic closed loop 1-100 kHz, the step
+  after 10 ns within 0.5 % (tests/test_load_step.py).
+
+## Power tree (`analysis/power_tree.py`, `report/power_tree.py`, `ui/power_tree_window.py`)
+
+The user, with a picture of a power-tree flow chart: "it would be nice if the user could create a flow chart similiar
+to this per button press to better undertsand the topology".
+- The graph from the board and the settings only: rails (power_in / power_out pin nets, stages' input and output
+  nets and input connector nets, grown through links; grounds and a stage's internal nets left out), SMPS (enabled
+  stages), LDOs (power_in on one rail, power_out on another, not a stage's part), links (pass FETs, also one already
+  modelled as a short or resistor; shorts, ferrites, filter inductors that are no stage's, shunts ≤ 1 Ω), oriented
+  from the side nearer a source (breadth first), sources (connectors on a rail and ground; one with a power_in pin on
+  the rail, or on a rail already fed by a regulator, is a load: a debug header), loads (supply_parts, output
+  connectors; > 4 as a group), capacitors grouped by value (3 groups and the rest). Refboard: 0.19 s.
+- Layout: layered [Sugiyama 1981] by the longest path from a root, barycentre heights, pushed apart; a rail's loads and
+  capacitors stacked under it in its column, indented, with elbows (beside it in the next column they were pushed
+  below the stages it feeds, lines crossing). matplotlib (Agg) PNG / SVG, light and dark palettes.
+- Window: Power tree… on the Power integrity and Converters tabs; drawn in a `background.LatestOnly` worker, Fit /
+  Refresh / Copy / Save image…; no timers.
+
 ## Ripple at a controller's FB pin (`analysis/fb_ripple.py`, branch `fb-ripple`)
 The user: "simulate the feedback ripple voltage arriving at the FB pin. This should consider the inductor, feedback
 network and any caps connected to it (especially any low ESR ones)"; asked: checked against controller fields, and

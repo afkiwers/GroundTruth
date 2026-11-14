@@ -75,6 +75,37 @@ refboard (+3V3, a 0.3 A step, source U49; 2026-10-19, `tools/dev/pdn_check.py --
 the 0.55 Ω target); U55 and U44 join only at 0.59 mm (their pads do not reach the rail's copper on the coarser
 grid, which a note says).
 
+**A power stage as the source.** A rail that is a power stage's output (Converters tab) has the stage in closed
+loop as its source, found by itself or named as `source: stage:NAME`: the stage's averaged model with its loop as
+an admittance (the same as its [load step](power.md#load-step-of-a-buck-or-boost-stage)), attached where its feedback
+divider senses the output; the sweep then starts at the loop's crossover / 30 instead of 10 kHz. A rail with no IC
+on it (an output to an off-board load) is read at `ports`, pin pairs supply / return:
+
+```yaml
+pdn:
+  - {rail: VOUT, voltage: 5V, i_step: 2A, source: stage:buck1, ports: [J2.1/J2.2],
+     load_step: {rise: 1us, cable_l: 1uH, c_load: 100uF}}
+```
+
+Find rails lists every stage's output beside the rails ICs draw from (read at its output connector when no IC draws
+from it; its step half the stage's load current). Checked on the loop test board: the field solve's |Z| at the
+buck's output capacitor equals the analytic closed loop within 5 % from 1 to 100 kHz (tests/test_load_step.py).
+
+**The step over time.** With `i_step` and a voltage, each port's voltage when its IC's current steps: its solved
+impedance fitted (vector fitting), the current the board sees passing the IC's package and die above `check_to` (a
+first-order low-pass there, as the target assumes [A19]), with a `load_step`'s ramp, harness, load capacitance or
+switched coil as on a converter. First the copper's inductance shows (L·ΔI·2π·check_to), then the decaps' and the
+source's dip; the issue `pdn_step` when the rail moves by more than its ripple. On the test board the step after
+10 ns matches the analytic closed-loop step within 1 % of its dip.
+
+**Power tree.** The tab's (and the Converters tab's) **Power tree…** draws the board's power as a flow chart, read
+from the board and the settings (`analysis/power_tree.py`, `report/power_tree.py`): sources (connectors with a pad
+on a rail and on ground, a stage's input connector), series links (a pass FET, a filter inductor, a 0R or ferrite, a
+shunt up to 1 Ω), the switching stages (SMPS: V out, I out, f_sw, the efficiency at its load after a Simulate) and
+linear regulators (LDO: a part with a `power_in` pin on one rail and a `power_out` pin on another), each rail with its
+voltage, and under it its loads (the ICs drawing from it, an output connector; more than four as one group) and its
+capacitors grouped by value. Fit, Refresh, Copy and Save image… (PNG or SVG) in its window.
+
 ## Voltage-aware safety checks
 
 What a net's voltage asks of the copper and the parts around it. Each net's voltage comes from: grounds and the
