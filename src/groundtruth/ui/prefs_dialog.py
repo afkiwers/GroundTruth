@@ -11,6 +11,7 @@ from typing import Optional
 
 import wx
 from .messages import box as message_box   # laid-out message boxes (ui/messages.py)
+from .widgets import info_button
 
 from . import theme
 
@@ -252,30 +253,6 @@ def defaults(prefs: dict) -> dict:
 
 
 COMPUTE = ("This computer", "A GroundTruth compute server")
-ALL_CORES_INFO = (
-    "Use all cores\n\n"
-    "What it does:\n"
-    "- Solver threads 'auto' uses every physical core of the computer that solves (normally at most 4).\n"
-    "- After the first frequencies, Simulate refines the spectrum one frequency per net or power stage and round. "
-    "With this on it takes up to 4 at once while cores would otherwise wait, and its solve budget grows as much, "
-    "so the extra frequencies come on top of the usual ones.\n\n"
-    "When it helps: big machines (8 or more cores) with few nets or power stages, at high resolution. With many "
-    "nets and stages the cores are busy anyway and it changes little.\n\n"
-    "Potential issues:\n"
-    "- Results are no longer exactly reproducible across computers: which frequencies get solved depends on how "
-    "many cores there are. Figures normally agree within a fraction of a dB; near a sharp resonance a margin can "
-    "differ more. Compare runs (History tab) only when both used the same setting on the same machine.\n"
-    "- More solves in total (up to 4x the refinement): more CPU time, heat and power. On a laptop it competes with "
-    "KiCad and everything else, and the fans run.\n"
-    "- More memory at once (a factorisation per solve running). GroundTruth still lowers the threads when memory is "
-    "short, but there is less room for other programs.\n"
-    "- It can be slower when the cores are busy with other work: the extra solves then queue instead of filling "
-    "idle cores.\n"
-    "- On a compute server the server's own 'threads' setting still applies; in a cluster each server uses its "
-    "own core count, so the parts of one run may refine differently.\n\n"
-    "Off (the default): the same frequencies and the same figures on every computer.")
-
-
 def compute_server(prefs: dict) -> Optional[tuple[str, str]]:
     """(address, access key) when the preferences send the analyses to a compute server, else None."""
     p = defaults(prefs)
@@ -644,12 +621,8 @@ class PreferencesDialog(wx.Dialog):
         ss = wx.BoxSizer(wx.HORIZONTAL)
         self.plane_screening = wx.Choice(screening_holder, choices=list(PLANE_SCREENING))
         self.plane_screening.SetStringSelection(p["plane_screening"])
-        screening_info = wx.BitmapButton(screening_holder,
-                                         bitmap=wx.ArtProvider.GetBitmap(wx.ART_INFORMATION, wx.ART_BUTTON,
-                                                                         self.FromDIP(wx.Size(16, 16))),
-                                         style=wx.BORDER_NONE)
-        screening_info.SetToolTip("What plane screening does and what it costs (opens the help)")
-        screening_info.Bind(wx.EVT_BUTTON, lambda e: self.open_help("screening"))
+        screening_info = info_button(screening_holder, "What plane screening does and what it costs",
+                                     "screening")
         self.plane_screening_info = screening_info
         ss.Add(self.plane_screening, 0, wx.ALIGN_CENTER_VERTICAL)
         ss.Add(screening_info, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, self.FromDIP(6))
@@ -666,12 +639,10 @@ class PreferencesDialog(wx.Dialog):
         hs = wx.BoxSizer(wx.HORIZONTAL)
         self.all_cores = wx.CheckBox(holder, label="Use every core (faster on big machines)")
         self.all_cores.SetValue(p["all_cores"])
-        info = wx.BitmapButton(holder, bitmap=wx.ArtProvider.GetBitmap(wx.ART_INFORMATION, wx.ART_BUTTON,
-                                                                        self.FromDIP(wx.Size(16, 16))),
-                               style=wx.BORDER_NONE)
-        info.SetToolTip("What 'Use all cores' changes, and its potential issues")
-        info.Bind(wx.EVT_BUTTON, lambda e: message_box(ALL_CORES_INFO, "Use all cores", wx.ICON_INFORMATION,
-                                                         self))
+        # the help's section, like Plane screening's (i) (the user: "remove that [message box] and put text
+        # into our help like plane screening is. make sure that applies to all info icons")
+        info = info_button(holder, "What 'Use all cores' changes, and its potential issues", "allcores")
+        self.all_cores_info = info
         hs.Add(self.all_cores, 0, wx.ALIGN_CENTER_VERTICAL)
         hs.Add(info, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, self.FromDIP(6))
         holder.SetSizer(hs)
@@ -960,12 +931,6 @@ class PreferencesDialog(wx.Dialog):
             out.append(link)
         self.basis_links[key] = [w.GetLabel() for w in out[1:]]
         return out
-
-    def open_help(self, topic: str, anchor: str = ""):
-        """An info button: the help opens at that section (the window that opened the dialog shows it)."""
-        parent = self.GetParent()
-        if hasattr(parent, "show_help"):
-            parent.show_help(topic, anchor)
 
     def open_reference(self, ref: str):
         """A basis link: the help opens at that References entry (the window that opened the dialog shows it)."""

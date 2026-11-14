@@ -1790,7 +1790,7 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
 <tr><td valign="top"><b>All cores</b> (opt-in)</td><td>"Use every core": Solver threads <i>auto</i> uses every
   physical core (not at most 4), and after the first frequencies the refinement solves up to 4 frequencies per net or
   power stage at once while cores would otherwise wait, with its solve budget raised as much. It helps big machines
-  with few nets or stages at high resolution. Its price (the <b>(i)</b> button next to it): figures are no longer
+  with few nets or stages at high resolution. Its price (the <b>(i)</b> button next to it: <a href="#allcores">Use all cores</a>): figures are no longer
   identical across computers (normally within a fraction of a dB; near a sharp resonance a margin can move more), so
   compare History runs only with the same setting; more solves in total (CPU, heat, fans), more memory at once, and
   slower when the cores are busy with other work. A compute server's own <i>threads</i> setting still applies; the
@@ -2262,6 +2262,34 @@ settings file's):</p>
 </ul>
 <p>Source and assumptions: <a href="#ref-Dowell-1966">Dowell 1966</a>, <a href="#ref-Ferreira-1994">Ferreira
 1994</a> (the slab's two-port); REFERENCES A92 (the split and its impedance) and A93 (which layers split).</p>
+
+<hr><a name="allcores"></a><h3>Use all cores</h3>
+<p><b>What it does.</b> Preferences › Simulation › <b>All cores</b> ("Use every core (faster on big machines)") is off
+unless you tick it. Ticked:</p>
+<ul>
+<li>Solver threads <i>auto</i> uses every physical core of the computer that solves (otherwise at most 4).</li>
+<li>After the first frequencies, Simulate refines the spectrum one frequency per net or power stage and round. With
+  this on it takes up to 4 at once while cores would otherwise wait, and its solve budget grows as much, so the extra
+  frequencies come on top of the usual ones.</li>
+</ul>
+<p><b>When it helps.</b> Big machines (8 or more cores) with few nets or power stages, at high resolution. With many
+nets and stages the cores are busy anyway and it changes little.</p>
+<p><b>Potential issues:</b></p>
+<ul>
+<li><b>Results are no longer exactly reproducible across computers:</b> which frequencies get solved depends on how
+  many cores there are. Figures normally agree within a fraction of a dB; near a sharp resonance a margin can differ
+  more. Compare runs (History tab) only when both used the same setting on the same machine.</li>
+<li><b>More solves in total</b> (up to 4x the refinement): more CPU time, heat and power. On a laptop it competes
+  with KiCad and everything else, and the fans run.</li>
+<li><b>More memory at once</b> (a factorisation per solve running). GroundTruth still lowers the threads when memory
+  is short, but there is less room for other programs.</li>
+<li><b>It can be slower when the cores are busy with other work:</b> the extra solves then queue instead of filling
+  idle cores.</li>
+<li><b>On a compute server</b> the server's own <i>threads</i> setting still applies; in a cluster each server uses
+  its own core count, so the parts of one run may refine differently. The result notes that it ran this way.</li>
+</ul>
+<p><b>Off (the default):</b> the same frequencies and the same figures on every computer. The command line has
+<code>--all-cores</code>; the <b>(i)</b> button beside the setting opens this section.</p>
 
 <hr><a name="server"></a><h3>Compute server: set up and run (Server jobs tab)</h3>
 <p>Simulate, Suggest fixes, Check in Simulate, Compare what-if, Thermal and Current capacity can run on a powerful PC
