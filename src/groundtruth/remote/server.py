@@ -743,16 +743,17 @@ class ComputeServer:
 
     def _take_option(self, name: str, action: str) -> tuple[int, dict]:
         """POST /v1/options?name=..&action=install|remove: (HTTP status, answer). Only as the installed service,
-        only an option of options.OPTIONS that suits this machine, one at a time and not beside an update. It is
-        installed once no job runs (queued jobs wait, as for an update), in the background; the status's
-        "options" says how far it is."""
+        only an option of options.OPTIONS (to install: one that suits this machine), one at a time and not beside an
+        update. It is installed once no job runs (queued jobs wait, as for an update), in the background; the status's
+        "options" says how far it is. A removal is taken for any option (a package no option suits any more,
+        such as a GPU build on a Mac, can still go)."""
         if not os.environ.get("GROUNDTRUTH_SERVICE"):
             return 409, {"error": "this server runs in a window, not as the installed service: install the option "
                                   "there by hand (install_server, tools/install_gpu.py)"}
         if name not in options.OPTIONS or action not in options.ACTIONS:
             log.warning("refused an option request: not one of the server's options")
             return 400, {"error": "unknown option or action"}
-        why = options.unsuitable(name)
+        why = options.unsuitable(name) if action == "install" else ""     # a removal suits every machine
         if why:
             return 409, {"error": why}
         with self.lock:

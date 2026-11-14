@@ -403,7 +403,7 @@ class ServersPanel(wx.Panel):
         (remote/options.py)."""
         import threading
         from . import jobs_password as jp
-        from .server_updates import follow_option, no_options_reason, option_choices
+        from .server_updates import follow_option, installed_lines, no_options_reason, option_choices
         sel = self.list.GetFirstSelected()
         if not 0 <= sel < len(self.rows):
             return
@@ -441,11 +441,15 @@ class ServersPanel(wx.Panel):
                 message_box(f"{row['name']} can't be asked: {status}", title, wx.ICON_WARNING)
                 return
             choices = option_choices(status)
+            # what the server has, above the choices (the user: "show what options have been installed already")
+            have = installed_lines(status)
+            has = ("On " + row["name"] + ":\n" + "\n".join("  " + h for h in have) + "\n\n") if have else ""
             if not choices:
-                message_box(f"{row['name']} offers nothing to install from here: {no_options_reason(status)}.",
-                            title, wx.ICON_INFORMATION)
+                message_box(f"{has}{row['name']} offers nothing to install or remove from here: "
+                            f"{no_options_reason(status)}.", title, wx.ICON_INFORMATION)
                 return
-            with wx.SingleChoiceDialog(self, f"Options of {row['name']}:", title, [c["text"] for c in choices]) as d:
+            with wx.SingleChoiceDialog(self, f"{has}Remove an installed option, or install one:", title,
+                                       [c["text"] for c in choices]) as d:
                 pick = choices[d.GetSelection()] if d.ShowModal() == wx.ID_OK else None
             if pick is None or message_box(pick["confirm"], title, wx.YES_NO | wx.ICON_QUESTION) != wx.YES:
                 return
