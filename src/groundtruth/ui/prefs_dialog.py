@@ -856,6 +856,19 @@ class PreferencesDialog(wx.Dialog):
         checks = group("Run checks", "right")
         self.checks = {}
         self.basis_links: dict[str, list[str]] = {}       # check key -> the references linked beside it
+        # every check on or off at once (the user: "add select/de-select all"), above the checks
+        all_row = wx.BoxSizer(wx.HORIZONTAL)
+        self.checks_all = wx.Button(self, label="Select all")
+        self.checks_none = wx.Button(self, label="Deselect all")
+        all_row.Add(self.checks_all, 0, wx.RIGHT, gap)
+        all_row.Add(self.checks_none, 0)
+        holder = wx.Panel(self)
+        for b in (self.checks_all, self.checks_none):
+            b.Reparent(holder)
+        holder.SetSizer(all_row)
+        row(checks, "All checks", holder, "tick or untick every check below at once (OK saves it)")
+        self.checks_all.Bind(wx.EVT_BUTTON, lambda e: self.set_all_checks(True))
+        self.checks_none.Bind(wx.EVT_BUTTON, lambda e: self.set_all_checks(False))
         for key, label, _ids, tip in CHECK_TOGGLES:
             self.checks[key] = wx.CheckBox(self, label="Check")
             self.checks[key].SetValue(p[key])
@@ -880,6 +893,9 @@ class PreferencesDialog(wx.Dialog):
         esd = self.checks["check_esd_protection"]
         esd.Bind(wx.EVT_CHECKBOX, lambda e: self.esd_mm.Enable(esd.GetValue()))
         self.esd_mm.Enable(p["check_esd_protection"])
+        for box in self.checks.values():
+            box.Bind(wx.EVT_CHECKBOX, lambda e: (self._all_checks_buttons(), e.Skip()))
+        self._all_checks_buttons()
 
         look = group("Appearance", "right")
         self.theme = wx.Choice(self, choices=["System", "Light", "Dark"])
@@ -956,6 +972,21 @@ class PreferencesDialog(wx.Dialog):
         parent = self.GetParent()
         if hasattr(parent, "show_reference"):
             parent.show_reference(ref)
+
+    def set_all_checks(self, on: bool) -> None:
+        """Select all / Deselect all: every Run checks box ticked or unticked, with what follows a box (the solder
+        mask choice with Voltage spacing, the ESD distance with ESD at connectors) and the two buttons."""
+        for box in self.checks.values():
+            box.SetValue(on)
+        self.solder_mask.Enable(on)
+        self.esd_mm.Enable(on)
+        self._all_checks_buttons()
+
+    def _all_checks_buttons(self) -> None:
+        """Select all greyed when every check is on, Deselect all when every one is off."""
+        states = [box.GetValue() for box in self.checks.values()]
+        self.checks_all.Enable(not all(states))
+        self.checks_none.Enable(any(states))
 
     def _password_busy(self, busy: bool):
         """Grey the two past-jobs buttons while a password is hashed (off the GUI thread)."""
