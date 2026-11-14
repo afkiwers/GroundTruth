@@ -3038,6 +3038,27 @@ def test_preferences_switch_each_check_and_set_the_esd_distance(app, frame):
         assert not dlg.checks["check_diff_pairs"].GetValue() and dlg.esd_mm.GetValue() == 4.5
 
 
+def test_preferences_select_or_deselect_every_check_at_once(app, frame):
+    """Preferences > Run checks > All checks (the user: "add select/de-select all"): Deselect all unticks every
+    check and greys the solder mask and the ESD distance with them; Select all ticks them again. Each button is
+    greyed when it would change nothing, also after a single box is ticked by hand."""
+    from groundtruth.ui.prefs_dialog import CHECK_TOGGLES, PreferencesDialog, checks_off, defaults
+    with PreferencesDialog(frame, defaults({})) as dlg:
+        assert not dlg.checks_all.IsEnabled() and dlg.checks_none.IsEnabled()     # all on by default
+        dlg.checks_none.ProcessEvent(wx.CommandEvent(wx.wxEVT_BUTTON, dlg.checks_none.GetId()))
+        assert not any(box.GetValue() for box in dlg.checks.values())
+        assert not dlg.solder_mask.IsEnabled() and not dlg.esd_mm.IsEnabled()
+        assert dlg.checks_all.IsEnabled() and not dlg.checks_none.IsEnabled()
+        assert checks_off(dlg.values()) == {c for _k, _l, ids, _t in CHECK_TOGGLES for c in ids}
+        esd = dlg.checks["check_esd_protection"]                # one ticked by hand: both buttons do something
+        esd.SetValue(True)
+        esd.ProcessEvent(wx.CommandEvent(wx.wxEVT_CHECKBOX, esd.GetId()))
+        assert dlg.esd_mm.IsEnabled() and dlg.checks_all.IsEnabled() and dlg.checks_none.IsEnabled()
+        dlg.checks_all.ProcessEvent(wx.CommandEvent(wx.wxEVT_BUTTON, dlg.checks_all.GetId()))
+        assert all(box.GetValue() for box in dlg.checks.values()) and dlg.solder_mask.IsEnabled()
+        assert not dlg.checks_all.IsEnabled() and checks_off(dlg.values()) == frozenset()
+
+
 def test_preferences_choose_whether_the_solder_mask_counts_for_voltage_spacing(app, frame):
     """The user, of safety.solder_mask: "is that a dropdown?", then "where is that setting?". Preferences > Run
     checks > Solder mask: From the settings file (the default: the board's), Counts as coating, Left out; greyed
