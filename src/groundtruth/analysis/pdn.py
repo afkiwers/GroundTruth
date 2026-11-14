@@ -632,7 +632,14 @@ def prepare_pdn(model: BoardModel, specs: list) -> tuple[list, list, list]:
                                  f"{st.d:.2f} mm grid (pads smaller than a cell on thin tracks, or a break in the "
                                  "copper): left out; a higher resolution (Preferences) resolves small pads")
             if not ports:
-                raise SolverError("no IC's pads reach the rail's copper on this model")
+                # a board without the pours (zones unfilled, or removed while it is laid out again) has its rail and
+                # ground in pieces of tracks: say so rather than blame the pads (refboard saved mid-relayout: no
+                # zone at all, every rail failed with "a higher resolution resolves small pads")
+                poured = {z.net for z in board.zones if not z.is_rule_area and any(z.filled.values())}
+                missing = [n for n in (spec.rail, ground) if n not in poured]
+                why = (f"; the board has no filled copper pour (zone) of {' or '.join(missing)}: fill its zones "
+                       "(Refill zones), or check that the pours are on the board" if missing else "")
+                raise SolverError("no IC's pads reach the rail's copper on this model" + why)
             exc = PortSet(plane, ports)
         except SolverError as e:
             res.error = f"{spec.label}: {e}"

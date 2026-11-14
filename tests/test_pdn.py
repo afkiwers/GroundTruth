@@ -218,3 +218,16 @@ def test_a_connector_source_with_the_regulators_defaults_is_a_harness(tmp_path):
     assert "harness" in p.source and "500 nH" in p.source
     z, f = _at(p.ports[0], 3e5)
     assert z == pytest.approx(2 * math.pi * f * 500e-9, rel=0.25)
+
+
+def test_a_board_without_its_pours_says_so(tmp_path):
+    """A board saved without its zones (a layout in progress: the refboard's working copy had none and every rail
+    failed, read as "pads smaller than a cell"): the rail's error says that no filled pour of the rail or its ground
+    is on the board."""
+    from groundtruth.analysis.pdn import prepare_pdn
+    from groundtruth.analysis.simulate import BoardModel
+    from groundtruth.config.settings import PdnSpec
+    b, sc, _ = make(tmp_path, pdn_board(source=True), "nopour", nets=(), cavity_max_nodes=12000)
+    b.zones = []
+    _, (res,), _ = prepare_pdn(BoardModel(b, sc.config), [PdnSpec("VDD", voltage=3.3, i_step=0.5)])
+    assert "no filled copper pour (zone) of VDD or GND" in res.error, res.error
