@@ -44,6 +44,7 @@ CHECKS: dict[str, tuple[str, str]] = {
     "thermal_hotspot": ("warning", "Copper temperature above the limit (thermal solve)"),
     "part_temperature": ("warning", "Part temperature above the limit (thermal solve)"),
     "pdn_impedance": ("warning", "A supply rail's impedance at an IC above its target (PDN)"),
+    "pdn_step": ("warning", "A supply rail moves by more than its ripple at an IC when the load steps (PDN)"),
     "decap_missing": ("warning", "An IC's supply pin with no decoupling capacitor close by"),
     "clearance_voltage": ("error", "Copper of two nets closer than IPC-2221B asks for their voltage difference"),
     "cap_voltage": ("warning", "A capacitor's voltage over its (derated) rating"),
@@ -58,6 +59,7 @@ CHECKS: dict[str, tuple[str, str]] = {
     "tuning_delay": ("warning", "A KiCad tuning profile's unit delay differs from the board's cross-sections"),
     "loop_phase_margin": ("warning", "A converter's control loop has too little phase or gain margin"),
     "loop_crossover": ("warning", "A converter's control loop crosses over too close to its switching frequency"),
+    "load_step": ("warning", "A converter's output moves by more than allowed when its load steps"),
     "fb_ripple": ("warning", "The switching ripple at a controller's FB pin is outside its FB Ripple Min / Max"),
 }
 

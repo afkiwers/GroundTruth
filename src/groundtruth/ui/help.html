@@ -29,6 +29,7 @@ next one).</p>
 <li><a href="#efficiency">Efficiency over load current</a></li>
 <li><a href="#fbripple">Ripple at a controller's FB pin</a></li>
 <li><a href="#convsweep">Operating-point sweep: input voltage and load current</a></li>
+<li><a href="#loadstep">Load step: how a converter answers a step of its load</a></li>
 <li><a href="#hotloop">The hot loop</a></li>
 <li><a href="#thermal">Thermal and Current capacity</a></li>
 <li><a href="#analog">Op-amp circuits and the transfer function</a></li>
@@ -399,6 +400,39 @@ The report has a part <i>Operating-point sweeps</i>, the console a table, the JS
 for the swept points: the stage's own operating point raises them. In the settings file:
 <code>sweep: {v_in: [36, 48, 60], i_out: [0.5, 2], outputs: [emissions, losses, ripple]}</code> (outputs:
 emissions, losses, ripple, thermal; the first three when not given).</p>
+<hr><a name="loadstep"></a><h3>Load step: how a converter answers a step of its load</h3>
+<p>Every buck or boost stage with a control loop gets a <b>load step</b> in Simulate: the output's voltage over time
+when its load current steps (an electronic load), or when a load is switched on (a heater coil, a motor winding),
+through a harness to a load capacitance. Set on the Converters tab's <b>Load step</b> section (empty: from half the
+load current to all of it, the load at the output capacitors):</p>
+<ul>
+<li><b>Step from / Step to (A)</b>: the load current before and after; <b>Step rise</b>: its ramp (empty: an ideal
+  step, the worst case);</li>
+<li><b>Harness R / L</b>: the leads to the load (both conductors; about 0.5-1 µH per metre of a two-wire lead);
+  <b>Load C / ESR</b>: the capacitance at the load (a downstream board's input capacitors);</li>
+<li><b>Coil R / L</b>: a load switched on instead (R + sL; a pure inductor: R 0): its own current is the step, rising
+  as the coil allows; Step to and Step rise are greyed;</li>
+<li><b>Allowed deviation (%)</b>: beyond it (default 5 % of V out) the issue <b>load_step</b>.</li>
+</ul>
+<p>The model: the converter in closed loop is an admittance at its output (from its loop model: peak current or
+voltage mode, buck or boost, the same parts and controller fields as the loop gain), beside its output capacitors (C
+at DC bias, ESR), the harness and the load after it. A constant on-time or internally compensated controller has no
+loop model from its parts: give its symbol <b>Loop Bandwidth</b> and <b>Loop Phase Margin</b> fields (its datasheet's),
+or the stage <code>loop: {fc: 40kHz, pm: 60}</code>, for an approximate loop (said in the notes). The response is
+exact (the poles and zeros of the circuit, partial fractions), with its figures: the <b>dip</b> (the deepest
+excursion, in mV and % of V out, and when), how far it <b>rings back</b>, the final deviation (a harness's IR drop;
+none at the output with an integrating loop) and the <b>recovery</b> (back within ±1 % for good). A note says when
+the step asks the converter's current to slew faster than its inductor can, or moves the output by more than 10 %:
+the model is linear (small signal), the real stage's duty cycle or current limit stops it, and its dip is deeper.</p>
+<p>After Simulate the stage has a view <i>&lt;stage&gt; load step</i> on the Results tab: the output impedance open
+loop and closed loop (and at the load behind a harness), and the voltages over time with the allowed band and the
+load and converter currents; a <b>load step</b> tile, a line in the console and the report. In the settings file:</p>
+<pre>converters:
+  - {name: buck1, ..., load_step: {from: 5A, to: 10A, rise: 1us, cable_r: 20mΩ, cable_l: 500nH, c_load: 100uF, esr_load: 10mΩ}}
+  - {name: buck2, ..., load_step: {r_load: 2, l_load: 1mH, max_dev: 3%}}</pre>
+<p><code>tools/dev/load_step_check.py BOARD SETTINGS --only buck1 --from 5 --to 10 --cable 20m,500n --png DIR</code>
+does the same without a Simulate.</p>
+
 <hr><a name="hotloop"></a><h3>The hot loop</h3>
 <p>In a buck, the on-time loop (input capacitor, high-side switch, inductor, output capacitor) and the off-time loop
 (low-side switch, inductor, output capacitor) both carry trapezoidal currents: the inductor current never stops.
@@ -450,7 +484,7 @@ decides how much the reading drops (a slow sweep hardly lowers it, a fast one by
 default; the field's grey hint says so when triangle is chosen. <b>Q_g</b>, <b>Gate drive (V)</b>, <b>Controller
 I_q (A)</b>, <b>Efficiency currents (A)</b> and <b>Measured efficiency</b> feed the efficiency sweep (<a
 href="#efficiency">Efficiency over load current</a>). <b>Sweep V in (V)</b>, <b>Sweep I out (A)</b> and <b>Sweep outputs</b> run the stage at other operating points with every Simulate (<a href="#convsweep">Operating-point sweep</a>). <b>Interleave group</b> and <b>Phase (°)</b> mark
-the phases of one controller (<a href="#interleave">Interleaved stages</a> below). The buttons are those of the Signal paths
+the phases of one controller (<a href="#interleave">Interleaved stages</a> below). The <b>Load step</b> section sets the step Simulate answers (<a href="#loadstep">Load step</a>); <b>Power tree…</b> draws the board's power as a flow chart (<a href="#pdn">Power integrity</a>). The buttons are those of the Signal paths
 tab, and the rows show in KiCad the same way: clicking a row selects the stage's switches and hot-loop capacitors
 and highlights its switch node (<b>Zoom KiCad to the selected power stages</b> also zooms). KiCad shows the row
 you stop on: clicking or arrowing quickly through the rows does not make it select and zoom to each one.</p>
@@ -767,8 +801,10 @@ resolution (0.24 mm cells widen its edges); 4x is converged.</p>
 <hr><a name="pdn"></a><h3>Power integrity tab (PDN impedance)</h3>
 <p>The form's fields: <b>Rail</b>, <b>Ground</b> (its return net), <b>Voltage (V)</b> and a <b>Note</b>; the target
 from <b>Ripple (%)</b> and <b>Load step (A)</b>, checked up to <b>Check up to (Hz)</b>; the regulator
-(<b>Source</b>, <b>Source R (Ω)</b>, <b>Source L (H)</b>; empty: defaults); <b>ICs</b>: where the impedance is
-read (empty: every IC on the rail).</p>
+(<b>Source</b>, <b>Source R (Ω)</b>, <b>Source L (H)</b>; empty: found by itself); <b>ICs</b> and <b>Ports</b>:
+where the impedance is read (empty: every IC on the rail; a port is a pin pair, supply / return, e.g. J2.2/J2.1: a
+connector the load hangs on); the <b>Load step</b> section: the step's ramp and the load at the port (as a
+converter's <a href="#loadstep">load step</a>).</p>
 <p>For a supply rail, the <b>impedance its ICs see</b> between their supply and ground pins, from 10 kHz to 1 GHz:
 the decaps (their C, ESR and ESL from the Parts tab, plus their pads and vias), the planes' capacitance, the copper
 and the regulator together, solved on one model of the whole board. Each IC with supply pins (schematic pin type
@@ -784,20 +820,37 @@ V &middot; ripple / I_step, whatever the frequency of the IC's current step.</p>
   target an error) below <i>check_to</i> (default 100 MHz: above
   it the package and the die's own capacitance take over), naming the part holding the rail there;
   <b>decap_missing</b> for supply pins with no decap pad within <i>decap_mm</i> (3 mm);</li>
-<li>the <b>source</b> (the regulator's output, found by its <i>power_out</i> pin, or a connector) is modelled as
-  <i>vrm_r</i> + jω<i>vrm_l</i> (5 mΩ, 20 nH unless set): below the decaps' range the rail is the regulator's.</li>
+<li>the <b>source</b>: a power stage of the Converters tab whose output the rail is (found by itself, or
+  <i>stage:NAME</i>) is its closed loop, the same model as its <a href="#loadstep">load step</a>, put where its
+  feedback divider senses the output; the sweep then starts below its loop's crossover (f_c / 30) instead of 10 kHz.
+  Otherwise the regulator's output (found by its <i>power_out</i> pin) or a connector, modelled as <i>vrm_r</i> +
+  jω<i>vrm_l</i> (5 mΩ, 20 nH unless set): below the decaps' range the rail is the source's;</li>
+<li>the <b>step over time</b>: with a load step (and the voltage) each port's voltage when its IC's current steps by
+  Load step (A), from its solved impedance (a rational fit), the current the board sees passing the IC's package
+  and die above <i>check_to</i> (as the target assumes): first the copper's inductance (L·ΔI over the edge), then the
+  decaps' and the source's dip; the issue <b>pdn_step</b> when that dip (after the spike, which the impedance target judges) moves by more than the ripple. The Results view
+  shows it under the curves.</li>
 </ul>
 <p>The model is the whole board at the board-wide resolution (Preferences), and each IC's pins with their nearby decaps
 on a fine model of their own: the inductance at small pads and vias, which the board-wide grid cannot resolve, is
 added to the IC's curve. An IC whose small pads the board-wide grid cannot join to the rail's copper is left out
 with a note (raise the resolution).</p>
-<p>The <b>Power integrity</b> tab lists the rails: <b>Find rails</b> adds every rail ICs draw supply from (its source
-found by itself); set each one's <b>Load step</b> for a target (and its voltage when the name has none). After
+<p>The <b>Power integrity</b> tab lists the rails: <b>Find rails</b> adds every rail ICs draw supply from and every
+power stage's output (its source found by itself: the stage, named in the list; read at the stage's output connector
+when no IC draws from it, its load step half the stage's load current); set each one's <b>Load step</b> for a target
+(and its voltage when the name has none). <b>Power tree…</b> (here and on the Converters tab) draws the board's
+power as a flow chart: the sources (input connectors), series links (a pass FET, a filter inductor, a shunt), the
+switching stages (SMPS) and linear regulators (LDO: a part with a power_in pin on one rail and a power_out pin on
+another), each rail with its voltage, and under each rail its loads (the ICs drawing from it, an output connector)
+and capacitors grouped by value; <b>Fit</b> (the whole tree in the window, or full size), <b>Refresh</b> (the board and
+settings again), <b>Copy</b> and <b>Save image…</b> (PNG or SVG). It is read from the board and the settings, no
+Simulate needed (after one, the stages' efficiency at their load is in their boxes). After
 Simulate, each rail is a view on the <b>Results</b> tab: the curves with the target, and under them what holds the
 rail at each IC across frequency. In the settings file:</p>
 <pre>pdn:
   - {rail: +3V3, i_step: 300mA}
-  - {rail: VDD_CORE, voltage: 1.2V, ripple: 3%, i_step: 2A, source: U7, vrm_r: 2mΩ, vrm_l: 10nH}</pre>
+  - {rail: VDD_CORE, voltage: 1.2V, ripple: 3%, i_step: 2A, source: U7, vrm_r: 2mΩ, vrm_l: 10nH}
+  - {rail: VOUT, voltage: 5V, i_step: 2A, source: stage:buck1, ports: [J2.1/J2.2], load_step: {cable_l: 1uH, c_load: 100uF}}</pre>
 
 <hr><a name="si"></a><h3>Signal integrity tab</h3>
 <p>The forms: a pair (<b>P net</b>, <b>N net</b>, <b>Name</b>, <b>Note</b>; <b>Zdiff (Ω)</b>, <b>Tolerance
@@ -1163,6 +1216,10 @@ settings file changes it or switches a check off):</p>
   limits (warn_c 85 °C, max_c 105 °C)</td></tr>
 <tr><td>loop_phase_margin, loop_crossover (warning)</td><td>a converter's control loop: under 45° of phase or 6 dB
   of gain margin (under 30°: an error); a crossover above f_sw/5</td></tr>
+<tr><td>load_step (warning)</td><td>a converter's output (or its load behind a harness) moves by more than the
+  allowed deviation (5 %) when its load steps (<a href="#loadstep">Load step</a>)</td></tr>
+<tr><td>pdn_step (warning)</td><td>a supply rail moves by more than its ripple at an IC (or port) when the load
+  steps (<a href="#pdn">Power integrity</a>)</td></tr>
 <tr><td>fb_ripple (warning)</td><td>the switching ripple at a controller's FB pin below its FB Ripple Min or above
   its FB Ripple Max (<a href="#fbripple">FB ripple</a>)</td></tr>
 </table>

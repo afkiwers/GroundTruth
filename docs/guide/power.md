@@ -277,6 +277,37 @@ ADJ_RAIL as AC grounds; R46 ∥ R47 and R54 ∥ R55, 4 mΩ; slope compensation a
 `tools/dev/loop_check.py BOARD SETTINGS [--set conv1:ith_range=0.8] [--png DIR]` prints a stage's loop without a
 Simulate.
 
+## Load step of a buck or boost stage
+
+How the output answers a step of its load: the stage in closed loop as an admittance at its output node, Y_conv(s)
+(from the loop's averaged model: peak current mode T_s·q/L + G_c·F_h/R_i for a buck, voltage mode
+(1 + G_c·V_in/V_ramp)/Z_L, a boost's with its a·D' and right-half-plane terms [A117]), beside its output capacitors
+(C at DC bias, ESR); then a harness R + sL to the load, a load capacitance with its ESR, and either a current step
+(an electronic load, ideal or ramped) or a load branch R + sL switched on (a heater coil: compensation theorem). The
+responses are exact (poles and zeros, partial fractions): each node's dip, its time, how far it rings back, the final
+deviation and the recovery into ±1 %, the converter's current and its fastest slew.
+
+```yaml
+converters:
+  - {name: buck1, ..., load_step: {from: 5A, to: 10A, rise: 1us, cable_r: 20mΩ, cable_l: 500nH, c_load: 100uF,
+                                   esr_load: 10mΩ, max_dev: 5%}}
+  - {name: buck2, ..., load_step: {r_load: 2, l_load: 1mH}}      # a coil switched on from no load
+```
+
+Without `load_step` the step is half to full load at the output capacitors. A constant on-time or internally
+compensated controller has no loop model from its parts: its **Loop Bandwidth** and **Loop Phase Margin** fields (or
+`loop: {fc: 40kHz, pm: 60}`) give an approximate type II loop with that crossover and margin (Venable's K factor;
+[A115]). The model is linear: a note when the converter's current would slew faster than the inductor allows, or a
+node moves by more than 10 % [A116]. Issue `load_step` when a node moves by more than `max_dev` (5 %). The Results
+tab's *&lt;stage&gt; load step* view shows the output impedance open and closed loop and the voltages and currents over
+time. Validated against Z_ol/(1 + T) of the loop model, a time integration of the averaged circuit, and a coil
+switched on against the circuit with the coil in it (tests/test_load_step.py).
+
+On refboard (2026-11-14, `tools/dev/load_step_check.py`): conv1 5 → 10 A dips 292 mV (1.0 %) and recovers within
+±1 % in 28 µs (crossover 17.8 kHz at that load); 0 → 10 A through 20 mΩ + 500 nH to 100 µF dips 0.80 V (2.9 %) at the
+load and settles 200 mV low there (the harness's IR drop); conv2 5 → 10 A dips 123 mV (2.4 %), back in 61 µs; the
+constant on-time and internally compensated stages need their loop fields.
+
 ## Ripple at a controller's FB pin
 
 For every buck stage whose controller has an FB pin, Simulate works out the switching ripple at that pin over one

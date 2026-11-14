@@ -141,8 +141,28 @@ FIELD_TIPS = {
     "Sweep outputs": "What to work out at each point: emissions (radiated, conducted, overshoot), losses (and "
                      "efficiency), ripple (at the FB pin, and the control loop), temperatures (a thermal solve per "
                      "point: slow).",
+    # the load step (analysis/load_step.py)
+    "Step from (A)": "The load current before the step. Empty: half the load current (with a coil: no load).",
+    "Step to (A)": "The load current after the step (an electronic load). Empty: the load current. Not used when a "
+                   "coil is switched on (its own current is the step).",
+    "Step rise": "How fast the load current ramps, e.g. 1us. Empty: an ideal step (the worst case).",
+    "Harness R": "The resistance of the leads to the load, both conductors together, e.g. 20mΩ. Empty: the load is "
+                 "at the output capacitors.",
+    "Harness L": "The inductance of the leads to the load (about 0.5-1 µH per metre of a two-wire lead), e.g. 500nH.",
+    "Load C": "Capacitance at the load (a downstream board's input capacitors), e.g. 100uF. Empty: none.",
+    "Load C ESR": "The load capacitance's ESR, e.g. 10mΩ.",
+    "Coil R": "A load switched on instead of a current step: its resistance (a heater coil, a motor winding, a "
+              "resistor bank). With Coil L: R + sL, its current rising as the coil allows.",
+    "Coil L": "The switched load's inductance, e.g. 1mH (a pure inductor: Coil R 0).",
+    "Allowed deviation (%)": "How far the output (or the load) may move, in % of V out: beyond it the issue load_step. "
+                             "Empty: 5 %.",
 }
+LOAD_STEP_FIELDS = (("Step from (A)", "i_from", "A"), ("Step to (A)", "i_to", "A"), ("Step rise", "rise", "s"),
+                    ("Harness R", "cable_r", "Ω"), ("Harness L", "cable_l", "H"), ("Load C", "c_load", "F"),
+                    ("Load C ESR", "esr_load", "Ω"), ("Coil R", "r_load", "Ω"), ("Coil L", "l_load", "H"))
 BUTTON_TIPS = {
+    "Power tree…": "A flow chart of the board's power: sources, links, converters and regulators, rails, their "
+                       "loads and capacitors (Fit, Refresh, Copy, Save image in its window).",
     "Add": "Add a new power stage from the form.",
     "Update selected": "Replace the selected power stage with the form's values (settings the form does not show "
                        "are kept). With several selected: the fields you changed go into each of them; a field "
@@ -351,6 +371,18 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         self.interleave.SetHint("none")
         self.phase_deg = wx.TextCtrl(fw)
         self.phase_deg.SetHint("even spread")
+        # the load step (analysis/load_step.py): a current step, or a coil switched on, through a harness
+        hints = {"i_from": "half the load", "i_to": "the load current", "rise": "ideal step", "cable_r": "none",
+                 "cable_l": "none", "c_load": "none", "esr_load": "0", "r_load": "none (a current step)",
+                 "l_load": "none"}
+        self.ls_ctrls = {}
+        for _label, key, _unit in LOAD_STEP_FIELDS:
+            self.ls_ctrls[key] = wx.TextCtrl(fw)
+            self.ls_ctrls[key].SetHint(hints[key])
+        self.ls_max_dev = wx.TextCtrl(fw)
+        self.ls_max_dev.SetHint("5")
+        for key in ("r_load", "l_load"):
+            self.ls_ctrls[key].Bind(wx.EVT_TEXT, lambda e: (e.Skip(), self._load_step_state()))
         # the part parameters the schematic fields can give: a mark beside each (◆ from the schematic, ! differs)
         self.param_ctrls = {"c_oss": self.c_oss, "q_oss": self.q_oss, "rds_on": self.rds_on,
                             "rds_on_low": self.rds_on_low, "dcr": self.dcr, "diode_vf": self.diode_vf,
@@ -398,6 +430,9 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             ("Sweep", "Optional: other operating points, each list at the other's nominal value.",
              [("Sweep V in (V)", self.sweep_v_in), ("Sweep I out (A)", self.sweep_i_out),
               ("Sweep outputs", self.sweep_outputs)]),
+            ("Load step", "How the output answers a load step (closed loop). Empty: half to full load.",
+             [(label, self.ls_ctrls[key]) for label, key, _ in LOAD_STEP_FIELDS]
+             + [("Allowed deviation (%)", self.ls_max_dev)]),
         ]
 
     def _form_rows(self):
@@ -416,7 +451,8 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         fw.SetMinSize(wx.Size(inner.GetMinSize().width + wx.SystemSettings.GetMetric(wx.SYS_VSCROLL_X), 120))
         btns = button_row(self, [("Add", self.on_add), ("Update selected", self.on_update),
                                  ("Remove selected", self.on_remove), ("Mark reviewed", self.on_reviewed),
-                                 ("Use schematic values", self.on_schematic), ("Detect…", self.on_detect)],
+                                 ("Use schematic values", self.on_schematic), ("Detect…", self.on_detect),
+                                 ("Power tree…", self.on_power_tree)],
                           BUTTON_TIPS)
         right = wx.BoxSizer(wx.VERTICAL)
         right.Add(fw, 1, wx.EXPAND)
@@ -571,9 +607,54 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             ctrls[key].Enable(True)
         for key, text in self._texts(c).items():
             self._set(ctrls[key], text)
+        self._fill_load_step(c.load_step)
         self._spread_hint()
         self._integrated_state()
         self._show_marks(c)
+
+    def _fill_load_step(self, ls):
+        """The Load step section for one stage's load_step (None: every field empty, the defaults' hints shown);
+        enabled again (several stages grey it: _form_for_selection)."""
+        for _label, key, unit in LOAD_STEP_FIELDS:
+            v = getattr(ls, key) if ls is not None else None
+            shown = "" if v is None or (v == 0 and key not in ("i_from", "i_to", "r_load")) else format_si(v, unit)
+            self.ls_ctrls[key].ChangeValue(shown)
+            self.ls_ctrls[key].Enable(True)
+        self.ls_max_dev.ChangeValue("" if ls is None or ls.max_dev == 0.05 else f"{ls.max_dev * 100:g}")
+        self.ls_max_dev.Enable(True)
+        self._load_step_state()
+
+    def _load_step_state(self):
+        """With a coil switched on (Coil R or L given) the step is its own current: Step to and Step rise are not
+        used, greyed (their text kept for a switch back)."""
+        coil = bool(self.ls_ctrls["r_load"].GetValue().strip() or self.ls_ctrls["l_load"].GetValue().strip())
+        for key in ("i_to", "rise"):
+            self.ls_ctrls[key].Enable(not coil and self.ls_max_dev.IsEnabled())
+            self.ls_ctrls[key].SetHint("not used: a coil is switched on" if coil else
+                                       {"i_to": "the load current", "rise": "ideal step"}[key])
+
+    def _read_load_step(self, problems: list):
+        """The Load step section as a LoadStep (None when every field is empty); a field that is no number goes
+        into `problems`."""
+        from ..config.settings import LoadStep
+        values = {}
+        for label, key, unit in LOAD_STEP_FIELDS:
+            text = self.ls_ctrls[key].GetValue().strip()
+            if not text or (key in ("i_to", "rise") and not self.ls_ctrls[key].IsEnabled()):
+                continue
+            v = parse_field(text, unit)
+            if v is None or v < 0:
+                problems.append(f"{label}: '{text}' is not a number of 0 or more")
+                continue
+            values[key] = v
+        dev = self.ls_max_dev.GetValue().replace("%", "").strip()
+        if dev:
+            v = parse_field(dev, "")
+            if v is None or not 0 < v < 100:
+                problems.append(f"Allowed deviation: '{dev}' is not a percentage between 0 and 100")
+            else:
+                values["max_dev"] = v / 100
+        return LoadStep(**values) if values else None
 
     def _form_for_selection(self):
         """After the selection settled: several rows show their shared fields (a value they differ in as MIXED) and
@@ -591,6 +672,10 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             self._set(ctrls[key], shown[key])
         for key in self.OWN:
             ctrls[key].Enable(False)
+        # the load step is set one stage at a time (each stage's own load): greyed, emptied, kept as it is
+        for ctrl in list(self.ls_ctrls.values()) + [self.ls_max_dev]:
+            ctrl.ChangeValue("")
+            ctrl.Enable(False)
         self._spread_hint()
         self._show_marks(None)
         self._multi = shown
@@ -789,11 +874,13 @@ class ConvertersPanel(SelectableRows, wx.Panel):
             # random hops every cycle: its greyed rate field is not used (_spread_hint)
             spread_rate=None if self.spread_mode.GetStringSelection() == "random" else num(self.spread_rate, "Hz"),
             interleave=self.interleave.GetValue().strip(), phase_deg=num(self.phase_deg, "°"))
+        step_problems = []
+        spec.load_step = self._read_load_step(step_problems)
         from ..config.settings import validate
         from copy import copy
         probe = copy(self.settings.config)
         probe.nets, probe.converters = [], [spec]
-        problems = validate(probe, self.board)
+        problems = validate(probe, self.board) + step_problems
         if not (spec.f_sw and spec.i_out and spec.rise_time):
             problems.append("switching frequency, load current and edge time must be numbers (e.g. 400kHz, 3, 5ns)")
         for ctrl, what in ((self.spread, "spread spectrum (a percentage, e.g. 20)"),
@@ -890,6 +977,11 @@ class ConvertersPanel(SelectableRows, wx.Panel):
                 self.converters[i] = replace(self.converters[i], reviewed=True)
             if self._commit():
                 self.reselect(rows)
+
+    def on_power_tree(self, _=None):
+        """Power tree…: the board's power tree in a window of its own (ui/power_tree_window.py)."""
+        from .power_tree_window import open_power_tree
+        open_power_tree(self)
 
     def on_detect(self, _):
         """Find power stages as a background job."""

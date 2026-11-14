@@ -110,6 +110,79 @@ def rails_with_ics(board: Board, ground: str) -> dict[str, list[str]]:
     return dict(sorted(out.items(), key=lambda kv: (-len(kv[1]), kv[0])))
 
 
+STAGE = "stage:"                 # a PdnSpec source naming a power stage: "stage:conv1"
+LATE_TAUS = 10.0                 # a port step's "late" dip: after this many time constants of the check_to low-pass
+STAGE_F_LOW = 30.0               # with a power stage as the source the sweep starts at its crossover / this ...
+F_MIN_STAGE = 100.0              # ... but not below this
+
+
+def stage_outputs(board: Board, config, spec) -> tuple[set, str, str]:
+    """A power stage's output nets (loop.output_nets: the inductor's far side and nets joined to it through shunts),
+    the net its load hangs on and that connector's pins as a PDN port ("J2.2/J2.1", "" without one). The load's
+    net: the output connector's + pin's; else the one the feedback divider senses (what the loop holds); else the
+    output net with the most capacitors to ground; else the inductor's far side."""
+    from .loop import find_loop, output_nets
+    from .power import switch_inductor
+    from .safety import is_ground
+    outs = output_nets(board, config, spec)
+    if not outs:
+        return set(), "", ""
+    port, rail = "", ""
+    oc = list(spec.output_connector)
+    if len(oc) == 2 and all("." in p for p in oc):
+        ref, pin = oc[0].rsplit(".", 1)
+        fp = board.footprint(ref)
+        pad = next((p for p in fp.pads if p.number == pin), None) if fp is not None else None
+        if pad is not None and pad.net in outs:
+            rail, port = pad.net, f"{oc[0]}/{oc[1]}"
+    if not rail:
+        parts = find_loop(board, config, spec)
+        for ref, *_ in (parts.top if parts is not None else []):
+            fp = board.footprint(ref)
+            rail = next((p.net for p in (fp.pads if fp is not None else ()) if p.net in outs), "")
+            if rail:
+                break
+    if not rail:
+        by_net = board.parts_by_net()
+        count = {n: sum(1 for fp in by_net.get(n, ()) if (m := config.model_for(fp.reference)) is not None
+                        and m.kind == "cap" and any(is_ground(p.net) for p in fp.pads)) for n in outs}
+        if max(count.values(), default=0):
+            rail = max(sorted(count), key=count.get)
+    if not rail:
+        node, ind = switch_inductor(board, config, spec)
+        far = [p.net for p in ind.pads if p.net and p.net != node] if ind is not None else []
+        rail = far[0] if far and far[0] in outs else sorted(outs)[0]
+    return outs, rail, port
+
+
+def converter_rails(board: Board, config) -> dict[str, tuple[str, str]]:
+    """The rails the board's power stages feed: {net: (stage name, its output connector as a port or "")} (enabled
+    stages, not a motor bridge's legs; a stage whose output can't be found left out). The Power integrity tab's
+    Find rails lists them beside the rails ICs draw from (the user: "Why are converters not listed under Power
+    integrity"); each stage's own output nets also count as its rail for the source (find_stage)."""
+    out: dict[str, tuple[str, str]] = {}
+    for spec in config.converters:
+        if not spec.enabled or spec.bridge or spec.topology not in ("buck", "boost"):
+            continue
+        _, rail, port = stage_outputs(board, config, spec)
+        if rail and rail not in out:
+            out[rail] = (spec.name, port)
+    return out
+
+
+def find_stage(board: Board, config, rail: str, name: str = ""):
+    """The power stage feeding a rail: the one named (a "stage:NAME" source), else the first enabled stage whose
+    output nets hold the rail; None without one."""
+    for spec in config.converters:
+        if name and spec.name != name:
+            continue
+        if not spec.enabled or spec.bridge:
+            continue
+        if name or rail in stage_outputs(board, config, spec)[0]:
+            return spec
+    return None
+
+
 def find_source(board: Board, rail: str, ground: str) -> Optional[Footprint]:
     """The part feeding the rail: one with a power_out pin on it (a regulator's output), else a connector with pads on
     the rail and the ground; None when neither is there."""
@@ -172,6 +245,8 @@ class PdnResult:
     target_ohm: Optional[float] = None
     check_to: float = 100e6
     source: str = ""                    # the source part and its model, in words
+    stage: str = ""                     # a power stage as the source (its closed loop: analysis/load_step.py)
+    f_min: float = F_MIN                # the sweep's lowest frequency (lower with a power stage's loop)
     ports: list = field(default_factory=list)       # [{part, pins, f, z_ohm, phase_deg, worst, peaks, l_nh, holds}]
     responses: list = field(default_factory=list)   # each IC's Z(f) with its poles and zeros (analysis/transfer.py)
     decaps: list = field(default_factory=list)      # [{ref, value, C, near: [{part, mm}]}]
@@ -284,6 +359,81 @@ def _source_branch(st, src: Footprint, rail: str, ground: str, spec: PdnSpec) ->
                  + ("; a connector: a harness's defaults, give the supply's own values" if harness else "") + ")")
 
 
+def _stage_branch(st, board: Board, config, stage, rail: str, ground: str) -> tuple[list[Branch], str, float]:
+    """A power stage as the rail's source: its closed loop as the admittance Y_conv(s) (loop.LoopModel, or the
+    approximate loop of its bandwidth and phase margin: load_step.converter_model) from where its feedback divider
+    senses the output (the divider's top resistor's pad on an output net: the loop holds that node; else the
+    inductor's output pad) to the nearest ground copper, the branch's impedance 1/Y_conv(j2πf) [A117]. Its output
+    capacitors are the model's own part branches (decaps), so they are not in it. A sense shunt between the
+    inductor and the divider is inside the loop: at the inductor's pad its resistance read as a droop the loop
+    takes out (10 mΩ: 10 mV per A on the test board). (branches, its description, the loop's crossover in Hz or 0);
+    SolverError without a model or without copper there."""
+    from .load_step import _crossover, converter_model
+    from .loop import find_loop
+    from .power import switch_inductor
+    model, _, err = converter_model(board, config, stage, stage.i_out)
+    if model is None:
+        raise SolverError(f"{stage.name}: {err}")
+    outs = stage_outputs(board, config, stage)[0]
+    # where to attach, best first: the divider's top pad (the sensed node), the output capacitors' pads on the
+    # sensed net, the inductor's output pad; the first whose grid node lies on its net's main copper (a divider's
+    # 0402 pad on a thin track was its own piece on a 0.37 mm grid: the source read 7 Ω at 1 kHz)
+    cands = []
+    parts = find_loop(board, config, stage)
+    sensed = set()
+    for ref, *_ in (parts.top if parts is not None else []):
+        fp = board.footprint(ref)
+        for p in (fp.pads if fp is not None else ()):
+            if p.net in outs:
+                cands.append((p, f"{ref} (its feedback divider)"))
+                sensed.add(p.net)
+    caps = [fp for fp in decaps(board, config, next(iter(sensed)), ground)] if sensed else []
+    cands += [(p, f"{fp.reference} (an output capacitor)") for fp in caps for p in fp.pads if p.net in sensed]
+    node, ind = switch_inductor(board, config, stage)
+    if ind is not None:
+        cands += [(p, ind.reference) for p in ind.pads if p.net and p.net != node]
+    piece, main = copper_pieces(st, st.plane)
+    radius = max(3 * st.d, 2.0)
+    na = nb = None
+    where = ""
+    for pad, where in cands:
+        na = next((n for n in (st.node(l, *pad.position, pad.net, radius) for l in pad.layers) if n), None)
+        nb = next((n for n in (st.node(l, *pad.position, ground, radius) for l in st.names) if n), None)
+        if na and nb and na != nb and piece[st.plane.nid[na]] == main.get(pad.net) \
+                and piece[st.plane.nid[nb]] == main.get(ground):
+            break
+    else:
+        raise SolverError(f"{stage.name}: no {'/'.join(sorted(outs))} and {ground} copper at its feedback divider, "
+                          "output capacitors or inductor on this model's grid")
+    y_conv = model.y_conv
+
+    def z(f, y=y_conv):
+        """The stage's closed-loop source impedance 1/Y_conv at f."""
+        return complex(1.0 / y(2j * math.pi * f))
+    fc = _crossover(model.t, stage.f_sw) or 0.0
+    text = (f"{stage.name} in closed loop at {where} ({'approximate loop, ' if model.approximate else ''}"
+            f"crossover {fc / 1e3:.3g} kHz)" if fc else f"{stage.name} in closed loop at {where}")
+    return [Branch(na, nb, z, f"source {stage.name}", "part")], text, fc
+
+
+def _port_pads(board: Board, port: str, rail: str, ground: str):
+    """A port "J2.2/J2.1" as (footprint, [its pad on the rail], [its pad on the ground]), or a reason it can't be."""
+    try:
+        a, b = (p.strip() for p in port.split("/"))
+        ref, pa = a.rsplit(".", 1)
+        ref_b, pb = b.rsplit(".", 1)
+    except ValueError:
+        return f"port {port!r}: write it as supply / return pins, J2.2/J2.1"
+    fp, fb = board.footprint(ref), board.footprint(ref_b)
+    if fp is None or fb is None or fp is not fb:
+        return f"port {port!r}: both pins on one part on the board"
+    rp = [p for p in fp.pads if p.number == pa and p.net == rail]
+    gp = [p for p in fp.pads if p.number == pb and p.net == ground]
+    if not rp or not gp:
+        return f"port {port!r}: {a} must be on {rail} and {b} on {ground}"
+    return fp, rp, gp
+
+
 def copper_pieces(st, plane) -> tuple[np.ndarray, dict]:
     """The model's pieces of copper joined by copper (grid strips, vias, tracks bridged, pins; not parts and not
     the planes' capacitance): a piece number per node, and per net the piece holding most of its nodes (its main
@@ -394,19 +544,43 @@ def prepare_pdn(model: BoardModel, specs: list) -> tuple[list, list, list]:
             if missing:
                 res.notes.append(f"{', '.join(sorted(missing))}: no supply pin on {spec.rail} and pad on {ground}: "
                                  "left out")
+        for port in spec.ports:             # pin pairs: a connector the load hangs on (a converter's output)
+            got = _port_pads(board, port, spec.rail, ground)
+            if isinstance(got, str):
+                res.notes.append(got + ": left out")
+            else:
+                parts.append(got)
         if not parts:
             res.error = (f"no IC with a supply pin on {spec.rail} and a pad on {ground} (pin type power_in; set "
-                         "`parts` to name them)")
+                         "`parts` to name them, or `ports` for a connector the load hangs on)")
             continue
+        # the source: a power stage (named, or the one whose output this is), else a part (named, or found)
+        stage = None
+        if spec.source.startswith(STAGE):
+            stage = find_stage(board, config, spec.rail, spec.source[len(STAGE):])
+            if stage is None:
+                res.notes.append(f"no power stage {spec.source[len(STAGE):]!r}: the source is found by itself")
+        elif not spec.source:
+            stage = find_stage(board, config, spec.rail)
+        nets = {spec.rail, ground} | (stage_outputs(board, config, stage)[0] if stage is not None else set())
         try:
             # the rail and its ground on every copper layer; the capacitance between their facing copper
             layers = list(board.copper_layers)
             h = min((board.stackup.dielectric_between(x, y) for x, y in zip(layers, layers[1:])), default=0.2)
             d = _choose_pitch(max(h, 0.25), bbox, len(layers), a.cavity_max_nodes, "auto", a.resolution)
-            st = model.build(bbox, layers, {spec.rail, ground}, d, True)
+            st = model.build(bbox, layers, nets, d, True)
             branches, src_text = [], ""
             src = None
-            if spec.source.lower() != "none":
+            if stage is not None:
+                try:
+                    branches, src_text, fc = _stage_branch(st, board, config, stage, spec.rail, ground)
+                    res.source, res.stage = src_text, stage.name
+                    if fc:
+                        res.f_min = max(min(F_MIN, fc / STAGE_F_LOW), F_MIN_STAGE)
+                except SolverError as e:
+                    res.notes.append(f"the power stage as the source: {e}; a regulator's vrm_r / vrm_l instead")
+                    stage = None
+            if stage is None and spec.source.lower() != "none" and not spec.source.startswith(STAGE):
                 src = board.footprint(spec.source) if spec.source else find_source(board, spec.rail, ground)
             if src is not None:
                 branches, src_text = _source_branch(st, src, spec.rail, ground, spec)
@@ -418,7 +592,8 @@ def prepare_pdn(model: BoardModel, specs: list) -> tuple[list, list, list]:
             piece, main = copper_pieces(st, plane)
             # the rail's main copper is the piece its source feeds (a coarse grid can split a pour in two, and the
             # piece with most nodes need not be the fed one), else the piece holding most of the ICs' supply pads
-            fed = [int(piece[plane.nid[b.a]]) for b in branches]
+            # (a power stage's branch sits on its inductor's net, which may be behind a shunt: not the rail's piece)
+            fed = [int(piece[plane.nid[b.a]]) for b in branches if stage is None]
             if fed:
                 main[spec.rail] = max(set(fed), key=fed.count)
             else:
@@ -457,7 +632,14 @@ def prepare_pdn(model: BoardModel, specs: list) -> tuple[list, list, list]:
                                  f"{st.d:.2f} mm grid (pads smaller than a cell on thin tracks, or a break in the "
                                  "copper): left out; a higher resolution (Preferences) resolves small pads")
             if not ports:
-                raise SolverError("no IC's pads reach the rail's copper on this model")
+                # a board without the pours (zones unfilled, or removed while it is laid out again) has its rail and
+                # ground in pieces of tracks: say so rather than blame the pads (refboard saved mid-relayout: no
+                # zone at all, every rail failed with "a higher resolution resolves small pads")
+                poured = {z.net for z in board.zones if not z.is_rule_area and any(z.filled.values())}
+                missing = [n for n in (spec.rail, ground) if n not in poured]
+                why = (f"; the board has no filled copper pour (zone) of {' or '.join(missing)}: fill its zones "
+                       "(Refill zones), or check that the pours are on the board" if missing else "")
+                raise SolverError("no IC's pads reach the rail's copper on this model" + why)
             exc = PortSet(plane, ports)
         except SolverError as e:
             res.error = f"{spec.label}: {e}"
@@ -474,8 +656,8 @@ def prepare_pdn(model: BoardModel, specs: list) -> tuple[list, list, list]:
                 m["local_pitch"] = fine.build.d
         if why:
             res.notes.append("without the fine model at the pins: " + "; ".join(why))
-        n0 = int(math.ceil(math.log10(F_MAX / F_MIN) * PER_DECADE))
-        run = ModelRun(st, exc, planned=[float(f) for f in np.geomspace(F_MIN, F_MAX, n0 + 1)])
+        n0 = int(math.ceil(math.log10(F_MAX / res.f_min) * PER_DECADE))
+        run = ModelRun(st, exc, planned=[float(f) for f in np.geomspace(res.f_min, F_MAX, n0 + 1)])
         res.nodes, res.pitch_mm = st.nodes, st.d
         res.notes.append(f"PDN modelled on the whole board: {spec.rail} and {ground} on {len(layers)} layers, "
                          f"{st.nodes} nodes at {st.d:.2f} mm, {len(meta)} IC port(s)")
@@ -555,6 +737,7 @@ def finish_pdn(model: BoardModel, setup: PdnSetup):
         from .transfer import fitted_response
         res.responses.append(fitted_response(f"{meta['part']}: Z at its supply pins", res.name, "impedance", fs,
                                              Z[:, p], use_e=True))
+        _port_step(setup, res.responses[-1], meta, fs, Z[:, p])
         # what holds the rail at each frequency: each part's share of the port's current (its branches added)
         holds = []
         for k, f in enumerate(fs):
@@ -577,6 +760,7 @@ def finish_pdn(model: BoardModel, setup: PdnSetup):
                              "margin_db": float(20 * math.log10(res.target_ohm / max(z[k], 1e-12))),
                              "holds": holds[k]["part"]}
         res.ports.append(port)
+        _port_step_figures(res, port)
     if res.target_ohm:
         w = min(res.ports, key=lambda p: p["worst"]["margin_db"])
         res.worst = {"part": w["part"], **w["worst"]}
@@ -584,6 +768,40 @@ def finish_pdn(model: BoardModel, setup: PdnSetup):
     _issues(setup, config.rules)
     res.seconds = time.time() - setup.t_start
     return res
+
+
+def _port_step(setup: PdnSetup, resp, meta: dict, fs: np.ndarray, z: np.ndarray):
+    """The rail's voltage at a port over time when the IC draws i_step (over the load_step's rise; none: an ideal
+    step), or when the load_step's coil is switched on there, through its harness to its load capacitance
+    (load_step.sampled_step on the solved impedance up to check_to: the band the target applies to, the package and
+    die decoupling above it [A19]): its response's step curve (plots.draw_step) and figures, notes."""
+    from ..config.settings import LoadStep
+    from .load_step import sampled_step
+    res, spec = setup.res, setup.spec
+    ls = spec.load_step or LoadStep()
+    if res.voltage is None or not (spec.i_step or ls.switched) or np.sum(fs <= spec.check_to) < 6:
+        return
+    try:
+        st = sampled_step(fs, z, ls, spec.i_step or 0.0, res.voltage, ls.rise, f_max=spec.check_to)
+    except (ValueError, ZeroDivisionError, np.linalg.LinAlgError) as e:
+        res.notes.append(f"{meta['part']}: no step response ({e})")
+        return
+    for name, t, v, m in st["nodes"]:
+        # the dip after the first LATE_TAUS time constants of the low-pass at check_to: the decaps' and the
+        # regulator's, apart from the spike of the copper's inductance at the start (L·ΔI·2π·check_to)
+        late = t > LATE_TAUS / (2 * math.pi * spec.check_to)
+        if np.any(late):
+            dv = v[late] - res.voltage
+            k = int(np.argmin(dv) if (spec.i_step or ls.switched) else np.argmax(dv))
+            m["dip_late"], m["t_dip_late"] = float(dv[k]), float(t[late][k])
+            m["peak_late"] = float(np.max(np.abs(dv)))
+        if name == "port":                     # (a load node behind a harness: its figures in the notes)
+            resp.step = {"t": t, "y": v, "metrics": m, "kind": "load", "v_nom": res.voltage, "max_dev": spec.ripple,
+                         "label": meta["part"]}
+        else:
+            res.notes.append(f"{meta['part']}: at the load behind the harness the rail dips {m['dip'] * 1e3:+.3g} mV "
+                             f"({m['dip_pct']:+.2f} %)")
+    res.notes += [f"{meta['part']}: {n}" for n in st["notes"]]
 
 
 def _decaps_near(model: BoardModel, setup: PdnSetup):
@@ -621,9 +839,36 @@ def _decaps_near(model: BoardModel, setup: PdnSetup):
                         details={"part": port["part"], "pins": [p.pin for p, _ in far]})
 
 
+def _port_step_figures(res: PdnResult, port: dict):
+    """The port's step figures, taken from its response's step (set by _port_step before the port was listed)."""
+    r = res.responses[-1] if res.responses else None
+    st = getattr(r, "step", None)
+    if st and st.get("label") == port["part"]:
+        port["step"] = {"label": port["part"], **st["metrics"]}
+
+
 def _issues(setup: PdnSetup, rules):
-    """pdn_impedance: a port above the target below check_to (an error over it, a warning within WARN_DB)."""
+    """pdn_impedance: a port above the target below check_to (an error over it, a warning within WARN_DB);
+    pdn_step: the voltage at a port moving by more than the ripple when its IC steps (or the coil is switched on),
+    after the copper's spike at the start (peak_late: the decaps' and the source's response). The spike, L·ΔI over
+    the edge the check_to low-pass leaves, is the impedance above the decaps that pdn_impedance already judges in
+    frequency; judged again in time it flagged an off-board load at a connector port (5 A, 1.3 nH: −3.5 V in 0.5 ns
+    on refboard's converter output) whose harness could never draw that edge."""
     res, spec = setup.res, setup.spec
+    from ..components.values import format_si as _si
+    for port in res.ports:
+        m = port.get("step")
+        peak = m.get("peak_late", m["peak"]) if m else None
+        if m and res.voltage and peak > spec.ripple * res.voltage:
+            spike = (f"; before it the copper's spike {m['dip'] * 1e3:+.3g} mV at {_si(m['t_dip'], 's')}"
+                     if m.get("dip_late") is not None and abs(m["dip"]) > abs(m["dip_late"]) else "")
+            late = m.get("dip_late", m["dip"]), m.get("t_dip_late", m["t_dip"])
+            setup.issue(rules, "pdn_step",
+                        f"{spec.label}: at {port['part']} the rail moves by {peak * 1e3:.3g} mV "
+                        f"({100 * peak / res.voltage:.2f} %) when the load steps, more than the "
+                        f"{spec.ripple * 100:g} % allowed (dips {late[0] * 1e3:+.3g} mV after {_si(late[1], 's')}"
+                        f"{spike})", port["xy"], key=f"pdn:{spec.label}:{port['part']}:step",
+                        details={"dip": late[0], "peak": peak, "t_dip": late[1], "spike": m["dip"]})
     if not res.target_ohm:
         return
     from ..components.values import format_si

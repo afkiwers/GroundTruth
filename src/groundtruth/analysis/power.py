@@ -171,6 +171,7 @@ class ConverterResult(RouteResult):
     phase: str = ""
     loop: Optional[dict] = None                         # the control loop (analysis/loop.py): fc, pm, gm_db, notes
     fb_ripple: Optional[object] = None                  # the ripple at the controller's FB pin (analysis/fb_ripple.py)
+    load_step: Optional[object] = None                  # the load step (analysis/load_step.py: LoadStepResult)
     sweep: Optional[object] = None                      # the operating-point sweep (analysis/converter_sweep.py)
     victims: list = field(default_factory=list)         # what the switching does to victim nets and parts (a stage of
                                                         # its own; a bridge's are on the bridge): victims.stage_rows
@@ -201,6 +202,7 @@ class ConverterResult(RouteResult):
             d["fb_ripple"] = self.fb_ripple.summary()
         if self.sweep is not None:
             d["sweep"] = self.sweep.summary()
+        d["load_step"] = self.load_step.summary() if self.load_step is not None else None
         d["kind"] = "converter"
         return d
 
@@ -1545,6 +1547,7 @@ def finish_converter(model: BoardModel, setup: ConverterSetup) -> ConverterResul
         _stage_victims(model, setup)
         res.responses = stage_responses(setup)
         _stage_loop(model, setup)
+        _stage_load_step(model, setup)
         _stage_fb_ripple(model, setup)
         _stage_sweep(model, setup)
     _converter_issues(setup, rules, a)
@@ -3067,6 +3070,37 @@ def _stage_loop(model: BoardModel, setup: ConverterSetup):
                     f"{LOOP_RHP_MAX * 100:g} % of the boost's right-half-plane zero ({format_si(f_rhp, 'Hz')} at "
                     f"{format_si(spec.i_out, 'A')}): lower the crossover (it moves down as the load rises)",
                     res.location, layer=res.layer, key=f"loop:{spec.name}:fc", details=res.loop)
+
+
+def _stage_load_step(model: BoardModel, setup: ConverterSetup):
+    """The stage's load step (analysis/load_step.py): its result on the stage, and a load_step issue when a node
+    moves by more than the step's max_dev of its voltage. Said in the notes only where a load step can be expected:
+    the stage has a loop model or its own load_step (a stage without a controller found, or one whose controller
+    carries no loop fields, stays quiet)."""
+    from .load_step import analyse_load_step, step_line
+    spec, res = setup.spec, setup.res
+    if spec.bridge:
+        return
+    try:
+        r = analyse_load_step(model.board, model.config, spec)
+    except (ValueError, ZeroDivisionError, np.linalg.LinAlgError) as e:
+        if spec.load_step is not None or res.loop:
+            res.notes.append(f"load step: {e}")
+        return
+    if r.error:
+        lp = res.loop or {}
+        if spec.load_step is not None or (lp and not lp.get("error")):
+            res.notes.append(f"load step: {r.error}")
+        return
+    res.load_step = r
+    res.notes += [f"load step: {n}" for n in r.notes]
+    w = r.worst
+    if w is not None and r.v_out and w.metrics["peak"] > r.step.max_dev * r.v_out:
+        setup.issue(model.config.rules, "load_step",
+                    step_line(r) + f": more than the {r.step.max_dev * 100:g} % allowed (more output capacitance, "
+                    "a faster loop, or less harness inductance to the load)", res.location, layer=res.layer,
+                    key=f"load_step:{spec.name}", details={"peak": w.metrics["peak"], "node": w.node,
+                                                           "max_dev": r.step.max_dev})
 
 
 def _stage_victims(model: BoardModel, setup: ConverterSetup):

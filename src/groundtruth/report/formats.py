@@ -310,6 +310,9 @@ def converter_text(c) -> list[str]:
         gm = f", gain margin {lp['gm_db']:.1f} dB" if lp.get("gm_db") is not None else ""
         out.append(f"    control loop ({lp['mode']} mode, {lp['controller']}): crossover "
                    f"{format_si(lp['fc'], 'Hz')}, phase margin {lp['pm']:.0f}°{gm}")
+    if getattr(c, "load_step", None) is not None:
+        from ..analysis.load_step import step_line
+        out.append("    " + step_line(c.load_step).split(": ", 1)[1])
     for resp in getattr(c, "responses", ()):
         out.extend(response_lines(resp))
     if getattr(c, "victims", None):
