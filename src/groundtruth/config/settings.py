@@ -111,6 +111,35 @@ SWEEP_POINTS = (20, 5000)                 # the fewest and most points a sweep m
 
 
 @dataclass
+class LoadStep:
+    """A load step on a supply (analysis/load_step.py; a converter's `load_step:`, a PDN rail's): the load current
+    steps from i_from to i_to over `rise` (an electronic load), or, with r_load / l_load, a load branch R + sL is
+    switched on (a heater coil, a motor winding: the step is its own current). Between the output and the load a
+    harness R + sL (cable_r, cable_l) can run, and at the load a capacitance C_load with its ESR (a downstream
+    board's input capacitors). max_dev: the deviation allowed, a fraction of the voltage."""
+    i_from: Optional[float] = None      # A, before the step (None: half the stage's load current)
+    i_to: Optional[float] = None        # A, after it (None: the stage's load current)
+    rise: float = 0.0                   # s, the current's ramp (0: an ideal step)
+    cable_r: float = 0.0                # Ω, the harness to the load (both conductors together)
+    cable_l: float = 0.0                # H
+    c_load: float = 0.0                 # F, at the load
+    esr_load: float = 0.0               # Ω, its ESR
+    r_load: Optional[float] = None      # Ω, a switched load branch's resistance (with l_load: a coil)
+    l_load: float = 0.0                 # H, its inductance
+    max_dev: float = 0.05               # the deviation allowed, a fraction of the voltage
+
+    @property
+    def switched(self) -> bool:
+        """Whether the step switches on a load branch (r_load / l_load) instead of a current step."""
+        return self.r_load is not None or self.l_load > 0
+
+
+LOAD_STEP_KEYS = {"from": ("i_from", "A"), "to": ("i_to", "A"), "rise": ("rise", "s"), "cable_r": ("cable_r", "ohm"),
+                  "cable_l": ("cable_l", "H"), "c_load": ("c_load", "F"), "esr_load": ("esr_load", "ohm"),
+                  "r_load": ("r_load", "ohm"), "l_load": ("l_load", "H")}
+
+
+@dataclass
 class ConverterSpec:
     """A switching power stage. The switches commutate the load current within the edge time; that current
     flows around the hot loop: rail capacitors -> high-side switch -> switch node -> low-side switch -> ground."""
@@ -208,6 +237,8 @@ class ConverterSpec:
     # {mode, vref, gm, ro, ea_gain, ea_gbw, vsense_max, ith_range, cs_gain, slope, ramp, r_sense, fb_ripple_min,
     #  fb_ripple_max} (values with units)
     loop: dict = field(default_factory=dict)
+    # the load step (analysis/load_step.py): None steps from half the load current to all of it, no harness
+    load_step: Optional[LoadStep] = None
 
     @property
     def parts(self) -> list[str]:
@@ -269,6 +300,12 @@ class PdnSpec:
     decap_mm: float = 3.0               # a supply pin with no decap pad on the rail this close is an issue
     enabled: bool = True
     note: str = ""
+    # pin pairs "J1.2/J1.1" (supply / return) to check besides the ICs: a rail that feeds a connector (a converter's
+    # output), where the load is off the board
+    ports: list[str] = field(default_factory=list)
+    # the step at each port in time (i_step over its rise, through a harness to a load capacitance, or a switched
+    # load branch): its keys as a converter's load_step (from / to are not read: the step is i_step)
+    load_step: Optional[LoadStep] = None
 
     @property
     def label(self) -> str:
@@ -874,6 +911,46 @@ def _converter_snubber(v: Any, where: str) -> dict:
     return {"snubber": refs}
 
 
+def _load_step(v: Any, where: str) -> Optional[LoadStep]:
+    """A `load_step: {from: 5A, to: 10A, rise: 1us, cable_r: 10m, cable_l: 500n, c_load: 100u, esr_load: 5m,
+    r_load: 2, l_load: 1m, max_dev: 5%}` (every key optional) as a LoadStep; None when not given."""
+    if v is None or v == {}:
+        return None
+    if not isinstance(v, dict):
+        raise ConfigError([f"{where}.load_step: must be a mapping (from, to, rise, cable_r, cable_l, c_load, "
+                           "esr_load, r_load, l_load, max_dev)"])
+    unknown = sorted(set(map(str, v)) - set(LOAD_STEP_KEYS) - {"max_dev"})
+    if unknown:
+        raise ConfigError([f"{where}.load_step: unknown key(s) {', '.join(unknown)}"])
+    kw = {attr: _opt(v.get(key), f"{where}.load_step.{key}", unit) for key, (attr, unit) in LOAD_STEP_KEYS.items()}
+    kw = {k: x for k, x in kw.items() if x is not None or k in ("i_from", "i_to", "r_load")}
+    if v.get("max_dev") is not None:
+        kw["max_dev"] = _fraction(v.get("max_dev"), f"{where}.load_step.max_dev")
+    ls = LoadStep(**kw)
+    bad = [k for k in ("rise", "cable_r", "cable_l", "c_load", "esr_load", "l_load") if getattr(ls, k) < 0]
+    if bad or (ls.r_load is not None and ls.r_load < 0) or any(x is not None and x < 0 for x in (ls.i_from, ls.i_to)):
+        raise ConfigError([f"{where}.load_step: values can't be negative"])
+    if not 0 < ls.max_dev < 1:
+        raise ConfigError([f"{where}.load_step.max_dev: a fraction between 0 and 1 (e.g. 5%)"])
+    return ls
+
+
+def load_step_data(ls: Optional[LoadStep]) -> Optional[CommentedMap]:
+    """A LoadStep as its settings mapping (flow style, the keys left out that are at their defaults); None for
+    none."""
+    from ..components.values import format_si
+    if ls is None:
+        return None
+    d = {}
+    for key, (attr, unit) in LOAD_STEP_KEYS.items():
+        x = getattr(ls, attr)
+        if x is not None and (x != 0 or key in ("from", "to", "r_load")):
+            d[key] = format_si(x, unit)
+    if ls.max_dev != 0.05:
+        d["max_dev"] = f"{ls.max_dev * 100:g}%"
+    return _flow(d)
+
+
 def _converter_sweep(sw, where: str) -> dict:
     """A converter's `sweep: {v_in: [...], i_out: [...], outputs: [...]}` as ConverterSpec fields."""
     sw = sw or {}
@@ -1109,7 +1186,9 @@ def _pdn_from_data(d: dict, where: str) -> PdnSpec:
                    parts=[str(x).strip() for x in parts],
                    check_to=_num(d.get("check_to", 100e6), f"{where}.check_to", "Hz"),
                    decap_mm=_num(d.get("decap_mm", 3.0), f"{where}.decap_mm", "mm"),
-                   enabled=bool(d.get("enabled", True)), note=str(d.get("note") or ""))
+                   enabled=bool(d.get("enabled", True)), note=str(d.get("note") or ""),
+                   ports=[str(x).strip() for x in _refs(d.get("ports"))],
+                   load_step=_load_step(d.get("load_step"), where))
 
 
 def pdn_problems(spec: PdnSpec) -> list[str]:
@@ -1123,6 +1202,9 @@ def pdn_problems(spec: PdnSpec) -> list[str]:
         out.append("voltage must be above 0 V")
     if spec.vrm_r < 0 or spec.vrm_l < 0:
         out.append("vrm_r and vrm_l can't be negative")
+    for p in spec.ports:
+        if len([x for x in p.split("/") if "." in x]) != 2:
+            out.append(f"port {p!r}: two pins, supply / return (J1.2/J1.1)")
     return out
 
 
@@ -1521,6 +1603,7 @@ def config_from_data(data: Any) -> Config:
                 from_schematic=list(dict.fromkeys(k for r in _refs(c.get("from_schematic"))
                                                   for k in (("dead_rise", "dead_fall") if r == "dead_time" else (r,)))),
                 loop={str(k): (v if isinstance(v, (int, float)) else str(v)) for k, v in (c.get("loop") or {}).items()},
+                load_step=_load_step(c.get("load_step"), where),
                 **_converter_snubber(c.get("snubber"), where),
             )
         except ConfigError as e:
@@ -2068,6 +2151,8 @@ class SettingsFile:
                     d["spread_rate"] = format_si(c.spread_rate, "Hz")
             if c.loop:
                 d["loop"] = _flow(dict(c.loop))
+            if c.load_step is not None:
+                d["load_step"] = load_step_data(c.load_step)
             if c.conducted:
                 d["conducted"] = c.conducted
             if c.conducted_class:
@@ -2128,6 +2213,10 @@ class SettingsFile:
                 d["check_to"] = format_si(s.check_to, "Hz")
             if s.decap_mm != 3.0:
                 d["decap_mm"] = s.decap_mm
+            if s.ports:
+                d["ports"] = list(s.ports)
+            if s.load_step is not None:
+                d["load_step"] = load_step_data(s.load_step)
             if not s.enabled:
                 d["enabled"] = False
             if s.note:

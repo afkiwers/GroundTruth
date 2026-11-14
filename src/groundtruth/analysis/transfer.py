@@ -637,6 +637,15 @@ def step_text(m: dict) -> str:
     """step_metrics as one line: 'final 0.998, rise 1.62 ms, overshoot 4.3 %, settles (±2 %) in 2.91 ms'; a response
     whose final value is 0 (AC-coupled): 'final value 0 (AC-coupled): peak 0.996 at 1.2 µs, decays into ±2 % of the
     peak in 3.91 ms'."""
+    if m.get("kind") == "load":                    # a power stage's load step (analysis/load_step.step_figures)
+        rec = ("not back within the window" if m["recovery"] is None
+               else f"never outside ±{m['band']:.0%}" if m["recovery"] == 0
+               else f"back within ±{m['band']:.0%} in {fmt_s(m['recovery'])}")
+        late = (f", then {m['dip_late'] * 1e3:+.4g} mV after {fmt_s(m['t_dip_late'])} (the decaps' and the source's)"
+                if m.get("dip_late") is not None and abs(m["t_dip_late"] - m["t_dip"]) > 0.5 * m["t_dip_late"]
+                else "")
+        return (f"dips {m['dip'] * 1e3:+.4g} mV ({m['dip_pct']:+.2f} %) after {fmt_s(m['t_dip'])}{late}, rings back "
+                f"{m['back'] * 1e3:.3g} mV, settles at {m['final'] * 1e3:+.3g} mV, {rec}")
     if m.get("unstable"):
         return f"unstable (a pole in the right half-plane): it grows without bound, {m['peak']:.3g} at " \
                f"{fmt_s(m['t_peak'])}"
@@ -1156,6 +1165,10 @@ def bode_views(res) -> list:
                                                  if not getattr(c, "bridge", None)]
     views = [BodeView(name, group) for r in owners if getattr(r, "responses", None) and not r.error
              for name, group in unit_groups(r.net, r.responses)]
+    # a stage's load step: its output impedances, open and closed loop, and the voltages over time (load_step.py)
+    views += [BodeView(c.load_step.responses[0].owner, list(c.load_step.responses))
+              for c in getattr(res, "converters", ()) if getattr(c, "load_step", None) is not None
+              and c.load_step.responses and not getattr(c, "bridge", None)]
     views += [BodeView(name, group) for p in getattr(res, "pdn", ()) if p.responses
               for name, group in unit_groups(f"{p.name} PDN", p.responses)]
     for v in views:

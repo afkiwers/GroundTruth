@@ -1820,6 +1820,9 @@ def draw_step(fig: Figure, view) -> None:
         ax.text(0.5, 0.5, "no step response", ha="center", va="center", transform=ax.transAxes, fontsize=FS_TEXT)
         ax.set_axis_off()
         return
+    if all(r.step.get("kind") == "load" for r in resp):
+        _draw_load_step(fig, view, resp)
+        return
     spans = [float(r.step["t"][-1]) for r in resp]
     apart = max(spans) / max(min(spans), 1e-300) > 10
     groups = [[r] for r in resp] if apart else [resp]
@@ -1853,6 +1856,73 @@ def draw_step(fig: Figure, view) -> None:
         fig.text(left_in / w_in, 1 - 0.06 / h_in, title, ha="left", va="top", fontsize=FS_TITLE)
         header = _lh(FS_TITLE) + _lh(FS_TEXT) + 0.10
     _adjust(fig, left_in, right_in, 0.10 + 2 * _lh(FS_TICK) + 0.08, header + 0.06, wspace=0.25)
+
+
+def _draw_load_step(fig: Figure, view, resp: list) -> None:
+    """A power stage's load step (analysis/load_step.py): each node's voltage against time in its colour, its
+    voltage before the step dashed with the ±max_dev band shaded, the recovery (into ±1 % for good) dotted; on a
+    second axis (right) the load's current and the converter's, grey. The window: up to a little after the latest
+    recovery (the whole window when one has not recovered)."""
+    from ..analysis.transfer import response_label
+    ax = fig.add_subplot(111)
+    recs = [r.step["metrics"].get("recovery") for r in resp]
+    t_all = max(float(r.step["t"][-1]) for r in resp)
+    t_end = min(t_all, 1.6 * max(recs)) if all(x for x in recs) else t_all
+    t_end = max(t_end, 4 * max(float(r.step["metrics"]["t_dip"]) for r in resp))
+    scale, unit = next(((k, u) for k, u in ((1.0, "s"), (1e-3, "ms"), (1e-6, "µs"), (1e-9, "ns"))
+                        if t_end >= 2 * k), (1e-12, "ps"))
+    ax2 = None
+    lo, hi = math.inf, -math.inf
+    for k, r in enumerate(resp):
+        c = PDN_COLOURS[k % len(PDN_COLOURS)]
+        st, m = r.step, r.step["metrics"]
+        t = np.asarray(st["t"])
+        keep = t <= t_end
+        y = np.asarray(st["y"])[keep]
+        name = response_label(r, view.owner).replace("Z_out closed loop", "output").replace("Z at the load", "load")
+        ax.plot(t[keep] / scale, y, color=c, lw=1.3, label=f"V {name}")
+        v0 = st["v_nom"]
+        lo, hi = min(lo, float(np.min(y)), v0), max(hi, float(np.max(y)), v0)
+        ax.axhline(v0, color=c, lw=0.7, ls="--")
+        if m.get("recovery"):
+            ax.axvline(m["recovery"] / scale, color=c, lw=0.7, ls=":")
+    # the voltage axis fits the curves (a ±5 % band around 28 V would flatten a 1 % dip); the band's edges are drawn
+    # where they fall inside it
+    pad = 0.12 * max(hi - lo, 1e-6)
+    ax.set_ylim(lo - pad, hi + pad)
+    for k, r in enumerate(resp):
+        v0, dev = r.step["v_nom"], r.step["max_dev"]
+        ax.axhspan(v0 * (1 - dev), v0 * (1 + dev), color=PDN_COLOURS[k % len(PDN_COLOURS)], alpha=0.06, lw=0)
+    ax.set_ylim(lo - pad, hi + pad)
+    for k, r in enumerate(resp):
+        st = r.step
+        t = np.asarray(st["t"])
+        keep = t <= t_end
+        for key, label, ls in (("i", "I load", "-"), ("i_conv", "I converter", "--")):
+            if st.get(key) is not None:
+                if ax2 is None:
+                    ax2 = ax.twinx()
+                    ax2.set_ylabel("current (A)", fontsize=FS_TEXT)
+                    ax2.tick_params(labelsize=FS_TICK)
+                ax2.plot(t[keep] / scale, np.asarray(st[key])[keep], color="#7f7f7f", lw=0.9, ls=ls, label=label)
+    ax.set_xlabel(f"time ({unit})", fontsize=FS_TEXT)
+    ax.set_ylabel("V", fontsize=FS_TEXT)
+    ax.tick_params(labelsize=FS_TICK)
+    ax.grid(True, alpha=0.3)
+    # one key for both axes, in a row above the plot (inside, it covered the currents' curves): the voltages, then
+    # the currents
+    h1, l1 = ax.get_legend_handles_labels()
+    h2, l2 = ax2.get_legend_handles_labels() if ax2 is not None else ([], [])
+    ax.legend(h1 + h2, l1 + l2, fontsize=FS_TICK, frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.0),
+              ncol=len(l1 + l2), borderaxespad=0.2, handlelength=1.8)
+    w_in, h_in = fig.get_size_inches()
+    left_in = _lh(FS_TEXT) + _width_in("-1000", FS_TICK) + 0.24
+    right_in = (_lh(FS_TEXT) + _width_in("-1000", FS_TICK) + 0.24) if ax2 is not None else 0.25
+    band = resp[0].step["max_dev"]
+    title = (f"{view.owner}: the voltages after the step (dashed: before it, shaded: ±{band:.0%}; dotted: back "
+             "within ±1 %)")
+    fig.text(left_in / w_in, 1 - 0.06 / h_in, title, ha="left", va="top", fontsize=FS_TITLE)
+    _adjust(fig, left_in, right_in, 0.10 + 2 * _lh(FS_TICK) + 0.08, _lh(FS_TITLE) + _lh(FS_TICK) * 1.6 + 0.2)
 
 
 def pz_tip(curve: str, kind: str, row: dict) -> str:

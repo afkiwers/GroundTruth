@@ -242,7 +242,8 @@ def find_loop(board, config, spec) -> Optional[LoopParts]:
     names = {"vref": "Vref", "gm": "EA gm", "ro": "EA Ro", "ea_gain": "EA Gain", "ea_gbw": "EA GBW",
              "vsense_max": "Vsense Max", "ith_range": "ITH Range", "cs_gain": "Current Sense Gain",
              "slope": "Slope Compensation", "ramp": "Ramp",
-             "fb_ripple_min": "FB Ripple Min", "fb_ripple_max": "FB Ripple Max"}
+             "fb_ripple_min": "FB Ripple Min", "fb_ripple_max": "FB Ripple Max",
+             "fc": "Loop Bandwidth", "pm": "Loop Phase Margin"}
     for key, fname in names.items():
         if over.get(key) is not None:
             lp.params[key] = (float(parse_value(str(over[key])) if not isinstance(over[key], (int, float))
@@ -341,6 +342,7 @@ class LoopResult:
     figures: dict = field(default_factory=dict)
     notes: list = field(default_factory=list)
     error: str = ""
+    model: Optional["LoopModel"] = None
 
     def summary(self) -> dict:
         """Plain data for the stage's summary."""
@@ -350,6 +352,27 @@ class LoopResult:
                 "controller": p.controller if p else "", "comp": {"rc": p.rc, "cc": p.cc, "chf": p.chf} if p else {},
                 "divider": {"top": [x[0] for x in p.top], "bottom": [x[0] for x in p.bottom]} if p else {},
                 "r_sense": p.r_sense if p else None}
+
+
+@dataclass
+class LoopModel:
+    """The averaged small-signal model behind a loop gain, as exact rationals in s (analysis/load_step.py reads it):
+    the loop gain T, the open-loop output impedance Z_ol (the control voltage held: what the output node presents
+    to a current drawn from it before the loop acts) and the output admittance Y_o it was built on (the output
+    capacitors and the load). The closed loop's output impedance is Z_ol / (1 + T) [Erickson 2001, ch. 9].
+
+    y_conv: the converter itself in closed loop as a Norton admittance at its output node, the loop's control
+    included: the output's node equation is (Y_conv + Y_o)·v = −i_o, so Z_ol/(1 + T) = 1/(Y_conv + Y_o). Written
+    out per model it does not contain Y_o (the loop acts on the output voltage whatever hangs on it), so a load
+    network or the board's copper (analysis/pdn.py) can be put beside it [A117]. y_caps: the output capacitors'
+    admittance alone (Y_o without the load)."""
+    t: Rat
+    z_ol: Rat
+    y_o: Rat
+    y_conv: Rat
+    y_caps: Rat
+    caps: list = field(default_factory=list)       # [(ref, C, ESR)] the output capacitors in Y_o
+    approximate: bool = False                     # T from the loop bandwidth and phase margin [A115]
 
 
 def _admittance(parts) -> Optional[Rat]:
@@ -363,12 +386,19 @@ def _admittance(parts) -> Optional[Rat]:
     return y
 
 
-def output_admittance(board, config, spec, load_ohm: float) -> tuple[Rat, list]:
-    """Y_o(s) = Σ sC/(1 + sC·ESR) over the output capacitors + 1/R_load, and the capacitors [(ref, C, ESR)]."""
+def output_admittance(board, config, spec, load_ohm: float, y_load: Optional[Rat] = None) -> tuple[Rat, list]:
+    """Y_o(s) = Σ sC/(1 + sC·ESR) over the output capacitors + 1/R_load (or `y_load`, a load network's admittance:
+    analysis/load_step.py), and the capacitors [(ref, C, ESR)]. Capacitors of equal C and ESR are summed as one term
+    n·sC/(1 + sC·ESR): the same function, without a repeated root per capacitor (ten equal ceramics gave ten
+    coincident poles, which np.roots splits into a ring of spurious ones)."""
     from .safety import is_ground
     outs = output_nets(board, config, spec)
-    y = Rat([1.0 / load_ohm])
+    if y_load is not None:
+        y = y_load
+    else:
+        y = Rat([1.0 / load_ohm]) if load_ohm and math.isfinite(load_ohm) else Rat([0.0])
     caps = []
+    groups: dict = {}
     for fp in board.footprints:
         nets = {p.net for p in fp.pads if p.net}
         m = config.model_for(fp.reference)
@@ -379,14 +409,19 @@ def output_admittance(board, config, spec, load_ohm: float) -> tuple[Rat, list]:
         c = m.capacitance()                         # at its DC voltage in a run (analysis/bias.py)
         esr = m.get("ESR", 0.0)
         if c:
-            y = y + Rat([c, 0.0], [c * esr, 1.0])
+            key = (float(f"{c:.9g}"), float(f"{esr:.9g}"))
+            groups[key] = groups.get(key, 0) + 1
             caps.append((fp.reference, c, esr))
+    for (c, esr), n in groups.items():
+        y = y + Rat([n * c, 0.0], [c * esr, 1.0])
     return y, caps
 
 
-def analyse_loop(board, config, spec) -> Optional[LoopResult]:
+def analyse_loop(board, config, spec, y_load: Optional[Rat] = None) -> Optional[LoopResult]:
     """The stage's loop gain (see the module); None for a stage without a controller found (a bridge leg, a
-    stage of discrete parts driven from elsewhere)."""
+    stage of discrete parts driven from elsewhere). `y_load`: the load's admittance in place of the resistor
+    V_out / I_out (a load network, analysis/load_step.py; spec.i_out is then only the operating point and may be 0).
+    The model it is built on is kept in `model` (LoopModel)."""
     from .power import switch_inductor
     parts = find_loop(board, config, spec)
     if parts is None:
@@ -407,7 +442,7 @@ def analyse_loop(board, config, spec) -> Optional[LoopResult]:
     boost = spec.topology == "boost"
     if spec.topology not in ("buck", "boost"):
         return fail(f"the loop gain is modelled for buck and boost stages (this one: {spec.topology})")
-    if not (spec.v_in and spec.v_out and spec.i_out and spec.f_sw):
+    if not (spec.v_in and spec.v_out and (spec.i_out or y_load is not None) and spec.f_sw):
         return fail("the loop gain needs the stage's V in, V out, load current and f_sw")
     if (spec.v_out >= spec.v_in) != boost:
         return fail(f"a {spec.topology} from {spec.v_in:g} V to {spec.v_out:g} V: check the stage's voltages")
@@ -416,8 +451,8 @@ def analyse_loop(board, config, spec) -> Optional[LoopResult]:
     if m is None or not m.get("L", 0.0):
         return fail("the loop gain needs the stage's inductor and its inductance")
     L, r_l = m.get("L"), m.get("R", 0.0)
-    load = spec.v_out / spec.i_out
-    y_o, caps = output_admittance(board, config, spec, load)
+    load = spec.v_out / spec.i_out if spec.i_out else math.inf
+    y_o, caps = output_admittance(board, config, spec, load, y_load)
     if not caps:
         return fail("no output capacitor found from the output to ground")
     # continuous conduction (ideal): a buck's D = V_out / V_in, a boost's D' = 1 - D = V_in / V_out
@@ -434,7 +469,7 @@ def analyse_loop(board, config, spec) -> Optional[LoopResult]:
         res.notes.append(f"discontinuous conduction at {spec.i_out:g} A (the inductor's ripple "
                          f"{up * D * ts:.3g} A peak to peak): the model, for continuous conduction, is pessimistic "
                          "at this load")
-    if boost:
+    if boost and math.isfinite(load):
         # the right-half-plane zero (the same in voltage and current mode): D'²·R_load/L with an ideal inductor
         figs["f_rhp"] = dp * dp * load / L / (2 * math.pi)
     if parts.mode == "current":
@@ -472,9 +507,17 @@ def analyse_loop(board, config, spec) -> Optional[LoopResult]:
             a = i_l / spec.v_out
             g = ts * dp * dp * (mc - 0.5) / L
             fwd = Rat([dp]) + (-a) * Rat([L, r_l])
-            plant = Rat([1.0 / ri]) * fwd * (y_o + a * dp + g * fwd).inv() * fh
+            # the output current drawn from the node enters as −i_o: Z_ol = 1/(Y_o + a·D' + G·(D' − a·Z_L))
+            z_ol = (y_o + a * dp + g * fwd).inv()
+            plant = Rat([1.0 / ri]) * fwd * z_ol * fh
+            # closed: v_c = −G_c·v, so (Y_o + a·D' + G·fwd + G_c·F_h·fwd/R_i)·v = −i_o
+            conv = lambda gc_: a * dp + g * fwd + gc_ * fh * fwd * (1.0 / ri)        # noqa: E731
         else:
-            plant = (Rat([1.0 / ri]) * (y_o + ts * q / L).inv()) * fh
+            # Ridley's model: the modulator a current source v_c·F_h/R_i into Y_o with the conductance T_s·q/L
+            # across it [Ridley 1991]: Z_ol = 1/(Y_o + T_s·q/L)
+            z_ol = (y_o + ts * q / L).inv()
+            plant = (Rat([1.0 / ri]) * z_ol) * fh
+            conv = lambda gc_: Rat([ts * q / L]) + gc_ * fh * (1.0 / ri)              # noqa: E731
     else:
         ramp = p.get("ramp")
         if not ramp:
@@ -485,8 +528,16 @@ def analyse_loop(board, config, spec) -> Optional[LoopResult]:
             a = i_l / spec.v_out
             zl = Rat([L, r_l])
             plant = Rat([spec.v_out / ramp]) * (Rat([dp]) + (-a) * zl) * (zl * y_o + dp * dp).inv()
+            # d held: Z_L·i_L = −D'·v, Y_o·v = D'·i_L − i_o, so Z_ol = Z_L/(Z_L·Y_o + D'²)
+            z_ol = zl * (zl * y_o + dp * dp).inv()
+            # closed (d = −G_c·v/V_ramp): Y_conv = (D'² + G_c·V_out·(D' − a·Z_L)/V_ramp)/Z_L
+            conv = lambda gc_: (Rat([dp * dp]) + gc_ * (Rat([dp]) + (-a) * zl) * (spec.v_out / ramp)) * zl.inv()  # noqa: E731
         else:
             plant = Rat([spec.v_in / ramp]) * (Rat([1.0]) + Rat([L, r_l]) * y_o).inv()
+            # d held: the inductor's Z_L in parallel with Y_o, Z_ol = Z_L/(1 + Z_L·Y_o) [Erickson 2001]
+            z_ol = Rat([L, r_l]) * (Rat([1.0]) + Rat([L, r_l]) * y_o).inv()
+            # closed (d = −G_c·v/V_ramp): Z_L·i_L = V_in·d − v, so Y_conv = (1 + G_c·V_in/V_ramp)/Z_L
+            conv = lambda gc_: (Rat([1.0]) + gc_ * (spec.v_in / ramp)) * Rat([L, r_l]).inv()   # noqa: E731
     y_top = _admittance(parts.top)
     if y_top is None:
         return fail(f"no feedback divider found from the output to {parts.controller}'s FB pin")
@@ -520,6 +571,8 @@ def analyse_loop(board, config, spec) -> Optional[LoopResult]:
                     "op-amp)")
     t = gc * plant
     res.figures = figs
+    y_caps, _ = output_admittance(board, config, spec, math.inf, Rat([0.0]))
+    res.model = LoopModel(t, z_ol, y_o, conv(gc), y_caps, caps)
     # the figures from a dense sweep up to five times f_sw
     f = np.geomspace(max(spec.f_sw / 1e5, 1.0), 5 * spec.f_sw, 2000)
     h = t(2j * np.pi * f)

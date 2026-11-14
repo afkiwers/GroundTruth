@@ -80,6 +80,12 @@ PARAMS = (
           "inductor's down-slope)"),
     Param("Ramp", "controller", "the PWM ramp's amplitude (voltage mode)", "V", 1.0, "V", 0.1, 10.0, "1V",
           "voltage mode: the modulator gain 1 / Ramp"),
+    # a constant-on-time or internally compensated controller has no loop model from its parts: its datasheet's
+    # loop bandwidth and phase margin give the load step an approximate loop (analysis/load_step.py [A115])
+    Param("Loop Bandwidth", "controller", "the closed loop's crossover frequency (COT / internally compensated)",
+          "Hz", 1e3, "kHz", 100.0, 1e7, "40kHz", "the load step's approximate loop (with Loop Phase Margin)"),
+    Param("Loop Phase Margin", "controller", "the loop's phase margin, degrees (COT / internally compensated)",
+          "deg", 1.0, "°", 10.0, 90.0, "60", "the load step's approximate loop (with Loop Bandwidth)"),
     Param("FB Ripple Min", "controller", "the least switching ripple its FB pin needs (V p-p; a constant-on-time "
           "controller's datasheet gives it)", "V", 1e-3, "mV", 1e-4, 1.0, "25mV",
           "fb_ripple: the simulated ripple at FB below it is an issue (analysis/fb_ripple.py)"),

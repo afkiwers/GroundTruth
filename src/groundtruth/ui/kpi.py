@@ -382,10 +382,28 @@ def _converter(c, rules) -> list[Kpi]:
                     + (f", GM {lp['gm_db']:.0f} dB" if lp.get("gm_db") is not None else ""), status,
                     "the control loop's phase margin at its crossover (analysis/loop.py; aim for 45° or more): its "
                     "Bode view shows the loop gain"))
+    ls = getattr(c, "load_step", None)
+    if ls is not None and not ls.error and ls.worst is not None:
+        out.append(_load_step_tile(ls))
     fr = getattr(c, "fb_ripple", None)
     if fr is not None and not fr.error:
         out.append(_fb_ripple_tile(fr))
     return out
+
+
+def _load_step_tile(ls) -> Kpi:
+    """The load step's tile: the worst node's dip in mV and per cent, its recovery; red over the step's max_dev,
+    amber over half of it (analysis/load_step.py)."""
+    from ..analysis.transfer import fmt_s
+    w = ls.worst
+    m = w.metrics
+    share = m["peak"] / ls.v_out if ls.v_out else 0.0
+    status = "error" if share > ls.step.max_dev else "warn" if share > 0.5 * ls.step.max_dev else "ok"
+    rec = "not recovered" if m["recovery"] is None else f"back in {fmt_s(m['recovery'])}"
+    what = "coil on" if ls.step.switched else f"{ls.step.i_from:g}→{ls.step.i_to:g} A"
+    return ("load step", f"{m['dip'] * 1e3:+.3g} mV", f"{m['dip_pct']:+.1f} % at the {w.node}, {rec} ({what})", status,
+            "the output's dip when the load steps (the stage's load_step, else half to full load), from the closed "
+            "loop and the output capacitors: its view shows the impedances and the voltages over time")
 
 
 def _dc(c, rules) -> list[Kpi]:
