@@ -3,11 +3,13 @@ convergence), without touching the board or its settings: the settings are copie
 rail's pdn entry.
 
     .venv/Scripts/python tools/dev/pdn_check.py BOARD SETTINGS --rail +3V3 [--i-step 1] [--ripple 5%]
-        [--source U48 | none] [--vrm-r 5m] [--vrm-l 20n] [--parts U53,U54] [--budgets 40000,80000]
-        [--json OUT.json]
+        [--source U48 | none | stage:conv1] [--vrm-r 5m] [--vrm-l 20n] [--parts U53,U54] [--ports J2.2/J2.1]
+        [--budgets 40000,80000] [--json OUT.json]
 
 Prints per budget and IC: |Z| at a few frequencies, the peaks, the inductance above the decaps, the worst margin
-to the target and what holds the rail there; then the decaps near each IC and the issues.
+to the target and what holds the rail there, the step over time (its dip, the dip after the copper's spike, the
+recovery); then the decaps near each IC and the issues. A power stage feeding the rail is its source by itself
+(analysis/load_step.py): the sweep then starts below its loop's crossover.
 """
 from __future__ import annotations
 
@@ -26,7 +28,7 @@ from groundtruth.analysis.simulate import simulate              # noqa: E402
 from groundtruth.components.values import format_si, parse_value  # noqa: E402
 from groundtruth.config.settings import PdnSpec, SettingsFile   # noqa: E402
 
-SHOW_F = (1e5, 1e6, 1e7, 5e7, 1e8, 3e8)
+SHOW_F = (1e3, 1e4, 1e5, 1e6, 1e7, 5e7, 1e8, 3e8)
 
 
 def main(argv=None) -> int:
@@ -43,6 +45,7 @@ def main(argv=None) -> int:
     ap.add_argument("--vrm-r", default="5m")
     ap.add_argument("--vrm-l", default="20n")
     ap.add_argument("--parts", default="")
+    ap.add_argument("--ports", default="", help="pin pairs supply/return, comma-separated: J2.2/J2.1")
     ap.add_argument("--budgets", default="", help="cavity_max_nodes values, e.g. 40000,80000 (default: the file's)")
     ap.add_argument("--json", default="")
     args = ap.parse_args(argv)
@@ -56,7 +59,8 @@ def main(argv=None) -> int:
                    i_step=parse_value(args.i_step) if args.i_step else None,
                    voltage=parse_value(args.voltage) if args.voltage else None, source=args.source,
                    vrm_r=parse_value(args.vrm_r), vrm_l=parse_value(args.vrm_l),
-                   parts=[p.strip() for p in args.parts.split(",") if p.strip()])
+                   parts=[p.strip() for p in args.parts.split(",") if p.strip()],
+                   ports=[p.strip() for p in args.ports.split(",") if p.strip()])
     sc.set_pdn([spec])
     sc.save()
     out = {}
@@ -69,13 +73,14 @@ def main(argv=None) -> int:
         r = simulate(board, cfg, nets=[spec.label])
         p = r.pdn[0]
         print(f"\n=== budget {budget or cfg.analysis.cavity_max_nodes}: {time.time() - t0:.0f} s")
+        for n in p.notes:
+            print("note:", n)
         if p.error:
             print("error:", p.error)
             continue
-        for n in p.notes:
-            print("note:", n)
         print(f"{p.rail} / {p.ground}, {p.voltage} V, target "
-              + (format_si(p.target_ohm, "Ω") if p.target_ohm else "none") + (f"; source {p.source}" if p.source else ""))
+              + (format_si(p.target_ohm, "Ω") if p.target_ohm else "none") + (f"; source {p.source}" if p.source else "")
+              + f"; sweep from {format_si(p.f_min, 'Hz')}")
         for port in p.ports:
             zs = []
             for f in SHOW_F:
@@ -85,11 +90,17 @@ def main(argv=None) -> int:
             print(f"     peaks {[(format_si(x['f'], 'Hz'), format_si(x['z_ohm'], 'Ω')) for x in port['peaks']]}, "
                   f"L above the decaps {port['l_nh'] and round(port['l_nh'], 2)} nH"
                   + (f", worst {port['worst']}" if port.get("worst") else ""))
+            m = port.get("step")
+            if m:
+                late = (f", then {m['dip_late'] * 1e3:+.4g} mV at {format_si(m['t_dip_late'], 's')}"
+                        if m.get("dip_late") is not None else "")
+                print(f"     step: {m['dip'] * 1e3:+.4g} mV at {format_si(m['t_dip'], 's')}{late}, recovery "
+                      + (format_si(m['recovery'], 's') if m.get('recovery') is not None else "-"))
         for c in p.decaps:
             if c["near"]:
                 print(f"  decap {c['ref']} {c['value']}: " + ", ".join(f"{n['part']} {n['mm']} mm" for n in c["near"]))
         for i in r.issues:
-            if i.check in ("pdn_impedance", "decap_missing"):
+            if i.check in ("pdn_impedance", "pdn_step", "decap_missing"):
                 print(f"  [{i.severity}] {i.message}")
         out[str(budget)] = p.summary()
     if args.json:
