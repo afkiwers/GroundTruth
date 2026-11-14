@@ -38,7 +38,7 @@ GROUPS = (("Getting started", ("workflow", "together", "checks")),
           ("The tabs", ("nets", "converters", "bridges", "dcloads", "pdn", "si", "parts", "issues", "results", "fixes",
                         "history")),
           ("Analyses and output", ("fields", "cbias", "conducted", "safety", "efficiency", "fbripple", "convsweep",
-                                   "hotloop", "thermal", "analog", "prefs", "export", "drawing")),
+                                   "loadstep", "hotloop", "thermal", "analog", "prefs", "export", "drawing")),
           ("Labels and settings", ("labels", "siglabels", "configs", "settings")),
           ("Under the hood", ("speed", "screening", "allcores", "server", "methods", "limits", "references", "licenses")))
 
