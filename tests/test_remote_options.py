@@ -107,6 +107,15 @@ def test_the_server_installs_a_named_option_between_jobs_and_refuses_everything_
             time.sleep(0.1)
         cur = r.status()["options"]["current"]
         assert cur["state"] == "failed" and "code 3" in cur["error"]
+        # an option that doesn't suit this machine: not installed, but removed (a GPU build left on a Mac)
+        monkeypatch.setattr(options, "unsuitable", lambda name: "no GPU build is used on a Mac")
+        with pytest.raises(RemoteError, match="no GPU build"):
+            r.option("gpu-cu126", "install")
+        assert r.option("gpu-cu126", "remove")["action"] == "remove"
+        t0 = time.time()
+        while (r.status()["options"]["current"] or {}).get("state") != "done" and time.time() - t0 < 20:
+            time.sleep(0.1)
+        assert ran[-1][:2] == ("gpu-cu126", "remove")
     finally:
         srv.stop()
 
@@ -156,10 +165,39 @@ def test_the_plugin_offers_what_the_server_lists_and_follows_it():
                        "unsuitable": "x86 only"}],
         "installed": {"torch": "2.6.0+cu126", "mkl": None}, "current": None}}
     got = su.option_choices(status)
-    assert [(c["name"], c["action"]) for c in got] == [("gpu-cu126", "install"), ("gpu-cu128", "install"),
-                                                       ("gpu-cu126", "remove")]
-    assert "replaces the installed torch 2.6.0+cu126" in got[0]["text"] and "server-pc" in got[2]["confirm"]
+    # what is installed comes first, to remove (the user: "show what options have been installed already, and
+    # offer to uninstall them"), then the installs that suit the machine
+    assert [(c["name"], c["action"]) for c in got] == [("gpu-cu126", "remove"), ("gpu-cu126", "install"),
+                                                       ("gpu-cu128", "install")]
+    assert "PyTorch 2.6.0+cu126 (NVIDIA GPU, CUDA build cu126)" in got[0]["text"] and "server-pc" in got[0]["confirm"]
+    assert "replaces the installed torch 2.6.0+cu126" in got[1]["text"]
+    assert su.installed_lines(status) == ["Intel MKL (PARDISO sparse solver): not installed",
+                                          "PyTorch 2.6.0+cu126 (NVIDIA GPU, CUDA build cu126): installed"]
+    assert su.installed_lines({"host": "old"}) == []
+    assert "CPU only" in su.package_label("torch", "2.6.0") and "AMD" in su.package_label("torch", "2.12.0+rocm7.14")
+    # MKL there: removed, not offered again; also a package no option suits any more (a GPU build on a Mac)
+    status["options"]["installed"]["mkl"] = "2025.1.0"
+    got = su.option_choices(status)
+    assert ("sparse-mkl", "remove") in [(c["name"], c["action"]) for c in got]
+    assert ("sparse-mkl", "install") not in [(c["name"], c["action"]) for c in got]
     assert su.option_choices({"host": "old"}) == [] and su.option_choices({"options": {"available": []}}) == []
+    # why nothing is offered: an old build, a server in a window, or a machine none suits (a Mac: up to date, but
+    # no GPU build and no MKL there; the user was told "older version" for it)
+    assert "older version" in su.no_options_reason({"host": "old"})
+    assert "in a window" in su.no_options_reason({"options": {"available": [], "installed": {}}})
+    mac = {"options": {"available": [
+        {"name": "gpu-cu126", "unsuitable": "no GPU build is used on a Mac"},
+        {"name": "gpu-cu128", "unsuitable": "no GPU build is used on a Mac"},
+        {"name": "sparse-mkl", "unsuitable": "Intel MKL runs on x86 only, not on this arm64 machine"}],
+        "installed": {"torch": None, "mkl": None}}}
+    assert su.option_choices(mac) == []
+    why = su.no_options_reason(mac)
+    assert "none of them suits" in why and why.count("no GPU build") == 1 and "arm64" in why
+    assert "older" not in why and "window" not in why
+    mac["options"]["installed"]["torch"] = "2.6.0"                 # a PyTorch there after all: it can go
+    for o in mac["options"]["available"]:
+        o.update(package="mkl" if o["name"] == "sparse-mkl" else "torch", group="gpu", label="x", about="y")
+    assert [(c["name"], c["action"]) for c in su.option_choices(mac)] == [("gpu-cu126", "remove")]
 
     class Fake:
         """A client whose status answers come from `answers`."""

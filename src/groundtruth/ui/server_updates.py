@@ -195,32 +195,85 @@ def update(address: str, key: str, bundle: dict, progress: Callable[[str], None]
 OPTION_WAIT_S = 75 * 60         # how long an install is followed (a 2.5 GB download; the server's own limit is 60)
 
 
+PACKAGE_NAMES = {"torch": "PyTorch", "mkl": "Intel MKL (PARDISO sparse solver)"}
+
+
+def package_label(package: str, version: str) -> str:
+    """An installed option package for people: "PyTorch 2.6.0+cu126 (NVIDIA GPU, CUDA build cu126)" from its
+    distribution name and version (PyTorch's local version label names its build: +cuNNN, +rocm..., +cpu)."""
+    name = f"{PACKAGE_NAMES.get(package, package)} {version}"
+    if package != "torch":
+        return name
+    local = version.partition("+")[2].lower()
+    if local.startswith("cu"):
+        return f"{name} (NVIDIA GPU, CUDA build {local})"
+    if local.startswith("rocm"):
+        return f"{name} (AMD Radeon GPU, ROCm build)"
+    return f"{name} (CPU only: no GPU build)"
+
+
+def installed_lines(status: dict) -> list[str]:
+    """What the server has of the options' packages, one line each ("PyTorch ...: installed" / "...: not
+    installed"); [] when its status says nothing about them (an older build)."""
+    have = (status.get("options") or {}).get("installed") or {}
+    return [f"{package_label(pkg, ver)}: installed" if ver else f"{PACKAGE_NAMES.get(pkg, pkg)}: not installed"
+            for pkg, ver in sorted(have.items())]
+
+
 def option_choices(status: dict) -> list[dict]:
-    """What Options… offers for a server, from its status's "options": [{text, name, action, confirm}], installs
-    first. An option the server says does not suit its machine is left out; a package already there is offered
-    for removal once, and another GPU build is offered as its replacement. [] for a server that offers none (an
-    older build, or one running in a window)."""
+    """What Options… offers for a server, from its status's "options": [{text, name, action, confirm}]. First a
+    removal for every option package the server has (the user: "show what options have been installed already,
+    and offer to uninstall them"), also one no option suits any more (a GPU build on a Mac); then the installs
+    of the options that suit its machine: another GPU build is offered as the installed one's replacement, MKL
+    once it is there is not offered again. A removal needs an option of that package to name in the request (the
+    server takes option names only). [] for a server that offers nothing (an older build, one running in a
+    window, or a machine none suits with nothing installed: no_options_reason says which)."""
     opt = status.get("options") or {}
     have = opt.get("installed") or {}
-    out, removals = [], {}
-    for o in opt.get("available") or []:
+    host = status.get("host") or "the server"
+    available = opt.get("available") or []
+    removals, installs = [], []
+    for pkg, version in sorted(have.items()):
+        named = next((o for o in available if o.get("package") == pkg), None)
+        if version and named is not None:
+            removals.append({"text": f"Remove   {package_label(pkg, version)}   (installed)", "name": named["name"],
+                             "action": "remove",
+                             "confirm": f"Remove {package_label(pkg, version)} from {host}?\n\nIts jobs then run "
+                                        "without it (on the CPU, or with the built-in sparse solver)."})
+    for o in available:
         if o.get("unsuitable"):
             continue
         version = have.get(o["package"])
+        if version and o["group"] != "gpu":                    # MKL there: nothing to install again
+            continue
         there = f"; replaces the installed {o['package']} {version}" if version else ""
-        if not (version and o["group"] != "gpu"):               # MKL there: nothing to install again
-            out.append({"text": f"Install  {o['label']}  ({o['about']}{there})", "name": o["name"],
-                        "action": "install",
-                        "confirm": f"Install on {status.get('host') or 'the server'}:\n\n{o['label']}\n({o['about']})"
-                                   "\n\nThe server downloads it from the package's own index and installs it once "
-                                   "no job is running; queued jobs wait until it is done."})
-        if version and o["package"] not in removals:
-            removals[o["package"]] = {"text": f"Remove  {o['package']} {version}", "name": o["name"],
-                                      "action": "remove",
-                                      "confirm": f"Remove {o['package']} {version} from "
-                                                 f"{status.get('host') or 'the server'}?\n\nIts jobs then run without "
-                                                 "it (on the CPU, or with the built-in sparse solver)."}
-    return out + list(removals.values())
+        installs.append({"text": f"Install  {o['label']}  ({o['about']}{there})", "name": o["name"],
+                         "action": "install",
+                         "confirm": f"Install on {host}:\n\n{o['label']}\n({o['about']})"
+                                    "\n\nThe server downloads it from the package's own index and installs it once "
+                                    "no job is running; queued jobs wait until it is done."})
+    return removals + installs
+
+
+def no_options_reason(status: dict) -> str:
+    """Why option_choices offers nothing for this server, as the end of "<name> offers nothing to install from
+    here: ...". Three cases: the server lists options but none suits its machine (a Mac: no GPU build is used
+    there, and Intel MKL is x86 only), with its own reasons; it lists none while it answers with an options entry
+    (it runs in a window, not as the installed service, which alone may install packages); or its status has no
+    options entry at all (a build from before Options…)."""
+    opt = status.get("options")
+    if not isinstance(opt, dict):
+        return "it runs an older version of GroundTruth, from before server options (update it first)"
+    available = opt.get("available") or []
+    if not available:
+        return ("it runs in a window (groundtruth_server.cmd) rather than as the installed service, and only the "
+                "service installs packages")
+    reasons = []
+    for o in available:
+        why = o.get("unsuitable") or ""
+        if why and why not in reasons:
+            reasons.append(why)
+    return "none of them suits its machine (" + "; ".join(reasons) + "). Nothing is missing: it runs as it is"
 
 
 def follow_option(address: str, key: str, name: str, action: str, progress: Callable[[str], None], stop=None,

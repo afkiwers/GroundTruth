@@ -2288,12 +2288,15 @@ its buttons stay off.</p>
 <p><b>Options…</b> installs or removes the selected server's optional packages from here, so nobody has to sit at
 the server: a GPU build of PyTorch (NVIDIA: the CUDA builds cu118, cu126, cu128; AMD Radeon: the build for its
 chip; about 2.5 to 3 GB) and the Intel MKL sparse solver (about 150 MB, x86 only). It asks for this computer's
-password first (the one set with <b>Set password…</b>, which also guards Clear past jobs), lists what the server
-offers and what it has, and asks again before it starts. The server downloads the package from its maker's own
+password first (the one set with <b>Set password…</b>, which also guards Clear past jobs), then shows what the
+server has (PyTorch and its build, CPU only or for which GPU; Intel MKL), lists each installed one to <b>remove</b>
+and the options that suit its machine to <b>install</b>, and asks again before it starts. The server downloads the package from its maker's own
 index and installs it once no job is running (queued jobs wait); its row shows how far it is, and afterwards the
 server looks for its GPUs again. Only a server installed as a service takes this, and only for the options of its
 own fixed list: the plugin sends an option's name, never a package or an address, and the request is signed with
-the server's key like every other. The server keeps pip's output in <code>options.log</code> in its folder.</p>
+the server's key like every other. The server keeps pip's output in <code>options.log</code> in its folder. A Mac server offers nothing here, and needs
+nothing: its solves run on the CPU (no GPU build is used on a Mac) and an Apple-silicon Mac can't run Intel MKL;
+Options… says so.</p>
 
 <p><b>A server PC with two networks</b> (two network cards): <code>install_server.cmd install --address</code>
 lists its addresses to pick the one the other servers and the users reach it at; it then announces that one alone.
