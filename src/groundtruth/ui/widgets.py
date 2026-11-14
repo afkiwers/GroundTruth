@@ -341,6 +341,30 @@ def source_status(source: str, reviewed: bool) -> str:
     return "manual"
 
 
+INFO_NAME = "info"      # every info button's window name (tests find them by it)
+
+
+def info_button(parent, tip: str, topic: str, anchor: str = "") -> wx.BitmapButton:
+    """An (i) button that opens the help at `topic` (and `anchor` in it), shown by the top-level window's show_help
+    or, in a dialog, by its parent's. Never a window of its own: the explanation lives in the help (the user, of a
+    message box behind one: "remove that and put text into our help like plane screening is. make sure that
+    applies to all info icons")."""
+    info = wx.BitmapButton(parent, bitmap=wx.ArtProvider.GetBitmap(wx.ART_INFORMATION, wx.ART_BUTTON,
+                                                                    parent.FromDIP(wx.Size(16, 16))),
+                           style=wx.BORDER_NONE, name=INFO_NAME)
+    info.SetToolTip(tip + "\n(click: opens the help)")
+
+    def show(_evt):
+        """The window that can show the help: the top-level one, else (a dialog) the one that opened it."""
+        top = info.GetTopLevelParent()
+        for win in (top, top.GetParent()):
+            if win is not None and hasattr(win, "show_help"):
+                win.show_help(topic, anchor)
+                return
+    info.Bind(wx.EVT_BUTTON, show)
+    return info
+
+
 def button_row(parent, buttons: list[tuple[str, Callable]], tips: dict[str, str]) -> wx.WrapSizer:
     """A row of buttons (label, handler) that wraps when the window is narrow, each with its tooltip."""
     from . import theme

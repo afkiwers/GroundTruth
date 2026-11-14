@@ -32,7 +32,7 @@ REFERENCES = (Path(__file__).resolve().parents[2] / "docs" / "REFERENCES.md",
 TOPICS = ("workflow", "together", "checks", "nets", "converters", "bridges", "dcloads", "pdn", "si", "safety", "parts",
           "fields", "cbias", "conducted", "issues", "results", "fixes", "history", "efficiency", "fbripple",
           "convsweep", "hotloop", "thermal", "analog", "prefs", "export", "drawing", "labels", "siglabels",
-          "configs", "settings", "speed", "screening", "methods", "limits", "references", "licenses", "server")
+          "configs", "settings", "speed", "screening", "allcores", "methods", "limits", "references", "licenses", "server")
 # the sidebar's groups, by section; a section not listed goes under "More"
 GROUPS = (("Getting started", ("workflow", "together", "checks")),
           ("The tabs", ("nets", "converters", "bridges", "dcloads", "pdn", "si", "parts", "issues", "results", "fixes",
@@ -40,7 +40,7 @@ GROUPS = (("Getting started", ("workflow", "together", "checks")),
           ("Analyses and output", ("fields", "cbias", "conducted", "safety", "efficiency", "fbripple", "convsweep",
                                    "hotloop", "thermal", "analog", "prefs", "export", "drawing")),
           ("Labels and settings", ("labels", "siglabels", "configs", "settings")),
-          ("Under the hood", ("speed", "screening", "server", "methods", "limits", "references", "licenses")))
+          ("Under the hood", ("speed", "screening", "allcores", "server", "methods", "limits", "references", "licenses")))
 
 
 def page() -> str:

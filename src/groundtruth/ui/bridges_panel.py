@@ -19,8 +19,8 @@ from ..config.settings import (CONNECTIONS, DRIVE_MODES, EMF_SHAPES, PWM_SCHEMES
 from . import limit_choice as lc
 from . import theme
 from .listsel import SelectableRows
-from .widgets import (InfoBox, PickDialog, button_row, form_state, parse_field, restore_form, section_rows,
-                      set_lazy_items, source_status, with_mark)
+from .widgets import (InfoBox, PickDialog, button_row, form_state, info_button, parse_field, restore_form,
+                      section_rows, set_lazy_items, source_status, with_mark)
 
 STANDARD_CHOICES = lc.standard_items()     # as TI WEBENCH names them; the class beside it (ui/limit_choice.py)
 SWEEP_HELP = "bridges-sweep"        # the help's anchor of the sweep paragraph (help.html), the info button's target
@@ -325,22 +325,12 @@ class BridgesPanel(SelectableRows, wx.Panel):
         hs = wx.BoxSizer(wx.HORIZONTAL)
         note = wx.StaticText(holder, label="Optional, in addition to the operating point above.")
         note.SetName("muted")
-        info = wx.BitmapButton(holder, bitmap=wx.ArtProvider.GetBitmap(wx.ART_INFORMATION, wx.ART_BUTTON,
-                                                                        self.FromDIP(wx.Size(16, 16))),
-                               style=wx.BORDER_NONE)
-        info.SetToolTip(FIELD_TIPS["Sweep"] + "\n(click: the help on the sweep)")
-        info.Bind(wx.EVT_BUTTON, lambda e: self.on_sweep_help())
+        info = info_button(holder, FIELD_TIPS["Sweep"], "bridges", SWEEP_HELP)
         self.sweep_info = info
         hs.Add(note, 0, wx.ALIGN_CENTER_VERTICAL)
         hs.Add(info, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, self.FromDIP(6))
         holder.SetSizer(hs)
         return holder
-
-    def on_sweep_help(self):
-        """The Sweep heading's info button: the help at its sweep paragraph (the window that holds the tab shows it)."""
-        top = self.GetTopLevelParent()
-        if hasattr(top, "show_help"):
-            top.show_help("bridges", SWEEP_HELP)
 
     def _form_layout(self):
         """The form laid out, and the tab with it."""

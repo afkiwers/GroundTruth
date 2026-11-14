@@ -2964,20 +2964,58 @@ def test_fill_from_net_fills_the_dc_load_form(app, tmp_path, monkeypatch):
 def test_use_all_cores_is_an_opt_in_with_its_issues_explained(app, frame, monkeypatch):
     """Preferences > Simulation > "All cores" (the user: "make it an opt-in 'use all cores' setting. and add an info
     icon to explain its potential issues"): off by default; ticked, it goes into the settings Simulate runs with
-    (analysis.all_cores); the (i) button explains what it changes and its potential issues."""
-    from groundtruth.ui.prefs_dialog import ALL_CORES_INFO, PreferencesDialog, defaults, overrides
-    told = []
+    (analysis.all_cores); the (i) button opens the help at its section (what it changes and its potential issues),
+    no window of its own (the user: "remove that and put text into our help like plane screening is")."""
+    import re
+    from groundtruth.ui import help as gt_help
+    from groundtruth.ui.prefs_dialog import PreferencesDialog, defaults, overrides
+    told, opened = [], []
     monkeypatch.setattr(wx, "MessageBox", lambda text, *a, **k: told.append(text))
+    monkeypatch.setattr(frame, "show_help", lambda topic, anchor="": opened.append((topic, anchor)))
     assert defaults({})["all_cores"] is False and "all_cores" not in overrides({})
     assert overrides({"all_cores": True})["all_cores"] is True
     with PreferencesDialog(frame, defaults({})) as dlg:
         assert dlg.all_cores.GetValue() is False
         dlg.all_cores.SetValue(True)
         assert dlg.values()["all_cores"] is True
-        info = [c for c in dlg.all_cores.GetParent().GetChildren() if isinstance(c, wx.BitmapButton)][0]
+        info = dlg.all_cores_info
+        assert info.GetParent() is dlg.all_cores.GetParent() and "help" in info.GetToolTipText().lower()
         info.ProcessEvent(wx.CommandEvent(wx.wxEVT_BUTTON, info.GetId()))
-    assert told and told[0] == ALL_CORES_INFO
-    assert "Potential issues" in ALL_CORES_INFO and "reproducible" in ALL_CORES_INFO and "memory" in ALL_CORES_INFO
+    assert opened == [("allcores", "")] and not told
+    assert "allcores" in gt_help.TOPICS and "allcores" in dict(gt_help.GROUPS)["Under the hood"]
+    section = gt_help.PAGE.read_text(encoding="utf-8").split('<a name="allcores">')[1].split("<hr>")[0]
+    text = re.sub(r"<[^>]+>", "", section)
+    assert "Potential issues" in text and "reproducible" in text and "memory" in text and "--all-cores" in text
+
+
+def test_every_info_button_opens_the_help(app, frame, monkeypatch):
+    """No (i) button opens a window of its own (the user, of All cores' message box: "make sure that applies to all
+    info icons"): every info button (widgets.info_button) of Preferences opens the help at a section the help has,
+    none a message box; and no (i) button is made any other way (the source has one place that draws the art)."""
+    import re
+    from pathlib import Path
+    from groundtruth.ui import widgets
+    from groundtruth.ui.help import TOPICS
+    from groundtruth.ui.prefs_dialog import PreferencesDialog, defaults
+    told, opened = [], []
+    monkeypatch.setattr(wx, "MessageBox", lambda text, *a, **k: told.append(text))
+    monkeypatch.setattr(frame, "show_help", lambda topic, anchor="": opened.append(topic))
+
+    def infos(win):
+        """Every info button under win."""
+        for c in win.GetChildren():
+            if isinstance(c, wx.BitmapButton) and c.GetName() == widgets.INFO_NAME:
+                yield c
+            yield from infos(c)
+    with PreferencesDialog(frame, defaults({})) as dlg:
+        found = list(infos(dlg))
+        for b in found:
+            b.ProcessEvent(wx.CommandEvent(wx.wxEVT_BUTTON, b.GetId()))
+    assert len(found) == 2 and opened == ["screening", "allcores"] and not told
+    assert set(opened) <= set(TOPICS)
+    ui = Path(widgets.__file__).parent
+    makers = [f.name for f in ui.glob("*.py") if re.search(r"GetBitmap\(\s*wx\.ART_INFORMATION", f.read_text("utf-8"))]
+    assert makers == ["widgets.py"]
 
 
 
@@ -4042,7 +4080,7 @@ def test_the_sweep_heading_says_it_adds_to_the_operating_point_and_opens_its_hel
         notes = [w.GetLabel() for w in p.sweep_info.GetParent().GetChildren() if isinstance(w, wx.StaticText)]
         assert any("in addition to the operating point above" in n for n in notes)
         assert "IN ADDITION" in FIELD_TIPS["Sweep currents (A)"] and "IN ADDITION" in FIELD_TIPS["Sweep speeds (rpm)"]
-        p.on_sweep_help()
+        p.sweep_info.ProcessEvent(wx.CommandEvent(wx.wxEVT_BUTTON, p.sweep_info.GetId()))
         assert top.asked == [("bridges", SWEEP_HELP)]
         assert f'<a name="{SWEEP_HELP}"></a>' in page()
         assert HelpWindow._target("bridges", SWEEP_HELP) == SWEEP_HELP
