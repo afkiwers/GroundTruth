@@ -1861,8 +1861,9 @@ def draw_step(fig: Figure, view) -> None:
 def _draw_load_step(fig: Figure, view, resp: list) -> None:
     """A power stage's load step (analysis/load_step.py): each node's voltage against time in its colour, its
     voltage before the step dashed with the ±max_dev band shaded, the recovery (into ±1 % for good) dotted; on a
-    second axis (right) the load's current and the converter's, grey. The window: up to a little after the latest
-    recovery (the whole window when one has not recovered)."""
+    second axis (right) the load's current and the converter's, grey and absolute (from the operating point on). The
+    window: from a little before the step (the values before it) to a little after the latest recovery (the whole
+    window when one has not recovered)."""
     from ..analysis.transfer import response_label
     ax = fig.add_subplot(111)
     recs = [r.step["metrics"].get("recovery") for r in resp]
@@ -1871,6 +1872,14 @@ def _draw_load_step(fig: Figure, view, resp: list) -> None:
     t_end = max(t_end, 4 * max(float(r.step["metrics"]["t_dip"]) for r in resp))
     scale, unit = next(((k, u) for k, u in ((1.0, "s"), (1e-3, "ms"), (1e-6, "µs"), (1e-9, "ns"))
                         if t_end >= 2 * k), (1e-12, "ps"))
+    # a short stretch before the step (t < 0) at the values before it, so the step's edge shows: the voltage at its
+    # nominal, the currents at the operating point (i_from)
+    pre = 0.05 * t_end
+
+    def before(t, y, y0):
+        """The curve with the stretch before the step prepended (y0 from −pre to 0)."""
+        return np.concatenate(([-pre, 0.0], t)) / scale, np.concatenate(([y0, y0], y))
+
     ax2 = None
     lo, hi = math.inf, -math.inf
     for k, r in enumerate(resp):
@@ -1880,8 +1889,8 @@ def _draw_load_step(fig: Figure, view, resp: list) -> None:
         keep = t <= t_end
         y = np.asarray(st["y"])[keep]
         name = response_label(r, view.owner).replace("Z_out closed loop", "output").replace("Z at the load", "load")
-        ax.plot(t[keep] / scale, y, color=c, lw=1.3, label=f"V {name}")
         v0 = st["v_nom"]
+        ax.plot(*before(t[keep], y, v0), color=c, lw=1.3, label=f"V {name}")
         lo, hi = min(lo, float(np.min(y)), v0), max(hi, float(np.max(y)), v0)
         ax.axhline(v0, color=c, lw=0.7, ls="--")
         if m.get("recovery"):
@@ -1904,7 +1913,11 @@ def _draw_load_step(fig: Figure, view, resp: list) -> None:
                     ax2 = ax.twinx()
                     ax2.set_ylabel("current (A)", fontsize=FS_TEXT)
                     ax2.tick_params(labelsize=FS_TICK)
-                ax2.plot(t[keep] / scale, np.asarray(st[key])[keep], color="#7f7f7f", lw=0.9, ls=ls, label=label)
+                i = np.asarray(st[key])[keep]
+                i0 = st.get("i_from")
+                ax2.plot(*(before(t[keep], i, i0) if i0 is not None else (t[keep] / scale, i)), color="#7f7f7f",
+                         lw=0.9, ls=ls, label=label)
+    ax.set_xlim(-pre / scale, t_end / scale)
     ax.set_xlabel(f"time ({unit})", fontsize=FS_TEXT)
     ax.set_ylabel("V", fontsize=FS_TEXT)
     ax.tick_params(labelsize=FS_TICK)

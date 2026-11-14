@@ -285,7 +285,8 @@ How the output answers a step of its load: the stage in closed loop as an admitt
 (C at DC bias, ESR); then a harness R + sL to the load, a load capacitance with its ESR, and either a current step
 (an electronic load, ideal or ramped) or a load branch R + sL switched on (a heater coil: compensation theorem). The
 responses are exact (poles and zeros, partial fractions): each node's dip, its time, how far it rings back, the final
-deviation and the recovery into ±1 %, the converter's current and its fastest slew.
+deviation and the recovery into ±1 %, the converter's current and its fastest slew. The plot draws the currents
+absolute (from the operating point: a 5 → 10 A step reads 5 A before the step and 10 A after it).
 
 ```yaml
 converters:

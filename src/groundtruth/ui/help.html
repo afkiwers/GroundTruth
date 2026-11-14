@@ -426,7 +426,8 @@ the step asks the converter's current to slew faster than its inductor can, or m
 the model is linear (small signal), the real stage's duty cycle or current limit stops it, and its dip is deeper.</p>
 <p>After Simulate the stage has a view <i>&lt;stage&gt; load step</i> on the Results tab: the output impedance open
 loop and closed loop (and at the load behind a harness), and the voltages over time with the allowed band and the
-load and converter currents; a <b>load step</b> tile, a line in the console and the report. In the settings file:</p>
+load and converter currents (absolute, on the right axis: a 5 → 10 A step reads 5 A before it and 10 A after); a
+<b>load step</b> tile, a line in the console and the report. In the settings file:</p>
 <pre>converters:
   - {name: buck1, ..., load_step: {from: 5A, to: 10A, rise: 1us, cable_r: 20mΩ, cable_l: 500nH, c_load: 100uF, esr_load: 10mΩ}}
   - {name: buck2, ..., load_step: {r_load: 2, l_load: 1mH, max_dev: 3%}}</pre>
