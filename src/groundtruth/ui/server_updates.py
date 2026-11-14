@@ -199,7 +199,7 @@ def option_choices(status: dict) -> list[dict]:
     """What Options… offers for a server, from its status's "options": [{text, name, action, confirm}], installs
     first. An option the server says does not suit its machine is left out; a package already there is offered
     for removal once, and another GPU build is offered as its replacement. [] for a server that offers none (an
-    older build, or one running in a window)."""
+    older build, one running in a window, or a machine none suits: no_options_reason says which)."""
     opt = status.get("options") or {}
     have = opt.get("installed") or {}
     out, removals = [], {}
@@ -221,6 +221,27 @@ def option_choices(status: dict) -> list[dict]:
                                                  f"{status.get('host') or 'the server'}?\n\nIts jobs then run without "
                                                  "it (on the CPU, or with the built-in sparse solver)."}
     return out + list(removals.values())
+
+
+def no_options_reason(status: dict) -> str:
+    """Why option_choices offers nothing for this server, as the end of "<name> offers nothing to install from
+    here: ...". Three cases: the server lists options but none suits its machine (a Mac: no GPU build is used
+    there, and Intel MKL is x86 only), with its own reasons; it lists none while it answers with an options entry
+    (it runs in a window, not as the installed service, which alone may install packages); or its status has no
+    options entry at all (a build from before Options…)."""
+    opt = status.get("options")
+    if not isinstance(opt, dict):
+        return "it runs an older version of GroundTruth, from before server options (update it first)"
+    available = opt.get("available") or []
+    if not available:
+        return ("it runs in a window (groundtruth_server.cmd) rather than as the installed service, and only the "
+                "service installs packages")
+    reasons = []
+    for o in available:
+        why = o.get("unsuitable") or ""
+        if why and why not in reasons:
+            reasons.append(why)
+    return "none of them suits its machine (" + "; ".join(reasons) + "). Nothing is missing: it runs as it is"
 
 
 def follow_option(address: str, key: str, name: str, action: str, progress: Callable[[str], None], stop=None,

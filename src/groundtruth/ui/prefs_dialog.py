@@ -403,7 +403,7 @@ class ServersPanel(wx.Panel):
         (remote/options.py)."""
         import threading
         from . import jobs_password as jp
-        from .server_updates import follow_option, option_choices
+        from .server_updates import follow_option, no_options_reason, option_choices
         sel = self.list.GetFirstSelected()
         if not 0 <= sel < len(self.rows):
             return
@@ -442,8 +442,8 @@ class ServersPanel(wx.Panel):
                 return
             choices = option_choices(status)
             if not choices:
-                message_box(f"{row['name']} offers no options to install from here: it runs an older version, or in "
-                            "a window instead of as the installed service.", title, wx.ICON_INFORMATION)
+                message_box(f"{row['name']} offers nothing to install from here: {no_options_reason(status)}.",
+                            title, wx.ICON_INFORMATION)
                 return
             with wx.SingleChoiceDialog(self, f"Options of {row['name']}:", title, [c["text"] for c in choices]) as d:
                 pick = choices[d.GetSelection()] if d.ShowModal() == wx.ID_OK else None

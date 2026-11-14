@@ -2293,7 +2293,9 @@ offers and what it has, and asks again before it starts. The server downloads th
 index and installs it once no job is running (queued jobs wait); its row shows how far it is, and afterwards the
 server looks for its GPUs again. Only a server installed as a service takes this, and only for the options of its
 own fixed list: the plugin sends an option's name, never a package or an address, and the request is signed with
-the server's key like every other. The server keeps pip's output in <code>options.log</code> in its folder.</p>
+the server's key like every other. The server keeps pip's output in <code>options.log</code> in its folder. A Mac server offers nothing here, and needs
+nothing: its solves run on the CPU (no GPU build is used on a Mac) and an Apple-silicon Mac can't run Intel MKL;
+Options… says so.</p>
 
 <p><b>A server PC with two networks</b> (two network cards): <code>install_server.cmd install --address</code>
 lists its addresses to pick the one the other servers and the users reach it at; it then announces that one alone.

@@ -160,6 +160,19 @@ def test_the_plugin_offers_what_the_server_lists_and_follows_it():
                                                        ("gpu-cu126", "remove")]
     assert "replaces the installed torch 2.6.0+cu126" in got[0]["text"] and "server-pc" in got[2]["confirm"]
     assert su.option_choices({"host": "old"}) == [] and su.option_choices({"options": {"available": []}}) == []
+    # why nothing is offered: an old build, a server in a window, or a machine none suits (a Mac: up to date, but
+    # no GPU build and no MKL there; the user was told "older version" for it)
+    assert "older version" in su.no_options_reason({"host": "old"})
+    assert "in a window" in su.no_options_reason({"options": {"available": [], "installed": {}}})
+    mac = {"options": {"available": [
+        {"name": "gpu-cu126", "unsuitable": "no GPU build is used on a Mac"},
+        {"name": "gpu-cu128", "unsuitable": "no GPU build is used on a Mac"},
+        {"name": "sparse-mkl", "unsuitable": "Intel MKL runs on x86 only, not on this arm64 machine"}],
+        "installed": {"torch": None, "mkl": None}}}
+    assert su.option_choices(mac) == []
+    why = su.no_options_reason(mac)
+    assert "none of them suits" in why and why.count("no GPU build") == 1 and "arm64" in why
+    assert "older" not in why and "window" not in why
 
     class Fake:
         """A client whose status answers come from `answers`."""
