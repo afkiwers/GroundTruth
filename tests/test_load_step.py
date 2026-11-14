@@ -283,7 +283,8 @@ def test_a_stage_is_its_rails_pdn_source(tmp_path):
     m = p.ports[0]["step"]
     assert m["dip_late"] == pytest.approx(node.metrics["dip"], rel=0.01)
     assert m["t_dip"] < 1e-8                       # the copper's spike first (L·ΔI·2π·check_to)
-    assert any(i.check == "pdn_step" for i in res.issues)      # the spike is over 5 % of 3.3 V
+    assert m["peak_late"] < m["peak"]                  # the spike is judged by pdn_impedance, not by pdn_step
+    assert any(i.check == "pdn_step" for i in res.issues)      # the dip after it: 6.2 % of 3.3 V
 
 
 def test_a_port_needs_its_pins_on_the_rail(tmp_path):

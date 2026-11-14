@@ -95,7 +95,7 @@ buck's output capacitor equals the analytic closed loop within 5 % from 1 to 100
 impedance fitted (vector fitting), the current the board sees passing the IC's package and die above `check_to` (a
 first-order low-pass there, as the target assumes [A19]), with a `load_step`'s ramp, harness, load capacitance or
 switched coil as on a converter. First the copper's inductance shows (L·ΔI·2π·check_to), then the decaps' and the
-source's dip; the issue `pdn_step` when the rail moves by more than its ripple. On the test board the step after
+source's dip; the issue `pdn_step` when that dip (after the spike: the spike is the impedance above the decaps, which `pdn_impedance` judges) moves by more than the ripple. On the test board the step after
 10 ns matches the analytic closed-loop step within 1 % of its dip.
 
 **Power tree.** The tab's (and the Converters tab's) **Power tree…** draws the board's power as a flow chart, read

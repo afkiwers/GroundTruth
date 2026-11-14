@@ -794,6 +794,7 @@ def _port_step(setup: PdnSetup, resp, meta: dict, fs: np.ndarray, z: np.ndarray)
             dv = v[late] - res.voltage
             k = int(np.argmin(dv) if (spec.i_step or ls.switched) else np.argmax(dv))
             m["dip_late"], m["t_dip_late"] = float(dv[k]), float(t[late][k])
+            m["peak_late"] = float(np.max(np.abs(dv)))
         if name == "port":                     # (a load node behind a harness: its figures in the notes)
             resp.step = {"t": t, "y": v, "metrics": m, "kind": "load", "v_nom": res.voltage, "max_dev": spec.ripple,
                          "label": meta["part"]}
@@ -848,18 +849,26 @@ def _port_step_figures(res: PdnResult, port: dict):
 
 def _issues(setup: PdnSetup, rules):
     """pdn_impedance: a port above the target below check_to (an error over it, a warning within WARN_DB);
-    pdn_step: the voltage at a port moving by more than the ripple when its IC steps (or the coil is switched on)."""
+    pdn_step: the voltage at a port moving by more than the ripple when its IC steps (or the coil is switched on),
+    after the copper's spike at the start (peak_late: the decaps' and the source's response). The spike, L·ΔI over
+    the edge the check_to low-pass leaves, is the impedance above the decaps that pdn_impedance already judges in
+    frequency; judged again in time it flagged an off-board load at a connector port (5 A, 1.3 nH: −3.5 V in 0.5 ns
+    on refboard's converter output) whose harness could never draw that edge."""
     res, spec = setup.res, setup.spec
     from ..components.values import format_si as _si
     for port in res.ports:
         m = port.get("step")
-        if m and res.voltage and m["peak"] > spec.ripple * res.voltage:
+        peak = m.get("peak_late", m["peak"]) if m else None
+        if m and res.voltage and peak > spec.ripple * res.voltage:
+            spike = (f"; before it the copper's spike {m['dip'] * 1e3:+.3g} mV at {_si(m['t_dip'], 's')}"
+                     if m.get("dip_late") is not None and abs(m["dip"]) > abs(m["dip_late"]) else "")
+            late = m.get("dip_late", m["dip"]), m.get("t_dip_late", m["t_dip"])
             setup.issue(rules, "pdn_step",
-                        f"{spec.label}: at {port['part']} the rail moves by {m['peak'] * 1e3:.3g} mV "
-                        f"({100 * m['peak'] / res.voltage:.2f} %) when the load steps, more than the "
-                        f"{spec.ripple * 100:g} % allowed (dips {m['dip'] * 1e3:+.3g} mV after "
-                        f"{_si(m['t_dip'], 's')})", port["xy"], key=f"pdn:{spec.label}:{port['part']}:step",
-                        details={k: m[k] for k in ("dip", "peak", "t_dip")})
+                        f"{spec.label}: at {port['part']} the rail moves by {peak * 1e3:.3g} mV "
+                        f"({100 * peak / res.voltage:.2f} %) when the load steps, more than the "
+                        f"{spec.ripple * 100:g} % allowed (dips {late[0] * 1e3:+.3g} mV after {_si(late[1], 's')}"
+                        f"{spike})", port["xy"], key=f"pdn:{spec.label}:{port['part']}:step",
+                        details={"dip": late[0], "peak": peak, "t_dip": late[1], "spike": m["dip"]})
     if not res.target_ohm:
         return
     from ..components.values import format_si
