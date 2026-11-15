@@ -832,10 +832,13 @@ V &middot; ripple / I_step, whatever the frequency of the IC's current step.</p>
   decaps' and the source's dip; the issue <b>pdn_step</b> when that dip (after the spike, which the impedance target judges) moves by more than the ripple. The Results view
   shows it under the curves.</li>
 </ul>
-<p>The model is the whole board at the board-wide resolution (Preferences), and each IC's pins with their nearby decaps
-on a fine model of their own: the inductance at small pads and vias, which the board-wide grid cannot resolve, is
-added to the IC's curve. An IC whose small pads the board-wide grid cannot join to the rail's copper is left out
-with a note (raise the resolution).</p>
+<p>The model is the whole board at the board-wide resolution (Preferences), and each IC's (or connector port's) loop
+on a fine model of its own: the decaps that actually carry its current at high frequency (read off the board-wide
+model near 100 MHz, not just the nearest ones) and the copper to them, and its pins with their nearby decaps finer
+still. The inductance the board-wide grid gets wrong there (small pads, vias, the current's spread in the planes) is
+added to the port's curve, so its curve above the decaps reads the same at any resolution to a few per cent. A note
+says when that fine model holds only part of the current or its correction is not one inductance. An IC whose small
+pads the board-wide grid cannot join to the rail's copper is left out with a note (raise the resolution).</p>
 <p>The <b>Power integrity</b> tab lists the rails: <b>Find rails</b> adds every rail ICs draw supply from and every
 power stage's output (its source found by itself: the stage, named in the list; read at the stage's output connector
 when no IC draws from it, its load step half the stage's load current); set each one's <b>Load step</b> for a target

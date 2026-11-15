@@ -285,7 +285,7 @@ class PdnSetup:
         self.spec, self.res, self.ports, self.branches, self.build = spec, res, ports, branches, build
         self.fine = ModelRun(run.build, run.exc, planned=[])
         # the ports' run (refined), and each IC's two regional models at LOCAL_F (not refined)
-        self.extra_runs = [run] + [r for m in ports if m.get("local") for r in m["local"]]
+        self.extra_runs = [run] + [r for m in ports if m.get("local") for pair in m["local"] for r in pair]
         self.run = run
         self.cavity, self.spectrum_run = None, None
         self.issues: list[Issue] = []
@@ -465,55 +465,179 @@ def copper_pieces(st, plane) -> tuple[np.ndarray, dict]:
 
 
 LOCAL_F = (30e6, 100e6, 300e6)  # the per-IC correction's frequencies (inductive: above the decaps' resonances)
-LOCAL_NEAR_MM = 9.0              # decaps within this of an IC's supply pads are in its regional model ...
-LOCAL_MARGIN_MM = 3.0            # ... with this much copper around them
+LOCAL_PROBE_F = 100e6            # the board-wide solve that tells which decaps carry each port's current there ...
+LOCAL_SHARE = 0.9                # ... the decaps carrying this fraction of it are in the port's regional model ...
+LOCAL_SHARE_NOTE = 0.6           # a loop model holding less of it (its region kept small enough to be fine): a note
+LOCAL_NEAR_MM = 9.0              # ... and every decap within this of its supply pads (alone without the probe) ...
+LOCAL_MARGIN_MM = 3.0            # ... with at least this much copper around their pads ...
+LOCAL_MARGIN_CELLS = 10          # ... and at least this many cells of the coarser pitch of the pair
+LOCAL_COARSEST = 0.75            # a regional "fine" pitch must stay under this fraction of the board-wide one
+LOCAL_LEVEL = 1.05               # the loop's fine pitch above this × the pins' one: the pins get their own region
+LOCAL_SPREAD = 0.2               # the correction varying over LOCAL_F by more than this fraction (and ...
+LOCAL_SPREAD_NH = 0.05           # ... this many nH) is not one inductance: said in a note
+# The regional models are solved without the planes' capacitance [A118]: their difference is then the inductance the
+# coarse grid gets wrong along the port's loop alone. With it, a decap of high ESL in the region (a polymer
+# capacitor's 8 nH by a connector) resonated with the region's plane capacitance between LOCAL_F, and the two
+# pitches' small difference in that capacitance read as up to 2.5 nH of "inductance" (refboard's output connector:
+# 1.14 nH at 40000 nodes, 1.50 nH at 80000).
+LOCAL_CAPACITANCE = False
+
+
+def probe_shares(exc: "PortSet", branches: list[Branch], refs: set, f: float = LOCAL_PROBE_F) -> tuple:
+    """Each port's decap currents on the board-wide model at f: (the solution, [{ref: |I| per ampere of the port}]
+    per port), the parts' parallel branches added (as finish_pdn's "holds"); (None, []) when the solve fails."""
+    try:
+        sol = exc.solve(f)
+    except (SolverError, MemoryError):
+        return None, []
+    names = _names(branches)
+    idx = {r: [k for k, n in enumerate(names) if n == r] for r in refs}
+    shares = []
+    for p in range(len(sol.Z)):
+        I = sol.I_branch[p]
+        shares.append({r: abs(complex(np.sum(I[ks]))) for r, ks in idx.items() if ks and len(I) > max(ks)})
+    return sol, shares
+
+
+def _pad_extent(pads: list) -> list[tuple]:
+    """The corners of the pads' copper (their positions ± half their size, either way round): a region drawn around
+    them holds the whole pad, not only its centre (a polymer capacitor's pads are 4.4 mm long)."""
+    pts = []
+    for p in pads:
+        r = max(p.size) / 2 if getattr(p, "size", None) else 0.0
+        x, y = p.position
+        pts += [(x - r, y - r), (x + r, y + r)]
+    return pts
 
 
 def _local_runs(model: BoardModel, st, spec: PdnSpec, ground: str, fp: Footprint, rp: list, gp: list,
-                caps: list) -> tuple:
-    """Two regional models around one IC (its pads and the decaps within LOCAL_NEAR_MM of its supply pads, plus
-    LOCAL_MARGIN_MM), solved at LOCAL_F with the IC's port: one at a fine pitch (the dielectric height, the
-    regional node budget analysis.max_nodes, as a power stage's), one at the board-wide model's pitch on the
-    board-wide grid's own lattice (the region snapped to it). Their difference is what the coarse grid gets wrong at
-    the pins (small pads, vias, escapes: on refboard's +3V3, 0.04-0.9 nH; the test board's coarsest grid read
-    -43 % at 100 MHz without it), added to the IC's board-wide curve in finish_pdn. (fine run, coarse run), or (None, None, why)."""
+                caps: list, shares: Optional[dict] = None) -> tuple:
+    """The regional models of one port (an IC's supply and ground pads, or a connector's), in pairs (fine, coarse)
+    solved at LOCAL_F with its current; the sum of each pair's difference is what the board-wide model's coarse grid
+    gets wrong along the port's loop at high frequency (small pads, vias, escapes, the copper to the decaps: on
+    refboard's +3V3 0.04-0.9 nH; the test board's coarsest grid read -43 % at 100 MHz without it), added to the
+    port's board-wide curve in finish_pdn [A118].
+
+    Two scales, two regions (a telescoping sum: Z ≈ Z_board(d) + [Z_loop(d1) - Z_loop(d)] + [Z_pins(d2) - Z_pins(d1)]):
+    - the loop: the port's pads and the decaps that close its loop there, those carrying LOCAL_SHARE of its decap
+      current on the board-wide model at LOCAL_PROBE_F (`shares`, probe_shares) and every decap within LOCAL_NEAR_MM
+      of its supply pads, max(LOCAL_MARGIN_MM, LOCAL_MARGIN_CELLS × d) round their pads (the coarse grid's error in
+      the planes' spread reaches several of its cells: with 3 mm, 2.4 cells, a test connector read 4 % high); at its
+      fine pitch d1 and at the board-wide pitch d on the board-wide grid's own lattice. It takes the grid's error
+      along the copper to wherever the current closes.
+    - the pins: the port's pads and the near decaps alone (LOCAL_MARGIN_CELLS × d1 round them), at the finest pitch
+      d2 and at d1 on the loop model's lattice, when the loop's region is large enough that d1 is above LOCAL_LEVEL
+      × d2. The error between d1 and d2 is at small features (pads, vias), so a small region holds it.
+    Until 2026-11-15 only the pins' region, against the board-wide pitch: by refboard's output connector the one
+    near decap was a polymer capacitor (8 nH) while the current closed through ceramics 15-20 mm away, and the
+    correction, measured on a loop the board-wide model does not have, moved with the grid (0.08 nH at 40000 nodes,
+    0.43 nH at 80000). When the far decaps would make the loop's region so large that d1 is no longer fine
+    (LOCAL_COARSEST of d), those with the smallest share are left out first.
+
+    ([(fine run, coarse run), ...], {"refs": the loop's decaps, "share": their fraction of the probe's decap current
+    or None, "pins": the pins' region's decaps or None, "pitch": the finest pitch}), or (None, why)."""
     from .power import _area_shares, _side
     board, a = model.board, model.config.analysis
-    pts = [p.position for p in rp + gp]
-    near = 0
+    by_ref = {c.reference: c for c in caps}
+    near = []
     for c in caps:
         cp = [p for p in c.pads if p.net in (spec.rail, ground)]
         if any(math.dist(q.position, s.position) <= LOCAL_NEAR_MM for q in cp if q.net == spec.rail for s in rp):
-            pts += [q.position for q in cp]
-            near += 1
-    if not near:
-        # without a decap the region is a small plane capacitor: the pitches differ in its capacitance, not in an
-        # inductance at the pins (read as one, it moved the bare test board's 10 MHz reading by 2.5 %)
-        return None, None, f"no decap within {LOCAL_NEAR_MM:g} mm"
-    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
-    g0 = st.grids[0]
+            near.append(c.reference)
+    # the probe's decaps by their share of the port's current, the largest first, up to LOCAL_SHARE of it
+    far, total = [], sum(shares.values()) if shares else 0.0
+    if total > 0:
+        got = sum(shares.get(r, 0.0) for r in near)
+        for ref, i in sorted(shares.items(), key=lambda t: -t[1]):
+            if got >= LOCAL_SHARE * total:
+                break
+            if ref not in near and ref in by_ref:
+                far.append(ref)
+                got += i
+    if not near and not far:
+        # without a decap the port's loop does not close in the region (its planes' capacitance is left out of the
+        # regional models, LOCAL_CAPACITANCE)
+        return None, (f"no decap within {LOCAL_NEAR_MM:g} mm" if total <= 0 else "no decap carries its current")
     d = st.d
-
-    def snap(v, o, up):
-        """v on the board-wide lattice o + k·d (down, or up)."""
-        k = (v - o) / d
-        return o + (math.ceil(k) if up else math.floor(k)) * d
-    region = (snap(min(xs) - LOCAL_MARGIN_MM, g0.x0, False), snap(min(ys) - LOCAL_MARGIN_MM, g0.y0, False),
-              snap(max(xs) + LOCAL_MARGIN_MM, g0.x0, True), snap(max(ys) + LOCAL_MARGIN_MM, g0.y0, True))
     layers = list(st.names)
     h = min((board.stackup.dielectric_between(x, y) for x, y in zip(layers, layers[1:])), default=0.2)
-    d_fine = _choose_pitch(h, region, len(layers), a.max_nodes, "auto", a.resolution)
-    if d_fine >= 0.75 * d:
-        return None, None, "the board-wide grid is already about as fine"
-    runs = []
-    for pitch in (d_fine, d):
-        rs = model.build(region, layers, {spec.rail, ground}, pitch, True)
-        try:
+
+    def region_of(refs, x0, y0, pitch):
+        """The region round the port's pads and these decaps' pads on the rail and ground, max(LOCAL_MARGIN_MM,
+        LOCAL_MARGIN_CELLS cells of `pitch`) round them, snapped outwards to the lattice x0 + k·pitch, y0 + k·pitch;
+        and its fine pitch (analysis.max_nodes, the dielectric height)."""
+        margin = max(LOCAL_MARGIN_MM, LOCAL_MARGIN_CELLS * pitch)
+        pts = _pad_extent(rp + gp)
+        for r in refs:
+            pts += _pad_extent([p for p in by_ref[r].pads if p.net in (spec.rail, ground)])
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+
+        def snap(v, o, up):
+            """v on the lattice o + k·pitch (down, or up)."""
+            k = (v - o) / pitch
+            return o + (math.ceil(k - 1e-9) if up else math.floor(k + 1e-9)) * pitch
+        reg = (snap(min(xs) - margin, x0, False), snap(min(ys) - margin, y0, False),
+               snap(max(xs) + margin, x0, True), snap(max(ys) + margin, y0, True))
+        return reg, _choose_pitch(h, reg, len(layers), a.max_nodes, "auto", a.resolution)
+    g0 = st.grids[0]
+    # the loop's region: the far decaps with the smallest share leave first while its pitch is too coarse to be fine
+    while True:
+        refs = near + far
+        region, d1 = region_of(refs, g0.x0, g0.y0, d)
+        if d1 < LOCAL_COARSEST * d or not far:
+            break
+        far.pop()
+    if not refs:
+        return None, "the decaps carrying its current are too far apart for a fine regional model"
+    if d1 >= LOCAL_COARSEST * d:
+        return None, "the board-wide grid is already about as fine"
+    share = (sum(shares.get(r, 0.0) for r in refs) / total) if total > 0 else None
+
+    def pair(reg, fine, coarse, what):
+        """The port on this region at the two pitches: (fine run, coarse run); SolverError when its loop does not
+        close on either grid (loop_closes)."""
+        runs = []
+        for pitch in (fine, coarse):
+            rs = model.build(reg, layers, {spec.rail, ground}, pitch, LOCAL_CAPACITANCE)
             inj = _area_shares(rs, rp, _side(fp), 1.0) + _area_shares(rs, gp, _side(fp), -1.0)
-        except SolverError as e:
-            return None, None, str(e)
-        runs.append(ModelRun(rs, PortSet(rs.plane, [inj]), planned=list(LOCAL_F)))
-    return runs[0], runs[1], ""
+            if not loop_closes(rs.plane, inj):
+                raise SolverError(f"its pads do not reach its decaps on the {what} model's {pitch:.2f} mm grid")
+            runs.append(ModelRun(rs, PortSet(rs.plane, [inj]), planned=list(LOCAL_F)))
+        return runs[0], runs[1]
+    try:
+        pairs = [pair(region, d1, d, "loop")]
+    except SolverError as e:
+        return None, str(e)
+    pins, finest = None, d1
+    if near:
+        # the pins' region on the loop model's fine lattice (its pitch d1 there is the loop model's own grid)
+        g1 = pairs[0][0].build.grids[0]
+        reg2, d2 = region_of(near, g1.x0, g1.y0, d1)
+        if d1 > LOCAL_LEVEL * d2:
+            try:
+                pairs.append(pair(reg2, d2, d1, "pins'"))
+                pins, finest = sorted(near), d2
+            except SolverError:
+                pass                    # the loop's level alone (its pitch d1 is still finer than the board's)
+    return pairs, {"refs": sorted(refs), "share": share, "pins": pins, "pitch": finest}
+
+
+def loop_closes(plane, inj: list) -> bool:
+    """Whether a port's current can flow round on this model without the planes' capacitance: every node it enters
+    by joined to a node it leaves by through copper (strips, vias, tracks) and parts (the decaps). A regional model
+    without capacitance whose port pads do not reach its decaps (a small pad on a coarse grid, a pour cropped by the
+    region) is open: its solve would not converge. (One of refboard's ICs on a 1.15 mm regional grid read as a
+    capacitor, -343 nH at 30 MHz, through the planes' capacitance alone, while those were in the regional models.)"""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    n = plane.n_nodes
+    keep = np.ones(plane.nb, bool)
+    keep[plane.ns: plane.ns + plane.ncap] = False                     # the planes' capacitance (none here)
+    g = coo_matrix((np.ones(int(keep.sum())), (plane.a_nodes[keep], plane.b_nodes[keep])), shape=(n, n))
+    _, label = connected_components(g, directed=False)
+    into = {int(label[plane.nid[nd]]) for nd, a in inj if a > 0}
+    out = {int(label[plane.nid[nd]]) for nd, a in inj if a < 0}
+    return bool(into) and into <= out
 
 
 def prepare_pdn(model: BoardModel, specs: list) -> tuple[list, list, list]:
@@ -644,20 +768,32 @@ def prepare_pdn(model: BoardModel, specs: list) -> tuple[list, list, list]:
         except SolverError as e:
             res.error = f"{spec.label}: {e}"
             continue
-        # each IC's pins on a fine regional model (the inductance there; _local_runs)
-        caps = decaps(board, config, spec.rail, ground)
-        why = []
-        for m in meta:
-            fine, coarse, reason = _local_runs(model, st, spec, ground, m["fp"], m["pads"], m["ground_pads"], caps)
-            m["local"] = (fine, coarse) if fine is not None else None
-            if fine is None:
-                why.append(f"{m['part']} ({reason})")
-            else:
-                m["local_pitch"] = fine.build.d
-        if why:
-            res.notes.append("without the fine model at the pins: " + "; ".join(why))
         n0 = int(math.ceil(math.log10(F_MAX / res.f_min) * PER_DECADE))
         run = ModelRun(st, exc, planned=[float(f) for f in np.geomspace(res.f_min, F_MAX, n0 + 1)])
+        # each port's loop on a fine regional model (the inductance there; _local_runs), its decaps those that carry
+        # its current on this model: one of the sweep's own solves, the one nearest LOCAL_PROBE_F, made now and kept
+        # (the scheduler solves only what is not solved yet)
+        caps = decaps(board, config, spec.rail, ground)
+        f_probe = min(run.planned, key=lambda f: abs(math.log(f / LOCAL_PROBE_F)))
+        sol, shares = probe_shares(exc, list(plane.branches), {c.reference for c in caps}, f_probe) if caps \
+            else (None, [])
+        if sol is not None:
+            run.sols[f_probe] = sol
+        elif caps:
+            res.notes.append(f"the solve at {f_probe / 1e6:.3g} MHz that finds each port's decaps failed: the decaps "
+                             f"within {LOCAL_NEAR_MM:g} mm of its pins are in its fine model")
+        why = []
+        for k, m in enumerate(meta):
+            pairs, info = _local_runs(model, st, spec, ground, m["fp"], m["pads"], m["ground_pads"], caps,
+                                      shares[k] if k < len(shares) else None)
+            m["local"] = pairs
+            if pairs is None:
+                why.append(f"{m['part']} ({info})")
+            else:
+                m["local_pitch"] = info["pitch"]
+                m["local_refs"], m["local_share"], m["local_pins"] = info["refs"], info["share"], info["pins"]
+        if why:
+            res.notes.append("without the fine model at the pins: " + "; ".join(why))
         res.nodes, res.pitch_mm = st.nodes, st.d
         res.notes.append(f"PDN modelled on the whole board: {spec.rail} and {ground} on {len(layers)} layers, "
                          f"{st.nodes} nodes at {st.d:.2f} mm, {len(meta)} IC port(s)")
@@ -687,20 +823,31 @@ def _inductance(fs: np.ndarray, Zc: np.ndarray, z: np.ndarray, peaks: list) -> O
 
 
 def _local_correction(meta: dict) -> Optional[float]:
-    """The inductance (H) the board-wide grid gets wrong at an IC's pins: Im(Z_fine - Z_coarse)/ω of its two
-    regional models (_local_runs), the median over LOCAL_F; None without them. Added in series to the IC's curve: it
-    is the IC's own current path that the grid resolves differently, and at low frequency (the capacitors' range)
-    jω·ΔL is negligible next to them."""
+    """The inductance (H) the board-wide grid gets wrong along a port's loop: per pair of its regional models
+    (_local_runs: the loop's, and the pins' when they have their own) Im(Z_fine - Z_coarse)/ω, summed, the median
+    over LOCAL_F; None without them. Added in series to the port's curve: it is the port's own current path that the
+    grid resolves differently, and at low frequency (the capacitors' range) jω·ΔL is negligible next to them. Each
+    frequency's sum is kept in meta["local_nh"]: without the planes' capacitance in the regional models
+    (LOCAL_CAPACITANCE) they agree to a few pH, and finish_pdn says so when they do not (LOCAL_SPREAD)."""
     if not meta.get("local"):
         return None
-    fine, coarse = meta["local"]
-    sf, sc = fine.ok(), coarse.ok()
-    # only where both are inductive (the IC's loop closing through its decaps): below a decap's resonance the
-    # difference would be a capacitance's
-    common = sorted(f for f in set(sf) & set(sc) if sf[f].Z[0].imag > 0 and sc[f].Z[0].imag > 0)
-    if not common:
+    sums: dict[float, float] = {}
+    for k, (fine, coarse) in enumerate(meta["local"]):
+        sf, sc = fine.ok(), coarse.ok()
+        # only where both are inductive (the loop closing through its decaps): below a decap's resonance the
+        # difference would be a capacitance's
+        common = {f for f in set(sf) & set(sc) if sf[f].Z[0].imag > 0 and sc[f].Z[0].imag > 0}
+        if not common:
+            return None
+        if k:
+            common &= set(sums)                     # a frequency every pair has
+            sums = {f: sums[f] for f in common}
+        for f in common:
+            sums[f] = sums.get(f, 0.0) + (sf[f].Z[0] - sc[f].Z[0]).imag / (2 * math.pi * f)
+    if not sums:
         return None
-    return float(np.median([(sf[f].Z[0] - sc[f].Z[0]).imag / (2 * math.pi * f) for f in common]))
+    meta["local_nh"] = [(float(f), float(v * 1e9)) for f, v in sorted(sums.items())]
+    return float(np.median(list(sums.values())))
 
 
 def finish_pdn(model: BoardModel, setup: PdnSetup):
@@ -753,6 +900,19 @@ def finish_pdn(model: BoardModel, setup: PdnSetup):
         port["l_nh"] = _inductance(fs, Z[:, p], z, port["peaks"])
         port["l_correction_nh"] = None if dl is None else float(dl * 1e9)
         port["local_pitch_mm"] = meta.get("local_pitch")
+        port["local_decaps"] = meta.get("local_refs")          # the decaps in its fine model ...
+        port["local_share"] = meta.get("local_share")          # ... and their share of its decap current
+        port["local_pins"] = meta.get("local_pins")            # the pins' own fine model's decaps (or None)
+        if meta.get("local_share") is not None and meta["local_share"] < LOCAL_SHARE_NOTE:
+            res.notes.append(f"{meta['part']}: its fine model holds the decaps that carry {meta['local_share']:.0%} "
+                             "of its current at high frequency (the others are too far away for a region that fine): "
+                             "the rest of its loop is the board-wide grid's")
+        got = meta.get("local_nh") or []
+        vals = [v for _, v in got]
+        if len(vals) > 1 and max(vals) - min(vals) > max(LOCAL_SPREAD * abs(dl * 1e9), LOCAL_SPREAD_NH):
+            res.notes.append(f"{meta['part']}: the fine model's correction is not one inductance ("
+                             + ", ".join(f"{v:+.2f} nH at {f / 1e6:g} MHz" for f, v in got)
+                             + "): its curve above the decaps is less certain")
         if res.target_ohm:
             band = [k for k in range(len(fs)) if fs[k] <= spec.check_to]
             k = max(band, key=lambda k: z[k])

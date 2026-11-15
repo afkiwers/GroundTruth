@@ -183,7 +183,7 @@ def test_the_pins_fine_model_makes_a_coarse_grid_converge(tmp_path, monkeypatch)
     def z_at(name, budget, correct):
         """|Z| at 1 and 100 MHz on a board-wide budget, with or without the correction."""
         if not correct:
-            monkeypatch.setattr(P, "_local_runs", lambda *a, **k: (None, None, "off"))
+            monkeypatch.setattr(P, "_local_runs", lambda *a, **k: (None, "off"))
         b, sc, _ = make(tmp_path, pdn_board(caps=caps), name, nets=(), cavity_max_nodes=budget)
         sc.set_pdn([PdnSpec("VDD", source="none")])
         sc.save()
@@ -198,16 +198,20 @@ def test_the_pins_fine_model_makes_a_coarse_grid_converge(tmp_path, monkeypatch)
     corr, port = z_at("corr", 4000, True)
     mid, _ = z_at("mid", 24000, True)
     assert abs(raw[1] / ref[1] - 1) > 0.25                     # the coarse grid alone is far off at 100 MHz (-39 %)
-    # at 100 MHz (ohm): reference 0.3319, coarse grid alone 0.2028, corrected 4000 nodes 0.3387 (+2.1 %), corrected
-    # 24000 nodes 0.3401 (+2.5 %, 0.4 % above the 4000-node one). Each pin's current goes to its nodes by their cells'
-    # share of it [A88] and its joints are bilinear weights round the barrel, the same on every grid [A95]: the two
-    # budgets agree to well under 1 %, which is what the correction is for; the 2 % above the reference is the
-    # reference's own residue
+    # at 100 MHz (ohm): reference 0.3319, coarse grid alone 0.2028, corrected 4000 nodes 0.3390 (+2.1 %: the loop's
+    # region the whole board at 0.22 mm, the pins' at 0.20 mm), corrected 24000 nodes 0.3388 (+2.1 %; 0.3387 and
+    # 0.3401 with the regional models' plane capacitance, before 2026-11-15 [A118]). Each pin's current goes to its
+    # nodes by their cells' share of it [A88] and its joints are bilinear weights round the barrel, the same on every
+    # grid [A95]: the two budgets agree to well under 1 %, which is what the correction is for; the 2 % above the
+    # reference is the reference's own residue (the board-wide model alone at 0.30 mm)
     assert corr[1] == pytest.approx(ref[1], rel=0.05)
     assert mid[1] == pytest.approx(corr[1], rel=0.01)
     assert mid[1] == pytest.approx(ref[1], rel=0.05)
     assert corr[0] == pytest.approx(ref[0], rel=0.02) and port["l_correction_nh"] > 0.1
     assert port["local_pitch_mm"] < 0.3
+    # on 4000 nodes the loop's region (10 cells of 1.26 mm round the decaps) is the whole board at 0.22 mm: the pins
+    # and their decaps get their own model at 0.20 mm (the second level of _local_runs)
+    assert port["local_pins"] == ["C1", "C2", "C3", "C4"]
 
 
 def test_a_connector_source_with_the_regulators_defaults_is_a_harness(tmp_path):
@@ -231,3 +235,85 @@ def test_a_board_without_its_pours_says_so(tmp_path):
     b.zones = []
     _, (res,), _ = prepare_pdn(BoardModel(b, sc.config), [PdnSpec("VDD", voltage=3.3, i_step=0.5)])
     assert "no filled copper pour (zone) of VDD or GND" in res.error, res.error
+
+
+# a load's connector J2 (through-hole) with a polymer capacitor 6 mm away (8 nH ESL) and four 10 µF ceramics 16-20 mm
+# away (0.4 nH): the connector's current at 100 MHz closes mostly through the ceramics
+CONN_CAPS = [("C1", "100u", (14.0, 15.0)), ("C2", "10u", (25.0, 10.0)), ("C3", "10u", (25.0, 20.0)),
+             ("C4", "10u", (28.0, 13.0)), ("C5", "10u", (28.0, 17.0))]
+
+
+def _conn_config(sc):
+    """The connector board's config with the polymer capacitor's and the ceramics' models."""
+    from groundtruth.components.models import ComponentModel
+    cfg = SettingsFile.load(sc.path).config
+    cfg.components["C1"].model = ComponentModel("cap", {"C": 100e-6, "ESR": 0.028, "ESL": 8e-9})
+    for r in ("C2", "C3", "C4", "C5"):
+        cfg.components[r].model = ComponentModel("cap", {"C": 10e-6, "ESR": 0.005, "ESL": 0.4e-9})
+    return cfg
+
+
+def test_a_connectors_fine_model_holds_the_decaps_that_carry_its_current(tmp_path, monkeypatch):
+    """A connector port (through-hole pins) whose one near decap is a polymer capacitor while its current at high
+    frequency closes through ceramics farther away. The board-wide solve near 100 MHz (probe_shares) puts the
+    ceramics in its fine model, which is solved without the planes' capacitance [A118] over 10 coarse cells round
+    them: the corrected inductance Im(Z)/ω at 100 MHz then reads the same from 4000 and 12000 nodes (within 1.5 %)
+    and the reference, the board-wide model alone on its finest 0.25-0.30 mm grids (1.397 nH at both, made with
+    tools/dev/pdn_local_check.py --board-wide-only), within 2 %. Alone the coarse grids read 0.95 and 1.23 nH."""
+    from groundtruth.analysis import pdn as P
+
+    def l_at(name, budget):
+        """The connector's port at 100 MHz on this board-wide budget: (L in nH from Im(Z)/ω, the port)."""
+        b, sc, _ = make(tmp_path, pdn_board(caps=CONN_CAPS, output=(8.0, 15.0)), name, nets=(),
+                        cavity_max_nodes=budget)
+        sc.set_pdn([PdnSpec("VDD", source="none", ports=["J2.1/J2.2"])])
+        sc.save()
+        r = simulate(b, _conn_config(sc)).pdn[0]
+        assert not r.error, r.error
+        port = next(p for p in r.ports if p["part"] == "J2")
+        fs = np.array(port["f"])
+        k = int(np.argmin(np.abs(np.log(fs / 1e8))))
+        z = port["z_ohm"][k] * np.exp(1j * np.radians(port["phase_deg"][k]))
+        assert not any("not one inductance" in n for n in r.notes), r.notes
+        return z.imag / (2 * math.pi * fs[k]) * 1e9, port
+    coarse, port = l_at("c4k", 4000)
+    mid, _ = l_at("c12k", 12000)
+    assert set(port["local_decaps"]) == {"C1", "C2", "C3", "C4", "C5"} and port["local_share"] > 0.9
+    assert port["l_correction_nh"] > 0.3                    # the 1.26 mm grid alone reads about 0.95 nH
+    assert coarse == pytest.approx(mid, rel=0.015)
+    assert coarse == pytest.approx(1.397, rel=0.02) and mid == pytest.approx(1.397, rel=0.02)
+
+
+def test_the_local_correction_adds_its_levels_per_frequency():
+    """The loop's and the pins' pairs of regional models add per frequency (a telescoping sum), the median of the
+    sums is the correction; a frequency where a pair is not inductive is left out of every pair's sum."""
+    from types import SimpleNamespace
+    from groundtruth.analysis.pdn import _local_correction
+
+    def run(ls):
+        """A regional run whose port reads jωL (L in nH per frequency)."""
+        sols = {f: SimpleNamespace(Z=np.array([complex(0.0, 2 * math.pi * f * l * 1e-9)])) for f, l in ls.items()}
+        return SimpleNamespace(ok=lambda s=sols: s)
+    f1, f2, f3 = 3e7, 1e8, 3e8
+    loop = (run({f1: 1.50, f2: 1.49, f3: 1.48}), run({f1: 1.00, f2: 1.00, f3: 1.00}))
+    pins = (run({f1: 0.71, f2: 0.70, f3: -0.2}), run({f1: 0.69, f2: 0.69, f3: 0.68}))
+    meta = {"local": [loop, pins]}
+    dl = _local_correction(meta)
+    assert [f for f, _ in meta["local_nh"]] == [f1, f2]               # 300 MHz: the pins' fine run is not inductive
+    assert [v for _, v in meta["local_nh"]] == pytest.approx([0.52, 0.50])
+    assert dl * 1e9 == pytest.approx(0.51)
+
+
+def test_an_open_loop_is_found_before_it_is_solved():
+    """A regional model without the planes' capacitance whose port pads do not reach its decaps has no path round:
+    loop_closes says so (its solve would not converge), counting copper and parts but not the capacitance."""
+    from types import SimpleNamespace
+    from groundtruth.analysis.pdn import loop_closes
+    # nodes 0-1 rail copper, 2-3 ground copper, 4 an island; branches: 2 strips (0-1, 2-3), 1 capacitance (1-3),
+    # 1 part (a decap 1-2)
+    plane = SimpleNamespace(n_nodes=5, nb=4, ns=2, ncap=1, a_nodes=np.array([0, 2, 1, 1]),
+                            b_nodes=np.array([1, 3, 3, 2]), nid={k: k for k in range(5)})
+    assert loop_closes(plane, [(0, 1.0), (3, -1.0)])                  # rail - decap - ground
+    assert not loop_closes(plane, [(4, 1.0), (3, -1.0)])              # the island's pad
+    no_decap = SimpleNamespace(**{**vars(plane), "nb": 3, "a_nodes": plane.a_nodes[:3], "b_nodes": plane.b_nodes[:3]})
+    assert not loop_closes(no_decap, [(0, 1.0), (3, -1.0)])           # through the capacitance alone: open
