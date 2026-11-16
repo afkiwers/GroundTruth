@@ -1578,16 +1578,42 @@ check their design is sound").
 - Validation (tests/test_pdn.py, boardgen.pdn_board, planes 0.2 mm apart, 231 pF): bare planes 1/(ωC_pp) within
   0.1 %; one and four 1 µF decaps 1/(ω(nC + C_pp)) within 1 %, their minimum ESR/n plus copper; the source's 50 mΩ
   at low frequency; the target and its issue; a cut-off IC left out.
-- Pins on a fine model (`_local_runs`, `_local_correction`, the user's choice "Fine model per IC"): per IC two
-  regional models (its pads and the decaps within 9 mm, + 3 mm), at the fine pitch (dielectric height,
-  analysis.max_nodes) and at the board-wide pitch on its lattice (the region snapped to it), solved at 30 / 100 /
-  300 MHz; ΔL = Im(Z_fine - Z_coarse)/ω where both are inductive, median, added in series (jωΔL) to the IC's curve.
-  Without a decap in the region none (a small plane capacitor: the pitches differ in capacitance). Test board:
-  -43 % at 100 MHz on 1.26 mm cells, within 1 % with it (1.26 / 0.59 / 0.30 mm).
+- Pins on a fine model (`_local_runs`, `_local_correction`, the user's choice "Fine model per IC") [A118]: per port
+  (an IC, or a connector given as `ports`) regional models in pairs, fine and coarse, without the planes'
+  capacitance, solved at 30 / 100 / 300 MHz; ΔL = Im(Z_fine - Z_coarse)/ω per pair, summed, the median over the
+  frequencies, added in series (jωΔL) to the port's curve.
+  - Which decaps: `probe_shares` solves the board-wide model at the sweep's frequency nearest 100 MHz while the rail
+    is prepared (kept in the run: the scheduler does not solve it again) and reads each decap's share of each
+    port's current; the decaps carrying 90 % of it (LOCAL_SHARE), plus every decap within 9 mm, are the port's
+    loop. Far decaps with the smallest share leave first while the loop's fine pitch would be over 0.75 × the
+    board-wide one (LOCAL_COARSEST); a share under 60 % gets a note.
+  - Two levels (a telescoping sum): the loop's region (its pads and those decaps, max(3 mm, 10 coarse cells) round
+    them) at its fine pitch d1 against the board-wide pitch d on the board-wide lattice; when d1 is above 1.05 × the
+    pins' own pitch d2, the pins' region (the port and its near decaps, 10 cells of d1 round them) at d2 against d1
+    on the loop model's lattice. A region whose port does not reach its decaps through copper and parts
+    (`loop_closes`) is skipped: the loop's makes no correction (a note), the pins' leaves the loop's alone.
+  - The correction's values at the three frequencies differing by more than 20 % (and 0.05 nH) get a note: not one
+    inductance.
+  - Why so (2026-11-15; before, one pair: the IC's pads and the decaps within 9 mm, 3 mm round them, with the
+    planes' capacitance, against the board-wide pitch): by refboard's output connector the one near decap was a
+    polymer capacitor (8 nH) that resonated with the region's plane capacitance between the frequencies, the pitches'
+    small difference in that capacitance read as up to 2.5 nH, and the current really closed through ceramics
+    15-20 mm away: 1.14 nH at 40000 nodes, 1.50 nH at 80000. Now 1.378 / 1.383 / 1.352 nH from 20000 / 40000 / 80000;
+    the rail's whole sweep (`tools/dev/pdn_check.py`, 40000 / 80000) |Z| within 2.4 % from 10 to 100 MHz (27-31 %
+    before), the margin -4.8 / -4.6 dB (-3.2 / -5.6), in 248 / 603 s (440 / 726: the regional models solve faster
+    without capacitance).
+    A 3 mm margin (2.4 coarse cells) left the test connector 4 % high; 10 cells, 0.2 %.
+  - Test boards: an IC -43 % at 100 MHz on 1.26 mm cells, within 1 % with it (1.26 / 0.59 / 0.30 mm); a connector
+    with a polymer capacitor near and ceramics far, 1.415 / 1.406 / 1.406 nH from 4000 / 12000 / 60000 nodes against
+    1.397 nH for the board-wide model alone at 0.25-0.30 mm (`tools/dev/pdn_local_check.py`, which prints every
+    level of a rail's ports at several budgets).
 - Real board (refboard +3V3, LDO U49 as source), corrected: 40k nodes (0.86 mm, 12 min here, 5 ICs: U55 and
   U44 cut off) and 80k (0.59 mm, 29 min, all 7) agree at 100 MHz within 1-20 % (U53 0.571 / 0.596 Ω, margins
   within ~1.5 dB); ΔL 0.04-0.9 nH. (A first comparison read "halves from 0.86 to 0.59 mm": it compared the curves by
-  solve index, not by frequency, after different refinements; wrong.)
+  solve index, not by frequency, after different refinements; wrong.) On the board as relaid (2026-11-15, 1.15 /
+  0.78 mm, Im(Z)/ω at 100 MHz): with the two-level correction the ICs agree within 0.3-5 % (one 1.441 / 1.445 nH,
+  the worst 0.950 / 0.904 nH, its loop holding 51 % of its decap current at 80000), with the one-pair correction up
+  to 39 % (that IC's coarse regional model was capacitive at 40000 and got none).
 - Not yet: warm starts across frequencies (measured: -20 % iterations only).
 
 ## Voltage-aware safety checks (`analysis/safety.py`, M2, branch `safety`)

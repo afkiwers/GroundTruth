@@ -1193,15 +1193,22 @@ def radial_pair(radius: float = 10.0, h: float = 0.2, drill: float = 0.3) -> tup
 
 
 def pdn_board(caps: Sequence[tuple] = (), source: bool = False, size: Pt = (40.0, 30.0),
-              cut_ic: bool = False) -> BoardGen:
+              cut_ic: bool = False, output: Optional[Pt] = None) -> BoardGen:
     """A power-distribution test board: 4 layers 0.2 mm apart, a GND plane on In1.Cu and a VDD plane on In2.Cu over
     the whole board (0.3 mm inset), an IC U1 at PDN_IC with one supply pin (VDD, power_in) and one ground pin, each
     with a via in its pad to its plane. caps: (ref, value, (x, y)) 0402 capacitors VDD | GND with a via in each pad.
     source: a 2-pin connector J1 (VDD, GND) at the left edge, vias in its pads (the rail's supply).
-    cut_ic: a second IC U2 whose supply pad has no via (cut off from the VDD plane; its ground pad has one)."""
+    cut_ic: a second IC U2 whose supply pad has no via (cut off from the VDD plane; its ground pad has one).
+    output: a through-hole 2-pin connector J2 at (x, y), pin 1 VDD 2.5 mm left of it and pin 2 GND 2.5 mm right (1.2
+    mm drill, 2 mm round pads on every layer): a load's connector, a PDN port "J2.1/J2.2"."""
     g = BoardGen(layers=4, size=size, dielectrics=[0.2, 0.2, 0.2])
     g.plane("GND", "In1.Cu")
     g.plane("VDD", "In2.Cu")
+    if output is not None:
+        tht = {"type": "thru_hole", "drill": 1.2, "size": (2.0, 2.0), "shape": "circle"}
+        g.footprint("J2", "Conn_out", "Connector:Fake_2pin_THT", output, [
+            {"number": 1, "at": (-2.5, 0.0), "net": "VDD", **tht},
+            {"number": 2, "at": (2.5, 0.0), "net": "GND", **tht}], attrs="through_hole")
     x, y = PDN_IC
     g.footprint("U1", "MCU", "Package_SO:Fake_IC", (x, y), [
         {"number": 1, "at": (-0.6, 0.0), "net": "VDD", "size": (0.6, 0.8), "pinfunction": "VDD", "pintype": "power_in"},

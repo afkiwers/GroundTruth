@@ -68,12 +68,17 @@ the inductance it sees above its decaps and the worst margin to the target; issu
 naming the part holding the rail there) and `decap_missing` (a supply pin without a decap pad within `decap_mm`). The
 HTML report and the plugin's **Power integrity** tab (Find rails lists the rails ICs draw from; the Results tab
 shows each rail's curves and what holds it at each frequency). An IC whose pads the model's grid cannot join to the
-rail's copper (pads smaller than a cell) is left out with a note: raise the resolution. Each IC's pins are also solved
-on a fine model of their own surroundings (the inductance at small pads and vias), added to its board-wide curve: on
-refboard (+3V3, a 0.3 A step, source U49; 2026-10-19, `tools/dev/pdn_check.py --budgets 40000,80000`) the
-0.86 mm and 0.59 mm board-wide grids then agree within 1-5 % at 100 MHz (margins within 0.4 dB; U53 0.62 Ω against
-the 0.55 Ω target); U55 and U44 join only at 0.59 mm (their pads do not reach the rail's copper on the coarser
-grid, which a note says).
+rail's copper (pads smaller than a cell) is left out with a note: raise the resolution. Each port's loop is also
+solved on a fine model of its own, and what the board-wide grid gets wrong there (the inductance at small pads and
+vias, and of the current's spread in the planes) is added to its board-wide curve. That fine model holds the decaps
+that actually carry the port's current at high frequency, read off the board-wide model near 100 MHz, not only the
+nearest ones: by an output connector whose nearest capacitor is a polymer one (8 nH) the current closes through
+ceramics farther away. The pins and their nearby decaps get a finer model still. On refboard's first output rail
+(a 5 A step at its output connector, 2026-11-15, `tools/dev/pdn_check.py --budgets 40000,80000`) the 1.15 mm and
+0.78 mm board-wide grids then agree within 2.4 % from 10 to 100 MHz (the margin to the target -4.8 / -4.6 dB; before,
+with only the nearest decap in the fine model, 27-31 % apart and -3.2 / -5.6 dB), and on its +3V3 the ICs within
+0.3-5 % at 100 MHz. A note says when that fine model holds only part of a port's current (its far decaps would make
+it too large to be fine) or its correction is not one inductance.
 
 **A power stage as the source.** A rail that is a power stage's output (Converters tab) has the stage in closed
 loop as its source, found by itself or named as `source: stage:NAME`: the stage's averaged model with its loop as
