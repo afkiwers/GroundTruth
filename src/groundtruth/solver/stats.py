@@ -15,6 +15,11 @@ Simulate (`with collect() as c`, analysis/simulate.simulate) counts:
   wall time against the solves' summed time (the rest is threads waiting for the round's slowest solve);
 * per phase of the run (`mark`): its wall time; and the process's CPU time, memory (sampled, and the system's own
   peak) and the machine's swap traffic during the run.
+* memory against the scheduler's plan (the user's 8x jobs ran out on a 62.7 GB server, 2026-11-16): each phase's
+  memory at its end (the models' own after "models"); per round what the planner allowed and expected to run at
+  once next to the process's peak in it (RoundSampler: a thread sampling every SAMPLE_S); per model the
+  factorisation memory planned before its first factorisation (`planned`) next to the fill and the backend's
+  reported peak; per group the factorisation memory it was planned to keep.
 
 `Collector.as_dict` gives it as plain data: the result keeps it in SimulationResult.solver["stats"], which the
 simulation history writes into every kept run's run.json (tools/dev/run_stats.py prints it). Counting changes
@@ -32,6 +37,7 @@ from typing import Optional
 
 ENABLED = True              # False: collect() yields None and every hook does nothing
 USES_KEPT = 12              # a model's users listed by name at most (the rest counted)
+SAMPLE_S = 0.2              # RoundSampler's interval: a factorisation's commit grows over seconds, not milliseconds
 
 _active: list = [None]      # the Collector of the run in progress (one Simulate at a time per process)
 _tls = threading.local()    # per thread: seconds spent factorising and waiting for others' factorisations
@@ -154,6 +160,70 @@ def _swap() -> Optional[tuple[int, int]]:
         return None
 
 
+def _private() -> Optional[int]:
+    """This process's private memory now (bytes): on Windows its commit (psutil's `private`, what the commit limit
+    and the planner's LU_COMMIT count), elsewhere its resident memory; None without psutil."""
+    ps = _psutil()
+    try:
+        m = ps.Process().memory_info() if ps else None
+    except Exception:           # noqa: BLE001
+        return None
+    return None if m is None else int(getattr(m, "private", m.rss))
+
+
+class RoundSampler:
+    """The process's memory during a stretch of the run (a scheduling round): a daemon thread samples its resident
+    and private memory and the memory available every SAMPLE_S, keeping their values at the start and their
+    extremes, so a round's peak is seen even when it falls between the scheduler's own samples (`with
+    RoundSampler() as m: ...; m.figures()`)."""
+
+    def __init__(self):
+        """Not started."""
+        self.rss0 = self.private0 = self.avail0 = None
+        self.rss_max = self.private_max = 0
+        self.avail_min: Optional[int] = None
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def _take(self):
+        """One sample: the maxima and the minimum updated."""
+        rss, private, avail = _rss(), _private(), _available()
+        if rss:
+            self.rss_max = max(self.rss_max, rss)
+        if private:
+            self.private_max = max(self.private_max, private)
+        if avail is not None:
+            self.avail_min = avail if self.avail_min is None else min(self.avail_min, avail)
+
+    def _loop(self):
+        """Sample until stopped."""
+        while not self._stop.wait(SAMPLE_S):
+            self._take()
+
+    def __enter__(self):
+        """The values at the start, then the sampling thread."""
+        self.rss0, self.private0, self.avail0 = _rss(), _private(), _available()
+        self._take()
+        self._thread = threading.Thread(target=self._loop, name="gt-mem-sampler", daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        """Stop the thread (one last sample)."""
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2 * SAMPLE_S + 1.0)
+        self._take()
+        return False
+
+    def figures(self) -> dict:
+        """The start values and extremes in MB (None where unknown)."""
+        mb = lambda b: None if b is None else round(b / 2 ** 20)        # noqa: E731
+        return {"rss_start_mb": mb(self.rss0), "rss_max_mb": mb(self.rss_max or None),
+                "private_start_mb": mb(self.private0), "private_max_mb": mb(self.private_max or None),
+                "available_start_mb": mb(self.avail0), "available_min_mb": mb(self.avail_min)}
+
+
 def _available() -> Optional[int]:
     """The memory available to this process now (core.sysmem.available_bytes), None when unknown."""
     try:
@@ -198,6 +268,7 @@ class Collector:
         self.models: list[dict] = []
         self.rounds: list[dict] = []
         self.marks: list[tuple[str, float]] = [("start", self.t0)]
+        self.mark_memory: dict[str, dict] = {}  # per phase: the memory at its end (MB)
         self.info: dict = {}                    # set by the scheduler: threads, their limit, memory gate counts
         self.swap0 = _swap()
         self.available0 = _available()
@@ -249,12 +320,24 @@ class Collector:
                     e["more_uses"] += 1
 
     def factorised(self, stack, seconds: float, fill: int):
-        """A factorisation of the model was made in `seconds` with `fill` stored entries."""
+        """A factorisation of the model was made in `seconds` with `fill` stored entries (and the backend's
+        reported peak, `lu_peak`, when it gives one: PARDISO)."""
         e = self.entry(stack)
         with self._lock:
             e["factorisations"] += 1
             e["factorise_s"] += seconds
             e["fill"] = max(e["fill"], int(fill))
+            peak = int(getattr(stack, "lu_peak", 0) or 0)
+            if peak:
+                e["lu_peak_mb"] = max(e.get("lu_peak_mb", 0), round(peak / 2 ** 20))
+
+    def planned(self, stack, factor_bytes: int):
+        """The factorisation memory the scheduler plans for the model before its first factorisation
+        (peec.lu_bytes from its unknowns: the estimate a first solve is admitted with); later calls keep it."""
+        e = self.entry(stack)
+        with self._lock:
+            if "planned_first_mb" not in e and not e["factorisations"]:
+                e["planned_first_mb"] = round(factor_bytes / 2 ** 20)
 
     def solved(self, stack, iterations: Optional[int], wall: float, mark: tuple[float, float],
                times: Optional[SolveTimes], failed: bool = False):
@@ -290,8 +373,11 @@ class Collector:
     def mark(self, name: str):
         """The run's phase called `name` ends now (its wall time is from the previous mark); memory sampled."""
         self.sample()
+        rss, private, avail = _rss(), _private(), _available()
+        mb = lambda b: None if b is None else round(b / 2 ** 20)        # noqa: E731
         with self._lock:
             self.marks.append((name, time.perf_counter()))
+            self.mark_memory[name] = {"rss_mb": mb(rss), "private_mb": mb(private), "available_mb": mb(avail)}
 
     def round(self, **info):
         """A scheduling round's figures (simulate.solve_setups: its tasks, threads, limit, wall and busy seconds)."""
@@ -327,7 +413,7 @@ class Collector:
         now = time.perf_counter()
         wall = now - self.t0
         cpu = time.process_time() - self.cpu0
-        phases = [{"phase": name, "s": round(t - prev, 2)}
+        phases = [{"phase": name, "s": round(t - prev, 2), **self.mark_memory.get(name, {})}
                   for (_, prev), (name, t) in zip(self.marks, self.marks[1:])]
         if self.marks[-1][1] < now:
             phases.append({"phase": "rest", "s": round(now - self.marks[-1][1], 2)})
