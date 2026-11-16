@@ -1,6 +1,7 @@
 """The solver statistics (solver/stats.py, docs/SPEED.md): a Simulate keeps, per model, what the solver did and
 where the time went, per scheduling round the threads, per phase its time; counting changes no number."""
 import json
+from types import SimpleNamespace
 
 import numpy as np
 from shapely.geometry import box
@@ -141,3 +142,36 @@ def test_windows_is_not_asked_for_its_swap_traffic(monkeypatch):
     assert stats._swap() is None and asked == []
     monkeypatch.setattr(stats.sys, "platform", "linux")
     assert stats._swap() is None and asked == [1]       # elsewhere it asks (the error is swallowed: None)
+
+
+def test_a_simulate_keeps_its_memory_against_the_plan(tmp_path):
+    """Planned against measured memory (the user's 8x jobs ran out on a 62.7 GB server, 2026-11-16): each phase's
+    memory at its end, per round the memory planned at once beside the process's sampled extremes, per model the
+    factorisation memory planned before its first factorisation (the estimate peec.lu_bytes gives from its unknowns,
+    before any fill is measured), per group what it was planned to keep."""
+    from groundtruth.solver import peec
+    board, sc, _ = _board(tmp_path)
+    st = sim.simulate(board, sc.config).solver["stats"]
+    json.dumps(st)
+    models = {p["phase"]: p for p in st["phases"]}["models"]
+    assert models["rss_mb"] > 0 and models["private_mb"] > 0
+    for r in st["rounds"]:
+        m = r["memory"]
+        assert m["planned_at_once_mb"] >= 0 and m["rss_max_mb"] >= m["rss_start_mb"] > 0
+        assert m["private_max_mb"] >= m["private_start_mb"] > 0
+    (bw,) = [m for m in st["models"] if m["label"] == "board-wide"]
+    # the estimate from its unknowns alone: a model of the same size and kind with no fill measured yet
+    fresh = SimpleNamespace(lu_nnz=0, precond_mode=bw["precond"], nb=bw["unknowns"] - bw["nodes"])
+    assert bw["planned_first_mb"] == round(peec.lu_bytes(fresh) / 2 ** 20) > 0 and bw["fill"] > 0
+    assert st["info"]["group_plan"] and all(g["keeps_mb"] >= 0 and g["runs"] >= 1 for g in st["info"]["group_plan"])
+
+
+def test_the_round_sampler_sees_a_peak_between_the_rounds_own_samples():
+    """RoundSampler's thread catches memory taken and given back inside the stretch it watches."""
+    import time
+    with stats.RoundSampler() as s:
+        block = np.ones(64 * 2 ** 20 // 8)                  # 64 MB, touched
+        time.sleep(3 * stats.SAMPLE_S)
+        del block
+    f = s.figures()
+    assert f["rss_max_mb"] >= f["rss_start_mb"] + 50

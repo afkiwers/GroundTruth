@@ -95,6 +95,39 @@ def show(st: dict, n_models: int):
           f"the process started), available {mem.get('available_start_mb')} MB at the start, "
           f"{mem.get('available_min_mb')} MB at the least; swap in {mem.get('swap_in_mb')} MB, out "
           f"{mem.get('swap_out_mb')} MB during the run")
+    show_memory_plan(st)
+
+
+def show_memory_plan(st: dict):
+    """Memory against the scheduler's plan (runs from 2026-11-17 on): each phase's memory at its end, each group's
+    planned keep, each round's planned memory at once beside the private memory it added, each model's first
+    factorisation planned beside its measured fill and the backend's reported peak."""
+    phases = [p for p in st.get("phases", []) if p.get("private_mb") is not None]
+    if not phases:
+        return
+    print("  memory at each phase's end (private / resident / available MB): " + ", ".join(
+        f"{p['phase']} {p['private_mb']} / {p['rss_mb']} / {p['available_mb']}" for p in phases))
+    info = st.get("info", {})
+    for g in info.get("group_plan", []):
+        print(f"    group {g['group']:2d}: {g['runs']:3d} runs, planned to keep {g['keeps_mb']} MB, largest solve "
+              f"{g['largest_solve_mb']} MB")
+    rounds = [r for r in st.get("rounds", []) if r.get("memory")]
+    if rounds:
+        print("  rounds' memory (MB):  #  group  step      planned at once  private start -> max (added)  "
+              "available start -> min  budget")
+        for r in rounds:
+            m = r["memory"]
+            added = (m["private_max_mb"] or 0) - (m["private_start_mb"] or 0)
+            print(f"                      {r['round']:2d}  {r['group']:5d}  {r['step']:8s} {m['planned_at_once_mb']:12d}"
+                  f"     {m['private_start_mb']:>7} -> {m['private_max_mb']:>7} ({added:+7d})"
+                  f"      {m['available_start_mb']} -> {m['available_min_mb']}  {m.get('budget_mb')}")
+    models = [m for m in st.get("models", []) if m.get("planned_first_mb") is not None]
+    if models:
+        print("  first factorisation planned vs measured (MB; fill x 16 bytes, the backend's reported peak):")
+        for m in sorted(models, key=lambda m: -m["fill"])[:12]:
+            print(f"    {m['label'][:16]:16s} {m['precond']:6s} unknowns {m['unknowns']:>9d}  planned "
+                  f"{m['planned_first_mb']:>7d}  fill {m['fill'] * 16 / 2 ** 20:8.0f}  reported peak "
+                  f"{m.get('lu_peak_mb', '-')}")
 
 
 def main() -> int:

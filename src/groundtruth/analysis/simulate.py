@@ -3734,12 +3734,14 @@ def memory_notes(relief: MemoryRelief, stacks, gate0: tuple = (0, 0)) -> list[st
 class Admission:
     """Lets tasks run side by side while the memory they plan to use (`need` bytes each) fits in `budget`; a task
     that does not fit waits for running ones to finish, and runs alone when nothing else is running (never waits
-    for memory nothing will free). `peak`: the most that ran at once."""
+    for memory nothing will free). `peak`: the most that ran at once; `used_peak`: the most memory they planned at
+    once (the run's statistics set it against what the process then used)."""
 
     def __init__(self, budget: float):
         """Nothing running."""
         self.budget = budget
         self.used = 0.0
+        self.used_peak = 0.0
         self.running = 0
         self.peak = 0
         self.cond = threading.Condition()
@@ -3751,6 +3753,7 @@ class Admission:
             while self.running and self.used + need > self.budget:
                 self.cond.wait()
             self.used += need
+            self.used_peak = max(self.used_peak, self.used)
             self.running += 1
             self.peak = max(self.peak, self.running)
         try:
@@ -3920,13 +3923,20 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
             for st in (r.exc.stack, r.exc.stack._base):
                 if st is not None:
                     c.label(st, kind, name)
+                    c.planned(st, factor_bytes(st))     # the estimate before its first factorisation
         lim = _memory_limit([r.exc.stack for _, r in runs])
-        c.info.update({"threads_setting": str(t), "threads_cpu": threads_cpu,
-                       "threads_memory": memory_threads(threads, [r.exc.stack for _, r in runs], avail0) if auto
-                       else threads, "admission": auto, "sparse": peec._sparse.report(),
-                       "available_gb": None if avail0 is None else round(avail0 / 2 ** 30, 2),
-                       "memory_limit": None if lim is None else {"model": c.entry(lim[0])["label"],
-                                                                 "gb": round(lim[1] / 2 ** 30, 2)}})
+        figures = {"threads_setting": str(t), "threads_cpu": threads_cpu,
+                   "threads_memory": memory_threads(threads, [r.exc.stack for _, r in runs], avail0) if auto
+                   else threads, "admission": auto, "sparse": peec._sparse.report(),
+                   "available_gb": None if avail0 is None else round(avail0 / 2 ** 30, 2),
+                   "memory_limit": None if lim is None else {"model": c.entry(lim[0])["label"],
+                                                             "gb": round(lim[1] / 2 ** 30, 2)}}
+        if "available_gb" in c.info:
+            # a later call in the same run (Simulate's route_model_fallback retry): kept apart, so the main
+            # solves' figures stay those of the main solves (on 2026-11-16 the retry's 1.0 GB stood for them)
+            c.info.setdefault("later_calls", []).append(figures)
+        else:
+            c.info.update(figures)
 
     def unsolved(task, error: MemoryError):
         """The relief's last rung: the frequency is left unsolved, with a note (as a SolverError in solve_at)."""
@@ -4014,17 +4024,25 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
             avail = available_bytes()
             if avail is not None:
                 gate = Admission(MEMORY_SHARE * avail)
-        run_parallel(sorted(tasks, key=lambda t: t[2]), run, threads, relief,
-                     need=lambda t: solve_bytes(t[1].exc.stack, t[2]), admission=gate)
+        need = lambda t: solve_bytes(t[1].exc.stack, t[2])          # noqa: E731
+        # what the round plans to run at once, taken before it runs (a solve's factorisation replaces the model's
+        # estimate by its measured fill): without the gate the largest needs of as many solves as threads
+        ahead = sorted((need(t) for t in tasks), reverse=True)[:max(min(threads, len(tasks)), 1)] if c else []
+        # with statistics, the round's memory is sampled throughout (its peak against what was planned)
+        with (stats.RoundSampler() if c is not None else nullcontext()) as sampler:
+            run_parallel(sorted(tasks, key=lambda t: t[2]), run, threads, relief, need=need, admission=gate)
         if c is not None:
             kinds: dict[str, int] = {}
             for s, r, _ in tasks:
                 k = run_kind(s, r)
                 kinds[k] = kinds.get(k, 0) + 1
+            planned_mb = round((gate.used_peak if gate is not None and gate.used_peak else sum(ahead)) / 2 ** 20)
             # a round of one solve (or one thread) runs without the gate (run_parallel): at_once from the threads
             c.round(round=rounds[0], group=group, step=step, tasks=len(tasks), by_kind=kinds,
                     threads=min(threads, len(tasks)), at_once=gate.peak if gate is not None and gate.peak else
-                    min(threads, len(tasks)), wall_s=round(time.perf_counter() - t0, 2), busy_s=round(busy[0], 2))
+                    min(threads, len(tasks)), wall_s=round(time.perf_counter() - t0, 2), busy_s=round(busy[0], 2),
+                    memory={"budget_mb": None if gate is None else round(gate.budget / 2 ** 20),
+                            "planned_at_once_mb": planned_mb, **sampler.figures()})
         rounds[0] += 1
 
     stacks = list({id(r.exc.stack): r.exc.stack for _, r in runs}.values())
@@ -4050,6 +4068,12 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
     groups = [runs]
     if free_done:
         groups = solve_groups(runs, threads, available_bytes(), admitted=auto)
+    if c is not None and "group_plan" not in c.info:
+        # each group's planned factorisation memory kept while it is solved, and its largest solve (the main
+        # solves'; a later call's groups are not recorded), set against the rounds' measured memory
+        c.info["group_plan"] = [{"group": gi, "runs": len(g), "keeps_mb": round(kept_bytes(g) / 2 ** 20),
+                                 "largest_solve_mb": round(max(run_bytes(r) for _, r in g) / 2 ** 20)}
+                                for gi, g in enumerate(groups)]
     hooked: set[int] = set()
     for gi, group in enumerate(groups):
         next_round()
