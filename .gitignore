@@ -22,3 +22,6 @@ CLAUDE.md
 # session notes: local only (personal paths, machines, boards)
 docs/HANDOFF.md
 docs/NEXT_STEPS.md
+# a handover between machines: local only (names boards, customers, machines)
+RESTORE.md
+claude_memory/
