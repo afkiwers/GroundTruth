@@ -2285,7 +2285,10 @@ check's severity or switches it off (the check names are in the <a href="#issues
   only when it is at least 1.5 times as fast; otherwise the status line says "solved on CPU (the &lt;GPU&gt; computes
   … at 0.3x the CPU's speed here …)". <b>On</b> uses the GPU anyway. Only one program at a time computes on a GPU:
   under auto, a second one (another Simulate, a compute server's other job) runs on the CPU and says the GPU is in
-  use; under on it waits for it.</li>
+  use; under on it waits for it. A Simulate uses at most 80 % of the GPU memory that is free when it starts; a solve
+  that needs more is done on the CPU instead (the status line counts them). Without that limit the NVIDIA driver on
+  Windows would quietly place the excess in the computer's own memory, where it is slow and can run the computer
+  out of memory.</li>
 <li>The window never waits for a job: everything slow runs in the background, and <b>Cancel</b> stops it.</li>
 </ul>
 

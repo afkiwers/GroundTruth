@@ -265,13 +265,52 @@ def use(mode: str):
                 lock.release()
         else:
             run.lock = lock
+            _cap(run.device)
     _active[0] = run
     try:
         yield run
     finally:
         _active[0] = None
+        _give_back(run.device)
         if run.lock is not None:
             run.lock.release()
+
+
+def _cap(dev: Device):
+    """Limit PyTorch's allocations on a CUDA/ROCm device to DEVICE_MEMORY_SHARE of what is free on it as the run
+    starts, so that an allocation past it raises OutOfMemoryError (that solve is then redone on the CPU,
+    PlaneStack._solve_here) instead of being placed in the host's memory.
+
+    Why: with the NVIDIA driver on Windows (WDDM, "CUDA - Sysmem Fallback Policy" at its default) an allocation
+    past the card's memory does not fail, it silently goes to system RAM, and every device allocation also counts
+    1:1 in the process's private bytes (measured 2026-11-20, RTX 5070 Laptop 8 GB, driver 582: 14 GB allocated on
+    the 8 GB card without an error, private bytes +14 GB; with a 0.6 cap the 5th GB raised OutOfMemoryError).
+    On a compute server with two 5 GB cards that spill took a 4x Simulate from 9.7 GB (GPU off) to 62.7 GB of host
+    memory until the server's memory watchdog stopped it; DeviceTooSmall's free-memory check alone did not hold
+    it (several threads pass it at once; operators' and solves' own device arrays are not in device_bytes).
+    The cap is PyTorch's caching allocator's (cuFFT and cuSPARSE work areas go through it); the CUDA context itself
+    (some hundred MB) is outside it. It is set per process and device, again at every run: what is free then."""
+    if dev.device.type != "cuda":
+        return
+    try:
+        cuda = dev.torch.cuda
+        index = dev.device.index if dev.device.index is not None else cuda.current_device()
+        cuda.empty_cache()          # this process's own cached blocks are free for this run: count them as free
+        free, total = cuda.mem_get_info(index)
+        cuda.set_per_process_memory_fraction(max(min(DEVICE_MEMORY_SHARE * free / total, 1.0), 0.0), index)
+    except Exception:               # noqa: BLE001 - an older PyTorch or a backend without it: DeviceTooSmall only
+        pass
+
+
+def _give_back(dev: Optional[Device]):
+    """After a run on a CUDA/ROCm device: return PyTorch's cached device memory to the driver (on Windows it counts in
+    the process's private bytes until then, and the plugin and a server's worker live on after the run)."""
+    if dev is None or dev.device.type != "cuda":
+        return
+    try:
+        dev.torch.cuda.empty_cache()
+    except Exception:               # noqa: BLE001 - nothing to give back
+        pass
 
 
 def _candidate() -> Optional[Device]:
