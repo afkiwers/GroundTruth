@@ -2482,8 +2482,10 @@ power stages: one big item can't be split further.</p>
     threads then.</li>
   <li><code>"threads": "-"</code>: solver threads per job (<code>"-"</code>: each user's Preferences; or a number,
     e.g. 8 = the physical cores for one job at a time).</li>
-  <li><code>"gpu": "auto"</code>: use the server's GPUs if PyTorch finds them (<code>"on"</code>, <code>"off"</code>,
-    or <code>"-"</code>: each user's Preferences).</li>
+  <li><code>"gpu": "auto"</code>: each job as its user chose in Preferences (GPU auto uses the server's GPUs when
+    PyTorch finds them and they are faster; GPU off never). <code>"on"</code> or <code>"off"</code> here decides for
+    every job, whatever its user chose (<code>"-"</code> is the same as <code>"auto"</code>). The server reads this
+    file only when it starts: restart it after a change.</li>
   <li><code>"keep_hours": 24</code>: how long a finished job's result waits for its owner (removed at once when
     fetched).</li>
   <li><code>"port": 8765</code>: another port (then open that one in the firewall, and add <code>:port</code> to the

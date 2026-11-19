@@ -212,7 +212,8 @@ class ComputeServer:
                  data_dir: Optional[Path] = None, beacon_port: int = 0, lead: bool = False, peers: tuple = (),
                  remote_update: bool = False, home: Optional[Path] = None, address: str = ""):
         """`threads` / `gpu`: the server's solver threads and GPU choice for every job ("-": each job's own, i.e.
-        the plugin's Preferences); `data_dir`: the jobs' folder (default_data_dir); `remote_update`: take signed
+        the plugin's Preferences; a GPU choice of "auto" also keeps each job's own: only "on" / "off" override it,
+        worker._on_server); `data_dir`: the jobs' folder (default_data_dir); `remote_update`: take signed
         updates (remote/release.py) into `home` (the install folder: its release_key.pub, updates/)."""
         self.key, self.host, self.port = key, host, port
         self.workers, self.threads, self.gpu, self.keep_s = max(1, int(workers)), str(threads), str(gpu), keep_s

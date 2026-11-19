@@ -38,11 +38,15 @@ from pathlib import Path
 
 
 def _on_server(config, threads: str, gpu: str):
-    """The job's config with the server's solver threads and GPU choice ("-": the job's own)."""
+    """The job's config with the server's solver threads and GPU choice ("-": the job's own). The server's GPU
+    choice overrides the job's only when it is "on" or "off" (an administrator's decision): "auto", the server's
+    default, keeps the job's own, so a user who chose GPU off in Preferences gets no GPU (until 2026-11-17 the
+    server's "auto" overrode it: every job tried the server's 5 GB GPUs, full at 4x, and fell back to the CPU
+    dozens of times per run)."""
     a = config.analysis
     if threads != "-":
         a = replace(a, threads=int(threads) if threads.isdigit() else threads)
-    if gpu != "-":
+    if gpu in ("on", "off"):
         a = replace(a, gpu=gpu)
     return replace(config, analysis=a)
 

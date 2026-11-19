@@ -904,7 +904,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--threads", help="solver threads per job: auto or a number (settings file; default '-': the "
                                       "job's own, from the plugin's Preferences)")
     sp.add_argument("--gpu", choices=("-", "auto", "on", "off"),
-                    help="solver iterations on this PC's GPUs (settings file; default auto; '-': the job's own)")
+                    help="solver iterations on this PC's GPUs (settings file; default auto, which like '-' keeps each "
+                         "job's own choice; on / off decide for every job)")
     sp.add_argument("--keep-hours", type=float, help="how long a finished job's result waits for its owner "
                                                      "(settings file; default 24)")
     sp.add_argument("--lead", action=argparse.BooleanOptionalAction, default=None,

@@ -498,3 +498,20 @@ def test_a_job_on_a_server_that_is_gone_can_be_removed(tmp_path):
     up = Server(True)
     assert stop_on_server(jobs, up, "b", remove=True) is None and jobs.get("b") is None
     assert stop_on_server(jobs, up, "c") is None and jobs.get("c")["state"] == "cancelled" and up.forgot == ["b", "c"]
+
+
+def test_the_servers_gpu_choice_keeps_the_jobs_own_unless_on_or_off():
+    """The user had GPU off in Preferences, but the server's default "auto" overrode it: every job tried the
+    server's GPUs (full at 4x) and fell back to the CPU dozens of times per run (2026-11-17). Now the server's "auto"
+    and "-" keep each job's own choice; only "on" / "off" in server.json decide for every job. Its threads as
+    before ("-": the job's own)."""
+    from groundtruth.config.settings import Config
+    from groundtruth.remote.worker import _on_server
+    for job in ("auto", "on", "off"):
+        cfg = Config()
+        cfg.analysis.gpu, cfg.analysis.threads = job, "auto"
+        for server, want in (("auto", job), ("-", job), ("on", "on"), ("off", "off")):
+            got = _on_server(cfg, "-", server).analysis
+            assert got.gpu == want, (job, server, got.gpu)
+            assert got.threads == "auto"
+        assert _on_server(cfg, "8", "-").analysis.threads == 8
