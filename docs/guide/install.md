@@ -94,7 +94,7 @@ the CPU as before, so this is only worth doing on the machine that has the card.
 | A GPU | NVIDIA (Windows or Linux), or AMD on Linux (ROCm). Apple GPUs and Intel integrated graphics are not used. |
 | Its driver | A current NVIDIA driver. `nvidia-smi` (in a console) shows "CUDA Version: 12.x" at the top right: the highest CUDA build the driver can run. |
 | PyTorch with GPU support | Installed into the Python environment GroundTruth runs in: the KiCad plugin's own environment, or the venv you run the CLI from. Around 2.5 GB to download. GroundTruth does not install it by itself. |
-| Disk and memory | Around 5 GB free for PyTorch. A large board needs a few GB of GPU memory; a solve that does not fit is done on the CPU instead. |
+| Disk and memory | Around 5 GB free for PyTorch. A large board needs a few GB of GPU memory. A Simulate uses at most 80 % of what is free on the GPU when it starts; a solve that does not fit is done on the CPU instead (never in the computer's own memory through the driver's fallback). |
 
 The solver computes in double precision. Data-centre cards (A100, H100) do that at full speed; GeForce and most
 workstation cards at a small fraction of their single-precision speed. The speed-up therefore depends on the card:

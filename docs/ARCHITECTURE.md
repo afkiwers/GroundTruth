@@ -465,6 +465,18 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
     device failure in a solve except SolverError (out of memory, a missing operation) → that solve again on the
     CPU, counted (`Run.fallbacks`, the first error), shown with the result ("solved on GPU X (2 solve(s) done on
     the CPU instead: …)"). Double precision only (single precision stalls GMRES near resonances).
+  - **The device's memory is capped (2026-11-20, `gpu._cap` / `_give_back`).** On Windows the NVIDIA driver's
+    "CUDA - Sysmem Fallback Policy" (its default) places an allocation past the card's memory in system RAM
+    instead of failing, and every device allocation counts 1:1 in the process's private bytes (an RTX 5070 Laptop
+    8 GB, driver 582: 14 GB allocated without an error, private bytes +14 GB). On the compute server (two 5 GB
+    Quadro P2200) a refboard 4x Simulate under GPU auto took 62.7 GB of host memory until the server's watchdog
+    stopped it; with the GPU off the same run peaked at 9.7 GB (`DeviceTooSmall`'s free-memory check per stack did
+    not hold it: threads pass it together, and operators' and solves' own arrays are not in `device_bytes`). So
+    `gpu.use` caps PyTorch's caching allocator at `DEVICE_MEMORY_SHARE` (0.8) of the device's free memory as the
+    run starts (`set_per_process_memory_fraction`): past it an allocation raises OutOfMemoryError and that solve is
+    done on the CPU (a fallback, as above); the cached memory is returned to the driver when the run ends. Tests:
+    tests/test_gpu.py (a fake device: the cap's value, the hand-back; a real CUDA device where there is one:
+    twice the free memory requested, OutOfMemoryError at the cap).
   - Measured here only on PyTorch's CPU device (correctness): the device products equal numpy's to 1e-12, a
     Simulate with the board-wide model gives the same harmonics, margins (≤ 1e-3 dB) and issues, the fix search the
     same fixes. Speed on a real GPU: not measured yet (`tools/dev/gpu_check.py` on the GPU machine).

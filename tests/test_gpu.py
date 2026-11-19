@@ -148,6 +148,66 @@ def test_one_process_at_a_time_on_a_gpu(monkeypatch):
     held.release()
 
 
+def test_a_cuda_run_is_capped_to_the_free_device_memory_and_gives_it_back(monkeypatch):
+    """A run on a CUDA/ROCm device caps PyTorch's allocations at DEVICE_MEMORY_SHARE of the device's free memory
+    as the run starts (its own cached blocks emptied first: they are free for it), so that an allocation past it
+    fails (the solve goes to the CPU) instead of spilling into the host's memory (Windows' sysmem fallback); at the
+    end the cached memory goes back to the driver. A fake torch.cuda: no GPU needed."""
+    import types
+    calls = []
+
+    class Cuda:
+        def empty_cache(self):
+            calls.append("empty")
+
+        def current_device(self):
+            return 1
+
+        def mem_get_info(self, index):
+            calls.append(("info", index))
+            return (3 * 2 ** 30, 5 * 2 ** 30)           # 3 of 5 GB free
+
+        def set_per_process_memory_fraction(self, fraction, index):
+            calls.append(("cap", round(fraction, 6), index))
+    fake_torch = types.SimpleNamespace(cuda=Cuda())
+    dev = gpu.Device(fake_torch, types.SimpleNamespace(type="cuda", index=None), "Test GPU")
+    monkeypatch.setattr(gpu, "_claim", lambda mode: (None, ""))
+    monkeypatch.setattr(gpu, "probe", lambda mode: None if mode == "off" else dev)
+    with gpu.use("on") as run:
+        assert run.device is dev
+        assert calls == ["empty", ("info", 1), ("cap", round(gpu.DEVICE_MEMORY_SHARE * 3 / 5, 6), 1)]
+    assert calls[-1] == "empty"                          # handed back after the run
+    calls.clear()
+    with gpu.use("off"):                                 # the CPU: nothing touched
+        pass
+    assert calls == []
+
+
+@pytest.mark.skipif(not __import__("torch").cuda.is_available(), reason="needs a CUDA/ROCm GPU")
+def test_a_real_gpu_raises_out_of_memory_past_the_cap_instead_of_spilling(monkeypatch):
+    """On a real CUDA device (Windows' driver would otherwise place the excess in host RAM): inside a run, allocating
+    past DEVICE_MEMORY_SHARE of the free memory raises OutOfMemoryError (a RuntimeError, which _solve_here turns into
+    a CPU solve), and the memory is free again after the run."""
+    import torch
+    monkeypatch.delenv(gpu.ENV_DEVICE, raising=False)
+    torch.cuda.empty_cache()
+    free0 = torch.cuda.mem_get_info()[0]
+    chunk = 256 * 2 ** 20
+    blocks = []
+    try:
+        with gpu.use("on") as run:
+            assert run.device is not None and run.device.device.type == "cuda"
+            with pytest.raises(torch.OutOfMemoryError):
+                for _ in range(int(2 * free0 / chunk) + 8):      # twice what is free: would spill without the cap
+                    blocks.append(torch.empty(chunk, dtype=torch.uint8, device=run.device.device))
+            assert len(blocks) * chunk <= gpu.DEVICE_MEMORY_SHARE * free0 + chunk
+            blocks.clear()
+        assert torch.cuda.mem_get_info()[0] >= free0 - chunk       # given back
+    finally:
+        blocks.clear()
+        torch.cuda.set_per_process_memory_fraction(1.0, torch.cuda.current_device())
+
+
 def test_a_model_the_device_cannot_hold_is_solved_on_the_cpu(tmp_path, torch_cpu, monkeypatch):
     """A device whose free memory is too small for the model (device_bytes against DEVICE_MEMORY_SHARE of it):
     every solve is done on the CPU before anything is uploaded, the run counts them and says why, and the results are
