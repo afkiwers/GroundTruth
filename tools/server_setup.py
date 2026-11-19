@@ -1233,7 +1233,8 @@ def main(argv=None) -> int:
     ap.add_argument("--python", help="the Python to run on (default: KiCad 10+'s own)")
     ap.add_argument("--workers", type=int, help="jobs at a time (server.json)")
     ap.add_argument("--threads", help="solver threads per job (server.json; '-': each user's choice)")
-    ap.add_argument("--gpu", choices=("auto", "on", "off", "-"), help="use the GPUs (server.json)")
+    ap.add_argument("--gpu", choices=("auto", "on", "off", "-"),
+                    help="server.json: auto (default) and - keep each job's own choice; on / off decide for every job")
     ap.add_argument("--cuda", default="", help="also install PyTorch with this CUDA build (cu126, cu128) for an "
                                                "NVIDIA GPU (a few GB)")
     ap.add_argument("--port", type=int, help="the port (server.json; default 8765)")

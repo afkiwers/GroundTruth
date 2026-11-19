@@ -11,6 +11,8 @@ groundtruth serve [--host 0.0.0.0] [--port 8765] [--workers 1] [--gpu auto] [--t
                   [--lead | --no-lead] [--peers HOST,...] [--beacon-port 8766]
 ```
 
+**GPU.** `--gpu` (server.json `"gpu"`) `auto`, the default, runs each job as its user chose in Preferences: GPU auto uses the server's GPUs when they are there and faster, GPU off never. `on` or `off` decides for every job, whatever its user chose (until 2026-11-17 the server's `auto` overrode a user's off). The service reads `C:\ProgramData\GroundTruth\server.json` only when it starts: restart it after a change.
+
 **Several servers form a cluster** when they share the access key: they find each other on the local network (signed
 UDP beacons, port 8766) and the first to find another becomes the lead (`--lead` makes one the lead; `--peers` adds
 servers on another subnet). `install_server.cmd install --key` joins a further server to the cluster (asks for the
