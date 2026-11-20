@@ -125,6 +125,8 @@ def _find(forced: str, timed: bool = False) -> tuple[Optional[Device], str]:
         import torch
     except ImportError:
         return None, "PyTorch is not installed"
+    if not forced:
+        _start_driver()         # without the GIL (see there)
     names = [forced] if forced else (["cuda"] if torch.cuda.is_available() else [])
     if not names:
         return None, f"PyTorch {torch.__version__} finds no CUDA/ROCm GPU"
@@ -313,6 +315,32 @@ def _give_back(dev: Optional[Device]):
         pass
 
 
+_driver_lock = threading.Lock()
+_driver_started: list = [False]
+
+
+def _start_driver():
+    """Start the NVIDIA driver in this process (cuInit) through ctypes, once, before PyTorch's first CUDA call.
+
+    Why: the driver's start-up takes 0.7-2.5 s (2026-11-20, an RTX 5070 Laptop GPU, driver 582), and PyTorch's
+    torch.cuda.is_available() does it while holding the GIL, so the plugin's window stopped for that long at the
+    first Simulate under GPU auto, although the call runs in the job's thread (tests/test_gui.py
+    test_jobs_run_off_the_gui_thread: "GUI thread stalled 2.47s"). A ctypes call releases the GIL while it runs;
+    afterwards the driver is up and PyTorch's own calls hold it for ~0.01 s. cuInit creates no context (no device
+    memory: a GPU that auto then declines costs nothing). Without the NVIDIA driver (no GPU, AMD ROCm, macOS) there
+    is nothing to load and nothing is done; any failure leaves PyTorch to do it as before."""
+    with _driver_lock:
+        if _driver_started[0]:
+            return
+        _driver_started[0] = True
+        import ctypes
+        try:
+            lib = ctypes.WinDLL("nvcuda.dll") if os.name == "nt" else ctypes.CDLL("libcuda.so.1")
+            lib.cuInit(0)       # CUDA_SUCCESS or an error code: either way PyTorch finds the driver as it is
+        except (OSError, AttributeError):
+            pass
+
+
 def _candidate() -> Optional[Device]:
     """The CUDA/ROCm device a probe would test, without running anything on it (None: no PyTorch, no such
     device, or GROUNDTRUTH_GPU_DEVICE forcing one, which needs no lock)."""
@@ -322,6 +350,7 @@ def _candidate() -> Optional[Device]:
         import torch
     except ImportError:
         return None
+    _start_driver()             # without the GIL: torch.cuda would start it holding the GIL for seconds
     try:
         if not torch.cuda.is_available() or torch.cuda.device_count() == 0:
             return None

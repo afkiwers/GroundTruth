@@ -208,6 +208,60 @@ def test_a_real_gpu_raises_out_of_memory_past_the_cap_instead_of_spilling(monkey
         torch.cuda.set_per_process_memory_fraction(1.0, torch.cuda.current_device())
 
 
+def test_the_driver_is_started_once_and_a_missing_one_is_ignored(monkeypatch):
+    """_start_driver loads the NVIDIA driver library once per process; without it (no GPU, AMD) nothing fails."""
+    import ctypes
+    loads = []
+
+    def missing(name):
+        loads.append(name)
+        raise OSError("not found")
+    monkeypatch.setattr(gpu, "_driver_started", [False])
+    monkeypatch.setattr(ctypes, "WinDLL", missing, raising=False)
+    monkeypatch.setattr(ctypes, "CDLL", missing)
+    gpu._start_driver()
+    gpu._start_driver()
+    assert len(loads) == 1
+
+
+GIL_CHECK = r"""
+import sys, threading, time
+sys.path.insert(0, {src!r})
+gap, stop = [0.0], threading.Event()
+def tick():
+    last = time.perf_counter()
+    while not stop.is_set():
+        time.sleep(0.005)
+        now = time.perf_counter(); gap[0] = max(gap[0], now - last); last = now
+import torch
+threading.Thread(target=tick, daemon=True).start()
+time.sleep(0.05)
+from groundtruth.solver import gpu
+found = gpu._candidate()
+time.sleep(0.05)
+stop.set()
+print(found is not None, round(gap[0], 3))
+"""
+
+
+@pytest.mark.skipif(not __import__("torch").cuda.is_available(), reason="needs a CUDA GPU")
+def test_finding_the_gpu_does_not_hold_the_gil(monkeypatch):
+    """In a fresh process (the driver not started yet): finding the GPU (_candidate, the first thing a Simulate under
+    GPU auto does) never holds the GIL for long, so the plugin's window keeps responding. torch.cuda.is_available()
+    alone held it 0.7-2.5 s while the driver started (2026-11-20)."""
+    import subprocess
+    import sys
+    from pathlib import Path
+    import groundtruth
+    monkeypatch.delenv(gpu.ENV_DEVICE, raising=False)
+    src = str(Path(groundtruth.__file__).parents[1])
+    out = subprocess.run([sys.executable, "-c", GIL_CHECK.format(src=src)], capture_output=True, text=True,
+                         timeout=120)
+    assert out.returncode == 0, out.stderr
+    found, gap = out.stdout.split()[-2:]
+    assert found == "True" and float(gap) < 0.3, out.stdout
+
+
 def test_a_model_the_device_cannot_hold_is_solved_on_the_cpu(tmp_path, torch_cpu, monkeypatch):
     """A device whose free memory is too small for the model (device_bytes against DEVICE_MEMORY_SHARE of it):
     every solve is done on the CPU before anything is uploaded, the run counts them and says why, and the results are

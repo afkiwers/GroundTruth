@@ -548,10 +548,17 @@ def test_simulate_lists_the_design_changes_and_one_is_checked_in_simulate(app, c
         got["filter_png"] = p._png is not None and p.open_schematic.IsEnabled()
         got["menu"] = [(label, on) for label, _, on in p.menu_items(p.design[k][1]) if label]
         from groundtruth.ui.fixes_panel import copy_png
-        got["copied"] = copy_png(p._png)                 # the schematic onto the clipboard as an image
-        data = wx.BitmapDataObject()
-        if got["copied"] and read_clipboard(data):          # read back without wx's error box (busy clipboard)
-            got["pasted"] = data.GetBitmap().GetWidth()
+        # the schematic onto the clipboard as an image, read back without wx's error box. The clipboard is the
+        # machine's own: another program (or the user copying while the tests run) can hold it longer than the
+        # app's ~0.1 s of retries, which it reports as "Clipboard busy". So the round trip is tried a few times
+        # over ~1 s here: a failure every time is the app's, not the desktop's
+        for _ in range(5):
+            got["copied"] = copy_png(p._png)
+            data = wx.BitmapDataObject()
+            if got["copied"] and read_clipboard(data):
+                got["pasted"] = data.GetBitmap().GetWidth()
+                break
+            wx.MilliSleep(200)
         k = next(i for i, (_, o) in enumerate(p.design) if o["kind"] == "snubber")
         p.design_list.Select(k)
         p._design_selected(type("E", (), {"GetIndex": lambda self: k})())
