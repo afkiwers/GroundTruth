@@ -87,7 +87,7 @@ class PartsPanel(wx.Panel):
 
         top = wx.BoxSizer(wx.HORIZONTAL)
         top.Add(wx.StaticText(self, label="Filter:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
-        self.filter = wx.SearchCtrl(self, size=(180, -1))
+        self.filter = wx.SearchCtrl(self, size=self.FromDIP(wx.Size(180, -1)))
         self.filter.SetDescriptiveText("ref, value or footprint")
         self.filter.Bind(wx.EVT_TEXT, lambda e: self.refresh())
         top.Add(self.filter, 0, wx.RIGHT, 12)

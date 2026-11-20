@@ -274,7 +274,7 @@ class ConvertersPanel(SelectableRows, wx.Panel):
         for i, (c, w) in enumerate([("Name", 150), ("Status", 95), ("Topology", 65), ("Switches", 130),
                                     ("Rail", 110), ("f_sw", 70), ("I out", 50), ("V in→out", 75), ("Edge", 55),
                                     ("Input", 90), ("Output", 90)]):
-            self.list.InsertColumn(i, c, width=w)
+            self.list.InsertColumn(i, c, width=self.FromDIP(w))
         self.list.SetMinSize(wx.Size(320, 120))   # it scrolls sideways; else its ~1000 px of columns squeeze the form
         self._init_rows(on_show, "power stages")
         self._init_enable("converters")

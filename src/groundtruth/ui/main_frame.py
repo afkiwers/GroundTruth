@@ -652,7 +652,7 @@ class MainFrame(ConfigActions, wx.Frame):
         self.status.SetStatusWidths([-3, -1])
         # field 1 holds the gauge, which covers it: nothing is written there (text under it peeked out below the
         # gauge when the bar was two lines tall)
-        self.gauge = wx.Gauge(self.status, range=1000, size=(200, -1))
+        self.gauge = wx.Gauge(self.status, range=1000, size=self.FromDIP(wx.Size(200, -1)))
         # the native field shows one line: a long message (a refused net's reason) is drawn wrapped by this label
         # over field 0 instead, the bar growing to STATUS_LINES lines; the text is kept by StatusBar (GetStatusText)
         self.status_label = wx.StaticText(self.status, style=wx.ST_NO_AUTORESIZE)

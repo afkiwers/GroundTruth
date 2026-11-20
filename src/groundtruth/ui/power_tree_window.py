@@ -32,7 +32,7 @@ class PowerTreeWindow(wx.Frame):
 
     def __init__(self, parent, source: Callable[[], tuple]):
         """The window over `parent`, its first drawing started."""
-        super().__init__(parent, title="Power tree", size=(1200, 700))
+        super().__init__(parent, title="Power tree", size=parent.FromDIP(wx.Size(1200, 700)))
         theme.set_icon(self)
         self.source = source
         self.png: Optional[bytes] = None

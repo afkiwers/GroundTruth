@@ -16,6 +16,7 @@ from .messages import box as message_box   # laid-out message boxes (ui/messages
 
 from . import startup
 from .gil import GUI_SWITCH_INTERVAL, responsive_gui  # noqa: F401  (GUI_SWITCH_INTERVAL: for tests)
+from .dpi import dpi_aware
 
 
 def _error(msg: str):
@@ -57,7 +58,7 @@ class StartWindow(wx.Frame):
         col.Add(title, 0, wx.BOTTOM, 4)
         col.Add(self.text, 0)
         col.Add(self.gauge, 0, wx.EXPAND | wx.TOP, 10)
-        col.SetMinSize((250, -1))
+        col.SetMinSize((self.FromDIP(250), -1))
         row.Add(col, 1, wx.TOP | wx.BOTTOM | wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 14)
         panel.SetSizer(row)
         row.Fit(self)
@@ -156,6 +157,8 @@ def plugin_main(argv: Optional[list[str]] = None, started: Optional[float] = Non
     action = argv[0] if argv else "analyse"
     log = startup.begin(action, started)
     responsive_gui()
+    if not wx.GetApp():                  # sharp on a scaled display: before wx makes its first window (ui/dpi.py)
+        log.mark(f"DPI awareness: {dpi_aware() or 'unchanged'}")
     app = wx.GetApp() or wx.App(False)
     from . import theme
     theme.init_app(app)                  # before the first window: the appearance cannot change afterwards
@@ -261,6 +264,7 @@ def gui_main(argv: Optional[list[str]] = None) -> int:
         return 2
     from .main_frame import MainFrame, Session
     responsive_gui()
+    dpi_aware()                          # sharp on a scaled display: before wx makes its first window (ui/dpi.py)
     app = wx.App(False)
     from . import theme
     theme.init_app(app)

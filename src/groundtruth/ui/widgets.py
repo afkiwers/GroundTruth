@@ -73,7 +73,7 @@ class FieldMark(wx.StaticText):
     With on_reset, a click on a mark whose source has another value calls it (the field takes that value back)."""
     def __init__(self, parent, on_reset: Optional[Callable[[], None]] = None):
         """An empty mark, one character wide (fixed size: a mark appearing does not shift the form)."""
-        super().__init__(parent, label="", size=wx.Size(16, -1), style=wx.ALIGN_CENTRE_HORIZONTAL | wx.ST_NO_AUTORESIZE)
+        super().__init__(parent, label="", size=parent.FromDIP(wx.Size(16, -1)), style=wx.ALIGN_CENTRE_HORIZONTAL | wx.ST_NO_AUTORESIZE)
         self.on_reset = on_reset
         self.label = ""                 # the reset's text ("Reset to 42.6mΩ (L2's R / DCR on the Parts tab)")
         self.resettable = False
@@ -386,12 +386,14 @@ class PickDialog(wx.Dialog):
                  size: tuple[int, int] = (1050, 420)):
         """found: everything detection found; new: those not yet in the settings (the rows). row(d) gives a
         row's cells, ticked(d) whether it starts ticked; note: a line under the count of new suggestions."""
-        super().__init__(parent, title=title, size=size, style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+        # sizes are device-independent pixels, scaled to the display (ui/dpi.py: the process is DPI-aware)
+        super().__init__(parent, title=title, size=wx.Window.FromDIP(wx.Size(*size), parent),
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.found = new
         self.list = wx.ListCtrl(self, style=wx.LC_REPORT)
         self.list.EnableCheckBoxes()
         for i, (c, w) in enumerate(columns):
-            self.list.InsertColumn(i, c, width=w)
+            self.list.InsertColumn(i, c, width=self.FromDIP(w))
         for k, d in enumerate(new):
             first, *rest = row(d)
             item = self.list.InsertItem(k, first)
@@ -400,7 +402,7 @@ class PickDialog(wx.Dialog):
             self.list.CheckItem(item, ticked(d))
         text = wx.StaticText(self, label=f"{len(new)} new suggestion(s) ({len(found) - len(new)} already listed). "
                                          + note)
-        text.Wrap(size[0] - 50)
+        text.Wrap(self.FromDIP(size[0] - 50))
         s = wx.BoxSizer(wx.VERTICAL)
         s.Add(text, 0, wx.ALL, 8)
         s.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)

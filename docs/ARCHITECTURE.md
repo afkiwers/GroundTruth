@@ -2709,6 +2709,13 @@ a History tab with a comparison (and the CLI).
   head. The plots' arrows stay equal. Test `test_board_arrows_get_thicker_with_the_current_density`.
 
 ## Plugin (`plugin/`, `ui/`)
+- **Sharp on a scaled display (2026-11-20, `ui/dpi.py`).** KiCad starts the plugin as its own pythonw.exe, whose
+  manifest declares no DPI awareness, so Windows drew the window at 100 % and stretched it: blurry at 150 % (a laptop
+  with two external monitors). `plugin_main` and `gui_main` call `dpi_aware()` before `wx.App`: per-monitor v2
+  (`SetProcessDpiAwarenessContext`), else per-monitor (shcore), else system-wide; an awareness already set is kept.
+  The plugin's start-up log says which. Every size is in device-independent pixels (`FromDIP`), the list columns'
+  widths and the remaining fixed sizes included, so the layout keeps its proportions at any scaling. Test:
+  tests/test_dpi.py (a fresh process: per-monitor v2, a frame then sees 144 DPI at 150 %; without it 96).
 - **Results and the design they are of** (round 6, ISSUE-29): the views shown keep the board and settings they were
   computed on (`_views_from`), with that board's fingerprint and `settings_key` (the settings as far as the results
   depend on them: not drawing, report, thermal, waivers, what-if edits or the computer's resolution / threads /

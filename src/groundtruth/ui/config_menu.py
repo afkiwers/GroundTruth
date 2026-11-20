@@ -56,7 +56,7 @@ class NameDialog(wx.Dialog):
         super().__init__(parent, title="Save configuration as")
         grid = wx.FlexGridSizer(3, 2, 8, 8)
         grid.AddGrowableCol(1)
-        self.name = wx.TextCtrl(self, value=name, size=(320, -1))
+        self.name = wx.TextCtrl(self, value=name, size=self.FromDIP(wx.Size(320, -1)))
         self.name.SetHint("e.g. ADC paths at 1 kHz")
         self.note = wx.TextCtrl(self, value=note)
         self.note.SetHint("optional: what this configuration is for")
