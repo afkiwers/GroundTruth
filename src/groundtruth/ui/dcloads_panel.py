@@ -211,7 +211,7 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
         self.list = wx.ListCtrl(self, style=wx.LC_REPORT)
         for i, (c, w) in enumerate([("Name", 150), ("Status", 70), ("Source", 90), ("Return", 80), ("Loads", 60),
                                     ("Total", 70), ("Max drop", 80)]):
-            self.list.InsertColumn(i, c, width=w)
+            self.list.InsertColumn(i, c, width=self.FromDIP(w))
         self.list.SetMinSize(wx.Size(320, 120))
         self._init_rows(None, "DC loads")
         self._init_enable("dc_loads")

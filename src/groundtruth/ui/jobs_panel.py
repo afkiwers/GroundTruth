@@ -174,7 +174,7 @@ class ServerJobsPanel(wx.Panel):
             """A report list with the columns; selecting in it clears the other list's selection."""
             lst = wx.ListCtrl(upper, style=wx.LC_REPORT)
             for i, (c, w) in enumerate(COLUMNS):
-                lst.InsertColumn(i, c, width=w)
+                lst.InsertColumn(i, c, width=self.FromDIP(w))
             lst.SetToolTip(tip)
             lst.Bind(wx.EVT_LIST_ITEM_SELECTED, lambda e, l=lst: (self._selected_in(l), e.Skip()))
             lst.Bind(wx.EVT_LIST_ITEM_DESELECTED, lambda e: (self._show_details(), e.Skip()))

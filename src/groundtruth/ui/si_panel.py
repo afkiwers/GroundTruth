@@ -77,7 +77,7 @@ class SiPanel(SelectableRows, wx.Panel):
         self.list = wx.ListCtrl(self, style=wx.LC_REPORT)
         for i, (c, w) in enumerate([("Pair", 130), ("Zdiff", 70), ("Edge", 60), ("Max skew", 70), ("Result", 230),
                                     ("Source", 120)]):
-            self.list.InsertColumn(i, c, width=w)
+            self.list.InsertColumn(i, c, width=self.FromDIP(w))
         self.list.SetMinSize(wx.Size(320, 110))
         self._init_rows(None, "pairs")
         self._init_enable("pairs")
@@ -85,7 +85,7 @@ class SiPanel(SelectableRows, wx.Panel):
         self.tlist = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
         for i, (c, w) in enumerate([("Nets / class", 160), ("Z0", 60), ("Tolerance", 70), ("Layers", 90),
                                     ("Result", 220)]):
-            self.tlist.InsertColumn(i, c, width=w)
+            self.tlist.InsertColumn(i, c, width=self.FromDIP(w))
         self.tlist.SetMinSize(wx.Size(320, 80))
         self.tlist.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_target_select)
 

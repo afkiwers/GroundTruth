@@ -37,7 +37,7 @@ class IssuesPanel(wx.Panel):
         self.on_show = on_show
         self.list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
         for i, (c, w) in enumerate(zip(ISSUE_COLS, (36, 70, 140, 150, 110, 70, 600))):
-            self.list.InsertColumn(i, c, width=w)
+            self.list.InsertColumn(i, c, width=self.FromDIP(w))
         # a header click sorts by that column, again the other way (the user: "add sorting when clicking on Check,
         # severity etc."); the rows keep their issue's number, so a row and its marker still match
         sort = theme.prefs().get("issues_sort") or [0, False]
@@ -267,7 +267,7 @@ class RenderVeil(wx.Panel):
         self.text = wx.StaticText(self, label="Drawing…")
         self.text.SetForegroundColour(theme.colour(pal.text))
         self.text.SetFont(self.text.GetFont().Bold())
-        self.gauge = wx.Gauge(self, range=100, size=(220, 8))
+        self.gauge = wx.Gauge(self, range=100, size=self.FromDIP(wx.Size(220, 8)))
         box = wx.BoxSizer(wx.VERTICAL)
         box.Add(self.text, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.BOTTOM, 8)
         box.Add(self.gauge, 0, wx.EXPAND)
@@ -642,7 +642,7 @@ class ResultsPanel(wx.Panel):
         route = wx.BoxSizer(wx.HORIZONTAL)
         route.Add(wx.StaticText(self, label="View:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
         self.choice = wx.Choice(self)
-        self.choice.SetMinSize((220, -1))
+        self.choice.SetMinSize((self.FromDIP(220), -1))
         self.choice.Bind(wx.EVT_CHOICE, lambda e: self._route_changed())
         route.Add(self.choice, 0, wx.ALIGN_CENTER_VERTICAL)
         top.Add(route, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT | wx.BOTTOM, 8)
@@ -819,7 +819,7 @@ class ResultsPanel(wx.Panel):
         plots = wx.BoxSizer(wx.VERTICAL)
         for c, h in ((self.canvas, MAPS_MIN_PX), (self.canvas3, 120), (self.canvas2, 120)):
             plots.Add(c, 0, wx.EXPAND | wx.BOTTOM, 6)
-            c.SetMinSize((150, h))                      # heights set per view (_fit_page); widths follow the page
+            c.SetMinSize((self.FromDIP(150), h))        # heights set per view (_fit_page); widths follow the page
             c.defer = self.rendering
             c.undrawn = self._canvas_undrawn
             c.page = self.page
@@ -1441,7 +1441,7 @@ class ResultsPanel(wx.Panel):
                    (self.canvas2, self._px(SPECTRUM_IN)))
         for c, h in heights:
             if c.GetMinSize().height != h:
-                c.SetMinSize((150, h))
+                c.SetMinSize((self.FromDIP(150), h))
         # one layout, without the canvases repainting at each step on the way (162 ms after a Simulate)
         self.page.Freeze()
         try:

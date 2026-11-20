@@ -86,7 +86,7 @@ class PdnPanel(SelectableRows, wx.Panel):
         self.list = wx.ListCtrl(self, style=wx.LC_REPORT)
         for i, (c, w) in enumerate([("Rail", 120), ("Voltage", 65), ("Ripple", 55), ("Load step", 70),
                                     ("Target", 70), ("Source", 110), ("ICs", 120)]):
-            self.list.InsertColumn(i, c, width=w)
+            self.list.InsertColumn(i, c, width=self.FromDIP(w))
         self.list.SetMinSize(wx.Size(320, 120))
         self._init_rows(None, "rails")
         self._init_enable("pdn")

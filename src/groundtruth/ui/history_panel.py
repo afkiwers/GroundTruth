@@ -100,7 +100,7 @@ class HistoryPanel(wx.Panel):
             self.buttons[key] = b
         self.list = wx.ListCtrl(self, style=wx.LC_REPORT)
         for i, (c, w) in enumerate(COLUMNS):
-            self.list.InsertColumn(i, c, width=w)
+            self.list.InsertColumn(i, c, width=self.FromDIP(w))
         self.list.SetToolTip("Each Simulate, newest first. Changed: what differs from the run below it (board, "
                              "settings, resolution, what-if). Ctrl-click two runs to compare them.")
         self.list.Bind(wx.EVT_LIST_ITEM_SELECTED, lambda e: (self._selection_changed(), e.Skip()))
@@ -120,7 +120,7 @@ class HistoryPanel(wx.Panel):
         self.cmp_title.SetFont(self.cmp_title.GetFont().Bold())
         self.cmp_list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
         for i, (c, w) in enumerate(CMP_COLUMNS):
-            self.cmp_list.InsertColumn(i, c, width=w)
+            self.cmp_list.InsertColumn(i, c, width=self.FromDIP(w))
         self.cmp_list.SetToolTip("Margin: below the limit is positive. Green: better (margins up, loop inductance "
                                  "down by more than 0.5 dB / 0.05 nH), red: something worse. Each run's worst "
                                  "harmonic is its own (no common frequency grid).")

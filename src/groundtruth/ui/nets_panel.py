@@ -141,7 +141,7 @@ class NetsPanel(SelectableRows, wx.Panel):
         self.list = wx.ListCtrl(self, style=wx.LC_REPORT)       # several rows: Remove / Mark reviewed act on all
         for i, (c, w) in enumerate([("Path", 180), ("Status", 95), ("Chain", 330), ("Freq", 75), ("Rise", 60),
                                     ("Ampl.", 50), ("Class", 110)]):
-            self.list.InsertColumn(i, c, width=w)
+            self.list.InsertColumn(i, c, width=self.FromDIP(w))
         # it scrolls sideways: its ~900 px of columns would squeeze the scrolled form beside it (as on Converters)
         self.list.SetMinSize(wx.Size(320, 120))
         # each row's chain (analysis.route.path_chain: a route search per path, ~5-60 ms on refboard) is

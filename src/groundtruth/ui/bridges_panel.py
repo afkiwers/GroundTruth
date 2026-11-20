@@ -155,7 +155,7 @@ class BridgesPanel(SelectableRows, wx.Panel):
         self.list = wx.ListCtrl(self, style=wx.LC_REPORT)
         for i, (c, w) in enumerate([("Name", 130), ("Status", 120), ("Legs", 50), ("Bus", 120), ("V", 45),
                                     ("f_pwm", 65), ("I phase", 60), ("rpm", 55), ("Motor", 150), ("Input", 90)]):
-            self.list.InsertColumn(i, c, width=w)
+            self.list.InsertColumn(i, c, width=self.FromDIP(w))
         self.list.SetMinSize(wx.Size(320, 100))
         self._init_rows(on_show, "bridges")
         self._init_enable("bridges")
@@ -163,7 +163,7 @@ class BridgesPanel(SelectableRows, wx.Panel):
         self.leg_list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
         for i, (c, w) in enumerate([("Phase", 50), ("Switch node", 150), ("High side", 90), ("Low side", 90),
                                     ("Return", 110), ("Output", 60), ("Driver", 55), ("Driven from", 220)]):
-            self.leg_list.InsertColumn(i, c, width=w)
+            self.leg_list.InsertColumn(i, c, width=self.FromDIP(w))
         self.leg_list.SetMinSize(wx.Size(320, 90))
         self.leg_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_leg_select)
 

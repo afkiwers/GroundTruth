@@ -210,7 +210,7 @@ class FixesPanel(wx.Panel):
         self.list.EnableCheckBoxes()
         for i, (c, w) in enumerate([("#", 50), ("Kind", 50), ("Net", 150), ("Location", 110), ("Predicted", 210),
                                     ("Fix", 330), ("For issue", 150), ("Note", 200)]):
-            self.list.InsertColumn(i, c, width=w)
+            self.list.InsertColumn(i, c, width=self.FromDIP(w))
         self.summary = wx.TextCtrl(self, style=wx.TE_MULTILINE | wx.TE_READONLY, size=(-1, 90))
         hint = wx.StaticText(self, label="Ticked = selected by the search (best per issue, verified together). "
                                          "Predicted: change of the loop moment at the worst harmonic (plane "
@@ -232,7 +232,7 @@ class FixesPanel(wx.Panel):
         legend.SetForegroundColour(theme.colour(theme.palette().muted))
         self.design_list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
         for i, (c, w) in enumerate(DESIGN_COLUMNS):
-            self.design_list.InsertColumn(i, c, width=w)
+            self.design_list.InsertColumn(i, c, width=self.FromDIP(w))
         self.design_list.SetMinSize(wx.Size(-1, 150))
         self.design_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self._design_selected)
         self.design_list.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self._design_menu)
