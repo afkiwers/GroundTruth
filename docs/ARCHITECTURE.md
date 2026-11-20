@@ -477,6 +477,14 @@ only: tracks on the plane layer cut slots, they don't form a plane. Checks:
     done on the CPU (a fallback, as above); the cached memory is returned to the driver when the run ends. Tests:
     tests/test_gpu.py (a fake device: the cap's value, the hand-back; a real CUDA device where there is one:
     twice the free memory requested, OutOfMemoryError at the cap).
+  - **The driver is started without the GIL (2026-11-20, `gpu._start_driver`).** `torch.cuda.is_available()`
+    starts the NVIDIA driver (0.7-2.5 s on an RTX 5070 Laptop GPU) while holding the GIL, so the first Simulate
+    under GPU auto stopped the plugin's window for that long although it runs in the job's thread
+    (test_jobs_run_off_the_gui_thread: "GUI thread stalled 2.47s"; found by sampling every thread's stack when a
+    20 ms sleeper woke late). `_candidate` and `_find` first call the driver's `cuInit` through ctypes, which
+    releases the GIL; PyTorch's calls then hold it ~0.01 s. cuInit makes no context (no device memory when auto
+    declines the GPU). Without the NVIDIA driver nothing is done. Test: tests/test_gpu.py (a fresh process: the
+    longest GIL hold while finding the GPU < 0.3 s).
   - Measured here only on PyTorch's CPU device (correctness): the device products equal numpy's to 1e-12, a
     Simulate with the board-wide model gives the same harmonics, margins (≤ 1e-3 dB) and issues, the fix search the
     same fixes. Speed on a real GPU: not measured yet (`tools/dev/gpu_check.py` on the GPU machine).
