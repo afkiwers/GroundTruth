@@ -48,7 +48,25 @@ def frame(app, tmp_path, monkeypatch):
 def run_steps(app, f, steps, timeout=600):
     """Run the event loop. Each step is called once the window is idle (no job for 0.3 s); a step may return
     a number of seconds after which the next step runs even if a job is still busy (to test Cancel).
-    Returns [(time, busy)] sampled by a 20 ms GUI timer."""
+    Returns [(time, busy)] sampled by a 20 ms GUI timer.
+
+    The window's idle garbage collection (gil.settle_garbage: one full collection once no job runs and the user has
+    left the mouse and keyboard alone) waits until the steps are done, then runs once. In a test nobody touches the
+    mouse, so it fired in the 0.3 s between two steps' jobs, and its 0.6-0.7 s late in a test run (a large heap)
+    counted as a stall "during a job" (seen 2026-11-23 with a stack sampler; in the plugin it waits for the user)."""
+    from groundtruth.ui import gil
+    settle, asked = gil.settle_garbage, []
+    gil.settle_garbage = lambda: asked.append(True)
+    try:
+        return _run_steps(app, f, steps, timeout)
+    finally:
+        gil.settle_garbage = settle
+        if asked:
+            settle()
+
+
+def _run_steps(app, f, steps, timeout):
+    """run_steps' event loop (see there)."""
     ticks = []
     state = {"k": 0, "idle_since": None, "due": None, "t0": time.perf_counter()}
     steps = list(steps)
@@ -3570,22 +3588,25 @@ def test_the_parts_tab_shows_each_capacitor_at_its_dc_voltage(app, tmp_path, mon
         close_window(f)
 
 
-def test_preferences_list_the_servers_and_update_the_old_ones(app, frame, monkeypatch):
-    """Preferences › Compute server › Servers (the user: "it will show the user which server is out of date and
-    offers to update it through a button press"): the servers asked in the background, the out-of-date one marked;
-    Update all updates the ones that take remote updates (after asking), then asks them again; without the plugin's
-    server package (a development copy) the buttons stay off."""
-    from groundtruth.ui import prefs_dialog, server_updates
-    from groundtruth.ui.prefs_dialog import PreferencesDialog, defaults
+def test_server_administration_lists_the_servers_updates_them_and_sets_their_keep_time(app, frame, monkeypatch):
+    """Server administration › Compute servers (the user: "it will show the user which server is out of date and
+    offers to update it through a button press"; "keeping the results for a settable amount of hours like 120hrs"):
+    the servers asked in the background, the out-of-date one marked, the first selected with its keep time in the box;
+    Update all updates the ones that take remote updates (after asking), then asks them again; Set sends the keep time
+    to the selected server and its row shows it; without the plugin's server package the update buttons stay off."""
+    from groundtruth.remote.client import Remote
+    from groundtruth.ui import server_admin, server_updates
     rows = [{"name": "build-pc", "address": "build-pc", "version": "0.1.5 (x)", "state": "older", "text": "out of date",
-             "can_update": True, "update": None, "running": 2},
+             "can_update": True, "update": None, "running": 2, "keep_hours": 24.0},
             {"name": "mac", "address": "10.0.0.3:8765", "version": "0.1.9 (y)", "state": "same", "text": "up to date",
-             "can_update": False, "update": None}]
-    asked, updated, modes, busy_asked = [], [], [], []
+             "can_update": False, "update": None, "keep_hours": 48.0}]
+    asked, updated, modes, busy_asked, kept = [], [], [], [], []
     monkeypatch.setattr(server_updates, "check", lambda a, k: asked.append((a, k)) or [dict(r) for r in rows])
     monkeypatch.setattr(server_updates, "update", lambda a, k, b, progress, stop=None, busy="wait":
                         updated.append(a) or modes.append(busy) or progress("installing…")
                         or (True, "updated to 0.1.9 (y)"))
+    monkeypatch.setattr(Remote, "set_keep_hours",
+                        lambda self, h: kept.append((self.host, h)) or {"keep_hours": float(h), "saved": True})
     from groundtruth.ui import server_info
     # jobs are running on build-pc: the user is asked what happens to them, and the answer goes to the server
     monkeypatch.setattr(server_info, "ask_running_jobs",
@@ -3595,15 +3616,17 @@ def test_preferences_list_the_servers_and_update_the_old_ones(app, frame, monkey
                         lambda parent, t, v: confirmed.append([r["name"] for r in t]) or True)
     import groundtruth.remote.release as release
     monkeypatch.setattr(release, "bundled", lambda folder=None: {"zip": None, "sig": "ab", "version": "0.1.9 (y)"})
-    prefs = dict(defaults({}), compute="server", server="build-pc", server_key="k" * 20)
-    with PreferencesDialog(frame, prefs) as dlg:
+    with server_admin.AdminDialog(frame, lambda: ("build-pc", "k" * 20)) as dlg:
         p = dlg.servers
-        assert isinstance(p, prefs_dialog.ServersPanel)
-        wait_for(app, lambda: p.list.GetItemCount() == 2)            # asked by itself once the dialog shows
+        assert isinstance(p, server_admin.ServersPanel)
+        wait_for(app, lambda: p.list.GetItemCount() == 2)            # asked by itself once the window shows
         assert asked == [("build-pc", "k" * 20)] and "1 server(s) out of date" in p.note.GetLabel()
-        assert p.all_b.IsEnabled() and not p.update_b.IsEnabled()
-        p.list.Select(0)
-        wait_for(app, lambda: p.update_b.IsEnabled())
+        assert p.list.GetFirstSelected() == 0 and p.keep.GetValue() == 24 and p.list.GetItemText(1, 2) == "48 h"
+        assert p.all_b.IsEnabled() and p.update_b.IsEnabled() and p.keep_b.IsEnabled()
+        p.keep.SetValue(120)
+        p.on_keep()
+        wait_for(app, lambda: "keeps finished results 120 h" in p.note.GetLabel())
+        assert kept[0][1] == 120 and p.list.GetItemText(0, 2) == "120 h"
         p.on_update(all_=True)
         wait_for(app, lambda: len(asked) == 2)                        # asked again after the update
         assert updated == ["build-pc"] and not p.busy and confirmed == [["build-pc"]]
@@ -4122,39 +4145,71 @@ def test_reference_nets_gone_from_the_board_are_offered_for_removal(app, frame, 
     assert "use GND (found on the board) instead" in asked[0]
 
 
-def test_clear_past_jobs_asks_for_its_password(app, frame, monkeypatch):
-    """Preferences › Compute server › Clear past jobs (the user: "offer a clear past jobs button ... ideally, have
-    some sort of password that is required to do so"): without a password it asks for one first; Set password…
-    keeps only its hash in ui.json; a wrong password clears nothing; the right one, after a Yes, clears every past
-    job (the window's clear) and nothing else."""
-    from groundtruth.ui import jobs_password as jp, prefs_dialog, theme
+def test_server_administration_opens_only_with_its_password(app, frame, monkeypatch):
+    """Preferences › Server administration… (the user: "put everything in one new window ... so all password
+    protected stuff is contained in there"): with no password set it asks for a new one (twice; only its hash is
+    kept in ui.json) and then opens; afterwards it opens only with that password. Preferences itself has no password
+    buttons left, only the one that opens the window."""
+    from groundtruth.ui import jobs_password as jp, server_admin, theme
     from groundtruth.ui.prefs_dialog import PreferencesDialog, defaults
+    told, answers, opened = [], [], []
+    monkeypatch.setattr(wx, "MessageBox", lambda text, *a, **k: (told.append(text), wx.OK)[1])
+    monkeypatch.setattr(server_admin, "ask_password", lambda parent, message: (told.append(message), answers.pop(0))[1])
+
+    class Window:
+        """Stands in for the modal window: records that it opened."""
+        def __init__(self, parent, settings, past_jobs=None):
+            opened.append(settings())
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def ShowModal(self):
+            return wx.ID_CLOSE
+    monkeypatch.setattr(server_admin, "AdminDialog", Window)
+    settings = lambda: ("build-pc", "k" * 20)                       # noqa: E731
+    answers[:] = ["s3cret-pw", "s3cret-pw"]
+    server_admin.open_admin(frame, settings)                        # none set: a new one first
+    wait_for(app, lambda: opened, timeout=20)
+    assert any("guards the server updates and options" in t for t in told)
+    rec = jp.record(theme.prefs())
+    assert jp.matches(rec, "s3cret-pw") and "s3cret-pw" not in theme.pref_path().read_text(encoding="utf-8")
+    answers[:] = ["wrong-pw"]
+    server_admin.open_admin(frame, settings)
+    wait_for(app, lambda: "Wrong password." in told[-1], timeout=20)
+    assert len(opened) == 1
+    answers[:] = ["s3cret-pw"]
+    server_admin.open_admin(frame, settings)
+    wait_for(app, lambda: len(opened) == 2, timeout=20)
+    assert opened[-1] == ("build-pc", "k" * 20)
+    with PreferencesDialog(frame, defaults({})) as dlg:
+        assert dlg.admin.GetLabel() == "Server administration…"
+        assert not hasattr(dlg, "set_password") and not hasattr(dlg, "clear_past") and not hasattr(dlg, "servers")
+
+
+def test_server_administration_clears_past_jobs_and_changes_its_password(app, frame, monkeypatch):
+    """Inside the window (opened with the password): Clear past jobs asks Yes/No naming how many, then clears this
+    computer's list; Change password takes a new one twice. Opened without the main window's jobs: greyed."""
+    from groundtruth.ui import jobs_password as jp, server_admin, theme
     told, answers, cleared = [], [], []
     monkeypatch.setattr(wx, "MessageBox", lambda text, *a, **k: (told.append(text), wx.YES)[1])
-    monkeypatch.setattr(prefs_dialog, "_ask_password", lambda parent, message: answers.pop(0))
+    monkeypatch.setattr(server_admin, "ask_password", lambda parent, message: answers.pop(0))
     past = (lambda: 3, lambda: (cleared.append(True), 3)[1])
-    with PreferencesDialog(frame, defaults({}), past_jobs=past) as dlg:
-        assert dlg.clear_past.IsEnabled() and dlg.set_password.IsEnabled()
-        dlg.on_clear_past()                                     # no password yet
-        assert "set one with Set password" in told[-1] and not cleared
-        answers[:] = ["s3cret-pw", "s3cret-pw"]
-        dlg.on_set_password()
-        wait_for(app, lambda: jp.record(theme.prefs()) is not None, timeout=20)
-        rec = jp.record(theme.prefs())
-        assert "s3cret-pw" not in theme.pref_path().read_text(encoding="utf-8") and jp.matches(rec, "s3cret-pw")
-        wait_for(app, lambda: dlg.clear_past.IsEnabled(), timeout=20)
-        answers[:] = ["wrong-pw"]
+    with server_admin.AdminDialog(frame, lambda: ("", ""), past) as dlg:
+        assert dlg.clear_past.IsEnabled()
         dlg.on_clear_past()
-        wait_for(app, lambda: "Wrong password" in told[-1], timeout=20)
-        assert not cleared
-        answers[:] = ["s3cret-pw"]
-        dlg.on_clear_past()
-        wait_for(app, lambda: cleared and "cleared" in told[-1], timeout=20)
-        assert any("Remove the 3 past job(s)" in t for t in told)
-        answers[:] = ["not-it"]                                 # changing it needs the current one
-        dlg.on_set_password()
-        wait_for(app, lambda: "not the current password" in told[-1], timeout=20)
-    with PreferencesDialog(frame, defaults({})) as dlg:         # opened without the window's jobs: greyed
+        assert cleared and any("Remove the 3 past job(s)" in t for t in told) and "3 past job(s) cleared" in told[-1]
+        answers[:] = ["n3w-passw", "n3w-passw"]
+        dlg.on_change_password()
+        wait_for(app, lambda: jp.record(theme.prefs()) is not None and dlg.change_password.IsEnabled(), timeout=20)
+        assert jp.matches(jp.record(theme.prefs()), "n3w-passw") and "administration password is set" in told[-1]
+        answers[:] = ["short", "short"]
+        dlg.on_change_password()
+        assert "Not set: the password needs at least" in told[-1]
+    with server_admin.AdminDialog(frame, lambda: ("", "")) as dlg:  # no past jobs to clear here
         assert not dlg.clear_past.IsEnabled()
 
 
@@ -4162,7 +4217,7 @@ def test_the_access_key_shows_only_after_windows_hello(app, frame, monkeypatch):
     """Preferences › Compute server › Access key (the user: "add an eye icon to display the server key passwords ...
     guard it behind windows hello ... only if it's correct it will be shown"): masked at first; the eye shows it
     only when Windows Hello verifies (cancelled or failed: still hidden); hiding needs nothing. Without Windows
-    Hello this computer's password (Set password…) stands in: a wrong one keeps it hidden, with none set it is
+    Hello this computer's administration password stands in: a wrong one keeps it hidden, with none set it is
     refused. The key typed while shown is the one saved."""
     from groundtruth.ui import hello, jobs_password as jp, secret_field, theme
     from groundtruth.ui.prefs_dialog import PreferencesDialog, defaults
@@ -4218,7 +4273,7 @@ def test_the_access_key_shows_only_after_windows_hello(app, frame, monkeypatch):
         n = len(told)
         field.on_eye()
         wait_for(app, lambda: len(told) > n, timeout=20)
-        assert "Set password" in told[-1] and not field.shown()
+        assert "Server administration" in told[-1] and not field.shown()
         theme.save_prefs(**{jp.PREF_KEY: jp.make_record("s3cret-pw")})
         answers[:] = ["wrong-pw"]
         field.on_eye()

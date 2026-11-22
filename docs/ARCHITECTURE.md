@@ -3388,9 +3388,18 @@ the other powerful pc to do all the computation"; Windows 11 Pro server, local n
     its new template at the next service start. Servers with the old in-process runner need one manual install.
   - Plugin: `client.Remote.update`; `ui/server_updates.py` (`check`: the configured server, its cluster members and
     `other_versions`, each asked; `row_of` with `release.compare`; `update`: send, follow the status until the
-    server runs the plugin's code or its newer last.json says failed / rolled back); `prefs_dialog.ServersPanel`
-    (Preferences › Compute server › Servers: the list, Check / Update / Update all, background threads, following
-    stops on EVT_WINDOW_DESTROY).
+    server runs the plugin's code or its newer last.json says failed / rolled back); `server_admin.ServersPanel`
+    (Preferences › Compute server › Server administration…, behind the administration password: the list, Check /
+    Update / Update all / Options… / Keep results, background threads, following stops on EVT_WINDOW_DESTROY).
+  - **Server administration (2026-11-20, `ui/server_admin.py`).** The user: "put everything in one new window ...
+    so all password protected stuff is contained in there". `open_admin` asks the administration password once
+    (jobs_password; none set: a new one, twice) off the GUI thread, then `AdminDialog`: the servers (ServersPanel),
+    Clear past jobs, Change password. Keep results: `Remote.set_keep_hours` -> `POST /v1/settings?keep_hours=H`
+    (`ComputeServer._take_settings`, 1-720 h): `keep_s` at once (`_expire` reads it each sweep, so results already
+    waiting count too) and server.json rewritten in one step (`_save_setting`; "saved": false when it can't be).
+    The user asked for it after an 8x result expired unfetched over a weekend (24 h). Tests: test_remote.py
+    (applied at once, a 30 h old result kept at 120 h and gone at 24 h, saved, refused out of range), test_gui.py
+    (the window's gate, its buttons, the keep time).
   - Tests (tests/test_remote_update.py): signatures and versions; the endpoint's refusals and the busy server;
     apply-update and its failure; the runner's apply / roll-back / unsafe zip; the key reset; the signed package;
     the Preferences logic; end to end: a real runner + server updated by a signed package from this tree, then a

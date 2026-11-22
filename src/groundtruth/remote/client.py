@@ -253,6 +253,18 @@ class Remote:
             return json.loads(body)
         raise RemoteError(f"{self.host}: {_error(body)}")
 
+    def set_keep_hours(self, hours: float) -> dict:
+        """POST /v1/settings: how long the server keeps a finished result for its owner (hours), at once and for its
+        next starts. Its answer ({keep_hours, saved}); RemoteError with its reason when it refuses (out of range), or
+        when it is older than this request (it answers "unknown request": update it first)."""
+        st, body = self.request("POST", f"/v1/settings?keep_hours={float(hours):g}")
+        if st == 200:
+            return json.loads(body)
+        reason = _error(body)
+        if st == 404:
+            reason = "this server's version can't change it from here: update the server first"
+        raise RemoteError(f"{self.host}: {reason}")
+
     def jobs(self) -> list[dict]:
         """This client's jobs on the server (GET /v1/jobs?client=...)."""
         st, data = self.request("GET", f"/v1/jobs?client={quote(self.client)}", timeout=POLL_TIMEOUT_S)

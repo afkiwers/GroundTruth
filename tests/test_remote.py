@@ -266,6 +266,45 @@ def test_jobs_and_results_survive_a_server_restart_and_go_once_fetched(tmp_path,
         srv3.stop()
 
 
+def test_how_long_results_are_kept_is_set_from_the_plugin(tmp_path, monkeypatch):
+    """POST /v1/settings?keep_hours (the user: "keeping the results for a settable amount of hours like 120hrs"):
+    applied at once, to a result already waiting too (finished 30 h ago: kept at 120 h, gone at the old 24 h), and
+    saved to server.json beside its other entries, which the next start reads; out of range is refused."""
+    from groundtruth.remote.server import settings
+    monkeypatch.setenv("GROUNDTRUTH_SERVER_TEST", "1")
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "server.json").write_text(json.dumps({"workers": 2, "keep_hours": 24}), encoding="utf-8")
+    srv = ComputeServer(KEY, "127.0.0.1", 0, data_dir=tmp_path / "jobs", home=home)
+    srv.start()
+    try:
+        r = remote(srv)
+        jid, _ = r.submit("sleep", (0.05,))
+        for _ in range(100):
+            if srv.jobs[jid].state == "done":
+                break
+            time.sleep(0.05)
+        srv.jobs[jid].finished = time.time() - 30 * 3600          # its result has waited 30 h
+        assert r.set_keep_hours(120) == {"keep_hours": 120.0, "saved": True}
+        assert r.status()["keep_hours"] == 120.0
+        with srv.lock:
+            srv._expire()
+        assert jid in srv.jobs                                    # kept: 30 h < 120 h
+        saved = json.loads((home / "server.json").read_text(encoding="utf-8"))
+        assert saved == {"workers": 2, "keep_hours": 120.0}
+        assert settings(home / "server.json")["keep_hours"] == 120.0      # the next start
+        for bad in (0.5, 1000, float("nan")):
+            with pytest.raises(RemoteError, match="keep_hours must be"):
+                r.set_keep_hours(bad)
+        assert srv.keep_s == 120 * 3600.0
+        assert r.set_keep_hours(24)["keep_hours"] == 24.0
+        with srv.lock:
+            srv._expire()
+        assert jid not in srv.jobs                                # 30 h > 24 h: gone
+    finally:
+        srv.stop()
+
+
 def test_the_server_settings_file_and_its_overrides(tmp_path):
     """server.json is made with the defaults on the first start; its entries count, an option given overrides."""
     from groundtruth.remote.server import DEFAULTS, settings

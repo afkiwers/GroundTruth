@@ -3,8 +3,8 @@
 only if it's correct it will be shown"). Preferences › Compute server › Access key uses it.
 
 Who may look: Windows Hello (ui/hello.py: PIN, fingerprint, face) where this computer has it set up; elsewhere (no
-Windows Hello, or not Windows) the password of this computer set with Set password… (jobs_password), the one that
-already guards Clear past jobs and a server's options; with neither, the key stays hidden. Both checks run off the
+Windows Hello, or not Windows) this computer's administration password (jobs_password, set in Preferences › Server
+administration…, ui/server_admin.py), the one that guards that window; with neither, the key stays hidden. Both checks run off the
 GUI thread (the window never freezes: the Hello dialog waits for the user, a password hash takes ~0.5 s). Hiding
 again needs nothing. A wx TextCtrl can't change its masked style once made, so the field holds two (masked and
 plain) and shows one, their text kept the same."""
@@ -207,17 +207,17 @@ class SecretField(wx.Panel):
         self.eye.Enable(self.masked.IsEnabled())
 
     def _fallback(self) -> None:
-        """No Windows Hello here: this computer's password (Set password…) when one is set, checked off the GUI
+        """No Windows Hello here: this computer's administration password when one is set, checked off the GUI
         thread; with none, the key stays hidden."""
         from . import jobs_password as jp
         rec = jp.record(theme.prefs())
         if rec is None:
             self._ended()
             message_box(f"Showing {self.what} needs Windows Hello, which this computer does not have set up, or this "
-                        "computer's password: set one with Set password… (under Past jobs) first.", TITLE,
+                        "computer's administration password: set one with Server administration… first.", TITLE,
                         wx.ICON_INFORMATION, self)
             return
-        with wx.PasswordEntryDialog(self, f"This computer's password (Set password…) to show {self.what}:",
+        with wx.PasswordEntryDialog(self, f"This computer's administration password to show {self.what}:",
                                     TITLE) as dlg:
             pw: Optional[str] = dlg.GetValue() if dlg.ShowModal() == wx.ID_OK else None
         if pw is None:

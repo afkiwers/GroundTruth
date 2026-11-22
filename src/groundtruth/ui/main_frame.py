@@ -2917,7 +2917,7 @@ class MainFrame(ConfigActions, wx.Frame):
         return sum(1 for m in self.remote_jobs.all() if m.get("state") in PAST)
 
     def clear_past_jobs(self) -> int:
-        """Preferences › Clear past jobs (after its password): every past job leaves this computer's list (as Remove
+        """Server administration › Clear past jobs (behind the administration password): every past job leaves this computer's list (as Remove
         from list: remembered, so the rebuild from the servers leaves it out); queued, running and ready jobs stay.
         Returns how many."""
         from ..remote.jobs import PAST

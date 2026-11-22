@@ -1,6 +1,6 @@
 """The compute servers' versions against this plugin, and their remote updates, for Preferences (the user: "when the
 groundtruth plugin is open and the user goes to preferences, it will show the user which server is out of date and
-offers to update it through a button press"). No wx here: the tests run it; prefs_dialog.ServersPanel shows it.
+offers to update it through a button press"). No wx here: the tests run it; server_admin.ServersPanel shows it.
 
 The servers are the one in Preferences and those its status names: its cluster's members and the servers it hears
 with another code version (a cluster leaves those out: they are the out-of-date ones). Each is asked for its own
@@ -84,7 +84,7 @@ def row_of(name: str, address: str, status: Optional[dict], error: str, mine_ver
         can = False
     return {"name": status.get("host") or name, "address": address, "version": _short(status.get("version")),
             "state": state, "text": text, "can_update": can, "update": up or None,
-            "running": len(status.get("running") or [])}
+            "running": len(status.get("running") or []), "keep_hours": status.get("keep_hours")}
 
 
 def _waiting_text(up: dict, n: int) -> str:
