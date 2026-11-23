@@ -362,7 +362,11 @@ def test_models_solved_in_groups_when_memory_is_short_keep_every_number(tmp_path
 
     def timeless(x):            # the wall-clock time a stage took is the one thing that may differ
         if isinstance(x, dict):
-            return {k: timeless(v) for k, v in x.items() if k != "seconds"}
+            # and the order of carriers with near-equal shares: they are ranked by share, and the grouped run's
+            # numbers may differ by ~1e-6 (see assert_same_numbers), enough to swap two symmetric vias: compared
+            # by name, each one's numbers still to the tolerance below
+            return {k: sorted((timeless(t) for t in v), key=lambda t: t["name"]) if k == "transfers" else timeless(v)
+                    for k, v in x.items() if k != "seconds"}
         return [timeless(v) for v in x] if isinstance(x, list) else x
 
     def dump(res):
@@ -389,13 +393,15 @@ def test_models_solved_in_groups_when_memory_is_short_keep_every_number(tmp_path
             assert a == b, (path, a, b)
     for b, config in ((board, sc.config), (buck_board, bsc.config)):
         # plenty of memory: one group (the real free memory varies; a loaded machine split it in two in the suite)
-        monkeypatch.setattr(sysmem, "available_bytes", lambda: 1 << 40)
-        together = simulate(b, config)
-        monkeypatch.undo()
+        # (each patch in a context of its own: monkeypatch.undo() also undid conftest's, and the GPU timed for real
+        # then solved the grouped run and every later test's: tests/test_conftest_guard.py)
+        with monkeypatch.context() as m:
+            m.setattr(sysmem, "available_bytes", lambda: 1 << 40)
+            together = simulate(b, config)
         assert together.groups == 1
-        monkeypatch.setattr(sysmem, "available_bytes", lambda: 1000)       # nothing fits: one group per model
-        grouped = simulate(b, config)
-        monkeypatch.undo()
+        with monkeypatch.context() as m:
+            m.setattr(sysmem, "available_bytes", lambda: 1000)       # nothing fits: one group per model
+            grouped = simulate(b, config)
         assert grouped.groups >= 2
         assert_same_numbers(json.loads(dump(grouped)), json.loads(dump(together)))
         assert together.converters or together.routes[0].cavity_solves

@@ -7,6 +7,23 @@ from groundtruth.config.settings import NetSpec, SettingsFile, settings_path
 SIG = NetSpec("SIG", "U1.1", ["U2.1"], 50e6, 1e-9)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _session_protections(tmp_path_factory):
+    """The two protections below also under the module- and session-scoped fixtures, which pytest sets up before a
+    test's own fixtures: a private LOCALAPPDATA, and `analysis.gpu: auto` keeping to the CPU. Without it a module
+    fixture's Simulate (test_pdn.py's `solved`) timed the laptop's GPU for real, auto took it, and the probe cache
+    ran every later test's Simulate on the GPU (test_stats.py then counted no CPU time split, 2026-11-23). Each test
+    still gets its own of both (the fixtures below)."""
+    from groundtruth.solver import gpu
+    root = tmp_path_factory.mktemp("session_user")
+    (root / "local" / "GroundTruth").mkdir(parents=True)
+    (root / "local" / "GroundTruth" / "ui.json").write_text('{"history": false}', encoding="utf-8")
+    with pytest.MonkeyPatch.context() as m:
+        m.setenv("LOCALAPPDATA", str(root / "local"))
+        m.setattr(gpu, "_speedup", lambda torch, dev: 0.0)
+        yield
+
+
 @pytest.fixture(autouse=True)
 def _private_user_folders(tmp_path_factory, monkeypatch):
     """Windows register a board inbox and the plugin logs its start-up in the user's folder: in tests both go

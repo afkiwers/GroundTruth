@@ -182,13 +182,13 @@ def test_the_pins_fine_model_makes_a_coarse_grid_converge(tmp_path, monkeypatch)
 
     def z_at(name, budget, correct):
         """|Z| at 1 and 100 MHz on a board-wide budget, with or without the correction."""
-        if not correct:
-            monkeypatch.setattr(P, "_local_runs", lambda *a, **k: (None, "off"))
-        b, sc, _ = make(tmp_path, pdn_board(caps=caps), name, nets=(), cavity_max_nodes=budget)
-        sc.set_pdn([PdnSpec("VDD", source="none")])
-        sc.save()
-        port = simulate(b, SettingsFile.load(sc.path).config).pdn[0].ports[0]
-        monkeypatch.undo()
+        with monkeypatch.context() as m:        # not monkeypatch.undo(): that also undoes conftest's patches
+            if not correct:
+                m.setattr(P, "_local_runs", lambda *a, **k: (None, "off"))
+            b, sc, _ = make(tmp_path, pdn_board(caps=caps), name, nets=(), cavity_max_nodes=budget)
+            sc.set_pdn([PdnSpec("VDD", source="none")])
+            sc.save()
+            port = simulate(b, SettingsFile.load(sc.path).config).pdn[0].ports[0]
         f, z = np.log(port["f"]), np.log(port["z_ohm"])
         return [float(np.exp(np.interp(np.log(x), f, z))) for x in (1e6, 1e8)], port
     # the reference on 60000 nodes: since vias join the planes around their barrel (add_pin, from ~0.3 mm cells
