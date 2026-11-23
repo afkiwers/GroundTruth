@@ -2954,6 +2954,11 @@ a History tab with a comparison (and the CLI).
   - **On the compute server** the worker is told its watchdog limit (`sysmem.LIMIT_ENV`), so the gate plans within
     it; a worker's own MemoryError is "the job ran out of memory" with its traceback in the job's details
     (`thermal_proc._run_child(what=...)`, `ThermalMemoryError.detail`).
+  - **No early stop** (decided 2026-11-23, after an 8x refboard run on the compute server with the GPU cap peaked
+    at 13.7 GB of 62.7): a plan past the free memory never refuses a run, since the estimate could stop runs that
+    would finish. `memory_need` (the largest group's kept factorisations plus its largest solve) against
+    `MEMORY_SHARE` of the memory free at the start only puts "needs ~X GB, Y GB was free" in the notes
+    (`MemoryRelief.planned_short`; `memory_short_planned` in the solver statistics).
   - The run's notes say what it did (`memory_notes`). Tests: `tests/test_memory_relief.py` (the gate's admit, wait
     and least fill; the ladder; a Simulate whose usual factorisations all run out finishes with the same margins
     within 0.05 dB; one that can make none still returns; the server's message and traceback).

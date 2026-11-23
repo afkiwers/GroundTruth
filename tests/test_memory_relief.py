@@ -159,6 +159,20 @@ def test_a_simulate_that_cannot_get_the_memory_still_finishes(route_board, monke
     assert any("not enough memory" in n for n in res.routes[0].notes)
 
 
+def test_a_plan_past_the_free_memory_is_a_note_not_a_stop(route_board, monkeypatch, own_stacks):
+    """The solves planned at the start need more than is free: the Simulate still runs (never stopped for memory:
+    the user's "It should not fail"), finishes with the same results and says "needs ~X GB" in its notes. With the
+    memory free, no such note."""
+    board, cfg, base = route_board
+    assert not any("needs ~" in n for n in base.notes), base.notes
+    monkeypatch.setattr(sysmem, "available_bytes", lambda: 2 ** 20)     # 1 MB "free"
+    res = simulate(board, cfg)
+    a, b = base.routes[0], res.routes[0]
+    assert not b.error and b.worst["margin_db"] == pytest.approx(a.worst["margin_db"], abs=0.05)
+    note = [n for n in res.notes if "needs ~" in n]
+    assert len(note) == 1 and "0.0 GB was free" in note[0] and "never stops" in note[0], res.notes
+
+
 def test_the_worker_is_told_its_memory_limit(monkeypatch):
     """A job under the server's watchdog plans within its limit: available_bytes is at most the limit less what the
     process holds."""
