@@ -3419,7 +3419,8 @@ def transfers(st: StackBuild, plane: PlaneStack, sol: Solution, route: Optional[
                             "y": y, "fraction": float(net), "distance_mm": float(dist), "distributed": True,
                             "f": float(sol.f)}
     out = [t for t in merged.values() if t["fraction"] >= 0.01]        # every carrier (the maps can show fewer)
-    out.sort(key=lambda t: -t["fraction"])
+    # biggest first; equal shares (symmetric vias) by name, so the order does not depend on the dict's history
+    out.sort(key=lambda t: (-t["fraction"], t["name"]))
     return out
 
 

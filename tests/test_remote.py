@@ -448,9 +448,9 @@ def test_a_mac_server_says_its_cpu_solves(tmp_path, monkeypatch):
     from groundtruth.remote import server as server_mod
     from groundtruth.remote.client import describe
     srv = ComputeServer(KEY, "127.0.0.1", 0, gpu="auto", data_dir=tmp_path)
-    monkeypatch.setattr(server_mod.sys, "platform", "darwin")
-    srv._probe_gpus()
-    monkeypatch.undo()
+    with monkeypatch.context() as m:            # not monkeypatch.undo(): that also undoes conftest's patches
+        m.setattr(server_mod.sys, "platform", "darwin")
+        srv._probe_gpus()
     assert srv.gpus == [] and srv.gpu_count == 0 and srv.gpu_note == server_mod.MAC_GPU_NOTE
     text = describe(srv.status())
     assert "a Mac" in text and "DLL" not in text and "--cuda" not in text
