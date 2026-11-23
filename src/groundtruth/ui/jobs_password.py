@@ -1,6 +1,10 @@
-"""The password that guards Preferences › Compute server › Clear past jobs (the user, 2026-11-02: "offer a clear past
-jobs button, maybe under preferences under compute server? ideally, have some sort of password that is required to
-do so").
+"""This computer's administration password: it opens Preferences › Compute server › Server administration…
+(ui/server_admin.py: server updates and options, how long servers keep results, clearing past jobs) and, without
+Windows Hello, shows the access key (ui/secret_field.py). First asked for to guard Clear past jobs (the user,
+2026-11-02: "offer a clear past jobs button, maybe under preferences under compute server? ideally, have some sort
+of password that is required to do so"); on 2026-11-20 everything it guards moved into one window ("put everythign
+in one new windows ... so all password protetced stuff is contained in there"). PREF_KEY keeps its old name, so a
+password already set still works.
 
 Only a salted hash is kept, in this computer's ui.json under PREF_KEY: PBKDF2-HMAC-SHA256 with a random 16-byte salt
 and ITERATIONS rounds (OWASP's 2023 figure for that hash), never the password itself; a check compares in constant

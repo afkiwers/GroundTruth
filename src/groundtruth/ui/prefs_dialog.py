@@ -259,266 +259,6 @@ def compute_server(prefs: dict) -> Optional[tuple[str, str]]:
     return (p["server"], p["server_key"]) if p["compute"] == "server" else None
 
 
-class ServersPanel(wx.Panel):
-    """Preferences › Compute server › Servers: the configured server and the servers its cluster names, each with
-    its version against this plugin's (ui/server_updates.py), and Update / Update all for the out-of-date ones that
-    take signed remote updates (remote/release.py). Every request runs in a background thread; following an update
-    ends when the dialog closes (the server carries on by itself)."""
-
-    COLS = (("Server", 130), ("Version", 140), ("State", 300))
-
-    def __init__(self, parent, settings):
-        """`settings()`: (the server address, the access key) as typed in the dialog now."""
-        import threading
-        from ..remote.release import bundled
-        super().__init__(parent)
-        self.settings = settings
-        self.rows: list[dict] = []
-        self.busy: set[str] = set()                 # addresses being updated
-        self.stop = threading.Event()
-        self.bundle = bundled()
-        self.list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL,
-                                size=self.FromDIP(wx.Size(sum(w for _, w in self.COLS) + 10, 104)))
-        for i, (title, w) in enumerate(self.COLS):
-            self.list.InsertColumn(i, title, width=self.FromDIP(w))
-        self.check_b = wx.Button(self, label="Check")
-        self.check_b.SetToolTip("ask every server for its version")
-        self.update_b = wx.Button(self, label="Update")
-        self.update_b.SetToolTip("update the selected server to this plugin's version")
-        self.all_b = wx.Button(self, label="Update all")
-        self.all_b.SetToolTip("update every out-of-date server, one after the other")
-        self.options_b = wx.Button(self, label="Options…")
-        self.options_b.SetToolTip("install or remove the selected server's options (a GPU build of PyTorch, the MKL "
-                                  "sparse solver); asks for this computer's password")
-        self.options_b.Bind(wx.EVT_BUTTON, lambda e: self.on_options())
-        self.note = wx.StaticText(self, label="")
-        self.note.SetName("muted")
-        self.check_b.Bind(wx.EVT_BUTTON, lambda e: self.start_check())
-        self.update_b.Bind(wx.EVT_BUTTON, lambda e: self.on_update(all_=False))
-        self.all_b.Bind(wx.EVT_BUTTON, lambda e: self.on_update(all_=True))
-        self.list.Bind(wx.EVT_LIST_ITEM_SELECTED, lambda e: self._enable())
-        self.Bind(wx.EVT_WINDOW_DESTROY, self._destroyed)
-        buttons = wx.BoxSizer(wx.HORIZONTAL)
-        for b in (self.check_b, self.update_b, self.all_b, self.options_b):
-            buttons.Add(b, 0, wx.RIGHT, self.FromDIP(GAP))
-        s = wx.BoxSizer(wx.VERTICAL)
-        s.Add(self.list, 1, wx.EXPAND)
-        s.Add(buttons, 0, wx.TOP, self.FromDIP(GAP))
-        s.Add(self.note, 0, wx.TOP | wx.EXPAND, self.FromDIP(GAP // 2))
-        self.SetSizer(s)
-        self._enable()
-
-    def _destroyed(self, evt):
-        """The dialog closes: stop following updates (EVT_WINDOW_DESTROY bubbles up from children: ours only)."""
-        evt.Skip()
-        if evt.GetEventObject() is self:
-            self.stop.set()
-
-    def start_check(self):
-        """Ask every server for its version (background); the list fills when they have answered."""
-        import threading
-        from .server_updates import check
-        address, key = self.settings()
-        if not address or not key:
-            self.note.SetLabel("Enter the server's address and access key first.")
-            return
-        self.note.SetLabel("Asking the servers…")
-        self.check_b.Disable()
-
-        def ask():
-            """(background) The rows, or why not."""
-            try:
-                rows, error = check(address, key), ""
-            except Exception as e:                  # noqa: BLE001 - shown in the note
-                rows, error = [], str(e)
-            wx.CallAfter(self._show, rows, error)
-        threading.Thread(target=ask, name="gt-server-versions", daemon=True).start()
-
-    def _show(self, rows: list, error: str):
-        """(GUI thread) The servers in the list, the out-of-date ones marked; a note on what to do."""
-        if not self:
-            return
-        self.check_b.Enable()
-        self.rows = rows
-        self.list.DeleteAllItems()
-        warn = theme.colour(theme.palette().warn)
-        for r in rows:
-            i = self.list.InsertItem(self.list.GetItemCount(), r["name"])
-            self.list.SetItem(i, 1, r["version"])
-            self.list.SetItem(i, 2, r["text"])
-            if r["state"] in ("older", "unreachable"):
-                self.list.SetItemTextColour(i, warn)
-        old = [r for r in rows if r["state"] == "older"]
-        if error:
-            self.note.SetLabel(error)
-        elif not old:
-            self.note.SetLabel("Every server runs this plugin's version." if rows else "")
-        elif self.bundle is None:
-            self.note.SetLabel(f"{len(old)} server(s) out of date. This plugin carries no server package (a "
-                               "development copy): update them with the server package, or install a built plugin.")
-        else:
-            self.note.SetLabel(f"{len(old)} server(s) out of date; Update installs this plugin's version on them "
-                               "at once (a busy one cancels its running jobs: their owners run them again).")
-        self.note.Wrap(max(200, self.list.GetSize().width))
-        self.GetParent().Layout()
-        self._enable()
-
-    def _enable(self):
-        """Update: a selected out-of-date server that takes remote updates; Update all: any such server; neither
-        without the plugin's server package or while updating."""
-        can = [r for r in self.rows if r["can_update"] and r["address"] not in self.busy]
-        sel = self.list.GetFirstSelected()
-        self.update_b.Enable(bool(self.bundle) and 0 <= sel < len(self.rows) and self.rows[sel] in can)
-        self.all_b.Enable(bool(self.bundle) and bool(can))
-        self.options_b.Enable(0 <= sel < len(self.rows) and self.rows[sel]["state"] != "unreachable"
-                              and self.rows[sel]["address"] not in self.busy)
-
-    def on_options(self):
-        """Options…: this computer's password first (the one that guards Clear past jobs; checked off the GUI
-        thread), then the selected server's options as it lists them, one to install or remove after a
-        confirmation; its row says how far it is. The server takes only names of its own fixed list
-        (remote/options.py)."""
-        import threading
-        from . import jobs_password as jp
-        from .server_updates import follow_option, installed_lines, no_options_reason, option_choices
-        sel = self.list.GetFirstSelected()
-        if not 0 <= sel < len(self.rows):
-            return
-        row = self.rows[sel]
-        title = "GroundTruth: server options"
-        rec = jp.record(theme.prefs())
-        if rec is None:
-            message_box("A server's options need this computer's password: set one with Set password… first.",
-                        title, wx.ICON_INFORMATION)
-            return
-        with wx.PasswordEntryDialog(self, f"Password for changing {row['name']}'s options:", title) as dlg:
-            pw = dlg.GetValue() if dlg.ShowModal() == wx.ID_OK else None
-        if pw is None:
-            return
-        _, key = self.settings()
-        self.options_b.Disable()
-
-        def look():
-            """(background) The password's check (~0.5 s), then the server's status."""
-            from ..remote.client import Remote
-            if not jp.matches(rec, pw):
-                return None
-            try:
-                return Remote(row["address"], key).status()
-            except Exception as e:                  # noqa: BLE001 - said in the message below
-                return str(e)
-
-        def chosen(status):
-            """(GUI thread) Offer the server's options; start the chosen one."""
-            self._enable()
-            if status is None:
-                message_box("Wrong password: nothing was changed.", title, wx.ICON_WARNING)
-                return
-            if isinstance(status, str):
-                message_box(f"{row['name']} can't be asked: {status}", title, wx.ICON_WARNING)
-                return
-            choices = option_choices(status)
-            # what the server has, above the choices (the user: "show what options have been installed already")
-            have = installed_lines(status)
-            has = ("On " + row["name"] + ":\n" + "\n".join("  " + h for h in have) + "\n\n") if have else ""
-            if not choices:
-                message_box(f"{has}{row['name']} offers nothing to install or remove from here: "
-                            f"{no_options_reason(status)}.", title, wx.ICON_INFORMATION)
-                return
-            with wx.SingleChoiceDialog(self, f"{has}Remove an installed option, or install one:", title,
-                                       [c["text"] for c in choices]) as d:
-                pick = choices[d.GetSelection()] if d.ShowModal() == wx.ID_OK else None
-            if pick is None or message_box(pick["confirm"], title, wx.YES_NO | wx.ICON_QUESTION) != wx.YES:
-                return
-            self.busy.add(row["address"])
-            self._enable()
-
-            def work():
-                """(background) Ask the server, follow it, then check the servers again."""
-                _, text = follow_option(row["address"], key, pick["name"], pick["action"],
-                                        lambda t: wx.CallAfter(self._row_text, row["address"], t), stop=self.stop)
-                wx.CallAfter(self._row_text, row["address"], text)
-                if not self.stop.is_set():
-                    wx.CallAfter(self._options_done, row["address"], text)
-            threading.Thread(target=work, name="gt-server-option", daemon=True).start()
-        _off_thread(self, look, chosen)
-
-    def _options_done(self, address: str, text: str):
-        """(GUI thread) An option's install or removal ended: the row keeps what happened; the buttons are back."""
-        if not self:
-            return
-        self.busy.discard(address)
-        self._enable()
-        self._row_text(address, text)
-
-    def on_update(self, all_: bool):
-        """Update the selected (or every) out-of-date server, after asking, one after the other in the background;
-        each row says how far its update is."""
-        import threading
-        from .server_updates import update
-        sel = self.list.GetFirstSelected()
-        targets = [r for r in self.rows if r["can_update"] and r["address"] not in self.busy] if all_ else \
-            ([self.rows[sel]] if 0 <= sel < len(self.rows) and self.rows[sel]["can_update"] else [])
-        if not targets or self.bundle is None:
-            return
-        from . import server_info
-        if not server_info.confirm_update(self, targets, self.bundle["version"]):
-            return
-        # servers with jobs running: the user decides whether they finish first or are stopped (never by itself)
-        busy = server_info.ask_running_jobs(self, [r for r in targets if r.get("running")])
-        if busy is None:
-            return
-        _, key = self.settings()
-        self.busy |= {r["address"] for r in targets}
-        self._enable()
-        bundle = self.bundle
-
-        def work():
-            """(background) One server after the other; each row told every step."""
-            for r in targets:
-                done, text = update(r["address"], key, bundle,
-                                    lambda t, a=r["address"]: wx.CallAfter(self._row_text, a, t), stop=self.stop,
-                                    busy=busy)
-                wx.CallAfter(self._row_text, r["address"], text)
-                if self.stop.is_set():
-                    return
-            wx.CallAfter(self._updated, [r["address"] for r in targets])
-        threading.Thread(target=work, name="gt-server-update", daemon=True).start()
-
-    def _row_text(self, address: str, text: str):
-        """(GUI thread) A server's State cell."""
-        if not self:
-            return
-        for i, r in enumerate(self.rows):
-            if r["address"] == address:
-                self.list.SetItem(i, 2, text)
-
-    def _updated(self, addresses: list):
-        """(GUI thread) The updates are over: ask every server again."""
-        if not self:
-            return
-        self.busy -= set(addresses)
-        self.start_check()
-
-
-def _off_thread(window, work, done):
-    """Run work() in a thread (a password hash takes ~0.5 s: never on the GUI thread) and then done(its result) on
-    the GUI thread, unless `window` is gone by then."""
-    import threading
-
-    def run():
-        """(thread) The work, then back to the GUI thread."""
-        out = work()
-        wx.CallAfter(lambda: done(out) if window else None)
-    threading.Thread(target=run, name="gt-password", daemon=True).start()
-
-
-def _ask_password(parent, message: str) -> Optional[str]:
-    """A masked password entry, None when cancelled."""
-    with wx.PasswordEntryDialog(parent, message, "GroundTruth: past jobs") as dlg:
-        return dlg.GetValue() if dlg.ShowModal() == wx.ID_OK else None
-
-
 class PreferencesDialog(wx.Dialog):
     """cell_mm: the 1× cell of the last Simulate's coarsest model (None before one): each Resolution entry shows
     its own."""
@@ -670,7 +410,7 @@ class PreferencesDialog(wx.Dialog):
         row(comp, "Access key", self.server_key,
             "the key the server's window shows when it starts (groundtruth_server.cmd). Every job and result is "
             "signed with it; kept in this computer's ui.json. The eye shows it after Windows Hello verifies you "
-            "(without Windows Hello: this computer's password, Set password… under Past jobs)")
+            "(without Windows Hello: this computer's administration password, set in Server administration…)")
         self.test = wx.Button(self, label="Test connection")
         row(comp, "Connection", self.test, "ask the server for its version, GPUs, memory and queue")
         self.test.Bind(wx.EVT_BUTTON, self.on_test)
@@ -679,44 +419,22 @@ class PreferencesDialog(wx.Dialog):
             "list the compute servers on the local network that use this access key (the cluster's lead first) and "
             "pick one for the address. Servers on another subnet aren't found: type their address")
         self.find.Bind(wx.EVT_BUTTON, self.on_find)
-        # every server's version against this plugin's, with remote updates (the user: "it will show the user which
-        # server is out of date and offers to update it through a button press")
-        self.servers = ServersPanel(self, lambda: (self.server.GetValue().strip(), self.server_key.GetValue().strip()))
-        row(comp, "Servers", self.servers,
-            "the server above and the servers of its cluster, each with its version against this plugin's. Update "
-            "installs this plugin's version on an out-of-date server that takes remote updates (turned on at its "
-            "install; only packages signed with the release key of its last manual install are taken); its running "
-            "jobs finish first. Check asks them again.")
+        # everything guarded by this computer's administration password in one window (ui/server_admin.py; the
+        # user: "put everything in one new window maybe combined with the installation so all password protected
+        # stuff is contained in there"): server versions and updates, options, how long results are kept, past jobs
+        self.admin = wx.Button(self, label="Server administration…")
+        row(comp, "Administration", self.admin,
+            "versions and updates of the servers, their optional packages, how long they keep results, clearing "
+            "past jobs, and the administration password that guards all of these (asked when it opens)")
+        self.admin.Bind(wx.EVT_BUTTON, lambda e: self.on_admin())
 
         def server_fields(_=None):
             """The address and key only matter for the server."""
             on = self.compute.GetSelection() == 1
-            for ctrl in (self.server, self.server_key, self.test, self.find, self.servers):
+            for ctrl in (self.server, self.server_key, self.test, self.find):
                 ctrl.Enable(on)
         self.compute.Bind(wx.EVT_CHOICE, server_fields)
         server_fields()
-        # Clear past jobs behind a password of this computer (jobs_password; the user: "offer a clear past jobs
-        # button ... ideally, have some sort of password that is required to do so"): only this computer's records
-        # of finished, failed, cancelled and lost jobs, never a running job or anything on a server
-        jobs_row = wx.BoxSizer(wx.HORIZONTAL)
-        self.set_password = wx.Button(self, label="Set password…")
-        self.clear_past = wx.Button(self, label="Clear past jobs…")
-        jobs_row.Add(self.set_password, 0, wx.RIGHT, gap)
-        jobs_row.Add(self.clear_past, 0)
-        holder = wx.Panel(self)
-        for b in (self.set_password, self.clear_past):
-            b.Reparent(holder)
-        holder.SetSizer(jobs_row)
-        row(comp, "Past jobs", holder,
-            "Clear past jobs removes the Server jobs tab's past jobs (shown, failed, cancelled, no longer on the "
-            "server) from this computer's list, never a job still queued or running, nor anything on a server. It "
-            "asks for the password set with Set password… (kept in this computer's ui.json as a salted hash only; "
-            "it guards against clearing by accident, not against someone using your Windows account)")
-        self.set_password.Bind(wx.EVT_BUTTON, lambda e: self.on_set_password())
-        self.clear_past.Bind(wx.EVT_BUTTON, lambda e: self.on_clear_past())
-        self.clear_past.Enable(past_jobs is not None)
-        if self.compute.GetSelection() == 1 and p["server"] and p["server_key"]:
-            wx.CallAfter(lambda: self and self.servers.start_check())      # once the dialog shows
 
         therm = group("Thermal", "left")
         self.thermal_quality = wx.Choice(self, choices=list(QUALITY))
@@ -953,89 +671,12 @@ class PreferencesDialog(wx.Dialog):
         self.checks_all.Enable(not all(states))
         self.checks_none.Enable(any(states))
 
-    def _password_busy(self, busy: bool):
-        """Grey the two past-jobs buttons while a password is hashed (off the GUI thread)."""
-        self.set_password.Enable(not busy)
-        self.clear_past.Enable(not busy and self.past_jobs is not None)
-
-    def on_set_password(self):
-        """Set password…: the current one first when one is set, then the new one twice; saved at once (its hash
-        only, jobs_password.make_record)."""
-        from . import jobs_password as jp
-        rec = jp.record(theme.prefs())
-
-        def ask_new():
-            """The new password, twice; hashed off the GUI thread and saved."""
-            new = _ask_password(self, f"New password for clearing past jobs (at least {jp.MIN_LENGTH} characters):")
-            if new is None:
-                return
-            again = _ask_password(self, "The new password again:")
-            if again is None:
-                return
-            why = jp.problem(new, again)
-            if why:
-                message_box(f"Not set: {why}.", "GroundTruth: past jobs", wx.ICON_WARNING)
-                return
-            self._password_busy(True)
-
-            def saved(made):
-                """The hash is made: store it."""
-                theme.save_prefs(**{jp.PREF_KEY: made})
-                self._password_busy(False)
-                message_box("The password for clearing past jobs is set.", "GroundTruth: past jobs",
-                            wx.ICON_INFORMATION)
-            _off_thread(self, lambda: jp.make_record(new), saved)
-        if rec is None:
-            ask_new()
-            return
-        old = _ask_password(self, "The current password for clearing past jobs:")
-        if old is None:
-            return
-        self._password_busy(True)
-
-        def checked(ok):
-            """The current password checked: on to the new one, or refused."""
-            self._password_busy(False)
-            if not ok:
-                message_box("That is not the current password.", "GroundTruth: past jobs", wx.ICON_WARNING)
-                return
-            ask_new()
-        _off_thread(self, lambda: jp.matches(rec, old), checked)
-
-    def on_clear_past(self):
-        """Clear past jobs…: the password (checked off the GUI thread), then a Yes/No naming how many, then the
-        window's clear(). Without a password set, the user is asked to set one first."""
-        from . import jobs_password as jp
-        if self.past_jobs is None:
-            return
-        count, clear = self.past_jobs
-        n = count()
-        if not n:
-            message_box("There are no past jobs to clear.", "GroundTruth: past jobs", wx.ICON_INFORMATION)
-            return
-        rec = jp.record(theme.prefs())
-        if rec is None:
-            message_box("Clearing past jobs needs a password: set one with Set password… first.",
-                        "GroundTruth: past jobs", wx.ICON_INFORMATION)
-            return
-        pw = _ask_password(self, "Password for clearing past jobs:")
-        if pw is None:
-            return
-        self._password_busy(True)
-
-        def checked(ok):
-            """The password checked: ask, then clear."""
-            self._password_busy(False)
-            if not ok:
-                message_box("Wrong password: nothing was cleared.", "GroundTruth: past jobs", wx.ICON_WARNING)
-                return
-            if message_box(f"Remove the {n} past job(s) from this computer's list? Jobs still queued or running and "
-                           "anything on the servers stay.", "GroundTruth: past jobs",
-                           wx.YES_NO | wx.ICON_QUESTION) != wx.YES:
-                return
-            done = clear()
-            message_box(f"{done} past job(s) cleared.", "GroundTruth: past jobs", wx.ICON_INFORMATION)
-        _off_thread(self, lambda: jp.matches(rec, pw), checked)
+    def on_admin(self):
+        """Server administration…: the administration password, then its window (ui/server_admin.py), with the
+        address and key as typed here now and the main window's past jobs."""
+        from .server_admin import open_admin
+        open_admin(self, lambda: (self.server.GetValue().strip(), self.server_key.GetValue().strip()),
+                   self.past_jobs)
 
     def values(self) -> dict:
         """The dialog's choices, as ui.json entries (vias shown "all" is None: no limit)."""

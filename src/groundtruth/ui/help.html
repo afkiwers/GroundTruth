@@ -2361,7 +2361,16 @@ on your local network: you keep working in KiCad on your own computer, the solvi
 results show here as usual. Several people can share one server; their jobs wait in a queue. KiCad does
 <b>not</b> need to be running on the server.</p>
 
-<p><b>Update the servers from here</b>: <b>Preferences, Compute server, Servers</b> lists the server and the
+<p><b>Server administration</b>: <b>Preferences, Compute server, Server administration…</b> opens one window
+for everything that changes the servers or this computer's job list: the servers' versions and updates, their
+optional packages, how long they keep results, clearing past jobs, and the password that guards all of these. It
+asks for this computer's <b>administration password</b> when it opens; the first time, when none is set, it asks
+you to choose one (at least 6 characters; typed twice). Only a salted hash of it is kept, in this computer's
+ui.json: it guards against changes made by accident or in passing, not against someone using your Windows account.
+Forgotten? Remove the <code>past_jobs_password</code> entry from ui.json and set a new one. <b>Change
+password…</b> in the window sets another.</p>
+
+<p><b>Update the servers from here</b>: the window's <b>Compute servers</b> list shows the server and the
 others of its cluster (and any other server with this key the network answers from), each with its version against
 this plugin's (the out-of-date ones in orange: an earlier build, also one that still takes this plugin's jobs
 because only the server's own program changed; a server is asked at whichever of its addresses answers from this
@@ -2379,8 +2388,7 @@ to its old version if the new one does not stay up. A development copy of the pl
 its buttons stay off.</p>
 <p><b>Options…</b> installs or removes the selected server's optional packages from here, so nobody has to sit at
 the server: a GPU build of PyTorch (NVIDIA: the CUDA builds cu118, cu126, cu128; AMD Radeon: the build for its
-chip; about 2.5 to 3 GB) and the Intel MKL sparse solver (about 150 MB, x86 only). It asks for this computer's
-password first (the one set with <b>Set password…</b>, which also guards Clear past jobs), then shows what the
+chip; about 2.5 to 3 GB) and the Intel MKL sparse solver (about 150 MB, x86 only). It shows what the
 server has (PyTorch and its build, CPU only or for which GPU; Intel MKL), lists each installed one to <b>remove</b>
 and the options that suit its machine to <b>install</b>, and asks again before it starts. The server downloads the package from its maker's own
 index and installs it once no job is running (queued jobs wait); its row shows how far it is, and afterwards the
@@ -2389,6 +2397,10 @@ own fixed list: the plugin sends an option's name, never a package or an address
 the server's key like every other. The server keeps pip's output in <code>options.log</code> in its folder. A Mac server offers nothing here, and needs
 nothing: its solves run on the CPU (no GPU build is used on a Mac) and an Apple-silicon Mac can't run Intel MKL;
 Options… says so.</p>
+<p><b>Keep results</b>: how long the selected server keeps a finished result for its owner, 1 to 720 hours (30
+days; 24 by default). <b>Set</b> changes it at once, also for the results already waiting, and the server saves it in
+its settings file for its next starts; the list's <i>Keeps results</i> column shows each server's. Longer helps when
+a laptop is away over a weekend; each waiting result takes the server's disk space (a few MB to a few hundred).</p>
 
 <p><b>A server PC with two networks</b> (two network cards): <code>install_server.cmd install --address</code>
 lists its addresses to pick the one the other servers and the users reach it at; it then announces that one alone.
@@ -2490,7 +2502,7 @@ power stages: one big item can't be split further.</p>
     every job, whatever its user chose (<code>"-"</code> is the same as <code>"auto"</code>). The server reads this
     file only when it starts: restart it after a change.</li>
   <li><code>"keep_hours": 24</code>: how long a finished job's result waits for its owner (removed at once when
-    fetched).</li>
+    fetched); also set from a plugin, Server administration, Keep results (at once, no restart).</li>
   <li><code>"port": 8765</code>: another port (then open that one in the firewall, and add <code>:port</code> to the
     address in the users' Preferences).</li>
   </ul>
@@ -2505,8 +2517,9 @@ power stages: one big item can't be split further.</p>
 <li><b>Preferences…</b> (top bar), group <b>Compute server</b>: <i>Run analyses on</i> = <i>A GroundTruth compute
   server</i>; <i>Server address</i> = its name or IP address (optionally <code>:port</code>); <i>Access key</i> = the
   key from the server. It is masked; the <b>eye</b> beside it shows it, after <b>Windows Hello</b> (your PIN,
-  fingerprint or face) has checked that it is you. Without Windows Hello on this computer it asks the password set
-  with <b>Set password…</b> under Past jobs instead (with none set, the key stays hidden). The eye again hides it.</li>
+  fingerprint or face) has checked that it is you. Without Windows Hello on this computer it asks the
+  administration password instead (set in <b>Server administration…</b>; with none set, the key stays hidden). The eye
+  again hides it.</li>
 <li><b>Test connection</b>: shows the server laid out: its version and code (the same as this plugin's, or not),
   addresses, cores, memory, GPU, its jobs (at a time, running, queued), remote updates, and its cluster as a table
   (every server's role, address, cores, memory, GPU and time in the cluster); <b>Copy details</b> copies it. Or why
@@ -2541,18 +2554,17 @@ power stages: one big item can't be split further.</p>
   says it is here: <b>Server jobs</b> tab, select it, <b>Show results</b> (its board must be the one open). The
   status line ends with <i>on the compute server …</i>.</li>
 <li><b>Nothing is lost to a dropped connection</b>: a sleeping laptop, a VPN drop or a night at home only delay the
-  result. The server keeps a finished result for 24 hours (its settings) and removes it once fetched. Only you stop
+  result. The server keeps a finished result for 24 hours (Server administration, Keep results, sets it) and
+  removes it once fetched. Only you stop
   a job: <b>Cancel job</b> on the Server jobs tab. <b>Remove from list</b> on a job still queued or running stops it
   on the server and takes it off the list. When its server can't be reached (switched off, renamed, a new address),
   you are asked whether to remove it anyway: should that server come back with the job, it finishes it there and
   nobody fetches the result.</li>
-<li><b>Clearing past jobs</b>: Preferences › Compute server › <b>Clear past jobs…</b> removes every past job (shown,
-  failed, cancelled, no longer on the server) from this computer's list at once; jobs still queued or running and
-  results not shown yet stay, and nothing on a server changes. It asks for a password, set once with <b>Set
-  password…</b> (at least 6 characters; changing it asks for the current one). Only a salted hash of it is kept, in
-  this computer's ui.json, never the password: it guards against clearing the list by accident, not against someone
-  using your Windows account. Forgotten? Remove the <code>past_jobs_password</code> entry from ui.json and set a new
-  one; single jobs can always be removed with <b>Remove from list</b>.</li>
+<li><b>Clearing past jobs</b>: Preferences › Compute server › Server administration… › <b>Clear past jobs…</b>
+  removes every past job (shown, failed, cancelled, no longer on the server) from this computer's list at once; jobs
+  still queued or running and results not shown yet stay, and nothing on a server changes. The window asks for the
+  administration password (see Server administration above). Single jobs can always be removed with <b>Remove from
+  list</b>.</li>
 <li>Check in Simulate, Compare what-if, Thermal and Current capacity also run on the server, but the window waits for
   them (the progress bar shows the server's progress or your place in its queue, Cancel cancels the job there); a
   lost connection is waited out, not given up. They are listed on the <b>Server jobs</b> tab too while they run

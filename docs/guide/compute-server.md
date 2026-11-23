@@ -41,20 +41,26 @@ macOS firewall and shows the address and key; `./install_server.command status |
 `install --key` joins a cluster. A Mac solves on its CPU only (no CUDA; Apple GPUs have no double precision).
 **Or in a window:** on the server, double-click `groundtruth_server.cmd` in the installed plugin's folder (it runs the server with the Python environment KiCad made for the plugin; KiCad itself need not run; the plugin's Help, "Compute server: set up and run", has the steps). Every start shows the access key (made on the first start, kept in `%LOCALAPPDATA%\GroundTruth\server.key`), the addresses to enter and a READY line. In the plugin:
 Preferences, **Compute server**: run analyses on a GroundTruth compute server, its address and the key (masked: the
-eye beside it shows it after Windows Hello verifies you, or, without Windows Hello, after the password of Set
-password…); **Test connection**. Simulate and Suggest fixes are **handed over**: the window is free at once, the **Server jobs** tab
+eye beside it shows it after Windows Hello verifies you, or, without Windows Hello, after the administration
+password); **Test connection**. Simulate and Suggest fixes are **handed over**: the window is free at once, the **Server jobs** tab
 lists the job, and its result comes back by itself whenever the server can be reached (a sleeping laptop or a night at
 home only delay it) and is shown, or offered there (Show results). Only the user cancels a job (Cancel job, or
 Remove from list, which also takes it off the list; a job whose server can't be reached any more is removed after a
-second question). Preferences › Compute server › Clear past jobs… removes every past job (shown, failed, cancelled,
-lost) from this computer's list at once, after a password set there with Set password… (only its salted PBKDF2 hash is
-kept, in ui.json under `past_jobs_password`); queued, running and unshown jobs stay. Check in Simulate,
+second question). Clear past jobs… (in Server administration, below) removes every past job (shown, failed,
+cancelled, lost) from this computer's list at once; queued, running and unshown jobs stay. Check in Simulate,
 Compare what-if, Thermal and Current capacity run there too while the window waits (Thermal with its electro-thermal rounds as one job: each round's DC paths are solved on the server too). Jobs queue first come, first
 served (`workers` at once; with as many workers as GPUs, one GPU each); every job lives on the server's disk, so a
-restart keeps the queue and the results; a result waits 24 h (`keep_hours`) and is removed once fetched. The server's
+restart keeps the queue and the results; a result waits 24 h (`keep_hours`; Server administration › Keep results changes it from the plugin, 1-720 h, at
+once and saved to `server.json`) and is removed once fetched. The server's
 settings are in `%LOCALAPPDATA%\GroundTruth\server.json` (made on the first start; options override them). A server
 that can't be reached when a job starts offers to run it locally. Requests and results are signed (HMAC-SHA256 with the
 key, no replay) and only GroundTruth's own data is unpickled; the traffic is not encrypted (local network only). The
 server must run the same GroundTruth code (and NumPy major version) as the plugin, otherwise it refuses the job.
 
-**Options from the plugin.** Preferences, Compute server, **Options…** installs or removes the selected server's optional packages without anyone at the server: a GPU build of PyTorch (NVIDIA `cu118` / `cu126` / `cu128`, or AMD Radeon's build for its chip) and the Intel MKL sparse solver. It asks for this computer's password (Set password…), shows what the server offers and has, and asks again before starting. The server installs the package from its maker's own index once no job is running, then looks for its GPUs again; pip's output is in `options.log` in the server's folder. A server takes this only as the installed service and only for the names of its own fixed list (`remote/options.py`): the plugin sends an option's name, never a package name or an address, in a request signed with the server's key.
+**Server administration.** Preferences, Compute server, **Server administration…** opens one window for
+everything password-guarded: the servers' versions with **Update** / **Update all**, **Options…**, **Keep results**
+(how long the selected server keeps a finished result, 1-720 h, `POST /v1/settings`), **Clear past jobs…** and
+**Change password…**. It asks for this computer's administration password when it opens (the first time: choose one,
+at least 6 characters); only its salted PBKDF2 hash is kept, in ui.json under `past_jobs_password`.
+
+**Options from the plugin.** Server administration, **Options…** installs or removes the selected server's optional packages without anyone at the server: a GPU build of PyTorch (NVIDIA `cu118` / `cu126` / `cu128`, or AMD Radeon's build for its chip) and the Intel MKL sparse solver. It shows what the server offers and has, and asks again before starting. The server installs the package from its maker's own index once no job is running, then looks for its GPUs again; pip's output is in `options.log` in the server's folder. A server takes this only as the installed service and only for the names of its own fixed list (`remote/options.py`): the plugin sends an option's name, never a package name or an address, in a request signed with the server's key.

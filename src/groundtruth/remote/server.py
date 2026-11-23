@@ -22,6 +22,8 @@ Every request and answer is signed with the access key (protocol.py). Endpoints 
     GET    /v1/jobs/ID/result         the result, protocol.dumps-compatible bytes (zlib of the worker's pickle)
     DELETE /v1/jobs/ID                cancel it (queued or running), or forget it (finished: its result goes)
     POST   /v1/options?name=&action=  install or remove one of the server's own options (remote/options.py)
+    POST   /v1/settings?keep_hours=H  how long a finished result waits for its owner, KEEP_MIN_H..KEEP_MAX_H: at once
+                                      (results waiting included) and saved to server.json -> {"keep_hours", "saved"}
     POST   /v1/update?sig=HEX         body: a signed server package (remote/release.py): taken when remote updates
                                       are on, the signature is the release key's and the build is newer; the server
                                       then starts no new job, and once none runs it exits for its runner to install it
@@ -55,6 +57,7 @@ from .protocol import ProtocolError
 
 MAX_BODY = 2 * 2 ** 30          # a job's body (a board and its settings: kB to a few MB; large what-if boards more)
 KEEP_HOURS = 24.0               # a finished job's result is kept this long when its owner does not fetch it
+KEEP_MIN_H, KEEP_MAX_H = 1.0, 720.0     # what POST /v1/settings takes (720 h: 30 days; a result can be large)
 MEMORY_SHARE = 0.85             # of the server's memory, shared by the jobs running at once (the rest: the system)
 DEFAULTS = {"port": protocol.DEFAULT_PORT, "workers": 1, "threads": "-", "gpu": "auto", "keep_hours": KEEP_HOURS,
             # the cluster (remote/cluster.py): its UDP port (0: no discovery), this server as the lead, peers on
@@ -709,6 +712,10 @@ class ComputeServer:
             status, answer = self._take_option(q.get("name", ""), q.get("action", ""))
             h._json(status, answer, nonce)
             return
+        if method == "POST" and parts == ["settings"]:
+            status, answer = self._take_settings(q)
+            h._json(status, answer, nonce)
+            return
         if method == "POST" and parts == ["update"]:
             status, answer = self._take_update(body, q.get("sig", ""), q.get("busy", "wait"))
             h._json(status, answer, nonce)
@@ -736,6 +743,46 @@ class ComputeServer:
                 h._json(200, {"id": job.id, "state": job.state}, nonce)
                 return
         h._json(404, {"error": "unknown request"}, nonce)
+
+    # ------------------------------------------------------------------ settings changed from a plugin
+    def _take_settings(self, q: dict) -> tuple[int, dict]:
+        """POST /v1/settings?keep_hours=H: (HTTP status, answer). How long a finished job's result waits for its
+        owner (the user, 2026-11-20: "keeping the results for a settable amount of hours like 120hrs", after an 8x
+        result expired over a weekend). Applied at once, to the results already waiting too (_expire reads keep_s
+        each time), and saved to server.json for the next start; a server.json that can't be written keeps the
+        change until the restart ("saved": false). Only keep_hours: the rest (port, workers, GPU) needs a restart."""
+        try:
+            hours = float(q.get("keep_hours", ""))
+        except ValueError:
+            hours = float("nan")
+        if not KEEP_MIN_H <= hours <= KEEP_MAX_H:       # also refuses NaN
+            return 400, {"error": f"keep_hours must be a number of hours from {KEEP_MIN_H:g} to {KEEP_MAX_H:g}"}
+        with self.lock:
+            self.keep_s = hours * 3600.0
+            self.lock.notify_all()
+        saved = self._save_setting("keep_hours", hours)
+        log.info("results are now kept %g h%s", hours, "" if saved else " (server.json not written)")
+        return 200, {"keep_hours": hours, "saved": saved}
+
+    def _save_setting(self, name: str, value) -> bool:
+        """Write one entry into server.json next to the key (the others as they are; the file is replaced in one
+        step, so a crash leaves the old or the new one). False when it can't be written."""
+        path = self.home / "server.json"
+        try:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(data, dict):
+                    data = {}
+            except FileNotFoundError:
+                data = dict(DEFAULTS)
+            data[name] = value
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            os.replace(tmp, path)
+            return True
+        except (OSError, ValueError) as e:
+            log.warning("could not save %s to %s: %s", name, path, e)
+            return False
 
     # ------------------------------------------------------------------ options installed on request (options.py)
     def _option_busy(self) -> bool:
