@@ -2248,7 +2248,8 @@ check's severity or switches it off (the check names are in the <a href="#issues
   waits for the others being made, or makes a leaner one (the least fill: more iterations, the same results).
   A solve that runs out anyway is repeated on its own with everything freed, then with the leaner factorisation;
   only if even that fails is that one frequency left unsolved (a note, and a <i>band_unsolved</i> warning naming
-  what it misses), and the rest of the run finishes. The run's notes say what it had to do. To avoid it: close
+  what it misses), and the rest of the run finishes. The run's notes say what it had to do; when the solves already
+  needed more than was free at the start, a note gives the estimate (“needs ~X GB, Y GB was free”). To avoid it: close
   other programs, choose fewer <b>Solver threads</b> or a lower <b>Resolution</b> (above 1×) in Preferences, or lower
   <code>analysis.max_nodes</code>.</li>
 <li><b>Two optional speed-ups</b>, each installed once per computer with an installer in the plugin's

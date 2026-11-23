@@ -3649,6 +3649,14 @@ def solve_groups(runs: list, threads: int, available: Optional[int], admitted: b
     return groups
 
 
+def memory_need(groups: list) -> int:
+    """The least memory the solves need without any MemoryRelief rung: the largest group's planned kept
+    factorisations (kept_bytes) plus its largest single solve (run_bytes), the most a group holds while solving one
+    frequency at a time. An estimate (the planner's figures; measured within ~15 % on refboard, HANDOFF 2026-11-23)
+    used only for a note: a run is never stopped for it (the user, 2026-10-19: "It should not fail")."""
+    return max((kept_bytes(g) + max(run_bytes(r) for _, r in g) for g in groups if g), default=0)
+
+
 def memory_threads(threads: int, stacks: list, available: Optional[int]) -> int:
     """`threads` (from analysis.threads "auto"), fewer when that many solves of the largest model would not fit in
     MEMORY_SHARE of the available memory: a run that fits beats one that runs out and retries solves one by one
@@ -3683,6 +3691,7 @@ class MemoryRelief:
         self.freed = 0          # cached factorisations freed by the ladder
         self.low = False        # rung 2 taken: every model factorises with the least fill
         self.unsolved = 0       # solves given up (rung 3)
+        self.planned_short = None   # (need, available) bytes when the plan did not fit at the start (memory_need)
         self._lock = threading.Lock()
 
     def step(self, rung: int):
@@ -3712,6 +3721,13 @@ def memory_notes(relief: MemoryRelief, stacks, gate0: tuple = (0, 0)) -> list[st
     and freed caches (since `gate0`, its counters before the run: the gate serves the whole process), the
     least-fill factorisations, the solves retried alone, the frequencies given up."""
     out = []
+    if relief.planned_short is not None:
+        # said whether or not a rung was taken: the estimate is the planner's, the run went ahead regardless
+        need, avail = relief.planned_short
+        out.append(f"this run needs ~{need / 2 ** 30:.1f} GB for its solves and {avail / 2 ** 30:.1f} GB was free "
+                   "when they started, so it may have run slower than usual (it never stops for memory; the results "
+                   "stand): more free memory, fewer jobs at once on the compute server or a lower resolution make "
+                   "it faster")
     freed = peec.GATE.freed - gate0[0] + relief.freed
     waits = peec.GATE.waits - gate0[1]
     low = sum(getattr(x, "lu_memory_fallbacks", 0) for x in stacks)
@@ -4068,11 +4084,19 @@ def solve_setups(setups: list, config: Config, progress=None, rest: float = 0.0,
     groups = [runs]
     if free_done:
         groups = solve_groups(runs, threads, available_bytes(), admitted=auto)
+    # the plan past the free memory even in groups: a note says so (memory_notes), the run goes ahead regardless,
+    # MemoryRelief's ladder making room as it goes. The first call only (a later retry's plan is not the run's)
+    need = memory_need(groups)
+    if avail0 is not None and need > MEMORY_SHARE * avail0 and relief.planned_short is None:
+        relief.planned_short = (need, avail0)
+        if c is not None:
+            c.info["memory_short_planned"] = {"need_gb": round(need / 2 ** 30, 2),
+                                              "available_gb": round(avail0 / 2 ** 30, 2)}
     if c is not None and "group_plan" not in c.info:
         # each group's planned factorisation memory kept while it is solved, and its largest solve (the main
         # solves'; a later call's groups are not recorded), set against the rounds' measured memory
         c.info["group_plan"] = [{"group": gi, "runs": len(g), "keeps_mb": round(kept_bytes(g) / 2 ** 20),
-                                 "largest_solve_mb": round(max(run_bytes(r) for _, r in g) / 2 ** 20)}
+                                 "largest_solve_mb": round(max((run_bytes(r) for _, r in g), default=0) / 2 ** 20)}
                                 for gi, g in enumerate(groups)]
     hooked: set[int] = set()
     for gi, group in enumerate(groups):
