@@ -196,7 +196,8 @@ follows it: <code>U42.3 → U41 ×1 → R41 4k7 → U53.9</code>, op-amps with t
 background, "no route: …" when the copper or a part doesn't connect), <b>Freq</b>, <b>Rise</b>, <b>Ampl.</b> and
 <b>Class</b> (the kind of signal detection took it for). Under the table, the selected path in full: its chain
 and its <b>Branches</b>: per net of the path, every two-pin part hanging off it to another net (a filter capacitor
-or a pull-down to GND, a pull-up to a rail), marked ✗ … (DNP) when it is not fitted. Those to a reference net (not DNP)
+or a pull-down to GND, a pull-up to a rail), marked ✗ before it and (DNP) right after it when it is not fitted
+(“✗ R23 0R (DNP) ∥ U13”: R23 is the one not fitted, across the op-amp stage U13). Those to a reference net (not DNP)
 take their share of the current in Simulate. Status is <i>manual</i> (entered by
 you), <i>auto, REVIEW</i> (found by detection, not checked yet: the row is <font color="@WARN@">orange</font>) or
 <i>auto, reviewed</i>.</p>

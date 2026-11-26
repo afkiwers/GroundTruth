@@ -525,7 +525,7 @@ class PathChain:
     receivers: list[str]
     shunts: list[str] = field(default_factory=list)
     # every 2-pin part hanging off the path, by the path's net it sits on (path order): [(net, ["R45 10k → GND",
-    # "✗ C42 100n → GND (DNP)"])]: capacitors, pull-ups / -downs, to any other net; DNP ones marked (path_branches)
+    # "✗ C42 100n (DNP) → GND"])]: capacitors, pull-ups / -downs, to any other net; DNP ones marked (path_branches)
     branches: list = field(default_factory=list)
     notes: list = field(default_factory=list)       # what the path's circuit leaves out (an op-amp without a model)
     error: str = ""
@@ -599,21 +599,23 @@ def path_branches(board: Board, config: Config, route: Route) -> list:
         nets = [p.net for p in fp.pads if p.net]
         if len(fp.pads) != 2 or len(set(nets)) != 2:
             continue
+        # "(DNP)" right after the part it is about, not at the end of the line: "✗ R23 0R ∥ U13 (DNP)" read as if
+        # the op-amp were not fitted (the user, 2026-11-26: "it says U13 DNP? schematic shows R23 DNP")
+        part = _part_text(board, config, fp.reference)
+        part = f"{DNP_MARK} {part} (DNP)" if fp.dnp else part
         on = [n for n in nets if n in found]
         if len(on) == 2:                    # both pins on the path: across a series part, or another branch's part
-            across = spans.get(frozenset(nets))
+            # each series part once: an op-amp with two channels on the path spans their nets twice ("U13, U13")
+            across = list(dict.fromkeys(spans.get(frozenset(nets), [])))
             first, last = sorted(on, key=order.index)
             # parallel to a series part or an op-amp stage; else a bridge between two of the path's nets (a
             # multiple-feedback filter's R from the input node to the output), named by the net it reaches
-            text = (f"{_part_text(board, config, fp.reference)} ∥ {', '.join(across)}" if across
-                    else f"{_part_text(board, config, fp.reference)} → {last}")
-            found[first].append(f"{DNP_MARK} {text} (DNP)" if fp.dnp else text)
+            found[first].append(f"{part} ∥ {', '.join(across)}" if across else f"{part} → {last}")
             continue
         if len(on) != 1:
             continue
         other = next(n for n in nets if n != on[0])
-        text = f"{_part_text(board, config, fp.reference)} → {other}"
-        found[on[0]].append(f"{DNP_MARK} {text} (DNP)" if fp.dnp else text)
+        found[on[0]].append(f"{part} → {other}")
     return [(n, sorted(found[n], key=lambda s: s.lstrip(DNP_MARK + " "))) for n in order if found[n]]
 
 
