@@ -2494,7 +2494,11 @@ def combine_dc(results, rules, plating_um: float = 25.0):
     if len(ends) == len(st.vias):
         loss += float(sum(r * (c * c + v) for (_, _, r), c, v in zip(ends, cur, rip_v)))
     loads = ", ".join(f"{r.net} {r.dc[0]['current_a']:.3g} A" if r.dc else r.net for r in stages)
-    i_in = sum(p["current_a"] for r in stages for p in r.dc if p["name"].startswith("input "))
+    # the current entering the copper: each power stage's input path, and each DC load's own current (a DC load has
+    # no input path: its one path is the rail, fed at its source). The vias' shares are of this total; with only
+    # DC loads it was 0 A and every via read 10^13 % (it was divided by 1e-12)
+    i_in = sum(p["current_a"] for r in stages if r.kind != "dcload" for p in r.dc if p["name"].startswith("input "))
+    i_in += sum(r.dc[0]["current_a"] for r in stages if r.kind == "dcload" and r.dc)
     path = {"name": COMBINED_VIEW, "combined": True, "stages": [r.net for r in stages], "current_a": i_in,
             "loads": loads, "r_mohm": 0.0, "r_copper_mohm": 0.0, "drop_mv": 0.0, "loss_w": loss, "parts": [],
             "peak_a_mm2": best[0], "peak_layer": best[1], "peak_at": best[2],
@@ -2505,7 +2509,7 @@ def combine_dc(results, rules, plating_um: float = 25.0):
     view = copy.copy(next((r for r in stages if r.kind != "dcload"), stages[0]))
     view.kind = "converter"
     view.net = COMBINED_NET
-    view.notes = [f"every power stage's DC paths at once ({loads}; {i_in:.3g} A in at the input connectors): "
+    view.notes = [f"every power stage's DC paths at once ({loads}; {i_in:.3g} A in at the input connectors and the DC loads' sources): "
                   f"their currents added on one whole-board model; copper loss {loss:.2f} W"]
     view.dc = [path]
     view.dc_maps = {COMBINED_VIEW: {l: m.astype(np.float32) for l, m in maps.items()}}
@@ -2760,8 +2764,11 @@ def dc_view(c: "ConverterResult", name: str) -> "ConverterResult":
     tot = sum(float(m.sum()) for m in maps.values()) or 1.0
     v.layer_share = {l: float(m.sum()) / tot for l, m in maps.items()}
     v.map_frequency = 0.0
+    # each via's share of the path's current; a path whose current is not known (0 A) shares the busiest via's,
+    # never 1e-12 A (that wrote 10^13 % at every via)
+    base = path["current_a"] if path["current_a"] > 1e-9 else max((x["current_a"] for x in path["vias"]), default=1.0)
     v.transfers = [{"name": x["name"], "kind": "via", "layers": list(maps), "x": x["x"], "y": x["y"],
-                    "fraction": x["current_a"] / max(path["current_a"], 1e-12), "distance_mm": 0.0,
+                    "fraction": x["current_a"] / base, "distance_mm": 0.0,
                     "current_a": x["current_a"]} for x in path["vias"]]
     v.heat_label = f"current density (A/mm²) at {path['current_a']:.3g} A DC"
     # the current beside the resistance and the drop; on the input path it is the expected input current (output

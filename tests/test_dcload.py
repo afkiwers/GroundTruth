@@ -243,3 +243,23 @@ def test_a_dc_rail_picked_in_its_tab_lights_the_copper_its_current_runs_on(tmp_p
     assert pwr in h.lit and ret[0] in h.lit and not set(gnd) & set(h.lit) and set(gnd) <= set(h.context)
     assert board.footprint("U1").uuid in h.focus and "through U1" in h.text
     assert dcloads_highlight(["nothing"], board, cfg).empty
+
+
+def test_dc_rails_alone_together_give_each_via_a_share_of_their_currents(tmp_path):
+    """Two DC rails and no power stage: the combined view (power.combine_dc) takes its current in from the rails'
+    own currents (there is no input path), so each via's share is of that total and at most 100 %. The user, of a
+    map whose vias read "80307840008252 %": the shares had been divided by the stages' 0 A input (1e-12)."""
+    from groundtruth.analysis.power import COMBINED_VIEW, dc_view
+    board, cfg = board_with(tmp_path, 30.0, [("U2.1", 2.0)], "two", ret=True)
+    second = DcLoadSpec("ground", "U1.2", [DcLoad("U2.2", 3.0, "")], "")
+    sf = SettingsFile.load(next((tmp_path).rglob("two*.groundtruth.yaml")))
+    sf.set_dc_loads([cfg.dc_loads[0], second])
+    sf.save()
+    res = simulate(board, SettingsFile.load(sf.path).config)
+    assert all(not r.error for r in res.dc_loads), [r.error for r in res.dc_loads]
+    combo = res.dc_combined
+    assert combo is not None
+    path = combo.dc[0]
+    assert path["current_a"] == pytest.approx(5.0) and "5 A in" in dc_view(combo, COMBINED_VIEW).heat_title
+    shares = [t["fraction"] for t in dc_view(combo, COMBINED_VIEW).transfers]
+    assert shares and all(0 < s <= 1.0 + 1e-6 for s in shares)
