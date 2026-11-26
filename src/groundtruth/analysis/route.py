@@ -7,7 +7,7 @@ segments (per layer) and vertical via transitions, which the rule checks and the
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import combinations, pairwise
 from typing import Optional
 
@@ -340,6 +340,26 @@ def copper_graph(board: Board, nets: set) -> "_Graph":
                 for end in (obj.start, obj.end):
                     g.edge(node_id, g.node(layer, end), math.dist(pt, end), ("track", obj))
 
+    # A via or pad whose centre lies on the middle of a track (not at one of its ends) is joined to it too: KiCad
+    # connects two items when one's anchor (a via's or pad's centre, a track's ends) lies inside the other's copper.
+    # A board's via 34 µm beside a track's centre line, in its middle, cut a path off as "unrouted" (2026-11-26); the
+    # via joins the track's two ends, each at its distance along the copper.
+    for obj in [*vias, *pads]:
+        for layer in obj.layers:
+            if layer not in trees:
+                continue
+            tree, items = trees[layer]
+            here = SPoint(obj.position)
+            for idx in tree.query(here, predicate="intersects"):
+                k2, t, _ = items[idx]
+                if k2 != "track" or not track_shape(t).contains(here):
+                    continue
+                if any(math.dist(obj.position, e) < 1e-3 for e in (t.start, t.end)):
+                    continue                # at the track's end: joined above (the same node or the end's test)
+                node = g.node(layer, obj.position)
+                for end in (t.start, t.end):        # the copper between them is this track's (its width, its uuid)
+                    g.edge(node, g.node(layer, end), math.dist(obj.position, end), ("track", t))
+
     # Copper pours of the route's nets (power stages carry their current in pours, not tracks): every pad, via
     # and track end touching the same filled polygon is connected through it. The step becomes a "zone"
     # segment; the solver then treats the pour as copper with its own current distribution, not as a line.
@@ -535,6 +555,26 @@ class ChainPart:
     on_path: bool = False
     dnp: bool = False
     setting: bool = False      # not a board part: the path's settings add it (its source R, its receivers' load)
+    # an op-amp channel on the path: its input the route does not enter (`other_in`, its net; `inverting`: the route
+    # enters at −), whether that input is its own output (`follower`), the parts from it to the output (`feedback`)
+    # and the other parts on it (`in_parts`, each with its to_net): a difference amplifier's R1 and R3
+    other_in: str = ""
+    inverting: bool = False
+    follower: bool = False
+    feedback: list = field(default_factory=list)
+    in_parts: list = field(default_factory=list)
+
+
+@dataclass
+class ChainLeg:
+    """The route to one more receiver of a path (the first is the chain itself): its nets in order (one more than
+    its series parts), its series parts, its branch parts by net (path_branch_parts) and the settings' load at its
+    receiver."""
+    receiver: str
+    nets: list
+    series: list
+    branch_parts: list
+    load: list = field(default_factory=list)
 
 
 @dataclass
@@ -562,6 +602,8 @@ class PathChain:
     # the load at each receiver), as ChainParts with setting=True; the schematic draws them in the accent colour
     source: list = field(default_factory=list)
     load: list = field(default_factory=list)
+    legs: list = field(default_factory=list)        # the routes to the other receivers (ChainLeg), drawn below
+    leg_errors: list = field(default_factory=list)  # [(receiver, why)] for those without a route
 
     def text(self) -> str:
         """`U42.3 → U41 ×1 → R41 4k7 → U53.9` (several receivers joined by commas)."""
@@ -575,6 +617,12 @@ class PathChain:
         text = f"Path: {self.text()}"
         if self.branches:
             text += "\nBranches:" + "".join(f"\n  at {net}: " + ", ".join(parts) for net, parts in self.branches)
+        for leg in self.legs:
+            parts = [p.name + (f" {p.value}" if p.value and p.kind not in ("opamp", "buffer") else "")
+                     for p in leg.series]
+            text += f"\nTo {leg.receiver}: " + " → ".join([self.driver, *parts, leg.receiver])
+        for rx, why in self.leg_errors:
+            text += f"\nTo {rx}: no route ({why})"
         return text + "".join(f"\n⚠ {note}" for note in self.notes)
 
 
@@ -625,12 +673,63 @@ def _series_part(board: Board, config: Config, ref: str, pads) -> ChainPart:
             name = next((unit for unit, ins, out in _amp_units(config, fp)
                          if out.pin == pin_out.pin and any(p.pin == pin_in.pin for p in ins)), ref)
         g = config.model_for(ref).params.get("gain")
-        return ChainPart(ref, name, "op-amp" if g is None else f"×{g:g}", kind)
+        part = ChainPart(ref, name, "op-amp" if g is None else f"×{g:g}", kind)
+        if pads is not None and fp is not None:
+            _opamp_inputs(board, config, fp, pads, part)
+        return part
     if kind == "buffer":
         return ChainPart(ref, ref, "buffer", kind)
     entry = config.components.get(ref)
     value = entry.value if entry is not None else (fp.value if fp is not None else "")
     return ChainPart(ref, ref, value or "", kind)
+
+
+def _part_value(board: Board, config: Config, fp) -> str:
+    """A part's value as the settings or the board give it."""
+    entry = config.components.get(fp.reference)
+    return (entry.value if entry is not None else fp.value) or ""
+
+
+def _opamp_inputs(board: Board, config: Config, fp, pads, part: ChainPart):
+    """Fill an op-amp channel's ChainPart with its other input (the one the route does not enter): its net, whether
+    it is the output itself (a follower), the 2-pin parts from it to the output (feedback) and the other 2-pin parts
+    on it (to a reference, another stage's output). The schematic draws them at the triangle's second input."""
+    from .analog_net import opamp_channels
+    pin_in, pin_out = pads
+    ch = next((c for c in opamp_channels(fp, config.model_for(fp.reference))
+               if c.out is not None and c.out.pin == pin_out.pin
+               and pin_in.pin in {p.pin for p in (c.inp, c.inn) if p is not None}), None)
+    if ch is None:
+        return
+    out = ch.out
+    part.inverting = ch.inn is not None and ch.inn.pin == pin_in.pin
+    other = ch.inp if part.inverting else ch.inn
+    if other is None or not other.net:
+        return
+    part.other_in = other.net
+    part.follower = other.net == out.net
+    if part.follower:
+        return
+    for q in board.footprints:
+        nets = [x.net for x in q.pads if x.net]
+        if q.reference == fp.reference or len(q.pads) != 2 or len(set(nets)) != 2 or other.net not in nets:
+            continue
+        to = next(n for n in nets if n != other.net)
+        cp = ChainPart(q.reference, q.reference, _part_value(board, config, q), _kind(config, q.reference),
+                       other.net, to, False, q.dnp)
+        (part.feedback if to == out.net else part.in_parts).append(cp)
+    part.feedback.sort(key=lambda c: c.ref)
+    part.in_parts.sort(key=lambda c: c.ref)
+
+
+def _leg_of(board: Board, config: Config, route: Route, receiver: str) -> ChainLeg:
+    """A route as a ChainLeg: each series part's pads give the nets before and after it."""
+    pads = list(getattr(route, "part_pads", []) or [])
+    pads += [None] * (len(route.parts) - len(pads))
+    series = [_series_part(board, config, r, p) for r, p in zip(route.parts, pads)]
+    nets = [route.driver.net] + [p[1].net if p is not None else "" for p in pads]
+    nets[-1] = route.receiver.net
+    return ChainLeg(receiver, nets, series, path_branch_parts(board, config, route))
 
 
 def path_chain(board: Board, config: Config, spec) -> PathChain:
@@ -649,14 +748,18 @@ def path_chain(board: Board, config: Config, spec) -> PathChain:
     chain.parts = [_part_text(board, config, r) for r in route.parts]
     chain.shunts = [f"{_part_text(board, config, fp.reference)} to {ret.net}"
                     for fp, _, _, ret in shunt_parts(board, config, route, set(config.reference_nets))]
-    chain.branch_parts = path_branch_parts(board, config, route)
+    # the circuit for the schematic, to the first receiver and then to each other one (the user, 2026-11-26: "it
+    # only shows one input, u13C is connected to U7.12 and uses another OPA in subtraction/amplification mode")
+    main = _leg_of(board, config, route, spec.receivers[0])
+    chain.nets, chain.series, chain.branch_parts = main.nets, main.series, main.branch_parts
     chain.branches = _branch_text(chain.branch_parts)
-    # the circuit for the schematic: each series part's pads give the nets before and after it
-    pads = list(getattr(route, "part_pads", []) or [])
-    pads += [None] * (len(route.parts) - len(pads))
-    chain.series = [_series_part(board, config, r, p) for r, p in zip(route.parts, pads)]
-    chain.nets = [route.driver.net] + [p[1].net if p is not None else "" for p in pads]
-    chain.nets[-1] = route.receiver.net
+    for rx in spec.receivers[1:]:
+        try:
+            other = find_route(board, config, spec.name, spec.driver, rx, spec.through)
+        except RouteError as e:
+            chain.leg_errors.append((rx, str(e).split(" (")[0]))
+            continue
+        chain.legs.append(_leg_of(board, config, other, rx))
     from ..components.models import GROUND_NAME
     chain.ground_nets = set(config.reference_nets) | {n for n in board.nets if GROUND_NAME.match(n.split("/")[-1])}
     # the settings' parts of the path's circuit (analog_net builds the same: the path's value, else the default)
@@ -673,6 +776,8 @@ def path_chain(board: Board, config: Config, spec) -> PathChain:
     if spec.load_ohms is not None:
         chain.load.append(ChainPart("", "R load", f"{format_si(spec.load_ohms, 'Ω')} (path setting)", "resistor",
                                     route.receiver.net, gnd, setting=True))
+    for leg in chain.legs:                  # the same load at every receiver
+        leg.load = [replace(c, net=leg.nets[-1]) for c in chain.load]
     note = load_pf_note(spec.load_pf)
     if note:
         chain.notes.append(note)

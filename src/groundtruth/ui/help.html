@@ -196,7 +196,11 @@ follows it: <code>U42.3 → U41 ×1 → R41 4k7 → U53.9</code>, op-amps with t
 background, "no route: …" when the copper or a part doesn't connect), <b>Freq</b>, <b>Rise</b>, <b>Ampl.</b> and
 <b>Class</b> (the kind of signal detection took it for). Under the table, the selected path as a
 <b>schematic</b>, left to right: the driver pin, the series parts and op-amp channels (U13B, with "op-amp" or its
-gain) as the route passes them, the receiver pin (the path's other receivers named under it). Below each net hangs
+gain) as the route passes them, the first receiver pin. Each further receiver's route leaves the path where it parts
+from it and runs on below it to its own pin (a second ADC input behind its own op-amp stage); a receiver without a
+route is named with "no route". An op-amp channel shows its other input: tied to its output (a follower's loop under
+the triangle), or its feedback parts to the output and the other parts on that input (a difference amplifier's
+resistor from its reference, to that net's name). Below each net hangs
 every two-pin part from it to another net (a filter capacitor or a pull-down to a ground symbol, a pull-up to its
 rail's name); a part joining two of the path's nets (a feedback or speed-up part across a series part or an op-amp
 stage) is drawn as a bridge above it. A part not fitted is dashed and grey, marked ✗ and (DNP). In

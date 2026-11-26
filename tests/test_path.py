@@ -571,6 +571,59 @@ def test_an_implausible_load_c_is_noted_with_what_was_probably_meant():
     assert "added at every receiver pin" in load_pf_note(1e6)
 
 
+def test_a_via_on_the_middle_of_a_track_joins_it(tmp_path):
+    """KiCad joins a via to a track when the via's centre lies inside the track's copper, also away from the track's
+    ends: a board's via 34 µm beside a B.Cu track's centre line, in its middle, cut the path to an ADC pin off as
+    "unrouted". Here the F.Cu track from U1 ends on a via that sits 30 µm beside the middle of the B.Cu track to U2:
+    the route runs through it."""
+    from conftest import make
+    from boardgen import BoardGen
+    from groundtruth.analysis.route import find_route
+    from groundtruth.config.settings import NetSpec
+    g = BoardGen(layers=2, size=(40.0, 20.0))
+    g.ic("U1", (5.0, 10.0), "SIG")
+    g.ic("U2", (35.0, 10.0), "SIG", layer="B.Cu")
+    g.track((5.0, 10.0), (20.0, 10.0), "SIG")
+    g.via((20.0, 10.0), "SIG")
+    g.track((18.0, 10.03), (35.0, 10.03), "SIG", layer="B.Cu")      # the via is on its middle, not at an end
+    spec = NetSpec("SIG", "U1.1", ["U2.1"], 20e6, 1e-9)
+    board, sc, _ = make(tmp_path, g, "viamid", nets=(spec,))
+    r = find_route(board, sc.config, "SIG", "U1.1", "U2.1")
+    assert len(r.vias) == 1 and r.vias[0].from_layer != r.vias[0].to_layer
+    # along the copper: 15 mm on F.Cu, then 15 mm on B.Cu from the via to U2 (not back to the track's far end)
+    assert sum(s.length for s in r.segments) == pytest.approx(30.0, abs=0.1)
+
+
+def test_each_receiver_s_route_is_drawn_from_where_it_leaves_the_path():
+    """The path schematic with two receivers: the second one's route leaves the first's at the net they last share
+    and runs on below it to its own pin; an op-amp channel shows its other input: a follower's loop, a difference
+    stage's feedback part (under the triangle, to the output) and its reference part (to another net's name)."""
+    from groundtruth.analysis.route import ChainLeg, ChainPart, PathChain
+    from groundtruth.report.schematics import Ink, _diverge, draw_path
+    follower = ChainPart("U1", "U1B", "op-amp", "opamp", other_in="OUT_B", follower=True)
+    diff = ChainPart("U1", "U1C", "op-amp", "opamp", other_in="INN_C",
+                     feedback=[ChainPart("R16", "R16", "7k15", "resistor", "INN_C", "OUT_C")],
+                     in_parts=[ChainPart("R17", "R17", "1k", "resistor", "INN_C", "REF")])
+    r19 = ChainPart("R19", "R19", "1k", "resistor")
+    chain = PathChain("U9.3", ["R5 4.7k", "U1 (op-amp)"], ["U7.11", "U7.12"],
+                      nets=["IN", "INP_B", "OUT_B"], series=[ChainPart("R5", "R5", "4.7k", "resistor"), follower],
+                      ground_nets={"GND"})
+    leg = ChainLeg("U7.12", ["IN", "INP_B", "OUT_B", "INP_C", "OUT_C"],
+                   [ChainPart("R5", "R5", "4.7k", "resistor"), follower, r19, diff],
+                   [("INP_C", [(ChainPart("R20", "R20", "7k15", "resistor", "INP_C", "GND"), "R20 7k15 → GND")]),
+                    ("OUT_C", [(ChainPart("R16", "R16", "7k15", "resistor", "OUT_C", "INN_C"), "R16 → INN_C")])])
+    chain.legs = [leg]
+    assert _diverge(chain.nets, chain.series, leg) == 2              # they part at OUT_B
+    fig = draw_path(chain, Ink())
+    texts = {t.get_text(): t.get_position() for t in fig.axes[0].texts}
+    assert texts["U7.11"][1] == pytest.approx(0.0) and texts["U7.12"][1] < -2.0
+    for name in ("R19\n1k", "R20\n7k15", "U1C\nop-amp", "R16\n7k15", "R17\n1k", "REF"):
+        assert name in texts, (name, sorted(texts))
+    assert list(texts).count("R16\n7k15") == 1                       # the feedback part, not also a branch
+    assert texts["R16\n7k15"][1] < texts["U7.12"][1]                 # under its triangle
+    assert texts["R19\n1k"][1] > texts["U7.12"][1] and texts["R19\n1k"][0] > texts["U1B\nop-amp"][0]
+
+
 def _pozar_alpha(f, w, z0, eeff, er, tan_d, sigma=5.8e7):
     """A microstrip's attenuation (Np/m) by Pozar's closed forms: conductor α_c = R_s/(Z0·W) with R_s = √(ωμ0/2σ)
     (δ ≪ t), dielectric α_d = k0·εr(εeff - 1)·tan δ / (2√εeff(εr - 1)) [Pozar 2012]."""
