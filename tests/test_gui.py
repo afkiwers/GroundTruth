@@ -2559,7 +2559,7 @@ def test_the_nets_form_keeps_the_source_and_load_on_update(app, frame):
     f.nets._commit()
     f.nets.list.Select(0)
     app.Yield()
-    assert (f.nets.src_r.GetValue(), f.nets.load_c.GetValue(), f.nets.src_l.GetValue()) == ("40", "7", "1.5")
+    assert (f.nets.src_r.GetValue(), f.nets.load_c.GetValue(), f.nets.src_l.GetValue()) == ("40Ω", "7pF", "1.5nH")
     f.nets.load_r.SetValue("50")
     f.nets.fall.SetValue("3ns")
     f.nets.on_update(None)
@@ -2767,15 +2767,35 @@ def test_detect_offers_to_replace_a_stale_unreviewed_net(app, tmp_path):
 
 def test_the_signal_paths_tab_shows_each_chain_and_the_selected_path(app, frame):
     """The Signal paths tab: the Chain column filled from the background thread (driver → parts → receivers),
-    and the selected row in full under the table."""
+    and the selected row under the table as a schematic (drawn in the background), its text kept for Copy."""
     f = frame
     run_steps(app, f, [])
     wait_for(app, lambda: bool(f.nets.chains))
     chain = f.nets.list.GetItemText(0, 2)
     assert "→" in chain and "…" not in chain and chain.startswith(f.nets.nets[0].driver), chain
     f.nets.select_only(0)
-    wait_for(app, lambda: f.nets.path_text.GetValue().startswith("Path: "))
-    assert f.nets.nets[0].driver in f.nets.path_text.GetValue()
+    wait_for(app, lambda: f.nets._sketch_png is not None)
+    assert f.nets._sketch_png[:4] == bytes([0x89]) + b"PNG"
+    assert f.nets.path_view.text.startswith("Path: ") and f.nets.nets[0].driver in f.nets.path_view.text
+
+
+def test_source_and_load_fields_show_and_read_si_values():
+    """Signal paths form: Source R / L / C and Load R / C are shown with their SI prefix and unit (3.3Ω, 12.4kΩ,
+    1.5nH, 8pF, 1µF) and read back the same; "8p", "1n", "8pF" are read as SI, a plain number in the field's stored
+    unit as before (8 → 8 pF, 1.5 → 1.5 nH)."""
+    from groundtruth.ui.nets_panel import NetsPanel as P
+    for value, kind, shown in ((3.3, "ohm", "3.3Ω"), (12400.0, "ohm", "12.4kΩ"), (1.5, "nh", "1.5nH"),
+                               (8.0, "pf", "8pF"), (1e6, "pf", "1µF")):
+        assert P._show(value, kind) == shown
+        if kind != "ohm":
+            assert P._read_scaled(shown, kind, True) == (pytest.approx(value), "")
+    assert P._read_scaled("8p", "pf", True)[0] == 8.0 and P._read_scaled("1n", "pf", True)[0] == 1000.0
+    assert P._read_scaled("8", "pf", True)[0] == 8.0 and P._read_scaled("1.5", "nh", True)[0] == 1.5
+    assert P._read_scaled("", "pf", True) == (None, "") and P._read_scaled("x", "pf", True)[1]
+    # farads typed into the pF field (8e-12), a unit without a prefix (8F), and the shown "8e-24F" of such a stored
+    # slip reading back as itself
+    assert P._read_scaled("8e-12", "pf", True)[0] == 8.0 and P._read_scaled("1.5e-9", "nh", True)[0] == 1.5
+    assert P._read_scaled("8F", "pf", True)[0] == 8e12 and P._read_scaled("8e-24F", "pf", True)[0] == 8e-12
 
 
 def test_the_path_box_is_made_taller_by_dragging_its_grip(app, frame):
@@ -2785,7 +2805,7 @@ def test_the_path_box_is_made_taller_by_dragging_its_grip(app, frame):
     from groundtruth.ui import theme
     f = frame
     run_steps(app, f, [])
-    grip, box = f.nets.path_grip, f.nets.path_text
+    grip, box = f.nets.path_grip, f.nets.path_view
     h0 = box.GetSize().height
 
     def mouse(kind, y, down=True):
