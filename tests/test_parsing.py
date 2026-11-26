@@ -63,6 +63,21 @@ def test_old_net_format_and_outline():
     assert math.isclose(len(b.outline[0][0]), 4)
 
 
+def test_an_outline_whose_ends_differ_by_a_fraction_of_a_nanometre_still_closes():
+    """A board edge whose pieces meet in KiCad but whose end points differ here in the last bits (an arc's end
+    computed from start/mid, a turned footprint), with a closed slot inside: the board is the whole outer contour
+    with the slot as a hole. Without snapping to 1 nm the outer ring never closed and the board was read as the
+    slot alone (a real 735 mm² board as three 7.7 mm² slots; every model clipped to them)."""
+    from groundtruth.geometry.shapes import polygonize_outline, to_shapely
+    e = 3e-10                                           # mm: well under KiCad's 1 nm
+    outer = [[(0, 0), (40, 0)], [(40, 0 + e), (40, 20)], [(40, 20), (0, 20 - e)], [(0, 20), (0, 0)]]
+    slot = [[(10, 8), (14, 8)], [(14, 8), (14, 12)], [(14, 12), (10, 12)], [(10, 12), (10, 8)]]
+    polys = polygonize_outline(outer + slot)
+    assert len(polys) == 1
+    board = to_shapely(polys[0])
+    assert board.area == pytest.approx(40 * 20 - 4 * 4, abs=1e-6) and len(polys[0][1]) == 1
+
+
 def test_a_broken_or_binary_board_file_is_named_in_the_error(tmp_path):
     """A file that is not S-expression text, or not text at all, raises BoardLoadError naming the file (the CLI
     printed the bare parser message before: "atom outside of list at offset 0")."""
