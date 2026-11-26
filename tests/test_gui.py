@@ -2792,6 +2792,10 @@ def test_source_and_load_fields_show_and_read_si_values():
     assert P._read_scaled("8p", "pf", True)[0] == 8.0 and P._read_scaled("1n", "pf", True)[0] == 1000.0
     assert P._read_scaled("8", "pf", True)[0] == 8.0 and P._read_scaled("1.5", "nh", True)[0] == 1.5
     assert P._read_scaled("", "pf", True) == (None, "") and P._read_scaled("x", "pf", True)[1]
+    # farads typed into the pF field (8e-12), a unit without a prefix (8F), and the shown "8e-24F" of such a stored
+    # slip reading back as itself
+    assert P._read_scaled("8e-12", "pf", True)[0] == 8.0 and P._read_scaled("1.5e-9", "nh", True)[0] == 1.5
+    assert P._read_scaled("8F", "pf", True)[0] == 8e12 and P._read_scaled("8e-24F", "pf", True)[0] == 8e-12
 
 
 def test_the_path_box_is_made_taller_by_dragging_its_grip(app, frame):

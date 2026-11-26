@@ -568,15 +568,22 @@ class NetsPanel(SelectableRows, wx.Panel):
     @staticmethod
     def _read_scaled(text: str, base: str, optional: bool):
         """An inductance (nH) or capacitance (pF) field: with an SI prefix or unit it is read as one ("1.5nH", "1n",
-        "8pF", "8p", "1µF"), a plain number in the field's own unit as before ("8": 8 pF). (value, problem)."""
+        "8pF", "8p", "1µF", "8F"), a plain number in the field's own unit as before ("8": 8 pF), one below 0.001 in
+        farads / henries ("8e-12": 8 pF). (value, problem)."""
         import re
         unit, scale = ("H", 1e-9) if base == "nh" else ("F", 1e-12)
-        if text.lower().endswith(unit.lower()):
+        with_unit = text.lower().endswith(unit.lower())
+        if with_unit:
             text = text[:-1].strip()
         if not text:
             return None, "" if optional else "must be a number"
         if re.fullmatch(r"[-+]?(\d+[.,]?\d*|[.,]\d+)(e[-+]?\d+)?", text, re.I):
-            return float(text.replace(",", ".")), ""          # a plain number: nH / pF
+            v = float(text.replace(",", "."))
+            # a plain number is nH / pF, unless it came with its unit ("8F") or is far below any part's nH / pF
+            # (8e-12: farads typed into the pF field, the user's 2026-11-26 slip; nobody means a thousandth of a pF)
+            if not with_unit and abs(v) >= 1e-3 or v == 0:
+                return v, ""
+            return float(f"{v / scale:.12g}"), ""
         v = parse_value(text)
         if v is None:
             return None, f"must be a number, e.g. {'1.5nH' if base == 'nh' else '8pF'}"

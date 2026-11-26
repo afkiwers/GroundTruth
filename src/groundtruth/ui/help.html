@@ -224,7 +224,8 @@ in the schematic: see <a href="#siglabels">Labelling a signal path</a>.</p>
   <b>Source L</b> (nH, package and bond wire) and <b>Source C</b> (pF, its output capacitance), <b>Fall
   time</b> when it differs from the rise time. The load: <b>Load C</b> (pF per receiver) and <b>Load R</b> (Ω,
   a termination at the receivers). They are shown with their SI prefix and unit (3.3Ω, 12.4kΩ, 1.5nH, 8pF) and take
-  one when typed (8p, 1n, 12.4k); a plain number is in the field's own unit (8 in Load C: 8 pF). Empty fields use
+  one when typed (8p, 1n, 12.4k); a plain number is in the field's own unit (8 in Load C: 8 pF), one below 0.001 in farads or henries (8e-12:
+  8 pF). Empty fields use
   the defaults (25 Ω, 5 pF, no L, C or termination). The
   report shows the path per net: its stretches and parts with their |Z| at the worst harmonic. Parts from the
   path to ground or a rail (a termination, an RC or pi filter's capacitor, a pull-down) are found on their own:
