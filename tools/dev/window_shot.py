@@ -8,7 +8,8 @@ in --tabs is saved as DIR/<theme>_<tab>.png; --scroll adds the Results tab's pag
 (<theme>_Results_scrolled.png: the cross-section and the spectrum under the maps); a tab "Layer window" opens the
 last map's layer alone (its ⤢ button) and saves <theme>_layer_<layer>.png. --runs N simulates N times
 (kept in DIR/groundtruth/history when Preferences keep runs); the History tab is captured with its two newest runs
-compared. A tab "Fixes:<kind>" (Fixes:filter, Fixes:snubber, Fixes:cm ...) selects the first design change of that
+compared. A tab "Signal paths:<path>" selects that path and saves <theme>_paths_<path>.png once its schematic is
+drawn. A tab "Fixes:<kind>" (Fixes:filter, Fixes:snubber, Fixes:cm ...) selects the first design change of that
 kind after --simulate and saves <theme>_Fixes_<kind>.png once its schematic is drawn. Captured with Win32 PrintWindow, which works while the screen
 itself cannot be read (a locked or minimised remote desktop)."""
 import argparse
@@ -147,6 +148,24 @@ def main() -> int:
                 win = rp.layer_windows.get(state["layer"])
                 path = out / f"{args.theme}_layer_{state['layer'].replace('.', '_')}.png"
                 print(f"{path}: {'ok' if win and capture(win, path) else 'PrintWindow failed'}")
+                return
+            if name.startswith("Signal paths:"):          # the Signal paths tab with a path selected (its name)
+                net, p = name.split(":", 1)[1], f.nets
+                if state.get("path") != net:
+                    k = next((i for i, n in enumerate(p.nets) if n.name == net), None)
+                    if k is None:
+                        print(f"  no path {net} in the settings")
+                        return
+                    f.notebook.SetSelection(f.notebook.FindPage(p))
+                    p.select_only(k)
+                    state["path"] = net
+                    tabs.insert(0, name)                  # capture once its schematic is drawn and painted
+                    return
+                if p._sketch_png is None and not p.path_view._text.startswith(f"{net}: no route"):
+                    tabs.insert(0, name)
+                    return
+                path = out / f"{args.theme}_paths_{''.join(ch if ch.isalnum() else '_' for ch in net)}.png"
+                print(f"{path}: {'ok' if capture(f, path) else 'PrintWindow failed'}")
                 return
             if name.startswith("Fixes:"):                 # the Fixes tab with a design change selected (its kind)
                 kind, p = name.split(":", 1)[1], f.fixes

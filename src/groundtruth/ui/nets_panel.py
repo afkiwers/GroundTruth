@@ -36,14 +36,17 @@ NET_TIPS = {
     "Duty cycle": "The fraction of the period the signal is high, e.g. 0.5 for a clock: it sets which harmonics "
                   "are strong.",
     "Fall time": "The falling edge's time when it differs from the rising one, e.g. 3ns (empty: the rise time).",
-    "Source R (Ω)": "The driver's output resistance, e.g. 25 (empty: analysis.driver_ohms, 25 Ω). With the line "
+    "Source R": "The driver's output resistance, e.g. 25Ω or 3.3 (empty: analysis.driver_ohms, 25 Ω). With the line "
                     "and the series parts it sets the current.",
-    "Source L (nH)": "The driver's series inductance (package and bond wire), e.g. 1.5: it slows the current at high "
+    "Source L": "The driver's series inductance (package and bond wire), e.g. 1.5nH (a plain number is nH): it slows "
+                "the current at high "
                      "frequencies (empty: none).",
-    "Source C (pF)": "The driver's output capacitance to its return, e.g. 3 (empty: none).",
-    "Load R (Ω)": "A resistance at the receivers, e.g. 50 for a parallel termination (empty: none, the receivers' "
+    "Source C": "The driver's output capacitance to its return, e.g. 3pF (a plain number is pF; empty: none).",
+    "Load R": "A resistance at each receiver, e.g. 50Ω for a parallel termination, 12.4k (empty: none, the receivers' "
                   "inputs only).",
-    "Load C (pF)": "The input capacitance per receiver, e.g. 5 (empty: analysis.load_pf, 5 pF).",
+    "Load C": "The input capacitance per receiver pin, e.g. 8pF or 8p (a plain number is pF; empty: analysis.load_pf, "
+              "5 pF). Added at every receiver on top of the board's parts: a capacitor on the board is in the circuit "
+              "already.",
     "Pass through": "Parts the signal path may run through although they don't pass a signal by default, e.g. C12 "
                     "for an AC-coupling capacitor or R7 for a resistor above 1 kΩ (comma-separated). Series "
                     "resistors up to 1 kΩ, ferrites and inductors are passed anyway; every part's impedance counts.",
@@ -149,7 +152,11 @@ class NetsPanel(SelectableRows, wx.Panel):
         self._chain_worker = LatestOnly("groundtruth-paths")
         self._chain_gen = 0
         self.chains: dict[str, object] = {}                     # path name -> PathChain of the last computation
-        self.path_text = None                                   # the preview under the list (_form_layout)
+        self.path_view = None                                   # the path's schematic under the list (_form_layout)
+        self._sketch_worker = LatestOnly("groundtruth-path-sketch")     # draws it (matplotlib off the GUI thread)
+        self._sketch_gen = 0
+        self._sketch_png = None                                 # the shown schematic's PNG (Copy, the window)
+        self._sketch_title = ""
         self._init_rows(on_show, "nets")
         self._init_enable("nets")
         self.list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_select)
@@ -173,8 +180,8 @@ class NetsPanel(SelectableRows, wx.Panel):
         self.fall, self.src_r, self.src_l, self.src_c, self.load_r, self.load_c, self.through = (
             wx.TextCtrl(fw) for _ in range(7))
         self.sweep_from, self.sweep_to, self.sweep_pts, self.max_bw = (wx.TextCtrl(fw) for _ in range(4))
-        for ctrl, hint in ((self.fall, "= rise time"), (self.src_r, "25 (default)"), (self.src_l, "none"),
-                           (self.src_c, "none"), (self.load_r, "none"), (self.load_c, "5 (default)"),
+        for ctrl, hint in ((self.fall, "= rise time"), (self.src_r, "25Ω (default)"), (self.src_l, "none"),
+                           (self.src_c, "none"), (self.load_r, "none"), (self.load_c, "5pF (default)"),
                            (self.through, "e.g. C12, R7"), (self.sweep_from, "auto: frequency / 100"),
                            (self.sweep_to, "auto: the band's top"), (self.sweep_pts, "300"),
                            (self.max_bw, "none")):
@@ -197,8 +204,8 @@ class NetsPanel(SelectableRows, wx.Panel):
              [("Frequency", self.freq), ("Rise time", self.rise), ("Fall time", self.fall),
               ("Amplitude (V)", self.ampl), ("Duty cycle", self.duty)]),
             ("Source and load", "The driver's output and the receivers' input. Empty: defaults.",
-             [("Source R (Ω)", self.src_r), ("Source L (nH)", self.src_l), ("Source C (pF)", self.src_c),
-              ("Load R (Ω)", self.load_r), ("Load C (pF)", self.load_c)]),
+             [("Source R", self.src_r), ("Source L", self.src_l), ("Source C", self.src_c),
+              ("Load R", self.load_r), ("Load C", self.load_c)]),
             ("Bode sweep", "Optional: the path's frequency response. Empty: automatic.",
              [("Sweep from", self.sweep_from), ("Sweep to", self.sweep_to), ("Sweep points", self.sweep_pts),
               ("Max bandwidth", self.max_bw)]),
@@ -214,7 +221,7 @@ class NetsPanel(SelectableRows, wx.Panel):
         height is kept in ui.json ("path_height") when the drag ends."""
         grip = wx.Window(self, size=wx.Size(-1, 7))
         grip.SetCursor(wx.Cursor(wx.CURSOR_SIZENS))
-        grip.SetToolTip("Drag to make the path box taller or shorter")
+        grip.SetToolTip("Drag to make the path's schematic taller or shorter")
         drag = {}
 
         def paint(evt):
@@ -229,7 +236,7 @@ class NetsPanel(SelectableRows, wx.Panel):
         def down(evt):
             """Start of a drag: the mouse is captured, the start height and position noted."""
             drag["y"] = grip.ClientToScreen(evt.GetPosition()).y
-            drag["h"] = self.path_text.GetSize().height
+            drag["h"] = self.path_view.GetSize().height
             grip.CaptureMouse()
 
         def move(evt):
@@ -238,7 +245,7 @@ class NetsPanel(SelectableRows, wx.Panel):
                 return
             h = drag["h"] + grip.ClientToScreen(evt.GetPosition()).y - drag["y"]
             h = max(self._path_min_h, min(h, int(self.GetClientSize().height * 0.7)))
-            self.path_text.SetMinSize(wx.Size(-1, h))
+            self.path_view.SetMinSize(wx.Size(-1, h))
             self.Layout()
 
         def up(evt=None):
@@ -248,7 +255,7 @@ class NetsPanel(SelectableRows, wx.Panel):
             drag.clear()
             if grip.HasCapture():
                 grip.ReleaseMouse()
-            theme.save_prefs(path_height=int(self.path_text.GetMinSize().height))
+            theme.save_prefs(path_height=int(self.path_view.GetMinSize().height))
 
         grip.Bind(wx.EVT_PAINT, paint)
         grip.Bind(wx.EVT_LEFT_DOWN, down)
@@ -284,14 +291,22 @@ class NetsPanel(SelectableRows, wx.Panel):
         left = wx.BoxSizer(wx.VERTICAL)
         left.Add(self.list_head(self.hint), 0, wx.EXPAND | wx.BOTTOM, 6)
         left.Add(self.list, 1, wx.EXPAND)
-        # the selected path in full (selectable text: a part reference can be copied from it)
-        self.path_text = wx.TextCtrl(self, style=wx.TE_MULTILINE | wx.TE_READONLY)
+        # the selected path as a schematic (the user, 2026-11-26: "instead of writing it, can you provide a graph
+        # 'schematic' of the path?"), scaled to the box; double-click: full size; right-click: copy it or its text
+        from .fixes_panel import SchematicPreview
+        self.path_view = SchematicPreview(self)
+        self.path_view.text = ""                            # the path as text (Copy as text)
         self._path_min_h = 3 * self.GetCharHeight() + 8
-        self.path_text.SetMinSize(wx.Size(-1, max(self._path_min_h, int(theme.prefs().get("path_height") or 0))))
-        self.path_text.SetToolTip("The selected path as the route follows it: driver → series parts and op-amps "
-                                  "(×gain) → receivers, and its branches (✗: DNP). Drag the grip below to make it "
-                                  "taller or shorter")
-        left.Add(self.path_text, 0, wx.EXPAND | wx.TOP, 6)
+        self.path_view.SetMinSize(wx.Size(-1, max(self._path_min_h, int(theme.prefs().get("path_height")
+                                                                         or self.FromDIP(220)))))
+        self.path_view.SetToolTip("The selected path as the route follows it: the driver pin, the series parts and "
+                                  "op-amp channels, the receiver; below each net what hangs off it, above it parts "
+                                  "between two of its nets (dashed, ✗: not fitted); blue: what the path's settings "
+                                  "add (source R, receiver load). Double-click: full size; right-click: copy. Drag "
+                                  "the grip below to make it taller or shorter")
+        self.path_view.Bind(wx.EVT_LEFT_DCLICK, lambda e: self._open_sketch())
+        self.path_view.Bind(wx.EVT_CONTEXT_MENU, lambda e: self._sketch_menu())
+        left.Add(self.path_view, 0, wx.EXPAND | wx.TOP, 6)
         self.path_grip = self._path_grip()
         left.Add(self.path_grip, 0, wx.EXPAND)
         left.Add(self.zoom, 0, wx.TOP, 6)
@@ -367,27 +382,86 @@ class NetsPanel(SelectableRows, wx.Panel):
         self._show_path()
 
     def _show_path(self):
-        """The preview under the list: the selected path's chain and the parts across it, or how to get one."""
-        if self.path_text is None:
+        """The schematic under the list: the selected path's circuit (drawn in the background), or a line saying
+        why there is none (nothing selected, still working, no route and what may block it)."""
+        if self.path_view is None:
             return
+        self._sketch_gen += 1
         rows = self.selected_rows()
-        if len(rows) != 1 or rows[0] >= len(self.nets):
-            self.path_text.ChangeValue("Select a path to see it in full." if self.nets else "")
+        n = self.nets[rows[0]] if len(rows) == 1 and rows[0] < len(self.nets) else None
+        c = self.chains.get(n.name) if n is not None else None
+        if n is None:
+            self._set_sketch(None, "Select a path to see its schematic." if self.nets else "", "")
             return
-        n = self.nets[rows[0]]
-        c = self.chains.get(n.name)
         if c is None:
-            text = f"{n.name}: working out its path…"
-        elif c.error:
-            text = (f"{n.name}: no route ({c.error}). A part in the way that doesn't pass a signal (a capacitor, "
+            self._set_sketch(None, f"{n.name}: working out its path…", "")
+            return
+        if c.error:
+            text = (f"{n.name}: no route ({c.error}).\nA part in the way that doesn't pass a signal (a capacitor, "
                     f"a resistor over 1 kΩ, an op-amp without its model) can be named in Pass through.")
-        else:
-            text = f"Path: {c.text()}"
-            if c.branches:                  # what hangs off each net of the path (✗: not placed, DNP)
-                text += "\nBranches:" + "".join(f"\n  at {net}: " + ", ".join(parts) for net, parts in c.branches)
-            for note in c.notes:                # what the path's circuit leaves out
-                text += f"\n⚠ {note}"
-        self.path_text.ChangeValue(text)
+            self._set_sketch(None, text, text)
+            return
+        self._set_sketch(None, f"{n.name}: drawing…", c.full_text())
+        gen, ink, title = self._sketch_gen, self._ink(), n.name
+
+        def work():
+            """(background) The path's schematic as PNG bytes; a failure is shown as a line, the text stays."""
+            from ..report.schematics import draw_path, png
+            try:
+                fig = draw_path(c, ink)
+                data = png(fig) if fig is not None else None
+            except Exception as e:                  # noqa: BLE001 - shown in the box, the text stays copyable
+                why = f"the schematic could not be drawn ({type(e).__name__}: {e})"
+                wx.CallAfter(lambda: self and gen == self._sketch_gen and self._set_sketch(None, why, c.full_text()))
+                return
+            wx.CallAfter(lambda: self and gen == self._sketch_gen and self._sketch_done(title, data, c))
+        self._sketch_worker.submit(work)
+
+    def _sketch_done(self, title: str, data, chain):
+        """(GUI thread) The schematic arrived for the path still selected."""
+        self._set_sketch(data, "" if data is not None else chain.full_text(), chain.full_text(), title)
+
+    def _set_sketch(self, data, message: str, text: str, title: str = ""):
+        """Show a schematic (PNG bytes) or a message; `text` is what Copy as text copies."""
+        self._sketch_png, self._sketch_title = data, title
+        self.path_view.text = text
+        self.path_view.set_png(data, message)
+
+    @staticmethod
+    def _ink():
+        """The schematic's colours from the window's theme (as the Fixes tab's)."""
+        from ..report.schematics import Ink
+        p = theme.palette()
+        return Ink(line=p.text, muted=p.muted, accent=p.accent, bg=p.card)
+
+    def _open_sketch(self):
+        """The path's schematic full size in a window of its own (Copy, Save as PNG)."""
+        if self._sketch_png is not None:
+            from .fixes_panel import SchematicWindow
+            SchematicWindow(self, f"Signal path {self._sketch_title}", self._sketch_png).Show()
+
+    def _sketch_menu(self):
+        """Right-click on the schematic: full size, copy the image, copy the path as text."""
+        from .fixes_panel import copy_png
+        from .widgets import copy_text
+        top = self.GetTopLevelParent()
+
+        def status(done: bool, what: str):
+            """Say in the status bar whether the copy worked (another program may hold the clipboard)."""
+            if hasattr(top, "SetStatusText"):
+                top.SetStatusText(f"{what} copied to the clipboard" if done else
+                                  "the clipboard is busy (another program has it open): try again")
+        menu = wx.Menu()
+        for label, fn, on in (("Open full size", self._open_sketch, self._sketch_png is not None),
+                              ("Copy image", lambda: status(copy_png(self._sketch_png), "schematic"),
+                               self._sketch_png is not None),
+                              ("Copy as text", lambda: status(copy_text(self.path_view.text), "path"),
+                               bool(self.path_view.text))):
+            item = menu.Append(wx.ID_ANY, label)
+            item.Enable(on)
+            self.Bind(wx.EVT_MENU, lambda e, fn=fn: fn(), item)
+        self.path_view.PopupMenu(menu)
+        menu.Destroy()
 
     def select(self, name: str):
         """Select the net's row alone (which fills the form) and scroll to it."""
@@ -462,6 +536,14 @@ class NetsPanel(SelectableRows, wx.Panel):
             return format_si(value, "s")
         if base == "int":
             return str(value)
+        # the source's and load's values with their SI prefix and unit (the user, 2026-11-26: "It would be nice if
+        # Source and Load values use SI units like p, k, M etc."); stored as Ω, nH and pF
+        if base == "ohm":
+            return format_si(value, "Ω")
+        if base == "nh":
+            return format_si(value * 1e-9, "H")
+        if base == "pf":
+            return format_si(value * 1e-12, "F")
         return f"{value:g}"
 
     def _read(self, ctrl, kind: str):
@@ -469,6 +551,8 @@ class NetsPanel(SelectableRows, wx.Panel):
         in ?), a problem where it is required."""
         text = ctrl.GetValue().strip()
         base, optional = kind.rstrip("?"), kind.endswith("?")
+        if base in ("nh", "pf"):
+            return self._read_scaled(text, base, optional)
         strip = {"hz": "Hz", "s": "s", "v": "V", "nh": "nH", "pf": "pF", "ohm": "Ω"}.get(base, "")
         if strip and text.lower().endswith(strip.lower()):
             text = text[: -len(strip)].strip()
@@ -480,6 +564,23 @@ class NetsPanel(SelectableRows, wx.Panel):
         if v is None or (base == "int" and v != int(v)):
             return None, "must be a whole number" if base == "int" else "must be a number"
         return (int(v) if base == "int" else v), ""
+
+    @staticmethod
+    def _read_scaled(text: str, base: str, optional: bool):
+        """An inductance (nH) or capacitance (pF) field: with an SI prefix or unit it is read as one ("1.5nH", "1n",
+        "8pF", "8p", "1µF"), a plain number in the field's own unit as before ("8": 8 pF). (value, problem)."""
+        import re
+        unit, scale = ("H", 1e-9) if base == "nh" else ("F", 1e-12)
+        if text.lower().endswith(unit.lower()):
+            text = text[:-1].strip()
+        if not text:
+            return None, "" if optional else "must be a number"
+        if re.fullmatch(r"[-+]?(\d+[.,]?\d*|[.,]\d+)(e[-+]?\d+)?", text, re.I):
+            return float(text.replace(",", ".")), ""          # a plain number: nH / pF
+        v = parse_value(text)
+        if v is None:
+            return None, f"must be a number, e.g. {'1.5nH' if base == 'nh' else '8pF'}"
+        return float(f"{v / scale:.12g}"), ""                 # 1n / 1e-12: 1000, not 1000.0000000000001
 
     def _fill_one(self, n: NetSpec):
         """The form shows one path (its own fields enabled again)."""
@@ -497,9 +598,10 @@ class NetsPanel(SelectableRows, wx.Panel):
         self.ampl.SetValue(f"{n.amplitude_v:g}")
         self.duty.SetValue(f"{n.duty:g}")
         self.fall.SetValue(format_si(n.fall_time, "s") if n.fall_time is not None else "")
-        for ctrl, v in ((self.src_r, n.driver_ohms), (self.src_l, n.driver_nh), (self.src_c, n.driver_pf),
-                        (self.load_r, n.load_ohms), (self.load_c, n.load_pf)):
-            ctrl.SetValue("" if v is None else f"{v:g}")
+        for ctrl, v, kind in ((self.src_r, n.driver_ohms, "ohm"), (self.src_l, n.driver_nh, "nh"),
+                              (self.src_c, n.driver_pf, "pf"), (self.load_r, n.load_ohms, "ohm"),
+                              (self.load_c, n.load_pf, "pf")):
+            ctrl.SetValue(self._show(v, kind))
         for ctrl, v in ((self.sweep_from, n.sweep_from), (self.sweep_to, n.sweep_to),
                         (self.max_bw, n.max_bandwidth)):
             ctrl.SetValue("" if v is None else format_si(v, "Hz"))

@@ -72,6 +72,9 @@ class Route:
     steps: list = field(default_factory=list)       # RouteSegment | RouteVia, in order
     nets: set[str] = field(default_factory=set)     # nets the route passes through
     parts: list[str] = field(default_factory=list)  # series parts on the route
+    # each series part's pads as the route passes it, (in, out), parallel to `parts` (an op-amp: its input and
+    # output pad, so the channel is known); empty for a route made elsewhere
+    part_pads: list = field(default_factory=list)
     notes: list[str] = field(default_factory=list)  # what modelling it had to simplify (simulate._chain), for the
                                                     # route's result
 
@@ -389,7 +392,7 @@ def find_route(board: Board, config: Config, net: str, driver_pin: str, receiver
                 continue
             for fp, a, b in steps:
                 edge = (g.node(a.layers[0], a.position), g.node(b.layers[0], b.position),
-                        math.dist(a.position, b.position) + PART_STEP, ("part", fp, a.layers[0]))
+                        math.dist(a.position, b.position) + PART_STEP, ("part", fp, a.layers[0], a, b))
                 oneway.append(edge)       # a passing part is in fwd both ways: both its directions are here
 
     src = g.node(driver.layers[0], driver.position)
@@ -459,6 +462,7 @@ def find_route(board: Board, config: Config, net: str, driver_pin: str, receiver
         elif kind == "part":
             fp = inf[1]
             route.parts.append(fp.reference)
+            route.part_pads.append((inf[3], inf[4]))
             route.steps.append(RouteSegment(pa, pb, la, 0.3, "part", fp.uuid, fp.line, ""))
         else:  # pad / join connectors inside copper
             route.steps.append(RouteSegment(pa, pb, la, 0.2, "pad", "", 0, ""))
@@ -516,6 +520,24 @@ def _part_text(board: Board, config: Config, ref: str) -> str:
 
 
 @dataclass
+class ChainPart:
+    """A part on or beside a path, for the path's schematic (report/schematics.draw_path). `kind`: resistor, cap,
+    inductor, ferrite, short, opamp, buffer or part (anything else: a box); `name` its reference, or an op-amp's
+    channel (U13B); `value` what is written under it ("4.7k", "op-amp", "×2"). A branch part also has the net it sits
+    on (`net`), the net at its other side (`to_net`), whether that net is on the path too (`on_path`: drawn as a
+    bridge over the path) and whether it is fitted (`dnp`)."""
+    ref: str
+    name: str
+    value: str
+    kind: str
+    net: str = ""
+    to_net: str = ""
+    on_path: bool = False
+    dnp: bool = False
+    setting: bool = False      # not a board part: the path's settings add it (its source R, its receivers' load)
+
+
+@dataclass
 class PathChain:
     """What the Signal paths tab shows for a path: its driver pin, the series parts and op-amps in route order (as
     text), its receivers, and the parts across it to a reference net (shunts: loads, filter capacitors). `error`:
@@ -529,10 +551,86 @@ class PathChain:
     branches: list = field(default_factory=list)
     notes: list = field(default_factory=list)       # what the path's circuit leaves out (an op-amp without a model)
     error: str = ""
+    # the same as a circuit, for the path's schematic (the user, 2026-11-26: "instead of writing it, can you provide a
+    # graph 'schematic' of the path?"): the path's nets in order (one more than its series parts: nets[i] before
+    # series[i], nets[i + 1] after it), the series parts, and the branch parts by net (path_branch_parts)
+    nets: list = field(default_factory=list)
+    series: list = field(default_factory=list)
+    branch_parts: list = field(default_factory=list)
+    ground_nets: set = field(default_factory=set)   # the nets drawn as a ground symbol (reference and ground nets)
+    # what the path's circuit adds beside the board's parts (analog_net: the driver's source resistance in series,
+    # the load at each receiver), as ChainParts with setting=True; the schematic draws them in the accent colour
+    source: list = field(default_factory=list)
+    load: list = field(default_factory=list)
 
     def text(self) -> str:
         """`U42.3 → U41 ×1 → R41 4k7 → U53.9` (several receivers joined by commas)."""
         return " → ".join([self.driver, *self.parts, ", ".join(self.receivers)])
+
+    def full_text(self) -> str:
+        """The path as the Signal paths tab used to write it (and copies it): its chain, the branches per net, the
+        notes."""
+        if self.error:
+            return f"no route ({self.error})"
+        text = f"Path: {self.text()}"
+        if self.branches:
+            text += "\nBranches:" + "".join(f"\n  at {net}: " + ", ".join(parts) for net, parts in self.branches)
+        return text + "".join(f"\n⚠ {note}" for note in self.notes)
+
+
+# a receiver pin's input capacitance is picofarads: a few pF for a logic or ADC input, tens with a connector and its
+# cable (assumption [A119]: bounds for a typed value to be taken as meant)
+LOAD_PF_PLAUSIBLE = (0.1, 1000.0)
+
+
+def load_pf_note(load_pf) -> str:
+    """A note when a path's Load C (pF) is far outside a pin's input capacitance: a value typed in farads (8e-12 →
+    8e-12 pF, nothing), or a board capacitor's value (1 µF), which the path's circuit then adds at every receiver on
+    top of the board's parts (the user, 2026-11-26: "There is only one 1uF ... This really shouldn't be right?!?").
+    "" when it is plausible or not set."""
+    if load_pf is None or LOAD_PF_PLAUSIBLE[0] <= load_pf <= LOAD_PF_PLAUSIBLE[1]:
+        return ""
+    from ..components.values import format_si
+    if load_pf < LOAD_PF_PLAUSIBLE[0]:
+        hint = (f"typed in farads? the field is in pF: {load_pf * 1e12:g} for {format_si(load_pf, 'F')}"
+                if 1e-15 <= load_pf <= 1e-9 else "the field is in pF")
+    else:
+        hint = ("a capacitor on the board is in the circuit already as itself; this one is added at every receiver "
+                "pin on top of it")
+    return (f"Load C {format_si(load_pf * 1e-12, 'F')} at each receiver: a pin's input is a few pF ({hint}). "
+            "Empty: the default")
+
+
+def _kind(config: Config, ref: str) -> str:
+    """A part's symbol kind for the path schematic: by its model, else by its reference's letters."""
+    m = config.model_for(ref)
+    kind = m.kind if m is not None else ""
+    if kind == "amplifier":
+        return "opamp"
+    if kind in ("resistor", "cap", "inductor", "ferrite", "short", "buffer"):
+        return kind
+    letters = "".join(ch for ch in ref if ch.isalpha()).upper()
+    return {"R": "resistor", "C": "cap", "L": "inductor", "FB": "ferrite"}.get(letters, "part")
+
+
+def _series_part(board: Board, config: Config, ref: str, pads) -> ChainPart:
+    """A series part of a route as the schematic draws it: an op-amp by its channel (the unit whose input and output
+    the route passes: U13B) with "op-amp" or its gain under it, any other part with its value."""
+    kind = _kind(config, ref)
+    fp = board.footprint(ref)
+    if kind == "opamp":
+        name = ref
+        if pads is not None and fp is not None:
+            pin_in, pin_out = pads
+            name = next((unit for unit, ins, out in _amp_units(config, fp)
+                         if out.pin == pin_out.pin and any(p.pin == pin_in.pin for p in ins)), ref)
+        g = config.model_for(ref).params.get("gain")
+        return ChainPart(ref, name, "op-amp" if g is None else f"×{g:g}", kind)
+    if kind == "buffer":
+        return ChainPart(ref, ref, "buffer", kind)
+    entry = config.components.get(ref)
+    value = entry.value if entry is not None else (fp.value if fp is not None else "")
+    return ChainPart(ref, ref, value or "", kind)
 
 
 def path_chain(board: Board, config: Config, spec) -> PathChain:
@@ -551,7 +649,33 @@ def path_chain(board: Board, config: Config, spec) -> PathChain:
     chain.parts = [_part_text(board, config, r) for r in route.parts]
     chain.shunts = [f"{_part_text(board, config, fp.reference)} to {ret.net}"
                     for fp, _, _, ret in shunt_parts(board, config, route, set(config.reference_nets))]
-    chain.branches = path_branches(board, config, route)
+    chain.branch_parts = path_branch_parts(board, config, route)
+    chain.branches = _branch_text(chain.branch_parts)
+    # the circuit for the schematic: each series part's pads give the nets before and after it
+    pads = list(getattr(route, "part_pads", []) or [])
+    pads += [None] * (len(route.parts) - len(pads))
+    chain.series = [_series_part(board, config, r, p) for r, p in zip(route.parts, pads)]
+    chain.nets = [route.driver.net] + [p[1].net if p is not None else "" for p in pads]
+    chain.nets[-1] = route.receiver.net
+    from ..components.models import GROUND_NAME
+    chain.ground_nets = set(config.reference_nets) | {n for n in board.nets if GROUND_NAME.match(n.split("/")[-1])}
+    # the settings' parts of the path's circuit (analog_net builds the same: the path's value, else the default)
+    from ..components.values import format_si
+    a = config.analysis
+    gnd = next(iter(sorted(config.reference_nets)), "GND")
+    r_src = spec.driver_ohms if spec.driver_ohms is not None else a.driver_ohms
+    src_how = "path setting" if spec.driver_ohms is not None else "default"
+    chain.source = [ChainPart("", "R source", f"{format_si(r_src, 'Ω')} ({src_how})", "resistor", setting=True)]
+    c_load = spec.load_pf if spec.load_pf is not None else a.load_pf
+    load_how = "path setting" if spec.load_pf is not None else "default"
+    chain.load = [ChainPart("", "C load", f"{format_si(c_load * 1e-12, 'F')} ({load_how})", "cap",
+                            route.receiver.net, gnd, setting=True)]
+    if spec.load_ohms is not None:
+        chain.load.append(ChainPart("", "R load", f"{format_si(spec.load_ohms, 'Ω')} (path setting)", "resistor",
+                                    route.receiver.net, gnd, setting=True))
+    note = load_pf_note(spec.load_pf)
+    if note:
+        chain.notes.append(note)
     # an op-amp by its pins on the path's nets whose model is 'open' (not one the route passes): the circuit leaves
     # it out, and with it what its feedback parts do
     from .analog_net import opamp_pin_roles, unmodelled_note
@@ -574,7 +698,19 @@ def path_branches(board: Board, config: Config, route: Route) -> list:
     show capacitors, pullups/downs. mark the ones ... that are DNP"): per net of the path, in path order, every 2-pin
     part with one pin on it and the other on another net, not one of the path's series parts, DNP ones included and
     marked; a part across a series part's two nets is listed as parallel to it ("C2 100n ∥ R2"), across an op-amp
-    stage's input and output as its feedback ("R4 2k94 ∥ U1"). Display only: the solver's shunts (shunt_parts) leave DNP parts out and take reference nets only."""
+    stage's input and output as its feedback ("R4 2k94 ∥ U1"). Display only: the solver's shunts (shunt_parts) leave
+    DNP parts out and take reference nets only. As text: [(net, ["R45 10k → GND", ...])]."""
+    return _branch_text(path_branch_parts(board, config, route))
+
+
+def _branch_text(items: list) -> list:
+    """path_branch_parts' items as the tab's text, sorted by reference within each net."""
+    return [(net, sorted((text for _, text in parts), key=lambda s: s.lstrip(DNP_MARK + " "))) for net, parts in items]
+
+
+def path_branch_parts(board: Board, config: Config, route: Route) -> list:
+    """path_branches with each part as a ChainPart too: [(net, [(ChainPart, text)])], in path order (the schematic
+    draws the ChainPart, the tab writes the text)."""
     # the path's nets in route order (its steps' nets as they come; route.nets is a set), any the steps miss after
     order = list(dict.fromkeys(n for n in [route.driver.net, *(getattr(s, "net", "") for s in route.steps),
                                            *sorted(route.nets), route.receiver.net] if n))
@@ -592,7 +728,7 @@ def path_branches(board: Board, config: Config, route: Route) -> list:
             snets = {amp[0].net, amp[1].net}    # output's nets: its feedback
         if len(snets) == 2:
             spans.setdefault(frozenset(snets), []).append(ref)
-    found: dict[str, list[str]] = {n: [] for n in order}
+    found: dict[str, list[tuple]] = {n: [] for n in order}
     for fp in board.footprints:
         if fp.reference in series:
             continue
@@ -603,6 +739,8 @@ def path_branches(board: Board, config: Config, route: Route) -> list:
         # the op-amp were not fitted (the user, 2026-11-26: "it says U13 DNP? schematic shows R23 DNP")
         part = _part_text(board, config, fp.reference)
         part = f"{DNP_MARK} {part} (DNP)" if fp.dnp else part
+        entry = config.components.get(fp.reference)
+        value = (entry.value if entry is not None else fp.value) or ""
         on = [n for n in nets if n in found]
         if len(on) == 2:                    # both pins on the path: across a series part, or another branch's part
             # each series part once: an op-amp with two channels on the path spans their nets twice ("U13, U13")
@@ -610,13 +748,15 @@ def path_branches(board: Board, config: Config, route: Route) -> list:
             first, last = sorted(on, key=order.index)
             # parallel to a series part or an op-amp stage; else a bridge between two of the path's nets (a
             # multiple-feedback filter's R from the input node to the output), named by the net it reaches
-            found[first].append(f"{part} ∥ {', '.join(across)}" if across else f"{part} → {last}")
+            cp = ChainPart(fp.reference, fp.reference, value, _kind(config, fp.reference), first, last, True, fp.dnp)
+            found[first].append((cp, f"{part} ∥ {', '.join(across)}" if across else f"{part} → {last}"))
             continue
         if len(on) != 1:
             continue
         other = next(n for n in nets if n != on[0])
-        found[on[0]].append(f"{part} → {other}")
-    return [(n, sorted(found[n], key=lambda s: s.lstrip(DNP_MARK + " "))) for n in order if found[n]]
+        cp = ChainPart(fp.reference, fp.reference, value, _kind(config, fp.reference), on[0], other, False, fp.dnp)
+        found[on[0]].append((cp, f"{part} → {other}"))
+    return [(n, sorted(found[n], key=lambda t: t[0].ref)) for n in order if found[n]]
 
 
 def _pour_ports(g: _Graph, tree, items, poly, net: str, layer: str) -> dict[int, Point]:

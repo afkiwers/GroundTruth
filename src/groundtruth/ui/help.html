@@ -194,11 +194,19 @@ stages, and is solved as one. Each row has its frequency, edge time and amplitud
 <p>The table's columns: <b>Path</b> (named after its start net), <b>Status</b>, <b>Chain</b> (the path as the route
 follows it: <code>U42.3 → U41 ×1 → R41 4k7 → U53.9</code>, op-amps with their gain; worked out in the
 background, "no route: …" when the copper or a part doesn't connect), <b>Freq</b>, <b>Rise</b>, <b>Ampl.</b> and
-<b>Class</b> (the kind of signal detection took it for). Under the table, the selected path in full: its chain
-and its <b>Branches</b>: per net of the path, every two-pin part hanging off it to another net (a filter capacitor
-or a pull-down to GND, a pull-up to a rail), marked ✗ before it and (DNP) right after it when it is not fitted
-(“✗ R23 0R (DNP) ∥ U13”: R23 is the one not fitted, across the op-amp stage U13). Those to a reference net (not DNP)
-take their share of the current in Simulate. Status is <i>manual</i> (entered by
+<b>Class</b> (the kind of signal detection took it for). Under the table, the selected path as a
+<b>schematic</b>, left to right: the driver pin, the series parts and op-amp channels (U13B, with "op-amp" or its
+gain) as the route passes them, the receiver pin (the path's other receivers named under it). Below each net hangs
+every two-pin part from it to another net (a filter capacitor or a pull-down to a ground symbol, a pull-up to its
+rail's name); a part joining two of the path's nets (a feedback or speed-up part across a series part or an op-amp
+stage) is drawn as a bridge above it. A part not fitted is dashed and grey, marked ✗ and (DNP). In
+<b>blue</b>: what the path's own settings add to its circuit, not parts on the board: the
+driver's source resistance and, at the receiver, <b>Load C</b> (and <b>Load R</b> when set), with "(path setting)"
+or "(default)". Check them there: a board capacitor's value typed into Load C (1 µF) is added at every receiver pin
+on top of the capacitor itself, and a value typed in farads into the pF field (8e-12) is nothing; either gets a ⚠
+note under the drawing. Double-click the schematic for it full size (Copy, Save as PNG); right-click to copy the
+image or the path as text. Parts to a reference net (not DNP) take their share of the current in Simulate. Status is
+<i>manual</i> (entered by
 you), <i>auto, REVIEW</i> (found by detection, not checked yet: the row is <font color="@WARN@">orange</font>) or
 <i>auto, reviewed</i>.</p>
 <p>Where Detect misses a path, takes it for a supply, guesses its driver wrong or stops at an op-amp, label the path
@@ -215,7 +223,9 @@ in the schematic: see <a href="#siglabels">Labelling a signal path</a>.</p>
   C12); when no path is found, the issue names the parts in the way. The source: <b>Source R</b> (Ω),
   <b>Source L</b> (nH, package and bond wire) and <b>Source C</b> (pF, its output capacitance), <b>Fall
   time</b> when it differs from the rise time. The load: <b>Load C</b> (pF per receiver) and <b>Load R</b> (Ω,
-  a termination at the receivers). Empty fields use the defaults (25 Ω, 5 pF, no L, C or termination). The
+  a termination at the receivers). They are shown with their SI prefix and unit (3.3Ω, 12.4kΩ, 1.5nH, 8pF) and take
+  one when typed (8p, 1n, 12.4k); a plain number is in the field's own unit (8 in Load C: 8 pF). Empty fields use
+  the defaults (25 Ω, 5 pF, no L, C or termination). The
   report shows the path per net: its stretches and parts with their |Z| at the worst harmonic. Parts from the
   path to ground or a rail (a termination, an RC or pi filter's capacitor, a pull-down) are found on their own:
   each takes its share of the current at its place, and one that carries at least 1 % of it is a current loop of

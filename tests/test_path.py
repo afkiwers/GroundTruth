@@ -521,6 +521,56 @@ def test_a_not_fitted_branch_is_marked_at_the_part_not_at_what_it_is_parallel_to
     assert "✗ C9 100n (DNP) ∥ R2" in lines, lines
 
 
+def test_a_path_is_drawn_as_its_circuit_with_the_settings_parts_marked(tmp_path):
+    """The Signal paths tab's schematic (report/schematics.draw_path): the chain as a circuit, its nets in route order
+    one more than its series parts (each series part between the nets of its two pads), the op-amp drawn as its
+    gain block, a DNP part across a series part drawn above the path, dashed in the muted colour, and the parts the
+    path's settings add (source R, the receiver's load C and R) in the accent colour with their values."""
+    from conftest import make
+    from boardgen import opamp_path_board
+    from groundtruth.analysis.route import path_chain
+    from groundtruth.config.settings import NetSpec
+    from groundtruth.report.schematics import Ink, draw_path, png
+    spec = NetSpec("SIG_A", "U1.1", ["U2.1"], 20e6, 1e-9, through=["R2"], load_pf=1e6, load_ohms=12.4e3)
+    g = opamp_path_board(r_after="4k7", Gain="2")
+    g.two_pin("C9", "100n", (38.5, 14.0), "SIG_C", "SIG_D", kind="C")
+    board, sc, _ = make(tmp_path, g, "amp", nets=(spec,))
+    board.footprint("C9").dnp = True
+    c = path_chain(board, sc.config, spec)
+    assert [(p.name, p.kind) for p in c.series] == [("R1", "resistor"), ("U5", "opamp"), ("R2", "resistor")]
+    assert len(c.nets) == len(c.series) + 1 and c.nets[0] == "SIG_A" and c.nets[-1] == board.footprint("U2").pad("1").net
+    assert c.series[1].value == "×2"
+    c9 = next(p for _, items in c.branch_parts for p, _ in items if p.ref == "C9")
+    assert c9.on_path and c9.dnp and {c9.net, c9.to_net} == {"SIG_C", "SIG_D"}
+    assert [(p.name, p.value) for p in c.load] == [("C load", "1µF (path setting)"), ("R load", "12.4kΩ (path setting)")]
+    assert c.source[0].value == "25Ω (default)"
+    ink = Ink()
+    fig = draw_path(c, ink)
+    texts = {t.get_text(): t for t in fig.axes[0].texts}
+    for want in ("U1.1", "U2.1", "R1\n33", "U5\n×2", "C load\n1µF (path setting)", "R load\n12.4kΩ (path setting)",
+                 "✗ C9\n100n (DNP)"):
+        assert want in texts, (want, sorted(texts))
+    assert texts["C load\n1µF (path setting)"].get_color() == ink.accent
+    assert texts["✗ C9\n100n (DNP)"].get_color() == ink.muted
+    assert texts["✗ C9\n100n (DNP)"].get_position()[1] > 0          # a bridge: above the path
+    dashed = [ln for ln in fig.axes[0].lines if ln.get_linestyle() == "--"]
+    assert dashed and all(ln.get_color() == ink.muted for ln in dashed)
+    assert png(fig).startswith(b"\x89PNG")
+    blocked = path_chain(board, sc.config, NetSpec("SIG_A", "U1.1", ["U2.1"], 20e6, 1e-9))
+    assert draw_path(blocked, ink) is None
+    # a 1 µF Load C is a board capacitor's value, not a pin's input: the path says so (A119)
+    assert any(n.startswith("Load C 1µF at each receiver") for n in c.notes), c.notes
+
+
+def test_an_implausible_load_c_is_noted_with_what_was_probably_meant():
+    """A119: Load C (pF) typed in farads (8e-12) or as a board part's value (1 µF) gets a note saying so; a pin's few
+    pF, or none set, gets none."""
+    from groundtruth.analysis.route import load_pf_note
+    assert load_pf_note(None) == "" and load_pf_note(8.0) == "" and load_pf_note(47.0) == ""
+    assert "typed in farads? the field is in pF: 8 for 8pF" in load_pf_note(8e-12)
+    assert "added at every receiver pin" in load_pf_note(1e6)
+
+
 def _pozar_alpha(f, w, z0, eeff, er, tan_d, sigma=5.8e7):
     """A microstrip's attenuation (Np/m) by Pozar's closed forms: conductor α_c = R_s/(Z0·W) with R_s = √(ωμ0/2σ)
     (δ ≪ t), dielectric α_d = k0·εr(εeff - 1)·tan δ / (2√εeff(εr - 1)) [Pozar 2012]."""

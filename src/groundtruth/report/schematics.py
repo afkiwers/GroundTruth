@@ -67,7 +67,8 @@ class Sketch:
         beside the Fixes tab's text, where the labels must stay readable)."""
         self.ax.text(p[0], p[1], s, color=colour or self.ink.line, fontsize=size * TEXT_SCALE, **kw)
 
-    def _part(self, a, b, shape, name: str, value: str, side: int, proposed: bool, dashed: bool = False):
+    def _part(self, a, b, shape, name: str, value: str, side: int, proposed: bool, dashed: bool = False,
+              colour: Optional[str] = None):
         """A part between a and b: wires to the symbol's ends, the symbol (shape: [(s, t), ...] polylines in the
         part's frame, s from 0 to ELEMENT), its name and value beside it (side +1 / -1: left or above / the
         other side)."""
@@ -78,9 +79,11 @@ class Sketch:
         s0 = (length - ELEMENT) / 2
         start = (ax_ + ux * s0, ay + uy * s0)
         end = (ax_ + ux * (s0 + ELEMENT), ay + uy * (s0 + ELEMENT))
-        self.wire(a, start)
-        self.wire(end, b)
-        colour = self.ink.accent if proposed else self.ink.line
+        # an explicit colour (a part not fitted, drawn muted and dashed) takes its leads with it
+        lead = dict(colour=colour, dashed=dashed) if colour else {}
+        self.wire(a, start, **lead)
+        self.wire(end, b, **lead)
+        colour = colour or (self.ink.accent if proposed else self.ink.line)
         for poly in shape:
             pts = [(start[0] + ux * s + nx * t, start[1] + uy * s + ny * t) for s, t in poly]
             self.wire(*pts, colour=colour, dashed=dashed)
@@ -92,16 +95,16 @@ class Sketch:
         label = _subscript(name) + ("\n" + value if value else "")
         self.text(mid, label, colour=colour, ha=ha, va=va, size=8.5, linespacing=1.15)
 
-    def resistor(self, a, b, name: str, value: str = "", side: int = 1, proposed: bool = True):
+    def resistor(self, a, b, name: str, value: str = "", side: int = 1, proposed: bool = True, **kw):
         """A resistor (zig-zag) from a to b."""
         n = 6
         pts = [(0.0, 0.0), (0.1, 0.0)]
         for k in range(n):
             pts.append((0.1 + (k + 0.5) * 0.8 / n, 0.16 * (1 if k % 2 == 0 else -1)))
         pts += [(0.9, 0.0), (ELEMENT, 0.0)]
-        self._part(a, b, [pts], name, value, side, proposed)
+        self._part(a, b, [pts], name, value, side, proposed, **kw)
 
-    def inductor(self, a, b, name: str, value: str = "", side: int = 1, proposed: bool = True):
+    def inductor(self, a, b, name: str, value: str = "", side: int = 1, proposed: bool = True, **kw):
         """An inductor (four loops) from a to b."""
         pts = [(0.0, 0.0), (0.1, 0.0)]
         for k in range(4):
@@ -109,10 +112,10 @@ class Sketch:
                 ang = math.pi * j / 12
                 pts.append((0.1 + 0.2 * k + 0.1 - 0.1 * math.cos(ang), 0.14 * math.sin(ang)))
         pts += [(0.9, 0.0), (ELEMENT, 0.0)]
-        self._part(a, b, [pts], name, value, side, proposed)
+        self._part(a, b, [pts], name, value, side, proposed, **kw)
 
     def capacitor(self, a, b, name: str, value: str = "", side: int = 1, proposed: bool = True,
-                  polar: bool = False, dashed: bool = False):
+                  polar: bool = False, dashed: bool = False, colour: Optional[str] = None):
         """A capacitor (two plates; polar: the lower plate curved, an electrolytic or polymer) from a to b."""
         g = 0.09
         shape = [[(0.0, 0.0), (0.5 - g, 0.0)], [(0.5 - g, -0.24), (0.5 - g, 0.24)], [(0.5 + g, 0.0), (ELEMENT, 0.0)]]
@@ -123,7 +126,7 @@ class Sketch:
             shape.append([(0.5 - g - 0.22, 0.12), (0.5 - g - 0.10, 0.12)])
         else:
             shape.append([(0.5 + g, -0.24), (0.5 + g, 0.24)])
-        self._part(a, b, shape, name, value, side, proposed, dashed=dashed)
+        self._part(a, b, shape, name, value, side, proposed, dashed=dashed, colour=colour)
 
     def ground(self, p):
         """A ground symbol below p."""
@@ -393,6 +396,179 @@ def figure_for(option: dict, stage: str, ink: Ink, result=None):
         m = re.search(r"at most ([0-9.eE+-]+) pF", option.get("title", ""))
         return draw_common_mode(stage, float(m.group(1)) if m else None, ink)
     return None
+
+
+# ---------------------------------------------------------------- a signal path (the Signal paths tab)
+CHAR_W = 0.17          # a label character's width in drawing units (8.5 pt × TEXT_SCALE at 0.5 in per unit)
+BRANCH_DROP = 2.0      # how far a branch part reaches down from the path to its ground or net label
+LOOP_Y = 1.9           # the first bridge over the path: clear of the series parts' two label lines
+LOOP_STEP = 1.6        # each further bridge level
+
+
+def _text_w(s: str) -> float:
+    """A label's width in drawing units (its longest line)."""
+    return max((len(ln) for ln in s.split("\n")), default=0) * CHAR_W
+
+
+def _two_pin(sk: Sketch, a, b, part, side: int, colour: Optional[str], dashed: bool):
+    """A branch or series part between a and b by its kind: resistor (0R too), capacitor, inductor, else a box
+    (ferrite, diode, anything else), its name and value beside it."""
+    name = ("✗ " if part.dnp else "") + part.name
+    value = part.value + (" (DNP)" if part.dnp else "")
+    kw = dict(side=side, proposed=False, colour=colour, dashed=dashed)
+    if part.kind in ("resistor", "short"):
+        sk.resistor(a, b, name, value, **kw)
+    elif part.kind == "cap":
+        sk.capacitor(a, b, name, value, **kw)
+    elif part.kind == "inductor":
+        sk.inductor(a, b, name, value, **kw)
+    else:                                   # a box: the IEC symbol of an impedance
+        h = 0.16
+        sk._part(a, b, [[(0.0, 0.0), (0.15, 0.0)], [(0.15, -h), (0.85, -h), (0.85, h), (0.15, h), (0.15, -h)],
+                        [(0.85, 0.0), (ELEMENT, 0.0)]], name, value, side, False, dashed=dashed, colour=colour)
+
+
+def _opamp(sk: Sketch, x: float, y: float, part, width: float):
+    """An op-amp channel (or buffer) as a triangle on the path from x to x + width: the input enters at + on the
+    left, the output leaves at the tip; its name and "op-amp" (or its gain) above it."""
+    w, h = 1.3, 0.75
+    x0 = x + (width - w) / 2
+    sk.wire((x, y), (x0, y))
+    sk.wire((x0, y - h), (x0 + w, y), (x0, y + h), (x0, y - h))
+    sk.wire((x0 + w, y), (x + width, y))
+    sk.text((x0 + 0.12, y), "+", ha="left", va="center", size=8)
+    sk.text((x0 + w / 2, y + h + 0.08), f"{part.name}\n{part.value}", ha="center", va="bottom", size=8.5,
+            linespacing=1.15)
+
+
+def draw_path(chain, ink: Ink):
+    """A signal path (analysis/route.PathChain) as a schematic, left to right: the driver pin, each net of the path
+    as a wire with the parts that hang off it dropped below it (to a ground symbol, or to the other net's name), the
+    series parts and op-amp channels between the nets, parts joining two of the path's nets as bridges above it
+    (a feedback or speed-up part across a series part), and the receiver pin at the right. Parts not fitted are
+    dashed in the muted colour with ✗. The user, 2026-11-26, of the tab's text: "instead of writing it, can you
+    provide a graph 'schematic' of the path?". None for a chain without a route."""
+    if chain.error or not chain.nets:
+        return None
+    nets = chain.nets
+    index = {n: i for i, n in enumerate(nets)}
+    down: dict[int, list] = {i: [] for i in range(len(nets))}
+    bridges = []
+    for net, items in chain.branch_parts:
+        for part, _ in items:
+            i = index.get(part.net)
+            if i is None:
+                continue
+            j = index.get(part.to_net) if part.on_path else None
+            if j is not None and j != i:
+                bridges.append((min(i, j), max(i, j), part))
+            else:
+                down[i].append(part)
+    down[len(nets) - 1] += list(chain.load)        # the settings' load at the receiver, last before its pin
+
+    # ---- the layout (x along the path): each net's branch columns, then the series part to the next net
+    src_w = 2.6 if chain.source else 0.0               # the settings' source resistance after the driver pin
+    x = 1.0 + src_w                                    # after the driver's wire
+    node_first, node_last, columns = [], [], []        # per net: its first / last attach x; [(x, part)] below it
+    series_x = []                                      # per series part: (start x, width)
+    for i in range(len(nets)):
+        node_first.append(x)
+        cols = []
+        for part in down[i]:
+            # each column as wide as its label (right of the part) or its net name (centred under it)
+            cols.append((x, part))
+            label_w = 0.45 + _text_w(("✗ " if part.dnp else "") + part.name + "\n" + part.value
+                                     + (" (DNP)" if part.dnp else ""))
+            net_w = 0.0 if part.setting or part.to_net in chain.ground_nets else _text_w(part.to_net) + 0.6
+            x += max(1.2, label_w + 0.35, net_w)
+        columns.append(cols)
+        node_last.append(cols[-1][0] if cols else node_first[-1])
+        if i < len(chain.series):
+            part = chain.series[i]
+            width = 2.2 if part.kind in ("opamp", "buffer") else max(2.0, _text_w(part.name + "\n" + part.value) + 1.0)
+            x = max(x, node_last[-1] + 0.5)
+            series_x.append((x, width))
+            x += width + 0.5
+    x_end = x + 0.5
+
+    # bridge levels: shortest span first, each on the lowest level that is free over its span (greedy)
+    levels: list[list] = []
+    placed = []
+    for i, j, part in sorted(bridges, key=lambda t: (t[1] - t[0], t[0])):
+        level = next((k for k, spans in enumerate(levels) if all(j <= a or i >= b for a, b in spans)), len(levels))
+        if level == len(levels):
+            levels.append([])
+        levels[level].append((i, j))
+        placed.append((i, j, part, level))
+
+    # room above for the highest bridge's two label lines (or the op-amps' and series parts' labels)
+    top = (LOOP_Y + LOOP_STEP * (len(levels) - 1) + 1.4) if levels else 1.9
+    bottom = -(BRANCH_DROP + 0.9) if any(columns) else -0.8
+    receivers = chain.receivers[:1]
+    others = chain.receivers[1:]
+    right = x_end + 0.3 + _text_w(receivers[0] if receivers else "") + 0.3
+    if others:
+        right = max(right, x_end + 0.3 + _text_w("also " + ", ".join(others)) + 0.3)
+    left = -0.5 - _text_w(chain.driver)
+    notes = list(chain.notes)
+    note_h = 0.4 * sum(1 + len(n) // 110 for n in notes)
+    bottom -= note_h
+
+    sk = Sketch(ink, right - left, top - bottom)
+    sk.ax.set_xlim(left, right)
+    sk.ax.set_ylim(bottom, top)
+    muted = ink.muted
+
+    # ---- the path's wire, driver to receiver, with the series parts on it
+    pos = 0.0
+    sk.ax.plot([0], [0], "o", ms=6, mfc=ink.bg, mec=ink.line, mew=1.4, zorder=3)
+    sk.text((-0.25, 0), chain.driver, ha="right", va="center")
+    for part in chain.source:
+        _two_pin(sk, (0.3, 0), (0.3 + src_w, 0), part, 1, ink.accent, False)
+        pos = 0.3 + src_w
+    for part, (sx, width) in zip(chain.series, series_x):
+        sk.wire((pos, 0), (sx, 0))
+        if part.kind in ("opamp", "buffer"):
+            _opamp(sk, sx, 0, part, width)
+        else:
+            _two_pin(sk, (sx, 0), (sx + width, 0), part, 1, None, False)
+        pos = sx + width
+    sk.wire((pos, 0), (x_end, 0))
+    sk.ax.plot([x_end], [0], "o", ms=6, mfc=ink.bg, mec=ink.line, mew=1.4, zorder=3)
+    if receivers:
+        sk.text((x_end + 0.3, 0), receivers[0], ha="left", va="center")
+    if others:
+        sk.text((x_end + 0.3, -0.45), "also " + ", ".join(others), colour=muted, ha="left", va="center", size=8)
+
+    # ---- what hangs off each net: down to a ground, or to the other net's name
+    for cols in columns:
+        for bx, part in cols:
+            colour, dashed = (muted, True) if part.dnp else (ink.accent, False) if part.setting else (None, False)
+            sk.dot((bx, 0))
+            end = (bx, -BRANCH_DROP)
+            _two_pin(sk, (bx, 0), end, part, 1, colour, dashed)
+            if part.setting or part.to_net in chain.ground_nets:
+                sk.ground(end)
+            else:
+                sk.text((bx, end[1] - 0.08), part.to_net, colour=muted, ha="center", va="top", size=8)
+
+    # ---- parts joining two of the path's nets, as bridges over it
+    for i, j, part, level in placed:
+        xl, xr = node_last[i], node_first[j]
+        if xr - xl < 1.2:                   # no room between the two nets' wires: widen to their outer ends
+            xl, xr = node_first[i], node_last[j]
+        y = LOOP_Y + LOOP_STEP * level
+        colour, dashed = (muted, True) if part.dnp else (ink.line, False)
+        sk.dot((xl, 0))
+        sk.dot((xr, 0))
+        sk.wire((xl, 0), (xl, y), colour=colour, dashed=dashed)
+        _two_pin(sk, (xl, y), (xr, y), part, 1, colour if part.dnp else None, dashed)
+        sk.wire((xr, y), (xr, 0), colour=colour, dashed=dashed)
+
+    for k, note in enumerate(notes):
+        sk.text((left + 0.1, bottom + 0.1 + 0.4 * (len(notes) - 1 - k)), "⚠ " + note, colour=muted, ha="left",
+                va="bottom", size=8)
+    return sk.fig
 
 
 def png(fig) -> bytes:

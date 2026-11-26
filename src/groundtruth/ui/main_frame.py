@@ -1528,7 +1528,7 @@ class MainFrame(ConfigActions, wx.Frame):
     def on_config_change(self):
         """A tab changed the settings: save them (in the background), and work out the Signal paths tab's chains
         again (a part model the Parts tab changed may open or close a path, or change a value shown)."""
-        if getattr(self, "nets", None) is not None and getattr(self.nets, "path_text", None) is not None:
+        if getattr(self, "nets", None) is not None and getattr(self.nets, "path_view", None) is not None:
             self.nets.refresh_chains()
         self.dirty = True
         self.on_save()
