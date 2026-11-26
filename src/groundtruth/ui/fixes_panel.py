@@ -156,12 +156,22 @@ class SchematicWindow(wx.Frame):
         view.SetSizer(vs)
         save = theme.Button(self, "Save as PNG…")
         save.Bind(wx.EVT_BUTTON, lambda e: self._save())
-        copy = theme.Button(self, "Copy")
+        copy = theme.Button(self, "Clipboard busy")
+        # wide enough for its longest label from the start: the label changes after a click, and a button that grew
+        # then overlapped Save as PNG… beside it (the user, 2026-11-27: "the buttons overlap slightly, space them out")
+        wide = copy.GetBestSize()                       # theme.Button.SetLabel resets its size: set again after it
+        copy.SetLabel("Copy")
+        copy.SetMinSize(wide)
         copy.SetToolTip("The schematic to the clipboard, as an image")
-        # the button says whether it worked (another program may hold the clipboard)
-        copy.Bind(wx.EVT_BUTTON, lambda e: copy.SetLabel("Copied" if copy_png(self.png) else "Clipboard busy"))
+
+        def on_copy(_evt):
+            """Copy the image; the button says whether it worked (another program may hold the clipboard)."""
+            copy.SetLabel("Copied" if copy_png(self.png) else "Clipboard busy")
+            copy.SetMinSize(wide)
+            row.Layout()
+        copy.Bind(wx.EVT_BUTTON, on_copy)
         row = wx.BoxSizer(wx.HORIZONTAL)
-        row.Add(copy, 0, wx.RIGHT, 6)
+        row.Add(copy, 0, wx.RIGHT, self.FromDIP(12))
         row.Add(save, 0)
         s = wx.BoxSizer(wx.VERTICAL)
         s.Add(view, 1, wx.EXPAND)
