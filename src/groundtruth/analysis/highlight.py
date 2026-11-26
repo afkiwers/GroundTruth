@@ -243,6 +243,38 @@ def stages_highlight(names: Sequence[str], board: Board, config: Config, routes:
     return _finish(h, board, config, set(flow))
 
 
+def dcloads_highlight(names: Sequence[str], board: Board, config: Config) -> Highlight:
+    """DC rails picked in the DC loads tab (the user, 2026-11-27: "why is the +Batt trace not highlighted?"): the
+    pads of their source, return and load pins, the parts whose model joins two of the rail's nets (a series 0R, a
+    current sensor's primary given a resistor model), and the copper of the nets the rail's current runs on, lit:
+    the supply side and a return net that is no reference net. A reference net's copper is selected for the zoom
+    but never lit (it would light up the whole board), as for a power stage."""
+    from ..components.models import model_pads
+    specs = [d for d in config.dc_loads if d.name in set(names)]
+    if not specs:
+        return Highlight(nets=False, text="no DC load")
+    pins = [p for d in specs for p in (d.source, d.source_return, *(x.pin for x in d.loads), *(x.ret for x in d.loads))
+            if p]
+    pads = []
+    for pin in pins:
+        ref, _, number = pin.partition(".")
+        fp = board.footprint(ref)
+        pads += [p for p in (fp.pads if fp is not None else []) if str(p.number) == number]
+    nets = {p.net for p in pads if p.net}
+    refs = set(config.reference_nets)
+    parts = [fp for fp in board.footprints if not fp.dnp
+             and len({p.net for p in model_pads(fp, config.model_for(fp.reference)) if p.net} & nets) >= 2
+             and (m := config.model_for(fp.reference)) is not None and m.kind != "open"]
+    flow = nets - refs
+    h = Highlight(focus=[p.uuid for p in pads if p.uuid] + [fp.uuid for fp in parts]
+                  + _copper_of(board, flow, zones=True),
+                  context=_copper_of(board, nets & refs, zones=True),
+                  text="; ".join(f"{d.name}: {d.source} → " + ", ".join(x.pin for x in d.loads) for d in specs)
+                  + (f"; through {', '.join(fp.reference for fp in parts)}" if parts else "")
+                  + (f"; current on {', '.join(sorted(flow))}" if flow else ""))
+    return _finish(h, board, config, flow)
+
+
 def _finish(h: Highlight, board: Board, config: Config, lit_nets: set[str]) -> Highlight:
     """Planes out of the zoom, the lit copper, the bounding box and the zoom-out steps."""
     h.focus = _valid(h.focus)

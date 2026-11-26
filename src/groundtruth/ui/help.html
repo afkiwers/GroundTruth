@@ -796,6 +796,15 @@ current density at the same current. The drops are for copper at 20 °C: about 0
 warmer; after <b>Thermal</b>, its notes (and the JSON report's <code>dc_at_temperature</code>) give each DC path's
 resistance, drop and loss at the temperature the solve found along it. Copper of the rail's net that does not touch (a track broken by a gap) is not joined, however narrow the
 gap: the rail is then reported as not connected.</p>
+<p><b>A part in the rail's path</b>: the rail's current flows only through parts whose model passes it. A series 0R
+is a short; a current sensor whose primary carries the rail (a Hall sensor's IP+ to IP−, or a 4-terminal shunt) needs
+a <b>resistor</b> model on the Parts tab with its conductor's resistance from the datasheet and <b>pins</b> naming
+the two pins it joins (<code>IP+, IP-</code>); until then its model is <i>open</i> and the rail's supply or return
+is cut there. Simulate then says so and names the part, the nets it joins and the pins to give it.</p>
+<p><b>Clicking a rail</b> (live in KiCad) highlights it there and zooms to it: its source, return and load pins, the
+parts in its path, and the copper its current runs on (the supply net and a return net that is not a reference net;
+a ground plane is never lit, it would light up the whole board). The current itself, where it flows and how dense,
+is the rail's map on the Results tab after Simulate (<b>Draw on board ▾ › Arrows</b> puts it on the board).</p>
 <p><b>Fill from net…</b> is the quick way: pick the rail's net (e.g. VDD) and its ground (GND); GroundTruth lists every part with a pin on the rail, with that part's own ground pin, and you pick the part feeding it (the connector with the fewest pins is preselected) and the parts drawing from it (the connectors are preselected), then a current per load. The form is filled in; check it, change a line's current if a load draws more, and press <b>Add</b>.</p>
 <p><b>Typing pins</b>: the Source pin, Source return and Loads fields list the board's pins while you type, each with
 its net and part (<b>Ctrl+Space</b>, or Down in a one-line field, lists them on an empty field); Up/Down choose, Enter or

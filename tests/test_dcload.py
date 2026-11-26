@@ -188,3 +188,58 @@ def test_the_form_offers_the_pins_that_fit(tmp_path):
     c = complete_load_line(pins, "J4.2/J=1A", 6, "J1.2", "J1.1")
     assert c.pins[0].pin == "J4.1" and (c.start, c.end) == (5, 6) and c.suffix == ""
     assert complete_load_line(pins, "J4.2/J4.1=0.", 12, "J1.2", "J1.1") is None
+
+
+def _sensor_return_board(tmp_path):
+    """A rail from J1.2 to J2.2 on PWR whose return runs from J2.1 (RET) through a Hall current sensor's primary
+    (U1: IP+ on RET, IP- on GND) to J1.1 (GND), as on a battery monitor board."""
+    g = BoardGen(layers=2, size=(40.0, 20.0))
+    for ref, x in (("J1", 5.0), ("J2", 35.0)):
+        g.footprint(ref, "CONN", "Connector:Fake_2", (x, 10.0), [
+            {"number": 1, "at": (0, 3.0), "net": "GND" if ref == "J1" else "RET", "size": (2.0, 2.0)},
+            {"number": 2, "at": (0, 0), "net": "PWR", "size": (2.0, 2.0)}])
+    g.footprint("U1", "ACS772", "Sensor_Current:Fake_CB", (20.0, 13.0), [
+        {"number": 1, "at": (0, -2.0), "net": "+5V", "pintype": "power_in", "pinfunction": "VCC"},
+        {"number": 4, "at": (2.0, 0), "net": "RET", "pintype": "passive", "pinfunction": "IP+", "size": (1.5, 1.5)},
+        {"number": 5, "at": (-2.0, 0), "net": "GND", "pintype": "passive", "pinfunction": "IP-", "size": (1.5, 1.5)}])
+    pwr = g.track((5.0, 10.0), (35.0, 10.0), "PWR", width=2.0)
+    g.track((35.0, 13.0), (22.0, 13.0), "RET", width=2.0)
+    g.track((18.0, 13.0), (5.0, 13.0), "GND", width=2.0)
+    board, sc, _ = make(tmp_path, g, "sensor", nets=())
+    sc.set_dc_loads([DcLoadSpec("rail", "J1.2", [DcLoad("J2.2", 10.0, "J2.1")], "J1.1")])
+    sc.save()
+    return board, SettingsFile.load(sc.path).config, pwr
+
+
+def test_a_return_through_a_sensor_without_a_model_names_it_and_what_to_set(tmp_path):
+    """The rail's return runs through a current sensor's primary whose model passes no current: Simulate's error names
+    the part, the two nets it joins and the pins to give a resistor model; with that model (1 mOhm on IP+ / IP-)
+    there is nothing to name and the return current flows through it: the return side drops more than its I·R."""
+    from groundtruth.analysis.dcload import open_links
+    from groundtruth.components.models import ComponentModel
+    board, cfg, _ = _sensor_return_board(tmp_path)
+    cfg.components["U1"].model = ComponentModel("open")
+    text = open_links(board, cfg, cfg.dc_loads[0])
+    assert "U1 joins GND and RET" in text and "pins IP+, IP-" in text, text
+    assert "U1 joins GND and RET" in simulate(board, cfg).dc_loads[0].error
+    cfg.components["U1"].model = ComponentModel("resistor", {"R": 1e-3}, pins=["IP+", "IP-"])
+    assert open_links(board, cfg, cfg.dc_loads[0]) == ""
+    # solved through the primary now: the return side drops at least its 10 A x 1 mOhm, plus its copper's
+    res = simulate(board, cfg).dc_loads[0]
+    assert not res.error and res.loads[0]["return_mv"] > 10.0, (res.error, res.loads)
+
+
+def test_a_dc_rail_picked_in_its_tab_lights_the_copper_its_current_runs_on(tmp_path):
+    """DC loads tab, a row clicked (analysis/highlight.dcloads_highlight): its pins' pads and the supply and the
+    non-reference return copper are selected and lit, the reference net's copper only in the zoom; a part whose model
+    joins two of its nets (the sensor's primary) is selected too."""
+    from groundtruth.analysis.highlight import dcloads_highlight
+    from groundtruth.components.models import ComponentModel
+    board, cfg, pwr = _sensor_return_board(tmp_path)
+    cfg.components["U1"].model = ComponentModel("resistor", {"R": 100e-6}, pins=["IP+", "IP-"])
+    h = dcloads_highlight(["rail"], board, cfg)
+    gnd = [t.uuid for t in board.tracks if t.net == "GND"]
+    ret = [t.uuid for t in board.tracks if t.net == "RET"]
+    assert pwr in h.lit and ret[0] in h.lit and not set(gnd) & set(h.lit) and set(gnd) <= set(h.context)
+    assert board.footprint("U1").uuid in h.focus and "through U1" in h.text
+    assert dcloads_highlight(["nothing"], board, cfg).empty
