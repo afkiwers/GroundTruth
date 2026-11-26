@@ -1694,6 +1694,20 @@ def transfer_clipboard(view) -> str:
     return "\n".join(([owner] if owner else []) + plain + ["", "LaTeX:"] + latex) + "\n"
 
 
+def is_receiver(r) -> bool:
+    """Whether a response is a receiver's (the path's output per volt of the source), not an op-amp's output or loop."""
+    return "receiver" in r.name and r.name.endswith("/ source")
+
+
+def receiver_style(r, others: bool) -> dict:
+    """How a response's curve is drawn: a receiver's on top of the rest and, with other curves beside it, dashed, so
+    the op-amp output it follows (one track away: the two coincide) still shows under it and it under the op-amp's
+    (the user, 2026-11-26: "why can't I see a plot of the signals on my receiver pins"); others plain."""
+    if not is_receiver(r):
+        return {"zorder": 2}
+    return {"zorder": 3.5, "dashes": (5, 3)} if others else {"zorder": 3.5}
+
+
 def draw_bode(fig: Figure, view) -> None:
     """A Bode plot of a view's responses (analysis/transfer.BodeView): magnitude on top (dB, or Ω on a log axis for
     impedances), the unwrapped phase below, on one log frequency axis; each response in its colour, its poles (×)
@@ -1718,8 +1732,9 @@ def draw_bode(fig: Figure, view) -> None:
         f = np.asarray(r.f) / 1e6
         f_all += list(f)
         mag = np.abs(r.h) if ohms else 20 * np.log10(np.maximum(np.abs(r.h), 1e-30))
-        ax_m.plot(f, mag, color=c, lw=1.3, label=response_label(r, view.owner))
-        ax_p.plot(f, r.phase_deg(), color=c, lw=1.1)
+        style = receiver_style(r, len(resp) > 1)
+        ax_m.plot(f, mag, color=c, lw=1.3, label=response_label(r, view.owner), **style)
+        ax_p.plot(f, r.phase_deg(), color=c, lw=1.1, **style)
         for roots, marker in ((r.poles, "x"), (r.zeros, "o")):
             rows = _pz_in_band(roots, r.f)
             if rows:                    # one artist for all of them (one each made the PDN views slow to draw)
@@ -1834,7 +1849,7 @@ def draw_step(fig: Figure, view) -> None:
         for r in group:
             c = PDN_COLOURS[resp.index(r) % len(PDN_COLOURS)]
             t, y, m = np.asarray(r.step["t"]) / scale, np.asarray(r.step["y"]), r.step["metrics"]
-            ax.plot(t, y, color=c, lw=1.3, label=response_label(r, view.owner))
+            ax.plot(t, y, color=c, lw=1.3, label=response_label(r, view.owner), **receiver_style(r, len(group) > 1))
             fin = m.get("final")
             if fin and m.get("rise") is not None:
                 ax.axhline(fin, color=c, lw=0.7, ls="--")
@@ -1975,7 +1990,9 @@ def draw_pz(fig: Figure, view) -> None:
             xs = [complex(s).real / (2 * math.pi) for s in roots]
             ys = [complex(s).imag / (2 * math.pi) for s in roots]
             if xs:
+                # a receiver's markers on top: its poles are often an op-amp output's too (same place, one track away)
                 ax.plot(xs, ys, marker, color=c, ms=7, mfc="none", mew=1.5,
+                        zorder=receiver_style(r, False)["zorder"],
                         label=response_label(r, view.owner) if marker == "x" else None)
                 pts += [abs(v) for v in xs + ys if v]
                 kind = "pole" if marker == "x" else "zero"

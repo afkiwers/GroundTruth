@@ -48,6 +48,35 @@ def test_an_rc_lowpass_sweeps_to_its_closed_form_without_a_field_solve(tmp_path,
     assert np.allclose(np.angle(resp.h[low], deg=True), np.angle(h[low], deg=True), atol=1.0)
 
 
+def test_each_receiver_has_its_result_and_its_curve_is_drawn_on_top(tmp_path):
+    """Two receivers on the low-pass's output net (U2.1 and U3.1): one result each, both with the one pole at
+    1 / (2π·1025 Ω·(10 nF + 2 × 5 pF)) (1 %). In an op-amp path the receiver's curve coincides with the op-amp output
+    one track before it: it is drawn on top of it, dashed, so both show (the user: "why can't I see a plot of the
+    signals on my receiver pins": the op-amp's curve hid it)."""
+    from types import SimpleNamespace
+    from matplotlib.figure import Figure
+    from groundtruth.analysis import simulate as sim
+    from groundtruth.analysis.transfer import bode_views, gain_figures
+    from groundtruth.report.plots import draw_bode
+    g = rc_lowpass_board()
+    g.ic("U3", (30.0, 6.0), "SIG_B", gnd_offset=(0.0, -1.0))
+    g.track((30.0, 10.0), (30.0, 6.0), "SIG_B")
+    spec = NetSpec("SIG_A", "U1.1", ["U2.1", "U3.1"], 1e6, 10e-9, **SWEEP)
+    board, sc, _ = make(tmp_path, g, "rc2", nets=(spec,))
+    results = sim.bode_paths(board, sc.config)
+    assert [r.receiver for r in results] == ["U2.1", "U3.1"] and not any(r.error for r in results)
+    f_c = 1 / (2 * math.pi * 1025.0 * 10.01e-9)
+    for r in results:
+        assert gain_figures(r.responses[0])["f_3db"] == pytest.approx(f_c, rel=0.01), r.receiver
+    board, sc, _ = make(tmp_path, opamp_path_board(Gain="1", GBW="10MHz"), "amp", nets=(_spec(**SWEEP),))
+    (r,) = sim.bode_paths(board, sc.config)
+    fig = Figure(figsize=(8, 5))
+    draw_bode(fig, bode_views(SimpleNamespace(routes=[r]))[0])
+    by = {ln.get_label(): ln for ln in fig.axes[0].get_lines()}
+    rx, amp = by["receiver / source"], by["U5: output"]
+    assert rx.get_zorder() > amp.get_zorder() and rx.get_linestyle() == "--", (rx.get_zorder(), rx.get_linestyle())
+
+
 def test_an_opamp_stage_gives_its_gain_and_its_pole_at_gbw_over_gain(tmp_path):
     """U5 with Gain 10 and GBW 10 MHz: +20 dB from 1 Hz, −3 dB at 1 MHz (2 %), U5's output beside the path's."""
     from groundtruth.analysis.simulate import bode_paths
