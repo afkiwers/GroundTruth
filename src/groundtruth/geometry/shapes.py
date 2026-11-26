@@ -146,9 +146,19 @@ def pad_shape(p: Pad):
     return SPolygon([(p.position[0] + x, p.position[1] + y) for x, y in pts])
 
 
+OUTLINE_GRID_MM = 1e-6      # Edge.Cuts points snapped to KiCad's internal unit (1 nm) before they are joined
+
+
 def polygonize_outline(segments: Iterable[Sequence[Point]], closed_shapes: Iterable[Polygon] = ()) -> list[Polygon]:
     """Turn Edge.Cuts line work into board polygons. Inner closed contours become holes."""
-    lines = [LineString(s) for s in segments if len(s) >= 2]
+    # Every point snapped to 1 nm (KiCad's own unit: nothing drawn is lost). Ends that meet in KiCad can differ in
+    # the last bits here (an arc's end computed from its start/mid, a footprint's rotation): a fraction of a nm
+    # apart, they are two points to shapely, the ring through them never closes, and its edges came out as "cut
+    # edges" with no face. A board whose slots closed but whose outer edge did not was then read as the slots
+    # alone (three 7.7 mm² pieces for a 735 mm² board; every model clipped to their bounding box, a signal path's
+    # return pins outside its grid: "not near any plane copper"); the gap fallback below only runs with no face.
+    lines = [g for g in (shapely.set_precision(LineString(s), OUTLINE_GRID_MM) for s in segments if len(s) >= 2)
+             if not g.is_empty]      # a piece shorter than 1 nm vanishes
     polys = [SPolygon(to_shapely(p).exterior) for p in closed_shapes]
     if lines:
         # node the loose segments where they meet (unary_union), then find every closed face they enclose
