@@ -64,6 +64,18 @@ def test_units_in_net_spec():
     assert n.freq == pytest.approx(20e6) and n.rise_time == pytest.approx(2e-9) and n.receivers == ["U2.1"]
 
 
+@pytest.mark.parametrize("written, pf", [(8, 8.0), (8e-12, 8.0), ("8p", 8.0), ("8pF", 8.0), ("1n", 1000.0),
+                                         (0.5, 0.5)])
+def test_a_load_c_written_in_farads_is_read_as_its_picofarads(written, pf):
+    """A119: a path's load_pf / driver_pf (pF) and driver_nh (nH) below 0.001 are farads / henries (8e-12 or "8p" for
+    8 pF, as the Signal paths form reads them), so the form shows 8pF, not 8e-24F; a plain value is in pF as before."""
+    cfg = config_from_data({"nets": [{"name": "X", "driver": "U1.1", "receivers": "U2.1", "freq": "1MHz",
+                                      "rise_time": "2ns", "load_pf": written, "driver_pf": written,
+                                      "driver_nh": 1.5e-9}]})
+    n = cfg.nets[0]
+    assert n.load_pf == pytest.approx(pf) and n.driver_pf == pytest.approx(pf) and n.driver_nh == pytest.approx(1.5)
+
+
 def test_validate_against_board(tmp_path):
     b = board_with([("R1", "33R")])
     sc = SettingsFile.new(tmp_path / "t.groundtruth.yaml", b)
