@@ -382,15 +382,12 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
         def label(c) -> str:
             """A part in the lists: its pins and value."""
             return f"{c['ref']} ({c['value']}): {c['pin']}" + (f", return {c['ret']}" if c["ret"] else ", no ground pin")
-        dlg = wx.SingleChoiceDialog(self, f"Which part feeds {rail}?", "Fill from net: the source",
-                                    [label(c) for c in cands])
-        dlg.SetSelection(max(0, guess_source(cands)))
-        try:
-            if dlg.ShowModal() != wx.ID_OK:
-                return
-            src = cands[dlg.GetSelection()]
-        finally:
-            dlg.Destroy()
+        labels = [label(c) for c in cands]
+        picked = self._choose(f"Which part feeds {rail}?", labels, labels[max(0, guess_source(cands))],
+                              "Fill from net: the source")
+        if picked is None:
+            return
+        src = cands[labels.index(picked)]
         rest = [c for c in cands if c is not src]
         dlg = wx.MultiChoiceDialog(self, f"Which parts draw current from {rail}?", "Fill from net: the loads",
                                    [label(c) for c in rest])
@@ -419,13 +416,13 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
         self.loads.SetValue("\n".join(f"{c['pin']}{'/' + c['ret'] if with_ret else ''}={amps}" for c in loads))
         self.list.SetFocus()
 
-    def _choose(self, message: str, choices: list, default: str):
-        """One net from a list (default preselected), or None (Cancel)."""
-        dlg = wx.SingleChoiceDialog(self, message, "Fill from net", choices)
-        if default in choices:
-            dlg.SetSelection(choices.index(default))
+    def _choose(self, message: str, choices: list, default: str, title: str = "Fill from net"):
+        """One item from a list with a filter at the top (widgets.FilteredChoiceDialog; default preselected), or
+        None (Cancel)."""
+        from .widgets import FilteredChoiceDialog
+        dlg = FilteredChoiceDialog(self, message, title, choices, default)
         try:
-            return choices[dlg.GetSelection()] if dlg.ShowModal() == wx.ID_OK else None
+            return dlg.choice() if dlg.ShowModal() == wx.ID_OK else None
         finally:
             dlg.Destroy()
 

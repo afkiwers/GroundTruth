@@ -414,6 +414,78 @@ class PickDialog(wx.Dialog):
         return [d.spec for k, d in enumerate(self.found) if self.list.IsItemChecked(k)]
 
 
+def matches(item: str, text: str) -> bool:
+    """Whether a filter's text lets an item through: every word of it found in the item, without case ("r2", "u1 .9",
+    "batt adc")."""
+    low = item.lower()
+    return all(w in low for w in text.lower().split())
+
+
+class FilteredChoiceDialog(wx.Dialog):
+    """One item from a long list, with a filter at the top that narrows the list as it is typed (the user, of Fill
+    from net's list of nets: "add a filter at the top"; the same rule as FilteredCheckList: every word in the item,
+    without case). The filter has the focus; Down moves into the list, Enter or a double-click takes the selected
+    item. `choice()` after OK: the item, or None."""
+
+    def __init__(self, parent, message: str, title: str, choices: list[str], default: str = ""):
+        """The message, the filter, the list (`default` selected when it is one of `choices`), OK and Cancel."""
+        super().__init__(parent, title=title, size=wx.Window.FromDIP(wx.Size(420, 520), parent),
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+        self.choices = list(choices)
+        self.filter = wx.SearchCtrl(self, style=wx.TE_PROCESS_ENTER)
+        self.filter.SetDescriptiveText("filter, e.g. batt or adc")
+        self.filter.ShowCancelButton(True)
+        self.list = wx.ListBox(self, style=wx.LB_SINGLE)
+        self.count = wx.StaticText(self, label="", name="muted")
+        s = wx.BoxSizer(wx.VERTICAL)
+        s.Add(wx.StaticText(self, label=message), 0, wx.ALL, 8)
+        s.Add(self.filter, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
+        s.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        s.Add(self.count, 0, wx.LEFT | wx.TOP, 8)
+        s.Add(self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL), 0, wx.EXPAND | wx.ALL, 8)
+        self.SetSizer(s)
+        self.filter.Bind(wx.EVT_TEXT, lambda e: self._show())
+        self.filter.Bind(wx.EVT_SEARCHCTRL_CANCEL_BTN, lambda e: (self.filter.ChangeValue(""), self._show()))
+        self.filter.Bind(wx.EVT_TEXT_ENTER, lambda e: self._take())
+        self.filter.Bind(wx.EVT_KEY_DOWN, self._key)
+        self.list.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self._take())
+        self._show(default)
+        self.filter.SetFocus()
+
+    def _show(self, keep: str = ""):
+        """The items the filter lets through, the one selected before (or `keep`) still selected, else the first."""
+        current = keep or self.choice() or ""
+        shown = [c for c in self.choices if matches(c, self.filter.GetValue())]
+        self.list.Set(shown)
+        if shown:
+            self.list.SetSelection(shown.index(current) if current in shown else 0)
+            self.list.EnsureVisible(self.list.GetSelection())
+        n = len(self.choices)
+        self.count.SetLabel(f"{len(shown)} of {n} shown" if len(shown) < n else f"{n} items")
+        self.FindWindowById(wx.ID_OK).Enable(bool(shown))
+
+    def _key(self, evt):
+        """Up / Down in the filter move the list's selection (the typing stays in the filter)."""
+        k, n = evt.GetKeyCode(), self.list.GetCount()
+        if k in (wx.WXK_DOWN, wx.WXK_UP) and n:
+            i = self.list.GetSelection()
+            i = min(n - 1, i + 1) if k == wx.WXK_DOWN else max(0, i - 1)
+            self.list.SetSelection(i)
+            self.list.EnsureVisible(i)
+            return
+        evt.Skip()
+
+    def _take(self):
+        """Enter or a double-click: close with OK when an item is selected."""
+        if self.list.GetSelection() != wx.NOT_FOUND:
+            self.EndModal(wx.ID_OK)
+
+    def choice(self):
+        """The selected item, or None."""
+        i = self.list.GetSelection() if hasattr(self, "list") else wx.NOT_FOUND
+        return self.list.GetString(i) if i != wx.NOT_FOUND else None
+
+
 class InfoBox(wx.Panel):
     """A tab's help, out of the way: one line "ⓘ <title>  <this board's status>  [Show]", and under it, while
     shown, a read-only text (selectable, so a label can be copied from it). Cheap to build: two labels, a button
