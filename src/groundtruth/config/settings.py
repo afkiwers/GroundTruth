@@ -841,6 +841,16 @@ def _num(v: Any, what: str, unit: str = "") -> float:
     raise ConfigError([f"{what}: cannot read number from {v!r}"])
 
 
+def _small(v: Any, what: str, unit: str) -> float:
+    """A capacitance in pF or an inductance in nH as written in the settings (_num); a value below 0.001 is taken as
+    farads / henries (8e-12 or "8p" for 8 pF: nobody means a thousandth of a pF there), as the Signal paths form
+    reads it [A119]. The user, 2026-11-26, of Load C showing 8e-24F: "it still doesn't display the value with SI
+    units"."""
+    x = _num(v, what, unit)
+    scale = 1e-12 if unit == "pF" else 1e-9
+    return float(f"{x / scale:.12g}") if 0 < abs(x) < 1e-3 else x
+
+
 def _mm(v: Any, what: str) -> float:
     """A length in mm: 5, 5.0 or "5mm" (not SI: "5m" would be 5 milli-units)."""
     if isinstance(v, str) and v.strip().lower().endswith("mm"):
@@ -1387,7 +1397,7 @@ def config_from_data(data: Any) -> Config:
             max_frequency=None if str(a.get("max_frequency", "auto")).lower() == "auto"
             else _num(a.get("max_frequency"), "analysis.max_frequency", "Hz"),
             driver_ohms=_num(a.get("driver_ohms", 25.0), "analysis.driver_ohms", "ohm"),
-            load_pf=_num(a.get("load_pf", 5.0), "analysis.load_pf", "pF"),
+            load_pf=_small(a.get("load_pf", 5.0), "analysis.load_pf", "pF"),
             threads=_threads(a.get("threads", "auto"), errors),
             gpu=_gpu(a.get("gpu", "auto"), errors),
             sparse=_sparse(a.get("sparse"), errors),
@@ -1514,10 +1524,10 @@ def config_from_data(data: Any) -> Config:
                 duty=_num(n.get("duty", 0.5), f"{where}.duty"),
                 current_a=None if n.get("current_a") is None else _num(n.get("current_a"), f"{where}.current_a", "A"),
                 driver_ohms=None if n.get("driver_ohms") is None else _num(n.get("driver_ohms"), f"{where}.driver_ohms", "ohm"),
-                load_pf=None if n.get("load_pf") is None else _num(n.get("load_pf"), f"{where}.load_pf", "pF"),
+                load_pf=None if n.get("load_pf") is None else _small(n.get("load_pf"), f"{where}.load_pf", "pF"),
                 fall_time=None if n.get("fall_time") is None else _num(n.get("fall_time"), f"{where}.fall_time", "s"),
-                driver_nh=None if n.get("driver_nh") is None else _num(n.get("driver_nh"), f"{where}.driver_nh", "nH"),
-                driver_pf=None if n.get("driver_pf") is None else _num(n.get("driver_pf"), f"{where}.driver_pf", "pF"),
+                driver_nh=None if n.get("driver_nh") is None else _small(n.get("driver_nh"), f"{where}.driver_nh", "nH"),
+                driver_pf=None if n.get("driver_pf") is None else _small(n.get("driver_pf"), f"{where}.driver_pf", "pF"),
                 load_ohms=None if n.get("load_ohms") is None else _num(n.get("load_ohms"), f"{where}.load_ohms", "ohm"),
                 sweep_from=None if n.get("sweep_from") is None else _num(n.get("sweep_from"), f"{where}.sweep_from",
                                                                          "Hz"),
