@@ -498,6 +498,29 @@ def test_a_capacitor_across_a_series_part_is_a_branch_in_parallel_with_it(tmp_pa
     assert at and at[0] in ("SIG_C", "SIG_D"), c.branches
 
 
+def test_a_not_fitted_branch_is_marked_at_the_part_not_at_what_it_is_parallel_to(tmp_path):
+    """A DNP part across a series part: "(DNP)" stands right after it ("✗ C9 100n (DNP) ∥ R2"), not at the end of the
+    line, where it read as if the series part (an op-amp there) were not fitted; a series part listed twice on the
+    route (an op-amp with two channels on it) is named once."""
+    from conftest import make
+    from boardgen import opamp_path_board
+    from groundtruth.analysis import route as route_mod
+    from groundtruth.config.settings import NetSpec
+    spec = NetSpec("SIG_A", "U1.1", ["U2.1"], 20e6, 1e-9, through=["R2"])
+    g = opamp_path_board(r_after="4k7", Gain="2")
+    g.two_pin("C9", "100n", (38.5, 14.0), "SIG_C", "SIG_D", kind="C")
+    board, sc, _ = make(tmp_path, g, "amp", nets=(spec,))
+    board.footprint("C9").dnp = True
+    c = route_mod.path_chain(board, sc.config, spec)
+    lines = [p for _, parts in c.branches for p in parts]
+    assert "✗ C9 100n (DNP) ∥ R2" in lines, lines
+    # the same part twice in the route's series parts (two channels of one op-amp): named once
+    r = route_mod.find_route(board, sc.config, spec.name, spec.driver, spec.receivers[0], spec.through)
+    r.parts = [*r.parts, "R2"]
+    lines = [p for _, parts in route_mod.path_branches(board, sc.config, r) for p in parts]
+    assert "✗ C9 100n (DNP) ∥ R2" in lines, lines
+
+
 def _pozar_alpha(f, w, z0, eeff, er, tan_d, sigma=5.8e7):
     """A microstrip's attenuation (Np/m) by Pozar's closed forms: conductor α_c = R_s/(Z0·W) with R_s = √(ωμ0/2σ)
     (δ ≪ t), dielectric α_d = k0·εr(εeff - 1)·tan δ / (2√εeff(εr - 1)) [Pozar 2012]."""
