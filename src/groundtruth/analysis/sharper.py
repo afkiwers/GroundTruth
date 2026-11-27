@@ -27,6 +27,16 @@ SHARPER_FACTOR = 4      # times the nodes: half the cell size
 MIN_PITCH_MM = 0.05
 
 
+def whole_board_dc(view) -> bool:
+    """Whether a view's map comes from the whole-board DC model (power.dc_board_build): a DC rail with loads, or
+    every stage's DC paths together (power.combine_dc, net COMBINED_NET). It has no model of its own to rebuild on a
+    finer grid; a finer map takes a higher Resolution and another Simulate."""
+    from .power import COMBINED_NET
+    if getattr(view, "kind", "") == "dcload" or getattr(view, "net", None) == COMBINED_NET:
+        return True
+    return any(p.get("combined") for p in (getattr(view, "dc", None) or []) if isinstance(p, dict))
+
+
 class SharperError(RuntimeError):
     """The view cannot be rebuilt (the board or the settings changed, the route is gone): an expected condition."""
 
@@ -36,9 +46,9 @@ def sharper_view(board: Board, config: Config, view, factor: float = SHARPER_FAC
     `view.sharper = {"d_mm", "was_mm", "nodes", "seconds"}`. `board` and `config` must be the ones the view was
     computed with (what-if runs: the edited copies)."""
     from .simulate import BoardModel
-    if getattr(view, "kind", "") == "dcload":
-        raise SharperError(f"{view.net}: a DC load is solved on the whole-board DC model; for a finer map raise the "
-                           "Resolution in Preferences and Simulate again")
+    if whole_board_dc(view):
+        raise SharperError(f"{view.net}: solved on the whole-board DC model; for a finer map raise the Resolution "
+                           "in Preferences and Simulate again")
     t0 = time.time()
     a = config.analysis
     if view.grid is None:
