@@ -263,3 +263,10 @@ def test_dc_rails_alone_together_give_each_via_a_share_of_their_currents(tmp_pat
     assert path["current_a"] == pytest.approx(5.0) and "5 A in" in dc_view(combo, COMBINED_VIEW).heat_title
     shares = [t["fraction"] for t in dc_view(combo, COMBINED_VIEW).transfers]
     assert shares and all(0 < s <= 1.0 + 1e-6 for s in shares)
+    # several paths at once have no one resistance or drop: no "0.00 mΩ" tile, the copper loss instead
+    from groundtruth.report.formats import COMBINED_NO_R, dc_r_drop
+    from groundtruth.ui.kpi import _dc
+    tiles = _dc(dc_view(combo, COMBINED_VIEW), cfg.rules)
+    assert [t[0] for t in tiles][:2] == ["DC " + COMBINED_VIEW, "copper loss"]
+    assert not any("mΩ" in str(t[1]) for t in tiles)
+    assert dc_r_drop(path) == COMBINED_NO_R and "mΩ" in dc_r_drop(res.dc_loads[0].dc[0])

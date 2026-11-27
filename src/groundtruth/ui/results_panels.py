@@ -1642,7 +1642,7 @@ class ResultsPanel(wx.Panel):
                                        f"{p['sustained_layer']}"] +
                                       ([f"{via['name']}: {via['current_a']:.2f} A, {via['a_mm2']:.0f} A/mm²"]
                                        if via else []))
-            from ..report.formats import dc_resistance
+            from ..report.formats import dc_r_drop
             if c.kind == "dcload":           # a DC rail with loads: the drop each load sees
                 return "   ·   ".join([f"DC load {p['current_a']:.3g} A from {c.driver}",
                                        f"copper loss {p['loss_w'] * 1e3:.0f} mW",
@@ -1650,7 +1650,7 @@ class ResultsPanel(wx.Panel):
                                        f"{p['sustained_layer']}"] +
                                       [f"{r['pin']}: {r['current_a']:.3g} A, drop {r['drop_mv']:.1f} mV" for r in
                                        c.loads])
-            return "   ·   ".join([f"DC {p['name']}: {p['current_a']:.3g} A", f"{dc_resistance(p)}, {p['drop_mv']:.1f} mV, "
+            return "   ·   ".join([f"DC {p['name']}: {p['current_a']:.3g} A", f"{dc_r_drop(p)}, "
                                    f"{p['loss_w'] * 1e3:.0f} mW",
                                    f"{p['sustained_a_mm2']:.0f} A/mm² sustained (peak {p['peak_a_mm2']:.0f}) on "
                                    f"{p['sustained_layer']}"] +
