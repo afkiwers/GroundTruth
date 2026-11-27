@@ -56,3 +56,24 @@ def test_a_view_whose_net_left_the_settings_says_so(tmp_path):
     from dataclasses import replace
     with pytest.raises(SharperError, match="no longer in the settings"):
         sharper_view(board, replace(sc.config, nets=[]), view)
+
+
+def test_the_whole_board_dc_views_say_how_to_get_a_finer_map(tmp_path):
+    """Two DC rails together (power.combine_dc, net "all power stages") and each rail's own view are solved on the
+    whole-board DC model: no model of their own to rebuild, so Sharper map says how to get a finer one (a higher
+    Resolution) instead of failing ("all power stages is no longer in the settings", the user's error dialog)."""
+    from groundtruth.analysis.power import COMBINED_VIEW
+    from groundtruth.analysis.sharper import whole_board_dc
+    from groundtruth.config.settings import DcLoad, DcLoadSpec, SettingsFile
+    from test_dcload import board_with
+    board, cfg = board_with(tmp_path, 30.0, [("U2.1", 2.0)], "two", ret=True)
+    sf = SettingsFile.load(next(tmp_path.rglob("two*.groundtruth.yaml")))
+    sf.set_dc_loads([cfg.dc_loads[0], DcLoadSpec("ground", "U1.2", [DcLoad("U2.2", 3.0, "")], "")])
+    sf.save()
+    cfg = SettingsFile.load(sf.path).config
+    res = simulate(board, cfg)
+    combo = dc_view(res.dc_combined, COMBINED_VIEW)
+    assert whole_board_dc(combo) and whole_board_dc(res.dc_loads[0])
+    for view in (combo, res.dc_loads[0]):
+        with pytest.raises(SharperError, match="Resolution"):
+            sharper_view(board, cfg, view)

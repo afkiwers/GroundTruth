@@ -2477,6 +2477,14 @@ class MainFrame(ConfigActions, wx.Frame):
             self.SetStatusText("for a finer thermal map choose Thermal quality: fine in Preferences (or "
                                "thermal.quality in the settings file) and run Thermal again")
             return
+        from ..analysis.sharper import whole_board_dc
+        if whole_board_dc(view):
+            # a DC rail's view and the stages' DC currents together are solved on the whole-board DC model: no model
+            # of their own to rebuild finer (an error dialog until 2026-11-27: "all power stages is no longer in the
+            # settings")
+            self.SetStatusText("this map comes from the whole-board DC model: for a finer one raise the Resolution "
+                               "in Preferences and Simulate again")
+            return
         if getattr(view, "sharper", None):
             self.SetStatusText(f"this map is already sharper ({view.sharper['d_mm']:.2f} mm grid)")
             return
