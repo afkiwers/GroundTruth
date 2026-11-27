@@ -161,6 +161,27 @@ def hole_shape(p: Pad, quad_segs: int = 8):
     return None
 
 
+HOLE_CUT_MM = 1.5           # a plated pad's hole this wide or wider (or a slot) is cut out of its copper [A121]
+
+
+def cut_hole(p: Pad):
+    """The hole cut out of a plated through-hole pad's copper (hole_shape), or None: a hole narrower than
+    HOLE_CUT_MM stays copper (a via-sized hole is below the grids' pitch; its plating conducts) [A121]."""
+    if p.pad_type != "thru_hole" or not (p.slot or p.drill >= HOLE_CUT_MM):
+        return None
+    return hole_shape(p)
+
+
+def hole_ring(p: Pad, offset: float, k: int) -> list:
+    """k points evenly round a pad's hole (hole_shape) `offset` mm out from its wall: where a barrel joins the
+    copper of a layer (simulate.joint_weights) [A95] [A121]. [] without a hole."""
+    hole = hole_shape(p, quad_segs=16)
+    if hole is None:
+        return []
+    ring = hole.buffer(offset, quad_segs=16).exterior if offset > 0 else hole.exterior
+    return [tuple(ring.interpolate(m / k, normalized=True).coords[0]) for m in range(k)]
+
+
 OUTLINE_GRID_MM = 1e-6      # Edge.Cuts points snapped to KiCad's internal unit (1 nm) before they are joined
 
 

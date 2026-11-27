@@ -9,7 +9,7 @@ from shapely.geometry import Point as SPoint, Polygon as SPolygon, box
 from shapely.ops import unary_union
 
 from ..core.board import Board
-from .shapes import clean_polygon, pad_shape, to_shapely, track_shape
+from .shapes import clean_polygon, cut_hole, pad_shape, to_shapely, track_shape
 
 
 class CopperMap:
@@ -23,6 +23,7 @@ class CopperMap:
         self.board = board
         # every piece of copper, by (layer, net); unioned lazily in get()
         self._parts: dict[tuple[str, str], list] = defaultdict(list)
+        self._holes: dict[str, list] = defaultdict(list)     # per layer: the pads' holes cut out (shapes.cut_hole)
         for t in board.tracks:
             self._parts[(t.layer, t.net)].append(track_shape(t))
         for v in board.vias:
@@ -33,6 +34,14 @@ class CopperMap:
         for fp in board.footprints:
             for p in fp.pads:
                 shape = pad_shape(p)
+                hole = cut_hole(p)
+                if hole is not None:
+                    # its hole is no copper (a slot as a slot): the pin's current reaches the layers through the
+                    # barrel round it (simulate.add_pin) [A121]. Cut from every net's copper on its layers in get():
+                    # a zone's fill runs solid over a pad of its own net, hole and all
+                    shape = shape.difference(hole)
+                    for layer in p.layers:
+                        self._holes[layer].append(hole)
                 for layer in p.layers:
                     self._parts[(layer, p.net)].append(shape)
         for z in board.zones:
@@ -96,7 +105,11 @@ class CopperMap:
         key = (layer, net)
         if key not in self._cache:
             parts = self._parts.get(key, [])
-            self._cache[key] = unary_union(parts) if parts else SPolygon()
+            shape = unary_union(parts) if parts else SPolygon()
+            holes = self._holes.get(layer)
+            if holes and not shape.is_empty:
+                shape = shape.difference(unary_union(holes))      # [A121]
+            self._cache[key] = shape
         return self._cache[key]
 
     def union(self, layer: str, nets: Iterable[str]):
