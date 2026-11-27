@@ -165,6 +165,17 @@ def dc_resistance(path: dict) -> str:
     return text
 
 
+COMBINED_NO_R = "no single resistance or drop (several paths at once)"
+
+
+def dc_r_drop(path: dict) -> str:
+    """'R mΩ (...), drop mV' of a DC path; the combined view (power.combine_dc: every stage's and DC load's paths
+    together) has no one resistance or drop, so it says so instead of the 0.00 mΩ / 0.0 mV it holds."""
+    if path.get("combined"):
+        return COMBINED_NO_R
+    return f"{dc_resistance(path)}, {path['drop_mv']:.1f} mV"
+
+
 def bridge_text(b) -> list[str]:
     """Report lines of one motor bridge (its legs are reported as power stages)."""
     if b.error:
@@ -260,7 +271,7 @@ def converter_text(c) -> list[str]:
                                for x in caps))
     for path in c.dc:
         via = path["vias"][0] if path["vias"] else None
-        out.append(f"    DC {path['name']}: {path['current_a']:.3g} A, {dc_resistance(path)}, {path['drop_mv']:.1f} mV, "
+        out.append(f"    DC {path['name']}: {path['current_a']:.3g} A, {dc_r_drop(path)}, "
                    f"{path['loss_w'] * 1e3:.0f} mW; {path['sustained_a_mm2']:.0f} A/mm² sustained "
                    f"(peak {path['peak_a_mm2']:.0f}) on {path['sustained_layer']}"
                    + (f"; {via['name']} {via['current_a']:.2f} A ({via['a_mm2']:.0f} A/mm²"

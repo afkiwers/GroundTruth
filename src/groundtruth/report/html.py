@@ -986,8 +986,10 @@ def _stage(board, c, issues, warn, figs, view3d, rules=None) -> str:
             via_txt = (f"{e(via['name'])}: {via['current_a']:.2f} A"
                        + (f", {via['load_pct']:.0f} % of IPC-2221" if via.get('load_pct') is not None else "")
                        ) if via else "–"
-            rows.append(f"<tr><td>{e(p['name'])}</td>{_num(p['current_a'], '{:.3g} A')}<td>{e(dc_resistance(p))}</td>"
-                        f"{_num(p['drop_mv'], '{:.1f} mV')}{_num(p['loss_w'] * 1e3, '{:.0f} mW')}"
+            rows.append(f"<tr><td>{e(p['name'])}</td>{_num(p['current_a'], '{:.3g} A')}"
+                        + ("<td>–</td><td>–</td>" if p.get("combined")      # several paths: no one R or drop
+                           else f"<td>{e(dc_resistance(p))}</td>{_num(p['drop_mv'], '{:.1f} mV')}")
+                        + f"{_num(p['loss_w'] * 1e3, '{:.0f} mW')}"
                         f"{_num(p['sustained_a_mm2'], '{:.0f} A/mm²')}<td>{e(p['sustained_layer'])}</td>"
                         f"<td>{via_txt}</td></tr>")
         body.append("<h4>DC power paths</h4>" + _table(

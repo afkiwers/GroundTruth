@@ -411,9 +411,13 @@ def _dc(c, rules) -> list[Kpi]:
     its busiest via."""
     p = next(x for x in c.dc if x["name"] == c.view_of)
     w, e = getattr(rules, "current_density_warning", 50.0), getattr(rules, "current_density_error", 100.0)
-    out = [("DC " + p["name"], f"{p['current_a']:.3g} A", "", "", "the DC path and its current"),
-           ("resistance", f"{p['r_mohm']:.2f} mΩ", f"{p['drop_mv']:.1f} mV, {p['loss_w'] * 1e3:.0f} mW", "",
-            "path resistance (copper, vias and the series parts on it), drop and loss"),
+    if p.get("combined"):       # several paths at once (power.combine_dc): no one resistance or drop, its loss
+        middle = ("copper loss", f"{p['loss_w'] * 1e3:.0f} mW" if p["loss_w"] < 1 else f"{p['loss_w']:.2f} W",
+                  "all paths together", "", "the copper's and the vias' I²R loss of every path's current at once")
+    else:
+        middle = ("resistance", f"{p['r_mohm']:.2f} mΩ", f"{p['drop_mv']:.1f} mV, {p['loss_w'] * 1e3:.0f} mW", "",
+                  "path resistance (copper, vias and the series parts on it), drop and loss")
+    out = [("DC " + p["name"], f"{p['current_a']:.3g} A", "", "", "the DC path and its current"), middle,
            ("current density", f"{p['sustained_a_mm2']:.0f} A/mm²",
             f"sustained, on {p['sustained_layer']} (peak {p['peak_a_mm2']:.0f})",
             _level(p["sustained_a_mm2"], w, e),
