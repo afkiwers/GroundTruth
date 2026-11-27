@@ -2311,8 +2311,8 @@ class MainFrame(ConfigActions, wx.Frame):
         p = defaults(theme.prefs())
         if p["thermal_quality"] != FROM_FILE:
             cfg = replace(cfg, thermal=replace(cfg.thermal, quality=p["thermal_quality"]))
-        # the electro-thermal coupling and the capacity limit as Preferences set them for this computer, else as the
-        # settings file has them
+        # the electro-thermal coupling, the capacity limit and where the board cools (ambient, convection, ...) as
+        # Preferences set them for this computer, else as the settings file has them
         et = thermal_overrides(p)
         if et:
             cfg = replace(cfg, thermal=replace(cfg.thermal, **et))

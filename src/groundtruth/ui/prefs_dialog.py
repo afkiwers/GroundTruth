@@ -32,6 +32,16 @@ ET_TOLERANCE = (FROM_FILE, "0.5 %", "1 %", "2 %", "5 %")
 # Current capacity's temperature limit (thermal.capacity_c, by default thermal.max_c) for this computer (the user:
 # "expose the thermal capacity limit as setting under preferences")
 CAPACITY_LIMIT = (FROM_FILE, "85 °C", "100 °C", "105 °C", "110 °C", "125 °C", "150 °C")
+# where the board cools (thermal.ambient_c, orientation, convection, airspeed, h_top, h_bottom, radiation) for this
+# computer, each from the settings file unless set here (the user: "expose the thermal settings in preferences")
+AMBIENT = (FROM_FILE, "20 °C", "25 °C", "30 °C", "35 °C", "40 °C", "45 °C", "50 °C", "55 °C", "60 °C", "70 °C",
+           "85 °C")
+ORIENTATION = (FROM_FILE, "horizontal", "vertical")
+CONVECTION = (FROM_FILE, "natural", "forced", "fixed")
+AIRSPEED = (FROM_FILE, "0.5 m/s", "1 m/s", "1.5 m/s", "2 m/s", "3 m/s", "4 m/s", "5 m/s", "7 m/s", "10 m/s")
+H_FIXED = (FROM_FILE, "2 W/m²K", "5 W/m²K", "8 W/m²K", "10 W/m²K", "15 W/m²K", "20 W/m²K", "30 W/m²K", "50 W/m²K",
+           "75 W/m²K", "100 W/m²K")
+RADIATION = (FROM_FILE, "on", "off")
 # Run checks' checks the user can switch off (the user: "expose the settings ... under Preferences. Make sure the user
 # can enable/disable each of the settings as needed; default enabled"): (ui.json key, label, the check ids it covers
 # (core/issues.CHECKS), tooltip). Off: their issues are left out of Run checks and Simulate (Config.checks_off).
@@ -197,8 +207,9 @@ def with_checks(cfg, prefs: dict):
 
 def thermal_overrides(p: dict) -> dict:
     """The thermal settings Preferences set for this computer (`p`: defaults()), as Config.thermal fields: the
-    electro-thermal coupling, its rounds and tolerance, Current capacity's limit; those "From the settings file"
-    are left out."""
+    electro-thermal coupling, its rounds and tolerance, Current capacity's limit, and where the board cools (ambient,
+    orientation, convection, air speed, fixed coefficients, radiation); those "From the settings file" are left
+    out."""
     out = {}
     if p["electrothermal"] != FROM_FILE:
         out["electrothermal"] = p["electrothermal"] == "on"
@@ -208,6 +219,21 @@ def thermal_overrides(p: dict) -> dict:
         out["electrothermal_tolerance"] = float(p["et_tolerance"].rstrip(" %")) / 100.0
     if p["capacity_limit"] != FROM_FILE:
         out["capacity_c"] = float(p["capacity_limit"].split()[0])        # "125 °C"
+    # where the board cools: each value's number is the first word of its choice ("2 m/s", "10 W/m²K", "40 °C")
+    if p["ambient"] != FROM_FILE:
+        out["ambient_c"] = float(p["ambient"].split()[0])
+    if p["orientation"] != FROM_FILE:
+        out["orientation"] = p["orientation"]
+    if p["convection"] != FROM_FILE:
+        out["convection"] = p["convection"]
+    if p["airspeed"] != FROM_FILE:
+        out["airspeed"] = float(p["airspeed"].split()[0])
+    if p["h_top"] != FROM_FILE:
+        out["h_top"] = float(p["h_top"].split()[0])
+    if p["h_bottom"] != FROM_FILE:
+        out["h_bottom"] = float(p["h_bottom"].split()[0])
+    if p["radiation"] != FROM_FILE:
+        out["radiation"] = p["radiation"] == "on"
     return out
 
 
@@ -229,6 +255,10 @@ def defaults(prefs: dict) -> dict:
             "et_tolerance": prefs.get("et_tolerance") if prefs.get("et_tolerance") in ET_TOLERANCE else FROM_FILE,
             "capacity_limit": prefs.get("capacity_limit") if prefs.get("capacity_limit") in CAPACITY_LIMIT
             else FROM_FILE,
+            **{k: prefs.get(k) if prefs.get(k) in choices else FROM_FILE
+               for k, choices in (("ambient", AMBIENT), ("orientation", ORIENTATION), ("convection", CONVECTION),
+                                  ("airspeed", AIRSPEED), ("h_top", H_FIXED), ("h_bottom", H_FIXED),
+                                  ("radiation", RADIATION))},
             "via_markers": bool(prefs.get("via_markers", True)),
             "max_vias": vias if isinstance(vias, int) and vias > 0 else None,
             "outlines": bool(prefs.get("outlines", False)),
@@ -464,6 +494,53 @@ class PreferencesDialog(wx.Dialog):
         row(therm, "Capacity limit", self.capacity_limit,
             "Current capacity: the load current at which the hottest copper or part junction reaches this "
             "temperature. From the settings file: its thermal.capacity_c, else its thermal.max_c (105 °C).")
+        # where the board cools (Thermal and Current capacity; the help's "What cooling is assumed")
+        self.ambient = wx.Choice(self, choices=list(AMBIENT))
+        self.ambient.SetStringSelection(p["ambient"])
+        row(therm, "Ambient", self.ambient,
+            "the air around the board (inside a warm housing: its inside temperature). From the settings file: its "
+            "thermal.ambient_c (25 °C).")
+        self.orientation = wx.Choice(self, choices=list(ORIENTATION))
+        self.orientation.SetStringSelection(p["orientation"])
+        row(therm, "Orientation", self.orientation,
+            "how the board stands for natural convection: lying flat (horizontal) or on its edge (vertical). From "
+            "the settings file: its thermal.orientation (horizontal).")
+        self.convection = wx.Choice(self, choices=list(CONVECTION))
+        self.convection.SetStringSelection(p["convection"])
+        row(therm, "Convection", self.convection,
+            "natural: still air, no fan (the flat-plate correlations); forced: air blowing along the board at the "
+            "air speed below, blended with natural convection; fixed: your own coefficients below (from a "
+            "measurement). From the settings file: its thermal.convection (natural).")
+        self.airspeed = wx.Choice(self, choices=list(AIRSPEED))
+        self.airspeed.SetStringSelection(p["airspeed"])
+        row(therm, "Air speed", self.airspeed,
+            "forced convection: the air's speed along the board. From the settings file: its thermal.airspeed "
+            "(1 m/s).")
+        self.h_top = wx.Choice(self, choices=list(H_FIXED))
+        self.h_top.SetStringSelection(p["h_top"])
+        row(therm, "h top", self.h_top,
+            "fixed convection: the top face's heat-transfer coefficient. From the settings file: its "
+            "thermal.h_top (10 W/m²K).")
+        self.h_bottom = wx.Choice(self, choices=list(H_FIXED))
+        self.h_bottom.SetStringSelection(p["h_bottom"])
+        row(therm, "h bottom", self.h_bottom,
+            "fixed convection: the bottom face's heat-transfer coefficient. From the settings file: its "
+            "thermal.h_bottom (5 W/m²K).")
+        self.radiation = wx.Choice(self, choices=list(RADIATION))
+        self.radiation.SetStringSelection(p["radiation"])
+        row(therm, "Radiation", self.radiation,
+            "heat radiated from the faces (emissivity 0.9 on solder mask, 0.1 on bare copper). From the settings "
+            "file: its thermal.radiation (on).")
+
+        def cooling_fields(_evt=None):
+            """Air speed only for forced convection, the fixed coefficients only for fixed (each also while the
+            convection comes from the settings file, which may say either)."""
+            c = self.convection.GetStringSelection()
+            self.airspeed.Enable(c in (FROM_FILE, "forced"))
+            self.h_top.Enable(c in (FROM_FILE, "fixed"))
+            self.h_bottom.Enable(c in (FROM_FILE, "fixed"))
+        self.convection.Bind(wx.EVT_CHOICE, cooling_fields)
+        cooling_fields()
 
         maps = group("Heatmaps", "right")
         self.via_markers = wx.CheckBox(self, label="Mark the vias carrying the current (▲)")
@@ -693,6 +770,8 @@ class PreferencesDialog(wx.Dialog):
                 "et_rounds": self.et_rounds.GetStringSelection(),
                 "et_tolerance": self.et_tolerance.GetStringSelection(),
                 "capacity_limit": self.capacity_limit.GetStringSelection(),
+                **{k: getattr(self, k).GetStringSelection() for k in ("ambient", "orientation", "convection",
+                                                                       "airspeed", "h_top", "h_bottom", "radiation")},
                 "author": self.author.GetValue().strip(),
                 "company": self.company.GetValue().strip(),
                 "history": self.history.GetValue(),
