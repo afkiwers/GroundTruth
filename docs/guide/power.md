@@ -404,6 +404,15 @@ Motor bridges heat the board with their RMS currents and their parts' losses (se
   `warn_c` (85) and `max_c` (105), `capacity_c` (see "Current capacity" below), `theta_jb` (part → K/W) for
   junction estimates, and the electro-thermal coupling below (`electrothermal`, `electrothermal_rounds`,
   `electrothermal_tolerance`).
+- **Cooling assumed by default**: the board lies horizontal in still air at 25 °C (no airflow, no enclosure,
+  heatsink or chassis mounting) and loses its heat through its two faces by natural convection and radiation.
+  Natural convection uses the flat-plate correlations (top face Nu = 0.54·Ra^¼, 0.15·Ra^⅓ when turbulent; bottom
+  face 0.52·Ra^⅕) [Incropera 2011], typically 5-10 W/m²K, one coefficient per face from its mean temperature;
+  radiation uses emissivity 0.9 on solder mask and 0.1 on bare copper. For a fan-cooled unit set
+  `convection: forced` and `airspeed` (blended with natural convection [Churchill 1977]); for measured
+  coefficients `convection: fixed` with `h_top` / `h_bottom`. A connector pin without a contact resistance
+  (`contact:`, see [part fields](part-fields.md)) adds no heat of its own: on a high-current connector that is often
+  the largest heat on the board.
 - **Electro-thermal coupling** (`thermal.electrothermal: true`, or Preferences… → Electro-thermal; off by default):
   hot copper is more resistive (+0.393 %/K), so a hot via or track hands current to cooler ones beside it. Off,
   the DC paths keep their 20 °C current pattern and only the heat follows ρ(T). On, after the first thermal solve

@@ -1637,6 +1637,18 @@ junction-to-board resistances (<code>theta_jb</code>). In the settings file, und
 (draft, normal, fine) unless <a href="#prefs">Preferences</a> sets one for this computer. Both run in the
 background; <b>Cancel</b> stops them. The solve is steady state: a load that lasts a few seconds (a cranking pulse)
 heats less than shown.</p>
+<p><b>What cooling is assumed.</b> Unless the settings say otherwise: the board lies <b>horizontal in still air</b>
+at 25 °C, <b>no airflow</b>, no enclosure, no heatsink and no mounting to a chassis; it loses its heat only through
+its two faces by natural convection and radiation. Natural convection uses the flat-plate correlations (the top
+face Nu = 0.54·Ra<sup>¼</sup>, 0.15·Ra<sup>⅓</sup> when turbulent; the bottom face 0.52·Ra<sup>⅕</sup>, its plume
+blocked), typically 5-10 W/m²K; radiation uses an emissivity of 0.9 on solder mask and 0.1 on bare copper. A board
+in a fan-cooled housing runs cooler: set <code>convection: forced</code> with the air speed along it
+(<code>airspeed</code>, m/s; blended with natural convection), or <code>fixed</code> with your own
+<code>h_top</code> / <code>h_bottom</code> (from a measurement); a board standing on its edge:
+<code>orientation: vertical</code>; inside a warm box: a higher <code>ambient_c</code>. What is not given is not
+guessed: a connector pin without a contact resistance (<a href="#pins">Through-hole pins</a>, <code>contact:</code>)
+adds no heat of its own, which on a high-current connector is often the largest heat on the board (a note names
+such pins).</p>
 <p>Thermal adds a temperature view to the Results tab's <b>View</b> list (replacing an earlier one), its issues
 join the Issues tab, and the status line gives the hottest copper and its layer and the power in copper and parts.
 The map shows each of its cells at the hottest point the solve found in it, so a track narrower than a map cell
