@@ -146,6 +146,21 @@ def pad_shape(p: Pad):
     return SPolygon([(p.position[0] + x, p.position[1] + y) for x, y in pts])
 
 
+def hole_shape(p: Pad, quad_segs: int = 8):
+    """A pad's drilled hole (absolute coordinates): a circle of its drill, or its slot (an oval drill: the stadium
+    W x H turned with the pad, as pad_shape turns an oval pad); None without a drill."""
+    if p.slot:
+        w, h = p.slot
+        r = min(w, h) / 2
+        a = rotate((-max(0.0, w / 2 - r), -max(0.0, h / 2 - r)), p.angle)
+        b = rotate((max(0.0, w / 2 - r), max(0.0, h / 2 - r)), p.angle)
+        return LineString([(p.position[0] + a[0], p.position[1] + a[1]),
+                           (p.position[0] + b[0], p.position[1] + b[1])]).buffer(r, quad_segs=quad_segs)
+    if p.drill > 0:
+        return SPoint(p.position).buffer(p.drill / 2, quad_segs=quad_segs)
+    return None
+
+
 OUTLINE_GRID_MM = 1e-6      # Edge.Cuts points snapped to KiCad's internal unit (1 nm) before they are joined
 
 

@@ -367,10 +367,18 @@ class _Loader:
         if len(size) == 1:
             size = (size[0], size[0])
         drill_node = node.find("drill")
-        drill = 0.0
+        drill, slot = 0.0, None
         if drill_node is not None:
-            nums = [a for a in drill_node.atoms() if re.fullmatch(r"-?[\d.]+", a)]
-            drill = float(nums[0]) if nums else 0.0
+            # "(drill 1)" a round hole, "(drill oval 6 2)" a slot W x H in the pad's frame: kept as the slot, and as
+            # the round hole of the same area for the barrel (before 2026-11-27 its W was read as a round 6 mm hole,
+            # which cut a 6 mm pad's whole width away: its copper reached the hole only round the ends)
+            atoms = drill_node.atoms()
+            nums = [float(a) for a in atoms if re.fullmatch(r"-?[\d.]+", a)]
+            if "oval" in atoms and len(nums) >= 2 and nums[0] != nums[1]:
+                slot = (nums[0], nums[1])
+                drill = math.sqrt(nums[0] * nums[1])
+            else:
+                drill = nums[0] if nums else 0.0
         polygon = None
         if shape == "custom":
             polygon = self._custom_pad(node, pos, angle, size)
@@ -389,7 +397,7 @@ class _Loader:
         margin = own if own is not None else fp_margin if fp_margin is not None else self.mask_clearance
         return Pad(fp.reference, str(number), pos, angle, (size[0], size[1]), shape, layers, net, ptype, drill,
                    polygon, node.float("roundrect_rratio", 0.0), node.value("uuid", ""), pin_type, pin_function,
-                   mask, margin)
+                   mask, margin, slot)
 
     def _custom_pad(self, node: SList, pos: Point, angle: float, size) -> Optional[Polygon]:
         """A custom pad's outline: its anchor rectangle united with its polygon primitives (widened by their

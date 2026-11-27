@@ -270,3 +270,23 @@ def test_dc_rails_alone_together_give_each_via_a_share_of_their_currents(tmp_pat
     assert [t[0] for t in tiles][:2] == ["DC " + COMBINED_VIEW, "copper loss"]
     assert not any("mΩ" in str(t[1]) for t in tiles)
     assert dc_r_drop(path) == COMBINED_NO_R and "mΩ" in dc_r_drop(res.dc_loads[0].dc[0])
+
+
+def test_a_shunt_below_a_milliohm_keeps_its_own_resistance(tmp_path):
+    """A Hall sensor's 100 µΩ primary on the return of a 10 A rail: solved at its own 100 µΩ, so the path names it at
+    0.1 mΩ and Thermal heats it with I²R = 10 mW. Until 2026-11-27 every resistor was floored at the 1 mΩ that
+    stands in for a short, ten times the heat (the user's shunt read the board's hottest spot) [A120]."""
+    from groundtruth.analysis.thermal import part_losses
+    from groundtruth.components.models import SHORT_OHMS, ComponentModel
+    assert ComponentModel("resistor", {"R": 100e-6}).impedance(0.0) == pytest.approx(100e-6)
+    assert ComponentModel("short", {}).impedance(0.0) == pytest.approx(SHORT_OHMS)
+    board, cfg, _ = _sensor_return_board(tmp_path)
+    cfg.components["U1"].model = ComponentModel("resistor", {"R": 100e-6}, pins=["IP+", "IP-"])
+    res = simulate(board, cfg).dc_loads[0]
+    part = next(p for p in res.dc[0]["parts"] if p["name"] == "U1")
+    amps = res.dc[0]["current_a"]
+    assert part["r_mohm"] == pytest.approx(0.1, rel=0.01)
+    rows, _ = part_losses(board, cfg, [res])
+    heat = next(r for r in rows if r["ref"] == "U1")["power_w"]
+    joints = sum(j["r_mohm"] for j in res.dc[0]["joints"] if j["name"] == "U1") * 1e-3     # its solder
+    assert heat == pytest.approx(amps ** 2 * (100e-6 + joints), rel=0.01) and heat < amps ** 2 * 1e-3 / 2

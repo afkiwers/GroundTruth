@@ -50,6 +50,7 @@ BUF_OUT = re.compile(r"^(\d*)(Y|OUT)$", re.I)        # its output pin name (1Y, 
 GROUND_NAME = re.compile(r"^(A|D|P|S)?GNDA?\w*$|^VSS\w*$|^0$", re.I)       # a net named as ground (its last part)
 
 SHORT_OHMS = 1e-3       # numerical stand-in for a dead short
+R_MIN_OHMS = 1e-6       # the least a resistor's or winding's own R is taken as (a shunt of 50-100 µΩ is common) [A120]
 SERIES_PATH_MAX_OHMS = 1e3  # resistors above this are pull-ups/downs, not part of a signal path
 
 
@@ -137,7 +138,9 @@ class ComponentModel:
         if k == "short":
             return complex(SHORT_OHMS, 0)
         if k == "resistor":
-            return complex(max(self.get("R"), SHORT_OHMS), 0)
+            # its own value down to R_MIN_OHMS: until 2026-11-27 SHORT_OHMS (1 mΩ) was its floor too, so a 100 µΩ
+            # current shunt was solved at 1 mΩ and heated ten times as much [A120]
+            return complex(max(self.get("R"), R_MIN_OHMS), 0)
         if k == "cap":
             # a real capacitor is a series R-L-C [A24]: ESR + j(w ESL - 1/(w C)); below its self-resonance
             # 1/(2 pi sqrt(ESL C)) it is capacitive, above it inductive (at DC: open)
@@ -147,7 +150,7 @@ class ComponentModel:
             return complex(self.get("ESR"), w * self.get("ESL") - (1 / (w * c) if w > 0 else math.inf))
         if k in ("inductor", "ferrite"):
             # a series R-L (its winding's DCR and inductance; a ferrite modelled the same way [A24], see defaults.py)
-            return complex(max(self.get("R"), SHORT_OHMS), w * self.get("L"))
+            return complex(max(self.get("R"), R_MIN_OHMS), w * self.get("L"))
         return None
 
     def amp_corner(self) -> Optional[float]:
