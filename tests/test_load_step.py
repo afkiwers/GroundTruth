@@ -195,10 +195,16 @@ def test_the_settings_round_trip():
     ls = LoadStep(i_from=1.0, i_to=2.5, rise=1e-6, cable_r=0.02, cable_l=5e-7, c_load=1e-4, esr_load=0.01,
                   r_load=None, l_load=0.0, max_dev=0.03)
     from dataclasses import asdict
-    back = asdict(_load_step(dict(load_step_data(ls)), "c"))
-    assert back == pytest.approx(asdict(ls), rel=1e-9) and back["r_load"] is None
-    coil = LoadStep(r_load=2.0, l_load=1e-3)
-    assert asdict(_load_step(dict(load_step_data(coil)), "c")) == pytest.approx(asdict(coil), rel=1e-9)
+
+    def same(a: LoadStep) -> bool:
+        """Written and read back: the same fields, the None ones apart (pytest.approx refuses a None in a mapping
+        since pytest 9)."""
+        back, want = asdict(_load_step(dict(load_step_data(a)), "c")), asdict(a)
+        nones = {k for k, v in want.items() if v is None}
+        return all(back[k] is None for k in nones) and             {k: v for k, v in back.items() if k not in nones} == pytest.approx(
+                {k: v for k, v in want.items() if k not in nones}, rel=1e-9)
+    assert same(ls) and ls.r_load is None
+    assert same(LoadStep(r_load=2.0, l_load=1e-3))
     with pytest.raises(ConfigError):
         _load_step({"fromm": 1}, "c")
     with pytest.raises(ConfigError):

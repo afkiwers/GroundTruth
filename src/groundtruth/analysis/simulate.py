@@ -446,7 +446,10 @@ class BoardModel:
         seeds: dict[str, dict[str, list]] = {l: {} for l in layers}
         vias = [v for v in board.vias if v.net in plane_nets and rb.contains(Point(v.position))]
         pads = [p for p in board.pads() if p.net in plane_nets and rb.contains(Point(p.position))]
-        for item, ls in [(v, v.layers) for v in vias] + [(p, p.layers) for p in pads]:
+        from ..geometry.shapes import cut_hole
+        # a pad whose hole is cut out (a slot, a wide hole [A121]) has no copper at its centre: no seed there (it made
+        # a node of its own in the hole, joined to nothing, and a share of the pin's fed current was lost on it)
+        for item, ls in [(v, v.layers) for v in vias] + [(p, p.layers) for p in pads if cut_hole(p) is None]:
             for l in ls:
                 if l in seeds:
                     seeds[l].setdefault(item.net, []).append(item.position)
@@ -503,7 +506,7 @@ class BoardModel:
                             st.pin_feed[p.pin] = feed
                 # joined all around its barrel (add_pin): a big connector pin is not a point source
                 add_pin(st, p.net, p.position, p.layers, p.drill or 0.8, f"pad {p.pin}", snap,
-                        filled=filled, column=column)
+                        filled=filled, column=column, pad=p)
         # Tracks across another net's grid cells: the bridges that keep them joined (peec._rasterise_lines)
         for k, g in enumerate(grids):
             for i0, j0, i1, j1, length, width in g.bridges:
@@ -827,8 +830,13 @@ def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optiona
     `rect` (terminal_rect, the part's `metal` pin value [A78]): with a sheet, the current enters and leaves it only
     over the terminal nodes inside that rectangle (the whole terminal is still soldered to the copper and conducts);
     without a sheet the plate is perfect and the rectangle changes nothing.
+    A through-hole side (its pins in plated holes: tht_pins) is joined at the pins' barrels instead, on every layer
+    (tht_bonds); `sheet` and `rect` do not apply to a pin.
     (None, []) when no node of the pads' net is near."""
     from ..geometry.shapes import pad_shape
+    pins = tht_pins(pads)
+    if pins and not fed:
+        return tht_bonds(st, pads, pins, ref, snap, bond_um)
     nodes = pad_nodes(st, pads)
     if not nodes:
         p = pads[0]
@@ -872,6 +880,59 @@ def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optiona
     n = len(entering)
     branches += [Branch(lid, top[nd], (lambda f, r=n * re_: complex(r)), ref, "bond") for nd in entering]
     return lid, branches
+
+
+PIN_DRILL_SHARE = 0.5       # a through-hole pad holds the part's pin when its hole is at least this share of the widest
+
+
+def tht_pins(pads: list) -> list:
+    """The pads of one side of a part whose plated holes hold its pin: through-hole pads (spanning layers) with the
+    side's widest hole, or one at least PIN_DRILL_SHARE of it. A footprint's small plated holes beside them (a
+    current sensor's or a power connector's stitching vias) are vias, not pins. [] when the side is not through-hole
+    (an SMD part, or a side with any SMD pad: its metal sits on the pads)."""
+    tht = [p for p in pads if p.pad_type == "thru_hole" and len(p.layers) > 1 and p.drill > 0]
+    if not tht or len(tht) < len([p for p in pads if p.pad_type != "np_thru_hole"]):
+        return []
+    widest = max(p.drill for p in tht)
+    return [p for p in tht if p.drill >= PIN_DRILL_SHARE * widest]
+
+
+def tht_bonds(st: StackBuild, pads: list, pins: list, ref: str, snap: float, bond_um: Optional[float] = None
+              ) -> tuple[Optional[LidNode], list[Branch]]:
+    """One through-hole side of a lumped part: its lid (over the pins' area-weighted centre) joined to the copper
+    where the pins' barrels meet each layer (joint_weights round each hole, barrel_rows per layer), every joint a
+    `bond` branch with its share of the side's solder joint (part_lid's: SOLDER_RHO x thickness over the pads' area,
+    split over the joints by their weights, the layers and the pins). The pin's current then reaches every layer
+    through the barrel and spreads from there over the pad and the pours, as round a soldered pin. Until 2026-11-27
+    such a side was bonded across its pads' whole face on its first layer like an SMD part's: a perfect plate over
+    the pad (its copper dark, carrying nothing), every inner layer's current forced up through whichever via stood
+    next to that face (one via read 142 % of its rating while its neighbours carried little) [A121]."""
+    from ..geometry.shapes import pad_shape
+    areas = np.array([getattr(pad_shape(p), "area", 0.0) or 0.0 for p in pins])
+    w = areas if areas.sum() > 0 else np.ones(len(pins))
+    cx = float(np.dot(w, [p.position[0] for p in pins]) / w.sum())
+    cy = float(np.dot(w, [p.position[1] for p in pins]) / w.sum())
+    joints_of = []                       # per pin: [(node, its share within the pin)]
+    for p in pins:
+        jw = joint_weights(st, p.position, p.drill, p)
+        rows = barrel_rows(st, p.net, p.position, list(p.layers), [(i, j) for i, j, _ in jw], snap + hole_reach(p))
+        if rows:
+            joints_of.append([(n, wt / len(rows)) for row in rows for n, (_, _, wt) in zip(row, jw)])
+    if not joints_of:
+        return None, []
+    k = joints_of[0][0][0][0]
+    g = st.grids[k]
+    lid = LidNode(k, min(max(int(round((cx - g.x0) / g.d)), 0), g.nx - 1),
+                  min(max(int(round((cy - g.y0) / g.d)), 0), g.ny - 1), st.n_lids)
+    st.n_lids += 1
+    rc = BOND_RC if bond_um is None else SOLDER_RHO * max(bond_um, BOND_MIN_UM) * 1e-6
+    all_area = float(sum(getattr(pad_shape(p), "area", 0.0) or 0.0 for p in pads))
+    r = rc / (max(all_area, 1e-3) * 1e-6)                # the side's joint in all
+    share: dict[tuple, float] = {}                        # a node's share of it, the pins' joints together
+    for js in joints_of:
+        for n, wt in js:
+            share[n] = share.get(n, 0.0) + wt / len(joints_of)
+    return lid, [Branch(n, lid, (lambda f, r=r / s: complex(r)), ref, "bond") for n, s in share.items() if s > 0]
 
 
 def pads_outline(pads: list):
@@ -1147,7 +1208,7 @@ def _column_z(column: Optional[tuple], drill_mm: float, filled: bool, za: float,
     return segment_impedance(length, soldered, drill_mm, g_solder, g_open)
 
 
-def joint_weights(st: StackBuild, pos, drill_mm: float) -> list[tuple[int, int, float]]:
+def joint_weights(st: StackBuild, pos, drill_mm: float, pad=None) -> list[tuple[int, int, float]]:
     """The joints of a via or pin at `pos` as (i, j, weight): its barrel's current spread over the grid nodes round
     the hole, weights summing to 1, the same nodes on every layer (one origin and pitch, `_make_build`) [A95].
 
@@ -1156,10 +1217,29 @@ def joint_weights(st: StackBuild, pos, drill_mm: float) -> list[tuple[int, int, 
     size: the centre of the spread current is the hole's own and the ring's radius is the barrel's. (Joints rounded
     to whole cells, as before 2026-11-06, jumped when the ring gained a joint: a radial plane pair's inductance by
     15 % between drill/d 0.70 and 0.75 at 0.4 mm cells.) Weights below WEIGHT_MIN are dropped and the rest scaled
-    to sum to 1."""
+    to sum to 1.
+
+    `pad`: a pad whose hole is cut out of its copper (shapes.cut_hole: a slot, or HOLE_CUT_MM and wider): the points
+    go evenly round its hole's own outline, half a cell out from the wall (where the copper is), a slot's along its
+    straight sides too [A121]; the barrel then meets every layer where its wall really is."""
+    from ..geometry.shapes import cut_hole, hole_ring
     g = st.grids[0]
-    k = max(RING_POINTS, pin_joints(drill_mm, st.d))
     w: dict[tuple[int, int], float] = {}
+    hole = cut_hole(pad) if pad is not None else None
+    if hole is not None:
+        ring = hole.buffer(st.d / 2).exterior.length
+        k = max(RING_POINTS, min(PIN_JOINTS_MAX, int(round(ring / (1.5 * st.d)))))
+        for x, y in hole_ring(pad, st.d / 2, k):
+            fi, fj = (x - g.x0) / st.d, (y - g.y0) / st.d
+            i0, j0 = int(math.floor(fi)), int(math.floor(fj))
+            ti, tj = fi - i0, fj - j0
+            for di, dj, a in ((0, 0, (1 - ti) * (1 - tj)), (1, 0, ti * (1 - tj)), (0, 1, (1 - ti) * tj),
+                              (1, 1, ti * tj)):
+                w[(i0 + di, j0 + dj)] = w.get((i0 + di, j0 + dj), 0.0) + a / k
+        keep = {ij: a for ij, a in w.items() if a >= WEIGHT_MIN}
+        tot = sum(keep.values())
+        return [(i, j, a / tot) for (i, j), a in sorted(keep.items())]
+    k = max(RING_POINTS, pin_joints(drill_mm, st.d))
     ci, cj = int(round((pos[0] - g.x0) / st.d)), int(round((pos[1] - g.y0) / st.d))      # the nearest node
     rho = drill_mm / (2 * st.d)                                 # the circle's radius in cells
     for m in range(k):
@@ -1174,22 +1254,11 @@ def joint_weights(st: StackBuild, pos, drill_mm: float) -> list[tuple[int, int, 
     return [(i, j, a / tot) for (i, j), a in sorted(keep.items())]
 
 
-def add_pin(st: StackBuild, net: str, pos, span: list[str], drill_mm: float, name: str, snap: float,
-            filled: bool = False, column: Optional[tuple] = None) -> int:
-    """A via's or through-hole pad's barrel between consecutive layers, joined to each layer all around it: one
-    branch per joint node (joint_weights) between the same grid points on every layer, each with the barrel's
-    impedance over the node's share of the current (together the barrel's own) [A89] [A95]. The user, of a big connector pin's map: "the current density around
-    that area looks odd": joined at the one node nearest its centre, the whole pin current entered a layer at one
-    cell on the ring's edge, a point source with a hot spot that is not there. A ring smaller than a cell is a smear
-    over the four nodes round it. A layer without the net's copper at a joint point (a pad smaller than the ring, a
-    thermal relief's gap) takes its own copper nearest that point within 0.75 cells, else the copper nearest the
-    hole's centre within `snap`; a layer with no copper of the net near the hole is not joined (a blind or buried
-    via's span ends there, an antipad). `column` (pin_column): the pin's own values (material, solder fill) instead
-    of a copper-filled hole."""
-    joints = joint_weights(st, pos, drill_mm)
-    pts = [(i, j) for i, j, _ in joints]
-    k = len(pts)
-    rows = []                                       # per layer the barrel joins: its joint nodes
+def barrel_rows(st: StackBuild, net: str, pos, span: list[str], pts: list, snap: float) -> list[list]:
+    """Per layer of `span` the barrel at `pos` joins: its joint nodes at the points `pts` (joint_weights' (i, j)),
+    each the layer's own node there, else its copper nearest that point within 0.75 cells, else the copper nearest
+    the hole's centre within `snap`. A layer without the net's copper near the hole is left out."""
+    rows = []
     for layer in span:
         li = st.index(layer)
         if li is None:
@@ -1207,6 +1276,34 @@ def add_pin(st: StackBuild, net: str, pos, span: list[str], drill_mm: float, nam
                 x, y = g.xy(i, j)
                 row.append(st.node(layer, float(x), float(y), net, 0.75 * st.d) or centre)
         rows.append(row)
+    return rows
+
+
+def hole_reach(pad) -> float:
+    """How far a pad's copper can be from its centre at most because of its cut hole (shapes.cut_hole): half the
+    hole's longer side, 0 when its hole is not cut (the nearest copper is then within the usual snap)."""
+    from ..geometry.shapes import cut_hole
+    if pad is None or cut_hole(pad) is None:
+        return 0.0
+    return max(pad.slot) / 2 if pad.slot else pad.drill / 2
+
+
+def add_pin(st: StackBuild, net: str, pos, span: list[str], drill_mm: float, name: str, snap: float,
+            filled: bool = False, column: Optional[tuple] = None, pad=None) -> int:
+    """A via's or through-hole pad's barrel between consecutive layers, joined to each layer all around it: one
+    branch per joint node (joint_weights) between the same grid points on every layer, each with the barrel's
+    impedance over the node's share of the current (together the barrel's own) [A89] [A95]. The user, of a big connector pin's map: "the current density around
+    that area looks odd": joined at the one node nearest its centre, the whole pin current entered a layer at one
+    cell on the ring's edge, a point source with a hot spot that is not there. A ring smaller than a cell is a smear
+    over the four nodes round it. A layer without the net's copper at a joint point (a pad smaller than the ring, a
+    thermal relief's gap) takes its own copper nearest that point within 0.75 cells, else the copper nearest the
+    hole's centre within `snap`; a layer with no copper of the net near the hole is not joined (a blind or buried
+    via's span ends there, an antipad). `column` (pin_column): the pin's own values (material, solder fill) instead
+    of a copper-filled hole. `pad`: the through-hole pad, whose hole may be cut out of the copper (a slot, a big
+    hole): the joints round its outline (joint_weights), its copper looked for beyond the hole [A121]."""
+    joints = joint_weights(st, pos, drill_mm, pad)
+    pts = [(i, j) for i, j, _ in joints]
+    rows = barrel_rows(st, net, pos, span, pts, snap + hole_reach(pad))     # per layer: its joint nodes
     added = 0
     for a, b in zip(rows, rows[1:]):
         z = _column_z(column, drill_mm, filled, st.z[a[0][0]], st.z[b[0][0]])

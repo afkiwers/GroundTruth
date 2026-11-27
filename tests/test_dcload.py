@@ -1,6 +1,7 @@
 """DC rails with loads (analysis/dcload.py), against analytic results: the drop along a pour is I·R with
 R = L / (σ·w·t), the solve is linear (several loads = the sum of each alone), copper past the last load carries
 nothing, the ground return adds its own drop, and the settings round-trip."""
+import numpy as np
 import pytest
 
 from boardgen import BoardGen
@@ -290,3 +291,59 @@ def test_a_shunt_below_a_milliohm_keeps_its_own_resistance(tmp_path):
     heat = next(r for r in rows if r["ref"] == "U1")["power_w"]
     joints = sum(j["r_mohm"] for j in res.dc[0]["joints"] if j["name"] == "U1") * 1e-3     # its solder
     assert heat == pytest.approx(amps ** 2 * (100e-6 + joints), rel=0.01) and heat < amps ** 2 * 1e-3 / 2
+
+
+
+def _slotted_shunt_board(tmp_path):
+    """A rail from J1.1 (A pours, F.Cu and B.Cu) to J2.1 (B pours) through R1, a through-hole shunt with slotted pins
+    (8.5 x 6 mm oval pads, "(drill oval 6 2)") as a current sensor's primary, 10 A."""
+    from groundtruth.components.models import ComponentModel
+    g = BoardGen(layers=2, size=(64.0, 20.0))
+    for net, x0, x1 in (("A", 4.0, 30.0), ("B", 34.0, 60.0)):
+        for layer in ("F.Cu", "B.Cu"):
+            g.zone(net, layer, [(x0, 2.0), (x1, 2.0), (x1, 18.0), (x0, 18.0)])
+    g.footprint("J1", "CONN", "Connector:Fake_1", (6.0, 10.0), [{"number": 1, "at": (0, 0), "net": "A", "size": (2.0, 4.0)}])
+    g.footprint("J2", "CONN", "Connector:Fake_1", (58.0, 10.0), [{"number": 1, "at": (0, 0), "net": "B",
+                                                                   "size": (2.0, 4.0)}])
+    slot = {"type": "thru_hole", "shape": "oval", "size": (8.5, 6.0), "drill": "oval 6 2"}
+    g.footprint("R1", "SHUNT", "Resistor_THT:Fake_slots", (32.0, 10.0), [
+        {"number": 1, "at": (-6.0, 0), "net": "A", **slot}, {"number": 2, "at": (6.0, 0), "net": "B", **slot}],
+        attrs="through_hole")
+    board, sc, _ = make(tmp_path, g, "slots", nets=())
+    sc.set_dc_loads([DcLoadSpec("rail", "J1.1", [DcLoad("J2.1", 10.0, "")], "")])
+    sc.save()
+    cfg = SettingsFile.load(sc.path).config
+    cfg.components["R1"].model = ComponentModel("resistor", {"R": 100e-6})
+    return board, cfg
+
+
+def test_a_through_hole_part_takes_its_current_at_its_barrels_on_every_layer(tmp_path):
+    """A through-hole part's terminal is its pin in the plated hole (simulate.tht_bonds [A121]): joined round the
+    slot's own outline on both layers, the slot no copper, the pad around it carrying the current to the wall. Until
+    2026-11-27 it was a plate bonded over the pad's face on F.Cu: the pad dark (the user: "the pad should not be dark
+    like that, there is current flowing through it for sure!"), the slot read as a round 6 mm hole of copper."""
+    from shapely.geometry import Point
+    from groundtruth.analysis.simulate import BoardModel, tht_pins
+    from groundtruth.geometry.shapes import hole_shape, pad_shape
+    board, cfg = _slotted_shunt_board(tmp_path)
+    pad = board.footprint("R1").pad("1")
+    assert tht_pins([pad]) == [pad]
+    st = BoardModel(board, cfg).build((2.0, 0.0, 62.0, 20.0), ["F.Cu", "B.Cu"], {"A", "B"}, 0.25, False)
+    hole = hole_shape(pad)
+    for k, g in enumerate(st.grids):            # no copper node inside the slot (its wall's half cell aside)
+        inside = [(i, j) for i, j in zip(*np.nonzero(g.node)) if hole.buffer(-0.2).contains(Point(*g.xy(i, j)))]
+        assert not inside, (st.names[k], inside[:3])
+    bonds = [b for b in st.branches if b.kind == "bond" and b.name == "R1"]
+    assert {b.a[0] for b in bonds} == {0, 1}    # on both layers
+    holes = [hole_shape(q) for q in board.footprint("R1").pads]
+    assert all(min(h.distance(Point(*st.xy(b.a))) for h in holes) < 0.5 for b in bonds)   # at the slots' walls
+    res = simulate(board, cfg).dc_loads[0]
+    assert not res.error, res.error
+    part = next(p for p in res.dc[0]["parts"] if p["name"] == "R1")
+    assert part["r_mohm"] == pytest.approx(0.1, rel=0.01)
+    # the pad's face between its edge and the slot carries current on F.Cu: not the dark plate it was
+    ring = pad_shape(pad).difference(hole.buffer(0.3))
+    g, m = res.layer_grids["F.Cu"], res.sheet_current["F.Cu"]
+    face = [float(m[i, j]) for i, j in zip(*np.nonzero(g.node)) if ring.contains(Point(*g.xy(i, j)))]
+    width_j = 10.0 / (2 * 16.0 * 0.035)         # the rail's mean density across both pours, A/mm²
+    assert face and max(face) > 0.5 * width_j and np.median(face) > 0.05 * width_j
