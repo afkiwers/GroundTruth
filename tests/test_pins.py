@@ -68,3 +68,19 @@ def test_the_joints_follow_the_ring():
     assert sim.pin_joints(0.3, 0.5) == 1
     assert sim.pin_joints(1.0, 0.25) == 8
     assert sim.pin_joints(5.0, 0.1) == sim.PIN_JOINTS_MAX
+
+
+def test_a_bottom_pin_on_an_inner_layer_model_joins_the_lower_layer(tmp_path):
+    """A bottom-side connector's pin in a 3 mm hole on a model of the two inner layers only (its side, B.Cu, not in
+    it): its lid joins the wall on In2.Cu, the inner layer nearest its side, and its column joins In1.Cu."""
+    g = BoardGen(layers=4, size=(40.0, 20.0))
+    for layer in ("F.Cu", "In1.Cu", "In2.Cu", "B.Cu"):
+        g.zone("P", layer, [(4.0, 4.0), (36.0, 4.0), (36.0, 16.0), (4.0, 16.0)])
+    g.footprint("J1", "CONN", "Connector:Fake_tht", (10.0, 10.0), [
+        {"number": 1, "at": (0, 0), "net": "P", "type": "thru_hole", "shape": "circle", "size": (5.0, 5.0),
+         "drill": 3.0}], attrs="through_hole", layer="B.Cu")
+    board, sc, _ = make(tmp_path, g, "bottom", nets=())
+    st = sim.BoardModel(board, sc.config).build((2.0, 2.0, 38.0, 18.0), ["In1.Cu", "In2.Cu"], {"P"}, 0.25, False)
+    lid = st.pin_lids["J1.1"]
+    assert {st.names[b.a[0]] for b in st.branches if b.kind == "bond" and b.b == lid} == {"In2.Cu"}
+    assert "J1.1" in st.pin_columns

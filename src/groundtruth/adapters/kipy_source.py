@@ -316,6 +316,19 @@ class _KipyReader:
                           p.net.name, "thru_hole" if p.pad_type == PadType.PT_PTH else "smd",
                           math.sqrt(dx * dy) if slot else dx, uuid=p.id.value,
                           pin_type=_PIN_TYPES.get(sym.type, ""), pin_function=pin_name(sym.name), slot=slot)
+                # the pad's copper offset off its hole (KiCad's pad offset, in its frame): its exact outline comes
+                # from KiCad below; until then (or if that request fails) the rectangle stands where the copper is
+                off = getattr(cl[0], "offset", None) if cl else None
+                try:
+                    dx, dy = _pt(off) if off is not None else (0.0, 0.0)
+                except (TypeError, AttributeError):
+                    dx = dy = 0.0
+                if dx or dy:
+                    from ..geometry.shapes import pad_shape, rotate
+                    d = rotate((dx, dy), pad.angle)
+                    moved = pad_shape(Pad(ref, p.number, (pad.position[0] + d[0], pad.position[1] + d[1]), pad.angle,
+                                          size, "rect", layers, p.net.name))
+                    pad.polygon = ([tuple(c) for c in list(moved.exterior.coords)[:-1]], [])
                 fp.pads.append(pad)
                 all_pads.append((pad, p))
                 nets.add(p.net.name)

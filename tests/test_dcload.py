@@ -401,7 +401,8 @@ def test_only_parts_carrying_the_rail_are_named_and_lit(tmp_path):
     """The sensor board with a decoupling capacitor C1 from the rail to GND and a controller U2 whose small sense pins
     sit on both of the return's nets: the highlight lists only what carries the rail's DC (U1's primary with a
     resistor model), not the capacitor (it joins the supply side to the return, and passes no DC); open_links names
-    U1 while its model is open, never U2 (0.3 mm² sense pins: no conductor of the rail), and a capacitor model on U1
+    U1 while its model is open, never U2 (a six-pin controller's 0.3 mm² sense pins: no conductor of the rail), and a
+    capacitor model on U1
     counts as passing nothing."""
     from groundtruth.analysis.dcload import open_links
     from groundtruth.analysis.highlight import dcloads_highlight
@@ -418,7 +419,10 @@ def test_only_parts_carrying_the_rail_are_named_and_lit(tmp_path):
     g.footprint("U2", "HOTSWAP", "Package_SO:Fake_MSOP", (20.0, 19.0), [
         {"number": 1, "at": (-1.0, 0), "net": "RET", "size": (0.3, 1.0), "pinfunction": "SENSE+"},
         {"number": 2, "at": (0.0, 0), "net": "GND", "size": (0.3, 1.0), "pinfunction": "SENSE-"},
-        {"number": 3, "at": (1.0, 0), "net": "+5V", "size": (0.3, 1.0), "pinfunction": "VCC"}])
+        {"number": 3, "at": (1.0, 0), "net": "+5V", "size": (0.3, 1.0), "pinfunction": "VCC"},
+        {"number": 4, "at": (2.0, 0), "net": "HS_GATE", "size": (0.3, 1.0), "pinfunction": "GATE"},
+        {"number": 5, "at": (3.0, 0), "net": "HS_TIMER", "size": (0.3, 1.0), "pinfunction": "TIMER"},
+        {"number": 6, "at": (4.0, 0), "net": "HS_PG", "size": (0.3, 1.0), "pinfunction": "PG"}])
     g.two_pin("C1", "10u", (12.0, 6.0), "PWR", "GND", kind="C")
     g.track((5.0, 10.0), (35.0, 10.0), "PWR", width=2.0)
     g.track((35.0, 13.0), (22.0, 13.0), "RET", width=2.0)
@@ -437,3 +441,28 @@ def test_only_parts_carrying_the_rail_are_named_and_lit(tmp_path):
     h = dcloads_highlight(["rail"], board, cfg)
     assert "through U1" in h.text and "C1" not in h.text and "U2" not in h.text
     assert board.footprint("C1").uuid not in h.focus
+
+
+def test_a_small_pass_fet_in_the_return_is_named(tmp_path):
+    """A SOT-23 FET without a model between the return's two nets (drain RET, source GND, gate on its own net):
+    open_links names it whatever its 0.4 mm² pads (a part of three nets is always named), so the rail's error says
+    what to set."""
+    from groundtruth.analysis.dcload import open_links
+    g = BoardGen(layers=2, size=(40.0, 20.0))
+    for ref, x in (("J1", 5.0), ("J2", 35.0)):
+        g.footprint(ref, "CONN", "Connector:Fake_2", (x, 10.0), [
+            {"number": 1, "at": (0, 3.0), "net": "GND" if ref == "J1" else "RET", "size": (2.0, 2.0)},
+            {"number": 2, "at": (0, 0), "net": "PWR", "size": (2.0, 2.0)}])
+    g.footprint("Q1", "FET", "Package_TO_SOT_SMD:Fake_SOT-23", (20.0, 13.0), [
+        {"number": 1, "at": (-0.95, 1.0), "net": "GATE", "size": (0.6, 0.7), "pinfunction": "G"},
+        {"number": 2, "at": (0.95, 1.0), "net": "GND", "size": (0.6, 0.7), "pinfunction": "S"},
+        {"number": 3, "at": (0.0, -1.0), "net": "RET", "size": (0.6, 0.7), "pinfunction": "D"}])
+    g.track((5.0, 10.0), (35.0, 10.0), "PWR", width=2.0)
+    g.track((35.0, 13.0), (20.0, 12.0), "RET", width=1.0)
+    g.track((20.95, 14.0), (5.0, 13.0), "GND", width=1.0)
+    board, sc, _ = make(tmp_path, g, "fet", nets=())
+    sc.set_dc_loads([DcLoadSpec("rail", "J1.2", [DcLoad("J2.2", 2.0, "J2.1")], "J1.1")])
+    sc.save()
+    cfg = SettingsFile.load(sc.path).config
+    cfg.components.pop("Q1", None)
+    assert "Q1 joins GND and RET" in open_links(board, cfg, cfg.dc_loads[0])

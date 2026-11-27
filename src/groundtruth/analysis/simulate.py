@@ -285,6 +285,9 @@ class StackBuild:
         # a through-hole pin whose solder does not reach its part's side: the layer its current enters the board on
         # (pins.feed_layer; power._pad_node takes it instead of the part's side)
         self.pin_feed: dict[str, str] = {}
+        # the through-hole pins whose barrel the model has (add_pin joined it to two layers or more): a lid on one of
+        # them may join one layer, the column the others (tht_bonds); a pin outside the model's region has none
+        self.pin_columns: set[str] = set()
         # a fitted pin in a hole cut out of the copper, of a part without a model (a connector's): the pin's metal as
         # a node of its own, joined to the hole's wall on every layer (pin_lids [A122]); its fed current enters there
         self.pin_lids: dict[str, LidNode] = {}
@@ -508,8 +511,9 @@ class BoardModel:
                         if feed:
                             st.pin_feed[p.pin] = feed
                 # joined all around its barrel (add_pin): a big connector pin is not a point source
-                add_pin(st, p.net, p.position, p.layers, p.drill or 0.8, f"pad {p.pin}", snap,
-                        filled=filled, column=column, pad=p)
+                if add_pin(st, p.net, p.position, p.layers, p.drill or 0.8, f"pad {p.pin}", snap,
+                           filled=filled, column=column, pad=p):
+                    st.pin_columns.add(p.pin)
         # Tracks across another net's grid cells: the bridges that keep them joined (peec._rasterise_lines)
         for k, g in enumerate(grids):
             for i0, j0, i1, j1, length, width in g.bridges:
@@ -946,7 +950,8 @@ def tht_bonds(st: StackBuild, pads: list, pins: list, ref: str, snap: float, bon
     the pad (its copper dark, carrying nothing), every inner layer's current forced up through whichever via stood
     next to that face (one via read 142 % of its rating while its neighbours carried little) [A121].
     The joints are on one layer: where the pin's current enters the board, the part's `side`, or where its solder
-    ends short of that side (st.pin_feed, pins.feed_layer), else the nearest of the pin's layers in the model. The
+    ends short of that side (st.pin_feed, pins.feed_layer), else the nearest of the pin's layers in the model by
+    height; a pin without a column in the model (st.pin_columns: outside its region) on every layer it has. The
     pin's column (add_pin: a copper-filled hole, or the pin's own values) joins the other layers with its resistance
     and inductance: bonded on every layer, the lid was an inductance-free path between the layers beside it (a
     connector's ground pin a perfect stitch in the AC models) and bypassed a pin's own values."""
@@ -958,13 +963,23 @@ def tht_bonds(st: StackBuild, pads: list, pins: list, ref: str, snap: float, bon
     joints_of = []                       # per pin: [(node, its share within the pin)]
     for p in pins:
         jw = joint_weights(st, p.position, p.drill, p)
-        feed = st.pin_feed.get(p.pin, side)
-        order = [feed] + [l for l in p.layers if l != feed] if feed in p.layers else list(p.layers)
-        rows = []
-        for layer in order:             # the feed layer, else the next of the pin's layers the model has
-            rows = barrel_rows(st, p.net, p.position, [layer], [(i, j) for i, j, _ in jw], snap + hole_reach(p))
-            if rows:
-                break
+        pts = [(i, j) for i, j, _ in jw]
+        if p.pin not in getattr(st, "pin_columns", {p.pin}):
+            # no column in this model (the pin outside its region): joined on every layer it has, as nothing else
+            # joins them here
+            rows = barrel_rows(st, p.net, p.position, list(p.layers), pts, snap + hole_reach(p))
+        else:
+            feed = st.pin_feed.get(p.pin, side)
+            # the feed layer, else the pin's layers the model has, nearest the feed layer's height first (a bottom
+            # part on a model of inner layers enters on the lower one); the part's side when the height is unknown
+            z = dict(zip(st.names, st.z))
+            z_feed = z.get(feed, max(st.z) if feed != "B.Cu" else min(st.z))
+            order = sorted([l for l in p.layers if l in z], key=lambda l: (l != feed, abs(z[l] - z_feed)))
+            rows = []
+            for layer in order:
+                rows = barrel_rows(st, p.net, p.position, [layer], pts, snap + hole_reach(p))
+                if rows:
+                    break
         if rows:
             joints_of.append([(n, wt / len(rows)) for row in rows for n, (_, _, wt) in zip(row, jw)])
     if not joints_of:

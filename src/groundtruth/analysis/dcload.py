@@ -156,9 +156,10 @@ def open_links(board, config, spec: DcLoadSpec) -> str:
     on the return side) but whose model passes no current, for the error when the rail's copper is not one piece:
     what to set. The user, 2026-11-27, of a rail whose return runs through a Hall current sensor's primary (IP+ to
     IP−, its model 'open'): "the return current goes through that shunt (pin 5,4). How would we manage that?". ""
-    when none is found. A capacitor's model passes no DC either. A part with more nets than these two is named only
-    when it has at least LINK_PAD_MM2 of pads on each of them (a current sensor's primary, not a hot-swap or
-    ideal-diode controller's sense pins, which no resistor model should join)."""
+    when none is found. A capacitor's model passes no DC either. A part of up to three nets is always named (a
+    pass or ideal-diode FET in SOT-23, a three-terminal filter); one with more only when it has at least LINK_PAD_MM2
+    of pads on each of the rail's nets (a current sensor's primary, not a hot-swap or ideal-diode controller's sense
+    pins, which no resistor model should join)."""
     from ..components.models import model_pads, pad_area, passes_dc
 
     def nets_of(pins) -> set:
@@ -180,7 +181,7 @@ def open_links(board, config, spec: DcLoadSpec) -> str:
             on = sorted({p.net for p in fp.pads if p.net} & nets)
             if len(on) < 2:
                 continue
-            if len({p.net for p in fp.pads if p.net}) > 2 and \
+            if len({p.net for p in fp.pads if p.net}) > 3 and \
                     min(sum(pad_area(p) for p in fp.pads if p.net == n) for n in on) < LINK_PAD_MM2:
                 continue                    # an IC's sense or supply pins on the rail: no conductor of the rail
             m = config.model_for(fp.reference)
