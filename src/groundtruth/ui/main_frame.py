@@ -626,7 +626,8 @@ class MainFrame(ConfigActions, wx.Frame):
             ("bridges", "Bridges", lambda nb: BridgesPanel(
                 nb, self.on_config_change, self._panel_job,
                 on_show=self.on_stages_selected if session.live else None, in_steps=True)),
-            ("dc_loads", "DC loads", lambda nb: DcLoadsPanel(nb, self.on_config_change)),
+            ("dc_loads", "DC loads", lambda nb: DcLoadsPanel(
+                nb, self.on_config_change, on_show=self.on_dcloads_selected if session.live else None)),
             ("pdn", "Power integrity", lambda nb: PdnPanel(nb, self.on_config_change, in_steps=True)),
             ("si", "Signal integrity", lambda nb: SiPanel(nb, self.on_config_change, in_steps=True)),
             ("parts", "Parts", lambda nb: PartsPanel(nb, self.on_config_change)),
@@ -2226,6 +2227,11 @@ class MainFrame(ConfigActions, wx.Frame):
         capacitors, the switch node highlighted)."""
         self._show_rows("stages", names, zoom)
 
+    def on_dcloads_selected(self, names: list[str], zoom: bool):
+        """The rows selected in the DC loads tab changed: show those rails in KiCad (their pins, the copper their
+        current runs on)."""
+        self._show_rows("dcloads", names, zoom)
+
     def _show_rows(self, kind: str, names: list[str], zoom: bool):
         """Show the nets or power stages selected in a table in KiCad (and zoom to them), in the background thread
         that shows issues, the newest selection winning; no rows clears our highlight. Live mode only."""
@@ -2238,8 +2244,9 @@ class MainFrame(ConfigActions, wx.Frame):
 
         def work():
             """(highlight thread) Work out the rows' items and show them in KiCad."""
-            from ..analysis.highlight import nets_highlight, stages_highlight
+            from ..analysis.highlight import dcloads_highlight, nets_highlight, stages_highlight
             h = (nets_highlight(names, board, config) if kind == "nets"
+                 else dcloads_highlight(names, board, config) if kind == "dcloads"
                  else stages_highlight(names, board, config, routes))
             result = session.show_issue(h, zoom=zoom, nets=True)
             wx.CallAfter(self._nets_shown, names, h, result)

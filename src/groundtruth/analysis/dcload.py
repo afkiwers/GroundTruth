@@ -141,10 +141,48 @@ def prepare_dc_loads(model: BoardModel, specs: list) -> tuple[list, list, list]:
             if "balance" in str(e):
                 res.error += (" (the supply or the return is not one connected piece of copper from the source to "
                               "every load: a series part without a model, or a pin on another net?)")
+                res.error += open_links(model.board, model.config, spec)
             continue
         res.notes.append(f"DC load modelled on the whole board: {st.nodes} nodes at {st.d:.2f} mm")
         setups.append(DcLoadSetup(spec, res, ModelRun(st, exc, planned=[DC_F]), feeds))
     return setups, results, issues
+
+
+def open_links(board, config, spec: DcLoadSpec) -> str:
+    """The parts that join two of a rail's own nets (its source's and loads' nets on the supply side, their returns'
+    on the return side) but whose model passes no current, for the error when the rail's copper is not one piece:
+    what to set. The user, 2026-11-27, of a rail whose return runs through a Hall current sensor's primary (IP+ to
+    IP−, its model 'open'): "the return current goes through that shunt (pin 5,4). How would we manage that?". ""
+    when none is found."""
+    from ..components.models import model_pads
+
+    def nets_of(pins) -> set:
+        """The nets of these REF.PAD pins (every pad with that number: a connector's paralleled pads)."""
+        out = set()
+        for pin in pins:
+            ref, _, number = (pin or "").partition(".")
+            fp = board.footprint(ref) if ref else None
+            out |= {p.net for p in (fp.pads if fp is not None else []) if str(p.number) == number and p.net}
+        return out
+
+    sides = [nets_of([spec.source, *(x.pin for x in spec.loads)]),
+             nets_of([spec.source_return, *(x.ret for x in spec.loads)])]
+    found = []
+    for nets in (s for s in sides if len(s) > 1):
+        for fp in board.footprints:
+            if fp.dnp or fp.reference in {f for f, _ in found}:
+                continue
+            on = sorted({p.net for p in fp.pads if p.net} & nets)
+            if len(on) < 2:
+                continue
+            m = config.model_for(fp.reference)
+            joined = {p.net for p in model_pads(fp, m) if p.net} if m is not None and m.kind != "open" else set()
+            if len(joined & nets) < 2:
+                names = sorted({(p.pin_function or str(p.number)) for p in fp.pads if p.net in on})
+                found.append((fp.reference, f"{fp.reference} joins {' and '.join(on)} but its model passes no "
+                                            f"current: on the Parts tab give it a resistor model (its conductor's "
+                                            f"resistance from the datasheet, or a short) with pins {', '.join(names)}"))
+    return "".join(f". {text}" for _, text in found)
 
 
 def _injections(model: BoardModel, st, spec: DcLoadSpec) -> tuple[list, dict]:

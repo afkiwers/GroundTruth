@@ -199,8 +199,9 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
     """The DC loads tab: the rails (a list on the left, each with its on/off tick) and a form on the right. Every
     change is written to the settings at once."""
 
-    def __init__(self, parent, on_change):
-        """on_change(): the settings changed (the window saves them and marks results as stale)."""
+    def __init__(self, parent, on_change, on_show=None):
+        """on_change(): the settings changed (the window saves them and marks results as stale); on_show(names, zoom):
+        the selected rows changed, show those rails in KiCad (live mode only)."""
         super().__init__(parent)
         self.on_change = on_change
         self.board = None
@@ -213,7 +214,7 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
                                     ("Total", 70), ("Max drop", 80)]):
             self.list.InsertColumn(i, c, width=self.FromDIP(w))
         self.list.SetMinSize(wx.Size(320, 120))
-        self._init_rows(None, "DC loads")
+        self._init_rows(on_show, "DC loads")
         self._init_enable("dc_loads")
         self.list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_select)
 
@@ -265,6 +266,7 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
         left = wx.BoxSizer(wx.VERTICAL)
         left.Add(self.list_head(self.hint), 0, wx.EXPAND | wx.BOTTOM, 6)
         left.Add(self.list, 1, wx.EXPAND)
+        left.Add(self.zoom, 0, wx.TOP, 6)                  # shown only in live mode (on_show)
         s = wx.BoxSizer(wx.HORIZONTAL)
         s.Add(left, 3, wx.EXPAND | wx.ALL, 6)
         s.Add(right, 2, wx.EXPAND | wx.ALL, 6)
@@ -380,15 +382,12 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
         def label(c) -> str:
             """A part in the lists: its pins and value."""
             return f"{c['ref']} ({c['value']}): {c['pin']}" + (f", return {c['ret']}" if c["ret"] else ", no ground pin")
-        dlg = wx.SingleChoiceDialog(self, f"Which part feeds {rail}?", "Fill from net: the source",
-                                    [label(c) for c in cands])
-        dlg.SetSelection(max(0, guess_source(cands)))
-        try:
-            if dlg.ShowModal() != wx.ID_OK:
-                return
-            src = cands[dlg.GetSelection()]
-        finally:
-            dlg.Destroy()
+        labels = [label(c) for c in cands]
+        picked = self._choose(f"Which part feeds {rail}?", labels, labels[max(0, guess_source(cands))],
+                              "Fill from net: the source")
+        if picked is None:
+            return
+        src = cands[labels.index(picked)]
         rest = [c for c in cands if c is not src]
         dlg = wx.MultiChoiceDialog(self, f"Which parts draw current from {rail}?", "Fill from net: the loads",
                                    [label(c) for c in rest])
@@ -417,13 +416,13 @@ class DcLoadsPanel(SelectableRows, wx.Panel):
         self.loads.SetValue("\n".join(f"{c['pin']}{'/' + c['ret'] if with_ret else ''}={amps}" for c in loads))
         self.list.SetFocus()
 
-    def _choose(self, message: str, choices: list, default: str):
-        """One net from a list (default preselected), or None (Cancel)."""
-        dlg = wx.SingleChoiceDialog(self, message, "Fill from net", choices)
-        if default in choices:
-            dlg.SetSelection(choices.index(default))
+    def _choose(self, message: str, choices: list, default: str, title: str = "Fill from net"):
+        """One item from a list with a filter at the top (widgets.FilteredChoiceDialog; default preselected), or
+        None (Cancel)."""
+        from .widgets import FilteredChoiceDialog
+        dlg = FilteredChoiceDialog(self, message, title, choices, default)
         try:
-            return choices[dlg.GetSelection()] if dlg.ShowModal() == wx.ID_OK else None
+            return dlg.choice() if dlg.ShowModal() == wx.ID_OK else None
         finally:
             dlg.Destroy()
 

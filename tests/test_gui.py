@@ -2779,6 +2779,32 @@ def test_the_signal_paths_tab_shows_each_chain_and_the_selected_path(app, frame)
     assert f.nets.path_view.text.startswith("Path: ") and f.nets.nets[0].driver in f.nets.path_view.text
 
 
+def test_fill_from_net_lists_its_nets_under_a_filter(app, frame):
+    """DC loads, Fill from net: the net list has a filter at the top (widgets.FilteredChoiceDialog): typing narrows
+    the list (every word, without case), the default stays selected while it is shown, Down moves the selection,
+    and OK gives the selected item; with nothing shown OK is greyed."""
+    import wx
+    from groundtruth.ui.widgets import FilteredChoiceDialog
+    nets = ["+3V3", "+5V", "+BATT", "/ADC_I_BATT_HIGH_RES", "/BATT_ADC_Temp", "GND", "GND1"]
+    dlg = FilteredChoiceDialog(frame, "The rail's net:", "Fill from net", nets, "+5V")
+    try:
+        assert dlg.choice() == "+5V" and dlg.list.GetCount() == len(nets)
+        dlg.filter.SetValue("batt")
+        assert dlg.list.GetItems() == ["+BATT", "/ADC_I_BATT_HIGH_RES", "/BATT_ADC_Temp"]
+        assert dlg.choice() == "+BATT"                          # the default is filtered out: the first shown
+        dlg.filter.SetValue("batt adc")
+        assert dlg.list.GetItems() == ["/ADC_I_BATT_HIGH_RES", "/BATT_ADC_Temp"]
+        e = wx.KeyEvent(wx.wxEVT_KEY_DOWN)
+        e.SetKeyCode(wx.WXK_DOWN)
+        dlg._key(e)
+        assert dlg.choice() == "/BATT_ADC_Temp"
+        dlg.filter.SetValue("nothing like it")
+        assert dlg.list.GetCount() == 0 and dlg.choice() is None
+        assert not dlg.FindWindowById(wx.ID_OK).IsEnabled()
+    finally:
+        dlg.Destroy()
+
+
 def test_source_and_load_fields_show_and_read_si_values():
     """Signal paths form: Source R / L / C and Load R / C are shown with their SI prefix and unit (3.3Ω, 12.4kΩ,
     1.5nH, 8pF, 1µF) and read back the same; "8p", "1n", "8pF" are read as SI, a plain number in the field's stored
@@ -2985,6 +3011,22 @@ def test_fill_from_net_fills_the_dc_load_form(app, tmp_path, monkeypatch):
 
         def GetValue(self):
             return "0.25A"
+    class Filtered:
+        """Stands in for widgets.FilteredChoiceDialog (the nets and the source, with a filter): answers OK with the
+        preselected entry."""
+        def __init__(self, parent, message, title, choices, default=""):
+            self.pick = default if default in choices else (choices[0] if choices else None)
+
+        def choice(self):
+            return self.pick
+
+        def ShowModal(self):
+            return wx.ID_OK
+
+        def Destroy(self):
+            pass
+    from groundtruth.ui import widgets
+    monkeypatch.setattr(widgets, "FilteredChoiceDialog", Filtered)
     monkeypatch.setattr(wx, "SingleChoiceDialog", Single)
     monkeypatch.setattr(wx, "MultiChoiceDialog", Multi)
     monkeypatch.setattr(wx, "TextEntryDialog", Text)
