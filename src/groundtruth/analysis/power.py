@@ -1607,6 +1607,42 @@ def _pad_nodes(st: StackBuild, pad: Pad, side: str) -> list[tuple]:
     return nodes or [n0]
 
 
+def _barrel_feed(st: StackBuild, pads: list[Pad], side: str) -> list[tuple]:
+    """Where a fed through-hole pin's current enters the copper when its hole is cut out of it (a slot, a wide hole:
+    shapes.cut_hole [A121]): [(node, share)]: the pin's own lid (simulate.pin_lids), joined to the wall on every
+    layer, when the model has one; else at its barrel's joints (simulate.joint_weights, the same nodes the
+    barrel's own branches end on) on the layer its current enters (_pad_node's: the part's side, or where its solder
+    ends), the shares the joints' weights, over all such pads of the pin by their hole's perimeter; [] for any other
+    pin (fed over its pad's face as before). The conductor soldered into the hole hands its current to the wall;
+    the pin's column (simulate.add_pin) carries it to the other layers [A122]. Fed over the pad's face, the ring
+    round a wide hole took the current evenly and it ran round the ring to where the copper leads away, nothing
+    entering at the wall (the user: "There is basically no current being absorbed by the massive conductor that is
+    soldered into that hole")."""
+    from ..geometry.shapes import cut_hole
+    from .simulate import barrel_rows, hole_reach, joint_weights
+    lid = getattr(st, "pin_lids", {}).get(pads[0].pin) if pads else None
+    if lid is not None:             # the pin's own metal (simulate.pin_lids): the copper decides where it hands over
+        return [(lid, 1.0)]
+    holes = [(p, cut_hole(p)) for p in pads]
+    if not all(h is not None for _, h in holes):
+        return []
+    perimeters = [h.length for _, h in holes]
+    out: dict[tuple, float] = {}
+    for (p, h), per in zip(holes, perimeters):
+        n0 = _pad_node(st, p, side)
+        if n0 is None:
+            return []
+        layer = st.names[n0[0]]
+        jw = joint_weights(st, p.position, p.drill, p)
+        rows = barrel_rows(st, p.net, p.position, [layer], [(i, j) for i, j, _ in jw],
+                           max(1.5 * st.d, 0.4) + hole_reach(p))
+        if not rows:
+            return []
+        for n, (_, _, w) in zip(rows[0], jw):
+            out[n] = out.get(n, 0.0) + w * per / sum(perimeters)
+    return list(out.items())
+
+
 def _by_pin(pads: list[Pad]) -> dict[str, list[Pad]]:
     """The pads grouped by their pin ("Q44.2"), in their order: a footprint can draw one pin from several
     overlapping primitives (an EPC GaN FET's source pin: a bar and three tabs over it)."""
@@ -1675,6 +1711,12 @@ def _area_shares(st: StackBuild, pads: list[Pad], side: str, total: float) -> li
             spread = getattr(st, "side_spread", {}).get((ps[0].footprint, ps[0].net)) or [lid]
             share = total * areas[pin] / sum(areas.values())
             out += [(t, share / len(spread)) for t in spread]
+            continue
+        barrel = _barrel_feed(st, ps, side)
+        if barrel:
+            # a pin in a hole cut out of the copper: fed at the hole's wall, where its barrel joins the copper [A122]
+            share = total * areas[pin] / sum(areas.values())
+            out += [(n, share * w) for n, w in barrel]
             continue
         nodes: list[tuple] = []
         for p in ps:
