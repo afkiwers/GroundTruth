@@ -81,6 +81,41 @@ def test_the_adapter_reproduces_pcb_thermals_own_board_reading(tmp_path):
             assert get(b) == pytest.approx(get(a), rel=1e-6, abs=1e-9)
 
 
+
+def test_a_slotted_pad_keeps_its_copper_beside_the_slot(tmp_path):
+    """A through-hole pad with an oval drill (KiCad's "(drill oval 6 2)": a 6 x 2 mm slot in an 8.5 x 6 mm oval pad,
+    the footprint turned 90°, as a current sensor's primary): read as that slot (Pad.slot, the barrel the round hole
+    of the same area) and cut out as it, the copper beside it as PCB Thermal's own reader has it. Until 2026-11-27
+    the 6 was read as a round 6 mm hole: the pad's whole width cut away, its current crowded round the ends (the
+    user: "the holes are not round where the hot spot is")."""
+    import math
+    from groundtruth.adapters.file_source import load_board
+    from groundtruth.geometry.shapes import hole_shape, pad_shape
+    from groundtruth.thermal.adapter import to_thermal_board
+    from groundtruth.thermal.kicad.board import load_board as pcb_load
+    g = BoardGen(layers=2, size=(30.0, 30.0))
+    g.footprint("U1", "Sensor", "Sensor:Fake_slots", (15.0, 15.0), [
+        {"number": 4, "at": (0.0, -5.0), "net": "A", "type": "thru_hole", "shape": "oval", "size": (8.5, 6.0),
+         "drill": "oval 6 2"},
+        {"number": 5, "at": (0.0, 5.0), "net": "B", "type": "thru_hole", "shape": "circle", "size": (2.0, 2.0),
+         "drill": 1.0}], angle=90)
+    path = g.write(tmp_path / "slots.kicad_pcb")
+    board = load_board(path)
+    slot, round_ = board.footprint("U1").pad("4"), board.footprint("U1").pad("5")
+    assert slot.slot == (6.0, 2.0) and slot.drill == pytest.approx(math.sqrt(12.0)) and round_.slot is None
+    hole = hole_shape(slot)
+    stadium = 4.0 * 2.0 + math.pi * 1.0 ** 2
+    assert hole.area == pytest.approx(stadium, rel=0.01) and hole.within(pad_shape(slot))
+    # turned with the pad: its long side along the pad's long side, which the footprint's 90° turns upright
+    x0, y0, x1, y1 = hole.bounds
+    assert (x1 - x0, y1 - y0) == (pytest.approx(2.0, abs=0.01), pytest.approx(6.0, abs=0.01))
+    a, b = pcb_load(path), to_thermal_board(board)
+    for get in (lambda x: sorted(round(p.shape.area, 3) for p in x.pads),
+                lambda x: sorted(round(p.drill_shape.area, 2) for p in x.pads if p.drill_shape is not None)):
+        assert get(b) == pytest.approx(get(a), rel=0.01)
+    ours = next(p for p in b.pads if p.number == "4")
+    assert ours.shape.area == pytest.approx(pad_shape(slot).area - stadium, rel=0.01)
+
 def _rip2(cfg, d_on, v_in, f_sw):
     """The inductor ripple's mean-square share ΔI²/12, ΔI = V_in·d_on/(L·f_sw) [Erickson 2001] with L from L1's model
     (d_on: D(1−D) for a buck, D_sw for a boost); 0 without a model."""

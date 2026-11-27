@@ -187,6 +187,9 @@ class Pad:
     pin_function: str = ""   # schematic pin name, e.g. "PA5"
     mask: str = ""           # the sides with a solder-mask opening over it, "F" / "B" / "FB" ("" none, or not known)
     mask_margin: float = 0.0  # mm the opening is wider than the pad (its own, its footprint's, else the board's)
+    # an oval drill (a slot), (W, H) mm in the pad's own frame as KiCad's `(drill oval W H)`; `drill` is then the
+    # round hole of the same area (the barrel's, as PCB Thermal's parser takes it), geometry.shapes.hole_shape the cut
+    slot: Optional[tuple] = None
 
     @property
     def pin(self) -> str:
@@ -394,7 +397,8 @@ class Board:
         for fp in self.footprints:
             pads = sorted(repr((p.number, point(p.position), r(p.angle), point(p.size), p.shape, list(p.layers), p.net,
                                 p.pad_type, r(p.drill), poly(p.polygon), r(p.roundrect_ratio), p.pin_type,
-                                p.pin_function, p.mask, r(p.mask_margin))) for p in fp.pads)
+                                p.pin_function, p.mask, r(p.mask_margin))
+                               + ((point(p.slot),) if p.slot else ())) for p in fp.pads)    # a slot: its W x H
             items.append(repr(("f", fp.reference, fp.value, fp.lib_id, point(fp.position), r(fp.angle), fp.layer, fp.dnp,
                                fp.exclude_from_sim, sorted(fp.fields.items()), fp.sheet, pads)))
         items += [repr(("z", z.net, list(z.layers), z.is_rule_area, z.name,

@@ -14,7 +14,7 @@ from shapely.geometry import Point, Polygon as SPolygon
 from shapely.ops import unary_union
 
 from ..core.board import Board
-from ..geometry.shapes import arc_points, pad_shape
+from ..geometry.shapes import arc_points, hole_shape, pad_shape
 from .kicad import board as tb
 
 FR4 = "FR4"
@@ -59,7 +59,7 @@ def _pad(p, fp) -> tb.Pad:
     shape = pad_shape(p)
     drill_shape = None
     if p.drill > 0 and p.pad_type == "thru_hole":
-        drill_shape = Point(p.position).buffer(p.drill / 2, quad_segs=8)
+        drill_shape = hole_shape(p)             # a slot as a slot, not a round hole its length wide
         shape = shape.difference(drill_shape)
     return tb.Pad(fp.reference, p.number, p.net, p.pad_type, p.position[0], p.position[1], list(p.layers), shape,
                   p.drill, drill_shape, mask_top="F.Cu" in p.layers, mask_bottom="B.Cu" in p.layers)

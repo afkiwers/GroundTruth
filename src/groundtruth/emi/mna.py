@@ -204,11 +204,12 @@ class Circuit:
         """A two-pin part from its model (components/models.ComponentModel: kind and parameters, SI): a series
         R-L-C as the model's impedance is [A24], each non-zero piece an element with internal nodes between them;
         "open" adds nothing, "short" a SHORT_OHMS resistor."""
-        from ..components.models import SHORT_OHMS
+        from ..components.models import R_MIN_OHMS, SHORT_OHMS
         if kind == "open":
             return
         if kind in ("short", "resistor"):
-            self.r(a, b, max(values.get("R", 0.0) if kind == "resistor" else 0.0, SHORT_OHMS))
+            # a short as SHORT_OHMS, a resistor at its own value down to R_MIN_OHMS [A120]
+            self.r(a, b, max(values.get("R", 0.0), R_MIN_OHMS) if kind == "resistor" else SHORT_OHMS)
             return
         chain = []
         if kind == "cap":
@@ -219,7 +220,7 @@ class Circuit:
                 return
             chain = [("R", values.get("ESR", 0.0)), ("L", values.get("ESL", 0.0)), ("C", c)]
         elif kind in ("inductor", "ferrite"):
-            chain = [("R", max(values.get("R", 0.0), SHORT_OHMS)), ("L", values.get("L", 0.0))]
+            chain = [("R", max(values.get("R", 0.0), R_MIN_OHMS)), ("L", values.get("L", 0.0))]
         else:
             raise ValueError(f"{name}: no circuit model for a {kind!r} part")
         chain = [(k, v) for k, v in chain if v > 0]

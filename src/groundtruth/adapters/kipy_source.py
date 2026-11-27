@@ -308,10 +308,14 @@ class _KipyReader:
                 cl = p.padstack.copper_layers
                 size = _pt(cl[0].size) if cl else (0.5, 0.5)
                 sym = p.proto.symbol_pin
+                # the drill's two diameters (the pad's frame): unequal, a slot, kept as such and as the round hole
+                # of the same area (Pad.slot; the file reader does the same)
+                dx, dy = p.padstack.drill.diameter.x * NM, p.padstack.drill.diameter.y * NM
+                slot = (dx, dy) if dx > 0 and dy > 0 and abs(dx - dy) > 1e-6 else None
                 pad = Pad(ref, p.number, _pt(p.position), p.padstack.angle.degrees, size, "rect", layers,
                           p.net.name, "thru_hole" if p.pad_type == PadType.PT_PTH else "smd",
-                          p.padstack.drill.diameter.x * NM, uuid=p.id.value,
-                          pin_type=_PIN_TYPES.get(sym.type, ""), pin_function=pin_name(sym.name))
+                          math.sqrt(dx * dy) if slot else dx, uuid=p.id.value,
+                          pin_type=_PIN_TYPES.get(sym.type, ""), pin_function=pin_name(sym.name), slot=slot)
                 fp.pads.append(pad)
                 all_pads.append((pad, p))
                 nets.add(p.net.name)
