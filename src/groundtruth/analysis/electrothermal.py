@@ -240,7 +240,11 @@ def couple(board: Board, config: Config, converters: list, th, issues: list,
         th.notes.append(f"electro-thermal: {info['stopped']}")
         return th, issues, converters
     say("electro-thermal: building the whole-board DC model again", 0.0)
-    model = BoardModel(board, config)
+    # the settings as Simulate saw them (Config.active): its whole-board DC model holds the nets of the stages and
+    # rails it ran, those switched on and those named for the run (Check in Simulate, --nets: they are among these
+    # results). Built from all of them, a stage switched off added its nets' copper, the model was another one, and
+    # the coupling stopped at round 0 ("the DC model is not Simulate's") on every board with a stage switched off
+    model = BoardModel(board, config.active([c.net for c in converters]))
     try:
         dst = dc_board_build(model)
     except SolverError as e:

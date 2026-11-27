@@ -326,3 +326,24 @@ def test_the_coupling_solves_a_rail_fed_through_pins_in_wide_holes(tmp_path):
     assert not th.error, th.error
     assert th.electrothermal and th.electrothermal["rounds"] >= 1
     assert not any("not on plane copper" in n for n in th.notes), th.notes
+
+
+def test_a_stage_switched_off_leaves_the_coupling_of_a_rail_beside_it_alone(tmp_path):
+    """The buck's stage switched off (enabled: false) and a DC rail on its input (J1.1 -> Q1's drain, VIN): Simulate's
+    whole-board DC model holds the rail's nets only (Config.active), and the coupling rebuilds that same model, so it
+    runs (before 2026-11-27 it rebuilt it with the switched-off stage's nets: another fingerprint, "the DC model is
+    not Simulate's", 0 rounds)."""
+    from groundtruth.analysis.detect import detect_converters
+    from groundtruth.analysis.simulate import simulate
+    from groundtruth.analysis.thermal import run_thermal
+    from groundtruth.config.settings import DcLoad, DcLoadSpec
+    board, sc, _ = make(tmp_path, discrete_buck_board(out_connector=True), "off", nets=())
+    spec = replace(detect_converters(board, sc.config)[0].spec, i_out=8.0, v_in=24.0, v_out=5.0, enabled=False)
+    rail = DcLoadSpec("vin rail", spec.input_connector[0], [DcLoad("Q1.5", 5.0, "")], "")
+    cfg = replace(sc.config, converters=[spec], dc_loads=[rail], thermal=replace(sc.config.thermal, quality="draft"))
+    res = simulate(board, cfg)
+    assert not res.converters and len(res.dc_loads) == 1 and not res.dc_loads[0].error, res.dc_loads[0].error
+    th, _ = run_thermal(board, _on(cfg, electrothermal_rounds=3), list(res.dc_loads))
+    info = th.electrothermal
+    assert info["rounds"] >= 1 and info["stopped"] != "the DC model is not Simulate's", info
+    assert not any("is not Simulate's" in n for n in th.notes)

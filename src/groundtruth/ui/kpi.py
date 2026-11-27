@@ -537,7 +537,11 @@ def _thermal(t, rules) -> list[Kpi]:
         top = (et.get("vias") or [None])[0]
         sub = (f"busiest via {top['current20_a']:.3g} → {top['current_a']:.3g} A" if top and
                top.get("current20_a") is not None else (et.get("stopped") or ""))
-        out.append(("electro-thermal", "settled" if et.get("settled") else "not settled",
+        # stopped before its first round (no DC model to solve again, another model than Simulate's): it did not
+        # run, which "not settled" (rounds ran out) would hide; the reason under it
+        state = "settled" if et.get("settled") else "not run" if not et.get("rounds") and et.get("stopped") \
+            else "not settled"
+        out.append(("electro-thermal", state,
                     f"{et.get('rounds', 0)} of at most {et.get('max_rounds', 0)} rounds; {sub}",
                     "" if et.get("settled") else "warn",
                     "the DC paths solved again with the copper at its temperature, then Thermal again, until no "
