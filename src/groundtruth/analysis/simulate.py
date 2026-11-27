@@ -285,6 +285,9 @@ class StackBuild:
         # a through-hole pin whose solder does not reach its part's side: the layer its current enters the board on
         # (pins.feed_layer; power._pad_node takes it instead of the part's side)
         self.pin_feed: dict[str, str] = {}
+        # a fitted pin in a hole cut out of the copper, of a part without a model (a connector's): the pin's metal as
+        # a node of its own, joined to the hole's wall on every layer (pin_lids [A122]); its fed current enters there
+        self.pin_lids: dict[str, LidNode] = {}
 
     def index(self, layer: str) -> Optional[int]:
         """A layer's index in the model, None when the model does not have it."""
@@ -572,6 +575,7 @@ class BoardModel:
             st.branches += bonds_a + bonds_b
             st.side_lids[(fp.reference, pa.net)], st.side_lids[(fp.reference, pb.net)] = lid_a, lid_b
         switch_lids(st, board, config, plane_nets, pin_params, snap)
+        pin_lids(st, board, pads, pin_params, snap)
         # Plane-pair capacitance from the physical stackup (εr, insulation thickness, loss tangent): the dielectrics
         # between two planes in series (Stackup.epsilon_series [Pozar 2012])
         if capacitance:
@@ -880,6 +884,28 @@ def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optiona
     n = len(entering)
     branches += [Branch(lid, top[nd], (lambda f, r=n * re_: complex(r)), ref, "bond") for nd in entering]
     return lid, branches
+
+
+def pin_lids(st: StackBuild, board, pads: list, pin_params, snap: float) -> None:
+    """The pins of fitted parts in holes cut out of the copper (shapes.cut_hole: a slot, a wide hole [A121]) whose
+    side is not already a lumped part's terminal (st.side_lids): each pin's metal a lid joined to its holes' walls on
+    every layer (tht_bonds), kept in st.pin_lids by pin name, for a current fed into the pin (power._barrel_feed).
+    The pin is one piece of metal, so the copper decides where round the wall it hands its current over: fed evenly
+    round the wall (or over the pad's face), the far side's share ran round the ring to where the copper leads away
+    [A122]. A pin nothing is fed into just joins its hole's wall on every layer through its solder, as it does."""
+    from ..geometry.shapes import cut_hole
+    groups: dict[str, list] = {}
+    for p in pads:
+        fp = board.footprint(p.footprint)
+        if fp is None or fp.dnp or cut_hole(p) is None or (p.footprint, p.net) in st.side_lids:
+            continue
+        groups.setdefault(p.pin, []).append(p)
+    for pin, ps in groups.items():
+        # its solder joints named after the part: their I²R is the part's (power.dc_summary's joints, Thermal)
+        lid, bonds = tht_bonds(st, ps, ps, ps[0].footprint, snap, pin_params(ps[0].footprint).bond)
+        if lid is not None:
+            st.branches += bonds
+            st.pin_lids[pin] = lid
 
 
 PIN_DRILL_SHARE = 0.5       # a through-hole pad holds the part's pin when its hole is at least this share of the widest

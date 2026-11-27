@@ -347,3 +347,36 @@ def test_a_through_hole_part_takes_its_current_at_its_barrels_on_every_layer(tmp
     face = [float(m[i, j]) for i, j in zip(*np.nonzero(g.node)) if ring.contains(Point(*g.xy(i, j)))]
     width_j = 10.0 / (2 * 16.0 * 0.035)         # the rail's mean density across both pours, A/mm²
     assert face and max(face) > 0.5 * width_j and np.median(face) > 0.05 * width_j
+
+
+
+def test_a_rail_between_two_soldered_pins_takes_every_layer_without_its_vias(tmp_path):
+    """A rail between two through-hole connector pins in 3 mm holes over the same pour on both layers: each pin's
+    metal is a node of its own joined to its hole's wall on both layers (simulate.pin_lids [A122]), so the current
+    enters both layers at once, half on each, and the stitching vias between them have nothing to carry; the load's
+    drop is the path's (read at the pins' own potential: at the grid under the hole it read 0 mV). Fed over the pad's
+    face on F.Cu (before 2026-11-27), the ring round the hole took the current evenly and carried it round itself
+    (the user: "There is basically no current being absorbed by the massive conductor that is soldered into that
+    hole"), and B.Cu's half had to come down through the vias."""
+    from groundtruth.analysis.simulate import BoardModel
+    g = BoardGen(layers=2, size=(60.0, 20.0))
+    for layer in ("F.Cu", "B.Cu"):
+        g.zone("P", layer, [(4.0, 4.0), (56.0, 4.0), (56.0, 16.0), (4.0, 16.0)])
+    pin = {"type": "thru_hole", "shape": "circle", "size": (5.0, 5.0), "drill": 3.0}
+    for ref, x in (("J1", 9.0), ("J2", 51.0)):
+        g.footprint(ref, "CONN", "Connector:Fake_tht", (x, 10.0), [{"number": 1, "at": (0, 0), "net": "P", **pin}],
+                    attrs="through_hole")
+    for y in (6.0, 10.0, 14.0):
+        g.via((30.0, y), "P", ("F.Cu", "B.Cu"))
+    board, sc, _ = make(tmp_path, g, "pins", nets=())
+    sc.set_dc_loads([DcLoadSpec("rail", "J1.1", [DcLoad("J2.1", 10.0, "")], "")])
+    sc.save()
+    cfg = SettingsFile.load(sc.path).config
+    st = BoardModel(board, cfg).build((2.0, 2.0, 58.0, 18.0), ["F.Cu", "B.Cu"], {"P"}, 0.25, False)
+    assert set(st.pin_lids) == {"J1.1", "J2.1"}
+    res = simulate(board, cfg).dc_loads[0]
+    assert not res.error, res.error
+    path = res.dc[0]
+    assert res.loads[0]["drop_mv"] == pytest.approx(path["drop_mv"], rel=1e-3) and path["drop_mv"] > 0
+    assert not path["vias"]                                 # none carries 1 % of the rail
+    assert res.layer_share["F.Cu"] == pytest.approx(0.5, abs=0.02)

@@ -240,8 +240,11 @@ def series_of(model: BoardModel, pin: str, amps: float) -> tuple[float, Optional
 
 def _potential(sol, nodes: list) -> float:
     """A pad's potential per A of the rail: its nodes' potentials weighted by the current each is fed with."""
+    from ..solver.peec import LidNode
     w = np.array([abs(a) for _, a in nodes])
-    v = np.array([sol.V[n].real for n, _ in nodes])
+    # a node fed into may be a lid (a pin's or a part's metal: simulate.pin_lids, side_lids): its own potential, not
+    # the grid's under it (a pin's lid stands over its hole, no copper: that read 0 V and the drop as 0 mV)
+    v = np.array([(sol.V_lid[n.lid] if isinstance(n, LidNode) else sol.V[n]).real for n, _ in nodes])
     if w.sum() <= 0:            # a pin whose feeds cancel (a load on the source pin itself): its nodes' mean
         return float(v.mean())
     return float((v * w).sum() / w.sum())
