@@ -1645,7 +1645,8 @@ blocked), typically 5-10 W/m²K; radiation uses an emissivity of 0.9 on solder m
 in a fan-cooled housing runs cooler: set <code>convection: forced</code> with the air speed along it
 (<code>airspeed</code>, m/s; blended with natural convection), or <code>fixed</code> with your own
 <code>h_top</code> / <code>h_bottom</code> (from a measurement); a board standing on its edge:
-<code>orientation: vertical</code>; inside a warm box: a higher <code>ambient_c</code>. What is not given is not
+<code>orientation: vertical</code>; inside a warm box: a higher <code>ambient_c</code>. The same settings are in <a href="#prefs">Preferences</a>, Thermal, for this
+computer (each <i>From the settings file</i> by default). What is not given is not
 guessed: a connector pin without a contact resistance (<a href="#pins">Through-hole pins</a>, <code>contact:</code>)
 adds no heat of its own, which on a high-current connector is often the largest heat on the board (a note names
 such pins).</p>
@@ -1911,6 +1912,14 @@ they are stored in <code>%LOCALAPPDATA%\GroundTruth\ui.json</code>. Hover over a
 <tr><td valign="top"><b>Thermal: Capacity limit</b></td><td>the temperature Current capacity searches for (85,
   100, 105, 110, 125 or 150 °C): the hottest copper or part junction. <i>From the settings file</i> keeps
   <code>thermal.capacity_c</code>, else <code>thermal.max_c</code> (105 °C).</td></tr>
+<tr><td valign="top"><b>Thermal: Ambient, Orientation, Convection, Air speed, h top, h bottom, Radiation</b></td><td>where
+  the board cools, for Thermal and Current capacity (see <a href="#thermal">What cooling is assumed</a>): the air's
+  temperature; the board lying flat or on its edge; <i>natural</i> (still air), <i>forced</i> (air blowing along the
+  board at the <b>Air speed</b>, blended with natural convection) or <i>fixed</i> (your own <b>h top</b> /
+  <b>h bottom</b>, from a measurement); radiation from the faces on or off. Air speed is open for forced convection,
+  the coefficients for fixed. Each <i>From the settings file</i> keeps the board's <code>thermal.ambient_c</code>
+  (25 °C), <code>orientation</code> (horizontal), <code>convection</code> (natural), <code>airspeed</code> (1 m/s),
+  <code>h_top</code> / <code>h_bottom</code> (10 / 5 W/m²K) and <code>radiation</code> (on).</td></tr>
 <tr><td valign="top"><b>Via markers</b>, <b>Vias shown</b></td><td>whether the maps mark the vias carrying the
   current, and how many at most (All, 5, 10, 20, 50, the busiest first; greyed while Via markers is unticked; see
   <a href="#results">Results</a>).</td></tr>

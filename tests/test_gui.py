@@ -3142,6 +3142,40 @@ def test_preferences_set_the_capacity_limit(app, frame):
         "capacity_c": 125.0, "electrothermal": True, "electrothermal_tolerance": 0.02}
 
 
+
+def test_preferences_set_where_the_board_cools(app, frame):
+    """Preferences > Thermal: ambient, orientation, convection, air speed, the fixed coefficients and radiation (the
+    user: "expose the thermal settings in preferences"), each from the settings file by default; a choice becomes the
+    thermal setting for Thermal and Current capacity. Air speed only for forced convection, the coefficients only for
+    fixed."""
+    from groundtruth.config.settings import ThermalSettings
+    from groundtruth.ui.prefs_dialog import FROM_FILE, PreferencesDialog, defaults, thermal_overrides
+    keys = ("ambient", "orientation", "convection", "airspeed", "h_top", "h_bottom", "radiation")
+    assert all(defaults({})[k] == FROM_FILE for k in keys)
+    assert defaults({"airspeed": "1.7 m/s"})["airspeed"] == FROM_FILE           # not a choice: the file's
+    with PreferencesDialog(frame, defaults({})) as dlg:
+        assert all(getattr(dlg, k).GetStringSelection() == FROM_FILE for k in keys)
+        assert dlg.airspeed.IsEnabled() and dlg.h_top.IsEnabled()             # the file may say either
+        dlg.convection.SetStringSelection("forced")
+        dlg.convection.ProcessEvent(wx.CommandEvent(wx.wxEVT_CHOICE, dlg.convection.GetId()))
+        assert dlg.airspeed.IsEnabled() and not dlg.h_top.IsEnabled() and not dlg.h_bottom.IsEnabled()
+        dlg.convection.SetStringSelection("fixed")
+        dlg.convection.ProcessEvent(wx.CommandEvent(wx.wxEVT_CHOICE, dlg.convection.GetId()))
+        assert not dlg.airspeed.IsEnabled() and dlg.h_top.IsEnabled()
+        dlg.convection.SetStringSelection("forced")
+        for k, choice in (("ambient", "40 °C"), ("orientation", "vertical"), ("airspeed", "2 m/s"),
+                          ("radiation", "off")):
+            getattr(dlg, k).SetStringSelection(choice)
+        v = dlg.values()
+    over = thermal_overrides(defaults(v))
+    assert over == {"ambient_c": 40.0, "orientation": "vertical", "convection": "forced", "airspeed": 2.0,
+                    "radiation": False}
+    from dataclasses import replace
+    t = replace(ThermalSettings(), **over)                       # every key is a ThermalSettings field
+    assert (t.ambient_c, t.convection, t.airspeed) == (40.0, "forced", 2.0)
+    fixed = thermal_overrides(defaults(dict(v, convection="fixed", h_top="20 W/m²K", h_bottom="8 W/m²K")))
+    assert (fixed["convection"], fixed["h_top"], fixed["h_bottom"]) == ("fixed", 20.0, 8.0)
+
 def test_preferences_switch_each_check_and_set_the_esd_distance(app, frame):
     """Preferences > Run checks: a tick box per check, all ticked by default, and the ESD search distance (greyed
     while ESD at connectors is unticked); values() hands them to ui.json."""
