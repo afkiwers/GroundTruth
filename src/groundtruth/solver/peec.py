@@ -1108,9 +1108,21 @@ class Solution:
     A_cu: Optional[np.ndarray] = None       # (N, nx, ny) the nodes' copper area / d² (the stack's; None: solutions
                                             # pickled before 2026-10-19, whose densities are the strips' mean)
     V_lid: Optional[np.ndarray] = None      # the potentials of the stack's LidNodes (its parts' metal), in order
+    lid_at: Optional[dict] = None           # a lid's number -> its place in V_lid (the stack's: lids no branch names
+                                            # have none, so a lid's number is not its place; `at` reads through it)
     I_twin: Optional[np.ndarray] = None     # (2, pairs): the upper and lower face sheets' strip currents of the
                                             # stack's split layers (PlaneStack._faces; in its tw_a / tw_b order):
                                             # I_x / I_y hold each layer's whole current, both faces added
+
+    def at(self, node) -> complex:
+        """A node's potential: a grid node's from V, a LidNode's (a part's or a pin's metal) from V_lid by its
+        place in the stack (lid_at). Indexing V with a lid read the grid cell under it: over a pin's hole no copper
+        (0 V), over a pad its copper's, not the metal's. KeyError for a lid the stack does not have."""
+        if isinstance(node, LidNode):
+            if self.V_lid is None or self.lid_at is None:
+                raise KeyError(f"no potential kept for lid {node.lid}")
+            return complex(self.V_lid[self.lid_at[node.lid]])
+        return complex(self.V[node])
 
     def state_for(self, stack: "PlaneStack") -> np.ndarray:
         """The solver's unknown vector [branch currents; node potentials] of this solution on `stack`, the stack
@@ -2801,7 +2813,8 @@ class RouteExcitation:
         # Solution.state_for rebuilds it from these when the fix search wants a warm start
         return Solution(f, I_x, I_y, Vg, Ib[st.ns + st.ncap:].copy(), Z, st.moment(self.trace, Ib), its,
                         Ib[st.ns: st.ns + st.ncap].copy(), W_x=st.W_x, W_y=st.W_y, A_cu=getattr(st, "A_cu", None),
-                        V_lid=V[st.n_grid:].copy(), I_twin=np.stack([Ib[st.tw_a], Ib[st.tw_b]]) if len(st.tw_b) else None)
+                        V_lid=V[st.n_grid:].copy(), lid_at={k: v - st.n_grid for k, v in st.lid_nid.items()},
+                        I_twin=np.stack([Ib[st.tw_a], Ib[st.tw_b]]) if len(st.tw_b) else None)
 
 
 def MultiPlaneProblem(layers: list[PlaneLayer], trace: list[TraceSegment], inject_driver: tuple[int, int, int],

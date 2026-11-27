@@ -285,6 +285,9 @@ class StackBuild:
         # a through-hole pin whose solder does not reach its part's side: the layer its current enters the board on
         # (pins.feed_layer; power._pad_node takes it instead of the part's side)
         self.pin_feed: dict[str, str] = {}
+        # the through-hole pins whose barrel the model has (add_pin joined it to two layers or more): a lid on one of
+        # them may join one layer, the column the others (tht_bonds); a pin outside the model's region has none
+        self.pin_columns: set[str] = set()
         # a fitted pin in a hole cut out of the copper, of a part without a model (a connector's): the pin's metal as
         # a node of its own, joined to the hole's wall on every layer (pin_lids [A122]); its fed current enters there
         self.pin_lids: dict[str, LidNode] = {}
@@ -508,8 +511,9 @@ class BoardModel:
                         if feed:
                             st.pin_feed[p.pin] = feed
                 # joined all around its barrel (add_pin): a big connector pin is not a point source
-                add_pin(st, p.net, p.position, p.layers, p.drill or 0.8, f"pad {p.pin}", snap,
-                        filled=filled, column=column, pad=p)
+                if add_pin(st, p.net, p.position, p.layers, p.drill or 0.8, f"pad {p.pin}", snap,
+                           filled=filled, column=column, pad=p):
+                    st.pin_columns.add(p.pin)
         # Tracks across another net's grid cells: the bridges that keep them joined (peec._rasterise_lines)
         for k, g in enumerate(grids):
             for i0, j0, i1, j1, length, width in g.bridges:
@@ -545,16 +549,22 @@ class BoardModel:
             r_dc = complex(z_part(DC_F)).real if sheet else 0.0
             entry = ENTRY_SHARE * r_dc if sheet and r_dc > 0 else sheet
             die = die_side(fp, model, sides, pin_params(fp.reference).entry)
+            # a through-hole side's pins are joined to their holes' walls on the layer the current enters there
+            side_layer = "B.Cu" if fp.layer == "B.Cu" else "F.Cu"
             # where the part's element joins each side's terminal: its `metal` rectangles [A78], else all of it
             metal = pin_params(fp.reference).metal
             rects = [terminal_rect(fp, side, metal) for side in sides]
+            # a through-hole side is joined at its pins' barrels (tht_bonds): no terminal sheet, so no even entry r_e
+            # to take off the part's branch for it (taken off for it anyway, a through-hole shunt read 2 % low)
+            smd = [not tht_pins(side) for side in sides]
             if die is not None:
                 # a vertical FET: its on-resistance spread over its tab (die_branches [A68]), the tab's metal a sheet
                 # under the die when given; the other side's metal (the source clip and leads) a lid as at any part,
                 # its even entry (r_e) taken off the die's branches
                 other = sides[1 - die]
-                lid, bonds = part_lid(st, other, fp.reference, snap, bond, sheet, entry, rect=rects[1 - die])
-                less = entry if sheet and r_dc > 0 else 0.0
+                lid, bonds = part_lid(st, other, fp.reference, snap, bond, sheet, entry, rect=rects[1 - die],
+                                      side=side_layer)
+                less = entry if sheet and r_dc > 0 and smd[1 - die] else 0.0
                 spread = die_branches(st, sides[die], lid, fp.reference, model, bond, sheet, less, rect=rects[die]) \
                     if lid is not None else []
                 if not spread:
@@ -562,10 +572,12 @@ class BoardModel:
                 st.branches += spread + bonds
                 st.side_lids[(fp.reference, other[0].net)] = lid
                 continue
-            if sheet and r_dc > 0:                       # both sides' even entry (2·r_e) taken off the part's branch
-                z_part = (lambda f, z=z_part, r=2 * entry: z(f) - r)
-            lid_a, bonds_a = part_lid(st, sides[0], fp.reference, snap, bond, sheet, entry, rect=rects[0])
-            lid_b, bonds_b = part_lid(st, sides[1], fp.reference, snap, bond, sheet, entry, rect=rects[1])
+            if sheet and r_dc > 0 and any(smd):          # each SMD side's even entry (r_e) off the part's branch
+                z_part = (lambda f, z=z_part, r=sum(smd) * entry: z(f) - r)
+            lid_a, bonds_a = part_lid(st, sides[0], fp.reference, snap, bond, sheet, entry, rect=rects[0],
+                                      side=side_layer)
+            lid_b, bonds_b = part_lid(st, sides[1], fp.reference, snap, bond, sheet, entry, rect=rects[1],
+                                      side=side_layer)
             if lid_a is None or lid_b is None:
                 continue
             if part_conducts(model):
@@ -812,8 +824,8 @@ def _in_rect(st: StackBuild, nodes: list, rect) -> list:
 
 
 def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optional[float] = None,
-             sheet: Optional[float] = None, entry_r: Optional[float] = None, fed: bool = False, rect=None
-             ) -> tuple[Optional[LidNode], list[Branch]]:
+             sheet: Optional[float] = None, entry_r: Optional[float] = None, fed: bool = False, rect=None,
+             side: str = "F.Cu") -> tuple[Optional[LidNode], list[Branch]]:
     """One side of a lumped part (its pads of one net): the part's metal on that side as a node of its own (its lid,
     peec.LidNode, over the pads' area-weighted centre) and a `bond` branch from every grid node of their net under
     the pads (pad_nodes: the cells they overlap [A88]; the nearest node when none is there) to the lid. The bonds share
@@ -835,12 +847,13 @@ def part_lid(st: StackBuild, pads: list, ref: str, snap: float, bond_um: Optiona
     over the terminal nodes inside that rectangle (the whole terminal is still soldered to the copper and conducts);
     without a sheet the plate is perfect and the rectangle changes nothing.
     A through-hole side (its pins in plated holes: tht_pins) is joined at the pins' barrels instead, on every layer
-    (tht_bonds); `sheet` and `rect` do not apply to a pin.
+    (tht_bonds), on the layer its current enters (`side`, the part's; st.pin_feed where the solder ends short of
+    it); `sheet` and `rect` do not apply to a pin.
     (None, []) when no node of the pads' net is near."""
     from ..geometry.shapes import pad_shape
     pins = tht_pins(pads)
     if pins and not fed:
-        return tht_bonds(st, pads, pins, ref, snap, bond_um)
+        return tht_bonds(st, pads, pins, ref, snap, bond_um, side)
     nodes = pad_nodes(st, pads)
     if not nodes:
         p = pads[0]
@@ -892,7 +905,8 @@ def pin_lids(st: StackBuild, board, pads: list, pin_params, snap: float) -> None
     every layer (tht_bonds), kept in st.pin_lids by pin name, for a current fed into the pin (power._barrel_feed).
     The pin is one piece of metal, so the copper decides where round the wall it hands its current over: fed evenly
     round the wall (or over the pad's face), the far side's share ran round the ring to where the copper leads away
-    [A122]. A pin nothing is fed into just joins its hole's wall on every layer through its solder, as it does."""
+    [A122]. The lid joins the wall on the layer the current enters (tht_bonds: the part's side, or where the
+    solder ends); the pin's column (add_pin, with its own values) carries it on to the other layers."""
     from ..geometry.shapes import cut_hole
     groups: dict[str, list] = {}
     for p in pads:
@@ -902,7 +916,9 @@ def pin_lids(st: StackBuild, board, pads: list, pin_params, snap: float) -> None
         groups.setdefault(p.pin, []).append(p)
     for pin, ps in groups.items():
         # its solder joints named after the part: their I²R is the part's (power.dc_summary's joints, Thermal)
-        lid, bonds = tht_bonds(st, ps, ps, ps[0].footprint, snap, pin_params(ps[0].footprint).bond)
+        fp = board.footprint(ps[0].footprint)
+        lid, bonds = tht_bonds(st, ps, ps, fp.reference, snap, pin_params(fp.reference).bond,
+                               "B.Cu" if fp.layer == "B.Cu" else "F.Cu")
         if lid is not None:
             st.branches += bonds
             st.pin_lids[pin] = lid
@@ -923,8 +939,8 @@ def tht_pins(pads: list) -> list:
     return [p for p in tht if p.drill >= PIN_DRILL_SHARE * widest]
 
 
-def tht_bonds(st: StackBuild, pads: list, pins: list, ref: str, snap: float, bond_um: Optional[float] = None
-              ) -> tuple[Optional[LidNode], list[Branch]]:
+def tht_bonds(st: StackBuild, pads: list, pins: list, ref: str, snap: float, bond_um: Optional[float] = None,
+              side: str = "F.Cu") -> tuple[Optional[LidNode], list[Branch]]:
     """One through-hole side of a lumped part: its lid (over the pins' area-weighted centre) joined to the copper
     where the pins' barrels meet each layer (joint_weights round each hole, barrel_rows per layer), every joint a
     `bond` branch with its share of the side's solder joint (part_lid's: SOLDER_RHO x thickness over the pads' area,
@@ -932,7 +948,13 @@ def tht_bonds(st: StackBuild, pads: list, pins: list, ref: str, snap: float, bon
     through the barrel and spreads from there over the pad and the pours, as round a soldered pin. Until 2026-11-27
     such a side was bonded across its pads' whole face on its first layer like an SMD part's: a perfect plate over
     the pad (its copper dark, carrying nothing), every inner layer's current forced up through whichever via stood
-    next to that face (one via read 142 % of its rating while its neighbours carried little) [A121]."""
+    next to that face (one via read 142 % of its rating while its neighbours carried little) [A121].
+    The joints are on one layer: where the pin's current enters the board, the part's `side`, or where its solder
+    ends short of that side (st.pin_feed, pins.feed_layer), else the nearest of the pin's layers in the model by
+    height; a pin without a column in the model (st.pin_columns: outside its region) on every layer it has. The
+    pin's column (add_pin: a copper-filled hole, or the pin's own values) joins the other layers with its resistance
+    and inductance: bonded on every layer, the lid was an inductance-free path between the layers beside it (a
+    connector's ground pin a perfect stitch in the AC models) and bypassed a pin's own values."""
     from ..geometry.shapes import pad_shape
     areas = np.array([getattr(pad_shape(p), "area", 0.0) or 0.0 for p in pins])
     w = areas if areas.sum() > 0 else np.ones(len(pins))
@@ -941,7 +963,23 @@ def tht_bonds(st: StackBuild, pads: list, pins: list, ref: str, snap: float, bon
     joints_of = []                       # per pin: [(node, its share within the pin)]
     for p in pins:
         jw = joint_weights(st, p.position, p.drill, p)
-        rows = barrel_rows(st, p.net, p.position, list(p.layers), [(i, j) for i, j, _ in jw], snap + hole_reach(p))
+        pts = [(i, j) for i, j, _ in jw]
+        if p.pin not in getattr(st, "pin_columns", {p.pin}):
+            # no column in this model (the pin outside its region): joined on every layer it has, as nothing else
+            # joins them here
+            rows = barrel_rows(st, p.net, p.position, list(p.layers), pts, snap + hole_reach(p))
+        else:
+            feed = st.pin_feed.get(p.pin, side)
+            # the feed layer, else the pin's layers the model has, nearest the feed layer's height first (a bottom
+            # part on a model of inner layers enters on the lower one); the part's side when the height is unknown
+            z = dict(zip(st.names, st.z))
+            z_feed = z.get(feed, max(st.z) if feed != "B.Cu" else min(st.z))
+            order = sorted([l for l in p.layers if l in z], key=lambda l: (l != feed, abs(z[l] - z_feed)))
+            rows = []
+            for layer in order:
+                rows = barrel_rows(st, p.net, p.position, [layer], pts, snap + hole_reach(p))
+                if rows:
+                    break
         if rows:
             joints_of.append([(n, wt / len(rows)) for row in rows for n, (_, _, wt) in zip(row, jw)])
     if not joints_of:

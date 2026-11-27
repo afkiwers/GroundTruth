@@ -248,8 +248,10 @@ def dcloads_highlight(names: Sequence[str], board: Board, config: Config) -> Hig
     pads of their source, return and load pins, the parts whose model joins two of the rail's nets (a series 0R, a
     current sensor's primary given a resistor model), and the copper of the nets the rail's current runs on, lit:
     the supply side and a return net that is no reference net. A reference net's copper is selected for the zoom
-    but never lit (it would light up the whole board), as for a power stage."""
-    from ..components.models import model_pads
+    but never lit (it would light up the whole board), as for a power stage. A part counts as carrying the rail when
+    its model passes DC (models.passes_dc) and joins two nets of one side (supply or return): a decoupling capacitor
+    between the rail and its ground is neither."""
+    from ..components.models import model_pads, passes_dc
     specs = [d for d in config.dc_loads if d.name in set(names)]
     if not specs:
         return Highlight(nets=False, text="no DC load")
@@ -262,9 +264,25 @@ def dcloads_highlight(names: Sequence[str], board: Board, config: Config) -> Hig
         pads += [p for p in (fp.pads if fp is not None else []) if str(p.number) == number]
     nets = {p.net for p in pads if p.net}
     refs = set(config.reference_nets)
-    parts = [fp for fp in board.footprints if not fp.dnp
-             and len({p.net for p in model_pads(fp, config.model_for(fp.reference)) if p.net} & nets) >= 2
-             and (m := config.model_for(fp.reference)) is not None and m.kind != "open"]
+
+    def side_nets(side_pins) -> set:
+        """The nets of one side's pins (every pad with that number)."""
+        out = set()
+        for pin in side_pins:
+            ref, _, number = (pin or "").partition(".")
+            fp = board.footprint(ref) if ref else None
+            out |= {p.net for p in (fp.pads if fp is not None else []) if str(p.number) == number and p.net}
+        return out
+    sides = [side_nets([pin for d in specs for pin in (d.source, *(x.pin for x in d.loads))]),
+             side_nets([pin for d in specs for pin in (d.source_return, *(x.ret for x in d.loads))])]
+    parts = []
+    for fp in board.footprints:
+        m = config.model_for(fp.reference)
+        if fp.dnp or not passes_dc(m):
+            continue
+        joined = {p.net for p in model_pads(fp, m) if p.net}
+        if any(len(joined & s) >= 2 for s in sides):
+            parts.append(fp)
     flow = nets - refs
     h = Highlight(focus=[p.uuid for p in pads if p.uuid] + [fp.uuid for fp in parts]
                   + _copper_of(board, flow, zones=True),

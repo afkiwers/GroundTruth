@@ -635,8 +635,9 @@ def loop_closes(plane, inj: list) -> bool:
     keep[plane.ns: plane.ns + plane.ncap] = False                     # the planes' capacitance (none here)
     g = coo_matrix((np.ones(int(keep.sum())), (plane.a_nodes[keep], plane.b_nodes[keep])), shape=(n, n))
     _, label = connected_components(g, directed=False)
-    into = {int(label[plane.nid[nd]]) for nd, a in inj if a > 0}
-    out = {int(label[plane.nid[nd]]) for nd, a in inj if a < 0}
+    # node_id: an injection may be a lid (a pin's or a part's metal), not the grid node under it
+    into = {int(label[plane.node_id(nd)]) for nd, a in inj if a > 0}
+    out = {int(label[plane.node_id(nd)]) for nd, a in inj if a < 0}
     return bool(into) and into <= out
 
 
@@ -717,7 +718,7 @@ def prepare_pdn(model: BoardModel, specs: list) -> tuple[list, list, list]:
             # the rail's main copper is the piece its source feeds (a coarse grid can split a pour in two, and the
             # piece with most nodes need not be the fed one), else the piece holding most of the ICs' supply pads
             # (a power stage's branch sits on its inductor's net, which may be behind a shunt: not the rail's piece)
-            fed = [int(piece[plane.nid[b.a]]) for b in branches if stage is None]
+            fed = [int(piece[plane.node_id(b.a)]) for b in branches if stage is None]     # b.a may be a lid
             if fed:
                 main[spec.rail] = max(set(fed), key=fed.count)
             else:
@@ -742,8 +743,8 @@ def prepare_pdn(model: BoardModel, specs: list) -> tuple[list, list, list]:
                     continue
                 # its pads on the rail's and the ground's main copper, or it would read only stray capacitance (and
                 # slow every solve: a nearly floating port)
-                on_rail = all(piece[plane.nid[nd]] == main.get(spec.rail) for nd, a_ in inj if a_ > 0)
-                on_gnd = all(piece[plane.nid[nd]] == main.get(ground) for nd, a_ in inj if a_ < 0)
+                on_rail = all(piece[plane.node_id(nd)] == main.get(spec.rail) for nd, a_ in inj if a_ > 0)
+                on_gnd = all(piece[plane.node_id(nd)] == main.get(ground) for nd, a_ in inj if a_ < 0)
                 if not (on_rail and on_gnd):
                     cut.append(fp.reference + ("" if on_rail else f" ({spec.rail})") + ("" if on_gnd else f" ({ground})"))
                     continue

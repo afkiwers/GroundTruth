@@ -1355,7 +1355,8 @@ def _combined_dc(board, c, issues, rules, figs) -> str:
         return "error" if x >= err else "warn" if x >= w else "ok"
     vias = p["vias"]
     busiest = max((x for x in vias if x.get("load_pct") is not None), key=lambda x: x["load_pct"], default=None)
-    cards = [_kpi("Input current", f"{p['current_a']:.3g} A", "every stage's expected input current, added"),
+    cards = [_kpi("Input current", f"{p['current_a']:.3g} A",
+                  "every stage's expected input current and every DC rail's own current, added"),
              _kpi("Copper loss", f"{p['loss_w']:.2f} W", "of the total current in the DC paths' copper"),
              _kpi("Sustained density", f"{p['sustained_a_mm2']:.0f} A/mm²",
                   f"{p['sustained_layer']} @ ({p['sustained_at'][0]:.1f}, {p['sustained_at'][1]:.1f})",

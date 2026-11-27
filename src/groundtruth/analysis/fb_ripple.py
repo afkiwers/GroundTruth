@@ -319,7 +319,8 @@ def tap_impedances(model, spec, inductor, sw_net: str, ctrl_gnd, sources: dict, 
 
     def joined(nd, sign: int) -> bool:
         """The node is on a piece of copper the current's injections of this sign are on."""
-        return nd is not None and int(piece[plane.nid[nd]]) in {int(piece[plane.nid[n]]) for n, a in inj
+        # node_id: an injection may be a lid (a pin's or a part's metal), whose own node is not the grid's under it
+        return nd is not None and int(piece[plane.node_id(nd)]) in {int(piece[plane.node_id(n)]) for n, a in inj
                                                                  if (a > 0) == (sign > 0)}
     def nearest_joined(pad, net: str, sign: int):
         """The nearest node of `net` within JOIN_MM of the pad on copper the injections of this sign are on, and
@@ -378,7 +379,7 @@ def tap_impedances(model, spec, inductor, sw_net: str, ctrl_gnd, sources: dict, 
         for f in solve_f:
             sol = exc.solve(float(f))
             for s, nd in nodes.items():
-                z[s].append(complex(sol.V[nd] - sol.V[ref]) if nd is not None else 0j)
+                z[s].append(sol.at(nd) - sol.at(ref) if nd is not None else 0j)   # `ref` may be a lid
     finally:
         # this model is used once: its factorisations go now, not when the cache would evict them
         with plane._lock:

@@ -319,7 +319,8 @@ def _slotted_shunt_board(tmp_path):
 
 def test_a_through_hole_part_takes_its_current_at_its_barrels_on_every_layer(tmp_path):
     """A through-hole part's terminal is its pin in the plated hole (simulate.tht_bonds [A121]): joined round the
-    slot's own outline on both layers, the slot no copper, the pad around it carrying the current to the wall. Until
+    slot's own outline on the part's side (the pin's column joins B.Cu), the slot no copper, the pad around it
+    carrying the current to the wall, B.Cu carrying its half through the pins. Until
     2026-11-27 it was a plate bonded over the pad's face on F.Cu: the pad dark (the user: "the pad should not be dark
     like that, there is current flowing through it for sure!"), the slot read as a round 6 mm hole of copper."""
     from shapely.geometry import Point
@@ -334,7 +335,7 @@ def test_a_through_hole_part_takes_its_current_at_its_barrels_on_every_layer(tmp
         inside = [(i, j) for i, j in zip(*np.nonzero(g.node)) if hole.buffer(-0.2).contains(Point(*g.xy(i, j)))]
         assert not inside, (st.names[k], inside[:3])
     bonds = [b for b in st.branches if b.kind == "bond" and b.name == "R1"]
-    assert {b.a[0] for b in bonds} == {0, 1}    # on both layers
+    assert {st.names[b.a[0]] for b in bonds} == {"F.Cu"}     # the part's side; its pins' columns join B.Cu
     holes = [hole_shape(q) for q in board.footprint("R1").pads]
     assert all(min(h.distance(Point(*st.xy(b.a))) for h in holes) < 0.5 for b in bonds)   # at the slots' walls
     res = simulate(board, cfg).dc_loads[0]
@@ -352,8 +353,9 @@ def test_a_through_hole_part_takes_its_current_at_its_barrels_on_every_layer(tmp
 
 def test_a_rail_between_two_soldered_pins_takes_every_layer_without_its_vias(tmp_path):
     """A rail between two through-hole connector pins in 3 mm holes over the same pour on both layers: each pin's
-    metal is a node of its own joined to its hole's wall on both layers (simulate.pin_lids [A122]), so the current
-    enters both layers at once, half on each, and the stitching vias between them have nothing to carry; the load's
+    metal is a node of its own joined to its hole's wall (simulate.pin_lids [A122]), its column to the other layer, so
+    the current enters both layers at the pins, half on each, and the stitching vias between them have nothing to
+    carry; the load's
     drop is the path's (read at the pins' own potential: at the grid under the hole it read 0 mV). Fed over the pad's
     face on F.Cu (before 2026-11-27), the ring round the hole took the current evenly and carried it round itself
     (the user: "There is basically no current being absorbed by the massive conductor that is soldered into that
@@ -380,3 +382,87 @@ def test_a_rail_between_two_soldered_pins_takes_every_layer_without_its_vias(tmp
     assert res.loads[0]["drop_mv"] == pytest.approx(path["drop_mv"], rel=1e-3) and path["drop_mv"] > 0
     assert not path["vias"]                                 # none carries 1 % of the rail
     assert res.layer_share["F.Cu"] == pytest.approx(0.5, abs=0.02)
+
+
+def test_a_through_hole_shunt_with_a_terminal_sheet_keeps_its_value(tmp_path):
+    """The slotted shunt with a Terminal Sheet Resistance field: its through-hole sides have no terminal sheet (their
+    pins join at the barrels), so no even-entry resistance comes off its branch: still 100 µΩ in the path (2 % low
+    when both sides' entries were taken off anyway)."""
+    from groundtruth.components.fields import TERMINAL_SHEET
+    board, cfg = _slotted_shunt_board(tmp_path)
+    board.footprint("R1").fields[TERMINAL_SHEET] = "0.5mOhm"
+    res = simulate(board, cfg).dc_loads[0]
+    assert not res.error, res.error
+    part = next(p for p in res.dc[0]["parts"] if p["name"] == "R1")
+    assert part["r_mohm"] == pytest.approx(0.1, rel=1e-3)
+
+
+def test_only_parts_carrying_the_rail_are_named_and_lit(tmp_path):
+    """The sensor board with a decoupling capacitor C1 from the rail to GND and a controller U2 whose small sense pins
+    sit on both of the return's nets: the highlight lists only what carries the rail's DC (U1's primary with a
+    resistor model), not the capacitor (it joins the supply side to the return, and passes no DC); open_links names
+    U1 while its model is open, never U2 (a six-pin controller's 0.3 mm² sense pins: no conductor of the rail), and a
+    capacitor model on U1
+    counts as passing nothing."""
+    from groundtruth.analysis.dcload import open_links
+    from groundtruth.analysis.highlight import dcloads_highlight
+    from groundtruth.components.models import ComponentModel
+    g = BoardGen(layers=2, size=(40.0, 24.0))
+    for ref, x in (("J1", 5.0), ("J2", 35.0)):
+        g.footprint(ref, "CONN", "Connector:Fake_2", (x, 10.0), [
+            {"number": 1, "at": (0, 3.0), "net": "GND" if ref == "J1" else "RET", "size": (2.0, 2.0)},
+            {"number": 2, "at": (0, 0), "net": "PWR", "size": (2.0, 2.0)}])
+    g.footprint("U1", "ACS772", "Sensor_Current:Fake_CB", (20.0, 13.0), [
+        {"number": 1, "at": (0, -2.0), "net": "+5V", "pintype": "power_in", "pinfunction": "VCC"},
+        {"number": 4, "at": (2.0, 0), "net": "RET", "pintype": "passive", "pinfunction": "IP+", "size": (1.5, 1.5)},
+        {"number": 5, "at": (-2.0, 0), "net": "GND", "pintype": "passive", "pinfunction": "IP-", "size": (1.5, 1.5)}])
+    g.footprint("U2", "HOTSWAP", "Package_SO:Fake_MSOP", (20.0, 19.0), [
+        {"number": 1, "at": (-1.0, 0), "net": "RET", "size": (0.3, 1.0), "pinfunction": "SENSE+"},
+        {"number": 2, "at": (0.0, 0), "net": "GND", "size": (0.3, 1.0), "pinfunction": "SENSE-"},
+        {"number": 3, "at": (1.0, 0), "net": "+5V", "size": (0.3, 1.0), "pinfunction": "VCC"},
+        {"number": 4, "at": (2.0, 0), "net": "HS_GATE", "size": (0.3, 1.0), "pinfunction": "GATE"},
+        {"number": 5, "at": (3.0, 0), "net": "HS_TIMER", "size": (0.3, 1.0), "pinfunction": "TIMER"},
+        {"number": 6, "at": (4.0, 0), "net": "HS_PG", "size": (0.3, 1.0), "pinfunction": "PG"}])
+    g.two_pin("C1", "10u", (12.0, 6.0), "PWR", "GND", kind="C")
+    g.track((5.0, 10.0), (35.0, 10.0), "PWR", width=2.0)
+    g.track((35.0, 13.0), (22.0, 13.0), "RET", width=2.0)
+    g.track((18.0, 13.0), (5.0, 13.0), "GND", width=2.0)
+    board, sc, _ = make(tmp_path, g, "named", nets=())
+    sc.set_dc_loads([DcLoadSpec("rail", "J1.2", [DcLoad("J2.2", 10.0, "J2.1")], "J1.1")])
+    sc.save()
+    cfg = SettingsFile.load(sc.path).config
+    assert cfg.model_for("C1") is not None and cfg.model_for("C1").kind == "cap"
+    text = open_links(board, cfg, cfg.dc_loads[0])
+    assert "U1 joins" in text and "U2" not in text and "C1" not in text
+    cfg.components["U1"].model = ComponentModel("cap", {"C": 1e-6}, pins=["IP+", "IP-"])
+    assert "U1 joins" in open_links(board, cfg, cfg.dc_loads[0])           # a capacitor passes no DC
+    cfg.components["U1"].model = ComponentModel("resistor", {"R": 100e-6}, pins=["IP+", "IP-"])
+    assert open_links(board, cfg, cfg.dc_loads[0]) == ""
+    h = dcloads_highlight(["rail"], board, cfg)
+    assert "through U1" in h.text and "C1" not in h.text and "U2" not in h.text
+    assert board.footprint("C1").uuid not in h.focus
+
+
+def test_a_small_pass_fet_in_the_return_is_named(tmp_path):
+    """A SOT-23 FET without a model between the return's two nets (drain RET, source GND, gate on its own net):
+    open_links names it whatever its 0.4 mm² pads (a part of three nets is always named), so the rail's error says
+    what to set."""
+    from groundtruth.analysis.dcload import open_links
+    g = BoardGen(layers=2, size=(40.0, 20.0))
+    for ref, x in (("J1", 5.0), ("J2", 35.0)):
+        g.footprint(ref, "CONN", "Connector:Fake_2", (x, 10.0), [
+            {"number": 1, "at": (0, 3.0), "net": "GND" if ref == "J1" else "RET", "size": (2.0, 2.0)},
+            {"number": 2, "at": (0, 0), "net": "PWR", "size": (2.0, 2.0)}])
+    g.footprint("Q1", "FET", "Package_TO_SOT_SMD:Fake_SOT-23", (20.0, 13.0), [
+        {"number": 1, "at": (-0.95, 1.0), "net": "GATE", "size": (0.6, 0.7), "pinfunction": "G"},
+        {"number": 2, "at": (0.95, 1.0), "net": "GND", "size": (0.6, 0.7), "pinfunction": "S"},
+        {"number": 3, "at": (0.0, -1.0), "net": "RET", "size": (0.6, 0.7), "pinfunction": "D"}])
+    g.track((5.0, 10.0), (35.0, 10.0), "PWR", width=2.0)
+    g.track((35.0, 13.0), (20.0, 12.0), "RET", width=1.0)
+    g.track((20.95, 14.0), (5.0, 13.0), "GND", width=1.0)
+    board, sc, _ = make(tmp_path, g, "fet", nets=())
+    sc.set_dc_loads([DcLoadSpec("rail", "J1.2", [DcLoad("J2.2", 2.0, "J2.1")], "J1.1")])
+    sc.save()
+    cfg = SettingsFile.load(sc.path).config
+    cfg.components.pop("Q1", None)
+    assert "Q1 joins GND and RET" in open_links(board, cfg, cfg.dc_loads[0])
