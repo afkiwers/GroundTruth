@@ -148,13 +148,18 @@ def prepare_dc_loads(model: BoardModel, specs: list) -> tuple[list, list, list]:
     return setups, results, issues
 
 
+LINK_PAD_MM2 = 1.0      # pads a part needs on each of a rail's nets to be named as carrying it (open_links)
+
+
 def open_links(board, config, spec: DcLoadSpec) -> str:
     """The parts that join two of a rail's own nets (its source's and loads' nets on the supply side, their returns'
     on the return side) but whose model passes no current, for the error when the rail's copper is not one piece:
     what to set. The user, 2026-11-27, of a rail whose return runs through a Hall current sensor's primary (IP+ to
     IP−, its model 'open'): "the return current goes through that shunt (pin 5,4). How would we manage that?". ""
-    when none is found."""
-    from ..components.models import model_pads
+    when none is found. A capacitor's model passes no DC either. A part with more nets than these two is named only
+    when it has at least LINK_PAD_MM2 of pads on each of them (a current sensor's primary, not a hot-swap or
+    ideal-diode controller's sense pins, which no resistor model should join)."""
+    from ..components.models import model_pads, pad_area, passes_dc
 
     def nets_of(pins) -> set:
         """The nets of these REF.PAD pins (every pad with that number: a connector's paralleled pads)."""
@@ -175,8 +180,11 @@ def open_links(board, config, spec: DcLoadSpec) -> str:
             on = sorted({p.net for p in fp.pads if p.net} & nets)
             if len(on) < 2:
                 continue
+            if len({p.net for p in fp.pads if p.net}) > 2 and \
+                    min(sum(pad_area(p) for p in fp.pads if p.net == n) for n in on) < LINK_PAD_MM2:
+                continue                    # an IC's sense or supply pins on the rail: no conductor of the rail
             m = config.model_for(fp.reference)
-            joined = {p.net for p in model_pads(fp, m) if p.net} if m is not None and m.kind != "open" else set()
+            joined = {p.net for p in model_pads(fp, m) if p.net} if passes_dc(m) else set()
             if len(joined & nets) < 2:
                 names = sorted({(p.pin_function or str(p.number)) for p in fp.pads if p.net in on})
                 found.append((fp.reference, f"{fp.reference} joins {' and '.join(on)} but its model passes no "
@@ -240,11 +248,10 @@ def series_of(model: BoardModel, pin: str, amps: float) -> tuple[float, Optional
 
 def _potential(sol, nodes: list) -> float:
     """A pad's potential per A of the rail: its nodes' potentials weighted by the current each is fed with."""
-    from ..solver.peec import LidNode
     w = np.array([abs(a) for _, a in nodes])
-    # a node fed into may be a lid (a pin's or a part's metal: simulate.pin_lids, side_lids): its own potential, not
-    # the grid's under it (a pin's lid stands over its hole, no copper: that read 0 V and the drop as 0 mV)
-    v = np.array([(sol.V_lid[n.lid] if isinstance(n, LidNode) else sol.V[n]).real for n, _ in nodes])
+    # a node fed into may be a lid (a pin's or a part's metal: simulate.pin_lids, side_lids): its own potential
+    # (Solution.at), not the grid's under it (a pin's lid stands over its hole, no copper: that read 0 mV of drop)
+    v = np.array([sol.at(n).real for n, _ in nodes])
     if w.sum() <= 0:            # a pin whose feeds cancel (a load on the source pin itself): its nodes' mean
         return float(v.mean())
     return float((v * w).sum() / w.sum())
@@ -273,9 +280,11 @@ def finish_dc_load(model: BoardModel, setup: DcLoadSetup):
     if isinstance(run.build, StackBuild):       # the vias' currents, kept for Thermal's via heat [A43]
         db = dc_board_of(run.build)
         res.dc_via = {name: (db, db.via_currents(np.asarray(sol.I_branch).real * total))}
-        # how it is excited, to solve it again with the copper at its temperature (thermal.electrothermal)
-        res.dc_plan = {"fingerprint": db.fingerprint, "inj": list(run.exc.extra),
-                       "feeds": {k: list(v) for k, v in setup.feeds.items()}}
+        # how it is excited, to solve it again with the copper at its temperature (thermal.electrothermal); a run
+        # solved at temperature (electrothermal._Run: no excitation of its own) keeps the plan it came from
+        if hasattr(run, "exc"):
+            res.dc_plan = {"fingerprint": db.fingerprint, "inj": list(run.exc.extra),
+                           "feeds": {k: list(v) for k, v in setup.feeds.items()}}
     # each load's voltage: potentials are per A of the rail (sol.V), so x total; supply side and return side
     v_src = _potential(sol, setup.feeds[spec.source]) * total
     v_ret = _potential(sol, setup.feeds[spec.source_return]) * total if spec.source_return else None

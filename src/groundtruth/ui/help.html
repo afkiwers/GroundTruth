@@ -1042,6 +1042,12 @@ load's source and load pins, a converter's input and output connectors): they ad
 Loads table's "of which at pins") and I²·R of heat at the part in Thermal; the current in the copper does not change.
 No contact value is guessed: a connector pin carrying 3 A or more without one gets a note. <code>fill</code> and
 <code>pin</code> change the hole's conduction between layers in every analysis.</p>
+<p>A plated hole 1.5 mm or wider (a slot: across its narrow side) is no copper in the models, as on the board: a slot
+(KiCad's oval drill) is its own shape, turned with its pad, and a drill offset moves the pad's copper off the hole as
+KiCad does. A fitted pin in such a hole is one piece of metal: where its current enters the board (a DC load's or a
+converter's connector pin, a modelled part's through-hole side such as a current sensor's primary), it hands it to
+the hole's wall on the layer it enters, and the copper decides where round the wall it goes; the pin's own column
+carries it to the other layers. Smaller holes stay copper, joined to every layer round their ring as above.</p>
 
 <hr><a name="fields"></a><h3>Part parameters from the schematic (HTTP lib fields)</h3>
 <p>R_DS(on), C_oss, an inductor's DCR, a capacitor's ESR and the like can come from the parts' symbol fields
@@ -2667,7 +2673,7 @@ smaller but dense, which a regular grid lets it apply with FFTs.</p>
   <li>every strip couples magnetically to every other strip on every layer (mutual partial inductance);</li>
   <li>two layers with copper and none in between form a parallel-plate capacitance ε₀·εᵣ·area/t, scaled by the
     cell's copper fraction and with dielectric loss (tan δ), the dielectrics between them in series;</li>
-  <li>a via is its barrel resistance plus partial self-inductance; a through-hole pin (a connector's) is a solid conductor joined to every layer all around its barrel, so its current enters the copper around the whole ring, not at one point;</li>
+  <li>a via is its barrel resistance plus partial self-inductance; a through-hole pin (a connector's) is a solid conductor joined to every layer all around its barrel, so its current enters the copper around the whole ring, not at one point; a hole 1.5 mm or wider (a slot across its narrow side) is cut out of the copper, and a fitted pin in it is one piece of metal joined to the hole's wall where its current enters (see <a href="#pins">Through-hole pins</a>);</li>
   <li>a part is its model's Z(f) plus 0.3 nH mounting inductance between its two sides' metal (a terminal, a FET's
     drain or source), each soldered over the whole of its pads (75 µm of solder, a few tenths of a mΩ on a large
     pad): the current hands over to the part where the copper brings it to the pad, mostly at the edge it arrives

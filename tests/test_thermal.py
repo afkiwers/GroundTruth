@@ -90,6 +90,7 @@ def test_a_slotted_pad_keeps_its_copper_beside_the_slot(tmp_path):
     user: "the holes are not round where the hot spot is")."""
     import math
     from groundtruth.adapters.file_source import load_board
+    from shapely.geometry import Point as SPoint
     from groundtruth.geometry.shapes import hole_shape, pad_shape
     from groundtruth.thermal.adapter import to_thermal_board
     from groundtruth.thermal.kicad.board import load_board as pcb_load
@@ -98,7 +99,10 @@ def test_a_slotted_pad_keeps_its_copper_beside_the_slot(tmp_path):
         {"number": 4, "at": (0.0, -5.0), "net": "A", "type": "thru_hole", "shape": "oval", "size": (8.5, 6.0),
          "drill": "oval 6 2"},
         {"number": 5, "at": (0.0, 5.0), "net": "B", "type": "thru_hole", "shape": "circle", "size": (2.0, 2.0),
-         "drill": 1.0}], angle=90)
+         "drill": 1.0},
+        # a drill offset: the hole at the pad's position, its copper 1 mm along the pad's x (turned with it)
+        {"number": 6, "at": (6.0, 0.0), "net": "C", "type": "thru_hole", "shape": "rect", "size": (4.0, 2.0),
+         "drill": "1 (offset 1 0)"}], angle=90)
     path = g.write(tmp_path / "slots.kicad_pcb")
     board = load_board(path)
     slot, round_ = board.footprint("U1").pad("4"), board.footprint("U1").pad("5")
@@ -115,6 +119,12 @@ def test_a_slotted_pad_keeps_its_copper_beside_the_slot(tmp_path):
         assert get(b) == pytest.approx(get(a), rel=0.01)
     ours = next(p for p in b.pads if p.number == "4")
     assert ours.shape.area == pytest.approx(pad_shape(slot).area - stadium, rel=0.01)
+    # the offset pad: its copper where KiCad (and PCB Thermal's reader) has it, its hole at the pad's position
+    off = board.footprint("U1").pad("6")
+    theirs = next(p for p in a.pads if p.number == "6")
+    assert pad_shape(off).centroid.distance(theirs.shape.convex_hull.centroid) < 0.01
+    assert pad_shape(off).centroid.distance(SPoint(off.position)) == pytest.approx(1.0, abs=0.01)
+    assert hole_shape(off).centroid.distance(SPoint(off.position)) < 1e-6
 
 def _rip2(cfg, d_on, v_in, f_sw):
     """The inductor ripple's mean-square share ΔI²/12, ΔI = V_in·d_on/(L·f_sw) [Erickson 2001] with L from L1's model

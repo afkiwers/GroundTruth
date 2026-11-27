@@ -312,7 +312,8 @@ def test_an_open_loop_is_found_before_it_is_solved():
     # nodes 0-1 rail copper, 2-3 ground copper, 4 an island; branches: 2 strips (0-1, 2-3), 1 capacitance (1-3),
     # 1 part (a decap 1-2)
     plane = SimpleNamespace(n_nodes=5, nb=4, ns=2, ncap=1, a_nodes=np.array([0, 2, 1, 1]),
-                            b_nodes=np.array([1, 3, 3, 2]), nid={k: k for k in range(5)})
+                            b_nodes=np.array([1, 3, 3, 2]), nid={k: k for k in range(5)},
+                            node_id=lambda n: n)          # PlaneStack.node_id (a lid's own number, a grid node's)
     assert loop_closes(plane, [(0, 1.0), (3, -1.0)])                  # rail - decap - ground
     assert not loop_closes(plane, [(4, 1.0), (3, -1.0)])              # the island's pad
     no_decap = SimpleNamespace(**{**vars(plane), "nb": 3, "a_nodes": plane.a_nodes[:3], "b_nodes": plane.b_nodes[:3]})

@@ -179,7 +179,8 @@ def coupled(buck):
 def test_every_round_heats_the_board_with_its_own_currents_and_settles_on_a_fixed_point(buck, coupled):
     """Each Thermal after a round is solved with that round's DC paths at temperature (its own copies, a new one each
     round), never with Simulate's 20 °C results, and the loop ends on a fixed point: Thermal of the returned results
-    gives the returned temperatures again (T = T0 + θ·P(T), within the tolerance), above the 20 °C currents' own.
+    gives the returned temperatures again (T = T0 + θ·P(T), within the tolerance), its paths more resistive than at
+    20 °C.
     Before round 8 the results were swapped by the round before's copies, so from round 2 on Thermal was solved with
     the 20 °C currents again: the rounds flipped between the two (changes 61 %, 0.21 %, 0.21 %, 0) and "settled" on
     the 20 °C temperatures (211.47 °C here, 212.82 °C at the fixed point). The fixed point is that of the mesh the
@@ -195,7 +196,10 @@ def test_every_round_heats_the_board_with_its_own_currents_and_settles_on_a_fixe
     assert all(plan == th0.mesh_plan for _, plan in seen) and th.mesh_plan == th0.mesh_plan   # one mesh [A90]
     again, _ = solve_thermal(board, cfg, *thermal_inputs(board, cfg, current), mesh_plan=th.mesh_plan)
     assert again.t_max == pytest.approx(th.t_max, abs=0.02)
-    assert th.t_max > th0.t_max + 0.5
+    # at temperature every DC path's copper is more resistive than at 20 °C (Thermal heats the copper by ρ(T) itself,
+    # so the coupling moves the current, and the hot spot little: until 2026-11-27 the rounds fed the switch current
+    # into the single grid cell under each terminal, not the terminal, and that crowding read as 3 K more)
+    assert all(b["r_mohm"] > a["r_mohm"] * 1.05 for a, b in zip(stages[0].dc, current[0].dc))
 
 
 def _perturbed(inputs, rel, seed):
@@ -291,3 +295,34 @@ def test_the_coupling_runs_whole_on_the_compute_server_in_one_job(buck):
     server.kinds.clear()
     run_in_process(board, cfg, stages, server=server)
     assert server.kinds == ["thermal"]
+
+
+def test_the_coupling_solves_a_rail_fed_through_pins_in_wide_holes(tmp_path):
+    """A DC rail between two connector pins in 3 mm holes: its current is fed into the pins' lids (simulate.pin_lids
+    [A122]), and the coupling's solves at temperature keep them lids (as plain cells they named the grid under the
+    holes, no copper: "not on plane copper")."""
+    from dataclasses import replace as rep
+    from boardgen import BoardGen
+    from groundtruth.analysis.simulate import simulate
+    from groundtruth.analysis.thermal import run_thermal
+    from groundtruth.config.settings import DcLoad, DcLoadSpec, SettingsFile
+    g = BoardGen(layers=2, size=(60.0, 20.0))
+    for layer in ("F.Cu", "B.Cu"):
+        g.zone("P", layer, [(4.0, 4.0), (56.0, 4.0), (56.0, 16.0), (4.0, 16.0)])
+    pin = {"type": "thru_hole", "shape": "circle", "size": (5.0, 5.0), "drill": 3.0}
+    for ref, x in (("J1", 9.0), ("J2", 51.0)):
+        g.footprint(ref, "CONN", "Connector:Fake_tht", (x, 10.0), [{"number": 1, "at": (0, 0), "net": "P", **pin}],
+                    attrs="through_hole")
+    board, sc, _ = make(tmp_path, g, "etpins", nets=())
+    sc.set_dc_loads([DcLoadSpec("rail", "J1.1", [DcLoad("J2.1", 40.0, "")], "")])
+    sc.save()
+    cfg = SettingsFile.load(sc.path).config
+    cfg = rep(cfg, thermal=rep(cfg.thermal, quality="draft"))
+    loads = simulate(board, cfg).dc_loads
+    assert not loads[0].error, loads[0].error
+    from groundtruth.solver.peec import LidNode
+    assert any(isinstance(n, LidNode) for n, _ in loads[0].dc_plan["inj"])
+    th, _ = run_thermal(board, _on(cfg, electrothermal_rounds=3), loads)
+    assert not th.error, th.error
+    assert th.electrothermal and th.electrothermal["rounds"] >= 1
+    assert not any("not on plane copper" in n for n in th.notes), th.notes

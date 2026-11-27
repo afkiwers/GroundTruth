@@ -2806,9 +2806,11 @@ def dc_view(c: "ConverterResult", name: str) -> "ConverterResult":
     tot = sum(float(m.sum()) for m in maps.values()) or 1.0
     v.layer_share = {l: float(m.sum()) / tot for l, m in maps.items()}
     v.map_frequency = 0.0
-    # each via's share of the path's current; a path whose current is not known (0 A) shares the busiest via's,
-    # never 1e-12 A (that wrote 10^13 % at every via)
-    base = path["current_a"] if path["current_a"] > 1e-9 else max((x["current_a"] for x in path["vias"]), default=1.0)
+    # each via's share of the path's current, never above 100 %: the path's current, or the busiest via's when that
+    # is more (a combined view whose stage has no input path: its current crosses the vias but is not in the total;
+    # a path of no known current, 0 A, which wrote 10^13 % at every via over 1e-12 A)
+    busiest = max((x["current_a"] for x in path["vias"]), default=0.0)
+    base = max(path["current_a"], busiest) or 1.0
     v.transfers = [{"name": x["name"], "kind": "via", "layers": list(maps), "x": x["x"], "y": x["y"],
                     "fraction": x["current_a"] / base, "distance_mm": 0.0,
                     "current_a": x["current_a"]} for x in path["vias"]]

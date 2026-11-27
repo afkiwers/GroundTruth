@@ -606,3 +606,17 @@ def test_the_terminal_contact_field_gives_any_parts_metal_by_its_pin_names():
     assert any("Q3: Terminal Contact Drain=…: no pad numbered or named Drain" in m
                for m in _read_tags(board).problems)
     assert field_metal(part("Q4", {"Terminal Contact": "four"}, []))[1]                         # unreadable: said
+
+
+def test_a_lids_potential_is_read_by_its_place_in_the_stack():
+    """Solution.at: a lid's potential from V_lid at the lid's place in the stack (lid numbers left unused by a model,
+    a part whose other side found no copper, leave gaps), a grid node's from V. 1 A fed into lid 7 through a 1 Ω bond
+    to the copper: the lid is 1 V above the node it is bonded to. Read as V[lid] it was the grid cell under it, and
+    V_lid[lid number] was out of range."""
+    g = build_grid(box(-D / 2, -D / 2, 5 + D / 2, 1 + D / 2), (0.0, 0.0, 5.0, 1.0), D)
+    lid = LidNode(0, 25, 5, 7)                       # the only lid, numbered 7: its place in V_lid is 0
+    st = PlaneStack([PlaneLayer("F.Cu", 0.0, g, T)], [Branch((0, 25, 5), lid, lambda f: complex(1.0), "P", "bond")])
+    sol = RouteExcitation(st, [], injections=[(lid, 1.0), ((0, 50, 5), -1.0)]).solve(10.0)
+    assert sol.lid_at == {7: 0} and len(sol.V_lid) == 1
+    assert (sol.at(lid) - sol.at((0, 25, 5))).real == pytest.approx(1.0, rel=1e-6)
+    assert sol.at((0, 25, 5)) == sol.V[0, 25, 5]

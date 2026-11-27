@@ -395,9 +395,25 @@ class _Loader:
         own = node.float("solder_mask_margin", 0.0) if node.find("solder_mask_margin") is not None else None
         fp_margin = getattr(self, "fp_margin", None)
         margin = own if own is not None else fp_margin if fp_margin is not None else self.mask_clearance
-        return Pad(fp.reference, str(number), pos, angle, (size[0], size[1]), shape, layers, net, ptype, drill,
-                   polygon, node.float("roundrect_rratio", 0.0), node.value("uuid", ""), pin_type, pin_function,
-                   mask, margin, slot)
+        pad = Pad(fp.reference, str(number), pos, angle, (size[0], size[1]), shape, layers, net, ptype, drill,
+                  polygon, node.float("roundrect_rratio", 0.0), node.value("uuid", ""), pin_type, pin_function,
+                  mask, margin, slot)
+        off = drill_node.xy("offset", ()) if drill_node is not None else ()
+        if len(off) >= 2 and (off[0] or off[1]):
+            # "(drill ... (offset dx dy))": the hole stays at the pad's position, its copper moves by the offset in
+            # the pad's frame (KiCad's pad shape position); kept as the pad's outline (Pad.polygon), so every user of
+            # pad_shape sees it there while the hole (shapes.hole_shape) and the barrel stay at `pos`
+            from ..geometry.shapes import pad_shape
+            d = rotate((off[0], off[1]), angle)
+            if pad.polygon is not None:
+                pts, holes = pad.polygon
+                pad.polygon = ([(x + d[0], y + d[1]) for x, y in pts], holes)
+            else:
+                moved = pad_shape(Pad(fp.reference, str(number), (pos[0] + d[0], pos[1] + d[1]), angle,
+                                      (size[0], size[1]), shape, layers, net, ptype, drill,
+                                      roundrect_ratio=node.float("roundrect_rratio", 0.0)))
+                pad.polygon = ([tuple(c) for c in list(moved.exterior.coords)[:-1]], [])
+        return pad
 
     def _custom_pad(self, node: SList, pos: Point, angle: float, size) -> Optional[Polygon]:
         """A custom pad's outline: its anchor rectangle united with its polygon primitives (widened by their

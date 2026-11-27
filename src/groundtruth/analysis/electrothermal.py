@@ -92,9 +92,13 @@ def _solve(dst, inj):
     """One DC run on the (temperature-scaled) whole-board model: the Solution at DC_F. `inj` is the run's injections
     as Simulate's excitation was given them, [((layer, i, j), A)] (the same model, its fingerprint checked, has the
     same grid; the excitation checks again that they are on copper and balance)."""
-    from ..solver.peec import RouteExcitation
+    from ..solver.peec import LidNode, RouteExcitation
     from .power import DC_F
-    return RouteExcitation(dst.plane, [], injections=[(tuple(int(v) for v in n), float(a)) for n, a in inj]).solve(DC_F)
+    # a lid (a pin's or a part's metal: simulate.pin_lids, side_lids) stays a lid: as a plain (layer, i, j) it named
+    # the grid cell under it, inside a cut hole no copper ("not on plane copper"), and the coupling failed; the hot
+    # model is the same build, so its lids have the same numbers
+    return RouteExcitation(dst.plane, [], injections=[(n if isinstance(n, LidNode) else tuple(int(v) for v in n),
+                                                       float(a)) for n, a in inj]).solve(DC_F)
 
 
 def _hot_stage(model, dst, c):

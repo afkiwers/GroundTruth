@@ -287,6 +287,15 @@ class ComponentModel:
 KELVIN_FORCE_RATIO = 1.5    # a 4-terminal shunt's force pads are at least this much larger than its sense pads
 
 
+DC_KINDS = ("short", "resistor", "inductor", "ferrite")    # the models that pass a DC current between their pins
+
+
+def passes_dc(model: Optional[ComponentModel]) -> bool:
+    """Whether a part's model carries a DC current from one of its nets to the other (a short, resistor, inductor or
+    ferrite); a capacitor, an open part, an amplifier or a buffer does not."""
+    return model is not None and model.kind in DC_KINDS
+
+
 def pad_area(p) -> float:
     """A pad's copper area (mm²): its outline's when the board gives one (a custom pad: its anchor and its
     primitives, whose `size` is only the small anchor), else its size's rectangle."""

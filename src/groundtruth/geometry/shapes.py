@@ -165,9 +165,14 @@ HOLE_CUT_MM = 1.5           # a plated pad's hole this wide or wider (or a slot)
 
 
 def cut_hole(p: Pad):
-    """The hole cut out of a plated through-hole pad's copper (hole_shape), or None: a hole narrower than
-    HOLE_CUT_MM stays copper (a via-sized hole is below the grids' pitch; its plating conducts) [A121]."""
-    if p.pad_type != "thru_hole" or not (p.slot or p.drill >= HOLE_CUT_MM):
+    """The hole cut out of a plated through-hole pad's copper (hole_shape), or None: a hole (a slot across its narrow
+    side) narrower than HOLE_CUT_MM stays copper (a via-sized hole is near the grids' pitch, and the thin ring round
+    it could break apart or vanish on a coarse grid; its plating conducts) [A121]. A USB-C shield's 0.6 mm slot so
+    stays copper as a 0.6 mm round hole does."""
+    if p.pad_type != "thru_hole":
+        return None
+    narrow = min(p.slot) if p.slot else p.drill
+    if narrow < HOLE_CUT_MM:
         return None
     return hole_shape(p)
 
