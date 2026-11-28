@@ -1270,13 +1270,20 @@ def _pdn(d, issues, figs) -> str:
             + (f", {d.voltage:g} V" if d.voltage else "") + "</span></header>"]
     if d.error:
         return "".join(body) + f"<p class='note'>{e(d.error)}</p></article>"
+    how = getattr(d, "i_step_source", "set")
+    step = (f", load step {format_si(d.i_step, 'A')}"
+            + {"fields": " from the ICs' Supply Current", "estimate": " ESTIMATED from the ICs' pin counts",
+               "partly": " PARTLY ESTIMATED (pin counts)"}.get(how, "")
+            if getattr(d, "i_step", None) else "")
     cards = [_kpi("Target", format_si(d.target_ohm, "Ω") if d.target_ohm else "none",
-                  f"up to {format_si(d.check_to, 'Hz')}" if d.target_ohm else "set i_step for one")]
+                  f"up to {format_si(d.check_to, 'Hz')}{step}" if d.target_ohm else "set i_step for one",
+                  "warn" if how in ("estimate", "partly") else "")]
     if d.worst:
         w = d.worst
         cards.append(_kpi("Worst margin", f"{w['margin_db']:+.1f} dB",
                           f"{w['part']}: {format_si(w['z_ohm'], 'Ω')} @ {format_si(w['f'], 'Hz')}",
-                          "error" if w["margin_db"] < 0 else "warn" if w["margin_db"] < 3 else "ok"))
+                          "error" if w["margin_db"] < 0 and how not in ("estimate", "partly") else
+                          "warn" if w["margin_db"] < 3 else "ok"))
     cards.append(_kpi("ICs", str(len(d.ports)), "with supply pins on the rail"))
     if d.source:
         cards.append(_kpi("Source", d.source.split(" ", 1)[0], d.source.split(" ", 1)[1] if " " in d.source else ""))
@@ -1291,11 +1298,72 @@ def _pdn(d, issues, figs) -> str:
                  e(f"{w['margin_db']:+.1f} dB @ {format_si(w['f'], 'Hz')}") if w else "–",
                  e(w.get("holds", "")),
                  e(f"{format_si(pk['z_ohm'], 'Ω')} @ {format_si(pk['f'], 'Hz')}") if pk else "–",
-                 f"{p['l_nh']:.2f} nH" if p.get("l_nh") else "–", e(", ".join(near[:4]) or "none")]
+                 f"{p['l_nh']:.2f} nH" if p.get("l_nh") else "–",
+                 e(f"{p['dc']['v']:.3f} V (−{p['dc']['drop_mv']:.1f} mV; min {p['dc']['limit']:.3g} V)")
+                 if p.get("dc") else "–",
+                 e(f"{p['step']['dip_late'] * 1e3:+.3g} mV" + (f" (spike {p['step']['dip'] * 1e3:+.3g} mV)"
+                   if abs(p['step']['dip']) > abs(p['step']['dip_late']) else ""))
+                 if p.get("step") and p["step"].get("dip_late") is not None else "–",
+                 e(", ".join(near[:4]) or "none")]
         rows.append("<tr>" + "".join(f"<td class='num'>{c}</td>" if k in (1, 5) else f"<td>{c}</td>"
                                      for k, c in enumerate(cells)) + "</tr>")
+    # ICs the DC run loads that are not impedance ports (left out of the AC model): their DC voltage still shown
+    port_parts = {p["part"] for p in d.ports}
+    for x in [x for x in getattr(d, "dc_ics", ()) if x["part"] not in port_parts]:
+        rows.append("<tr>" + "".join(f"<td>{c}</td>" for c in (
+            e(x["part"] + (" (regulator)" if x.get("regulator") else "")), "–", "–", "not an impedance port", "–", "–",
+            e(f"{x['v']:.3f} V (−{x['drop_mv']:.1f} mV; min {x['limit']:.3g} V)"), "–", "")) + "</tr>")
     body.append("<h4>ICs</h4>" + _table(["IC", "#Supply pins", "Worst margin", "Held there by", "Highest peak",
-                                         "#L above decaps", "Decaps within 9 mm"], rows))
+                                         "#L above decaps", "DC voltage", "Load step dip", "Decaps within 9 mm"], rows))
+    used = [c for c in d.decaps if "little" in c]
+    if used:
+        def _band(c):
+            """A decap's useful band as text."""
+            if not c.get("band"):
+                return "–"
+            lo, hi = (float(f"{x:.3g}") for x in c["band"])
+            return f"{format_si(lo, 'Hz')} … {format_si(hi, 'Hz')}"
+        def _without(c):
+            """What taking the decap out does (pdn._cap_effects), as text."""
+            from ..analysis.pdn import without_text
+            return without_text(c.get("without")) or "–"
+        drows = []
+        for c in sorted(used, key=lambda c: -c["peak_share"]):
+            cells = [e(c["ref"]), e(c["value"]), e(format_si(c["C_dc"], "F")) if c.get("C_dc") else "–",
+                     e(format_si(float(f"{c['srf']:.3g}"), "Hz")) if c.get("srf") else "–",
+                     f"{c['peak_share'] * 100:.0f} %" + (f" ({e(c['peak_at'])})" if c.get("peak_at") else ""),
+                     e(_band(c)), e(_without(c)), "does little" if c["little"] else ""]
+            drows.append("<tr>" + "".join(f"<td>{x}</td>" for x in cells) + "</tr>")
+        body.append("<h4>Decaps</h4>" + _table(["Decap", "Value", "C at its DC bias", "Own resonance",
+                                                "Largest share (IC)", "Useful band (≥10 %)",
+                                                "Without it (exact at its peaks and worst points)", ""], drows))
+        from ..analysis.pdn import point_advice
+        prows = []
+        for port in d.ports:
+            pts = [pk for pk in port["peaks"] if pk.get("cause")]
+            w = port.get("worst") or {}
+            if w.get("cause") and not any(pk["f"] == w["f"] for pk in pts):
+                pts.append(w)
+            for pk in sorted(pts, key=lambda x: x.get("margin_db", 99)):
+                prows.append("<tr>" + "".join(f"<td>{x}</td>" for x in (
+                    e(port["part"]), e(format_si(float(f"{pk['f']:.3g}"), "Hz")),
+                    e(format_si(float(f"{pk['z_ohm']:.3g}"), "Ω")),
+                    f"{pk['margin_db']:+.1f} dB" if "margin_db" in pk else "–", e(pk["cause"]),
+                    e(f"Z0 {format_si(float(format(pk['z0'], '.3g')), 'Ω')}, Q {pk['q']:.2g}")
+                    if pk.get("z0") else "–",
+                    e(point_advice(pk) or "–"))) +
+                    "</tr>")
+        if prows:
+            body.append("<h4>Peaks and the worst points: why, and what helps</h4>" + _table(
+                ["IC", "Frequency", "|Z|", "Margin", "Cause", "Z0, Q", "Fix (judged a decade either side)"], prows))
+        from .plots import draw_pdn_decaps, draw_pdn_step, pdn_has_step, pdn_share_port
+        if pdn_has_step(d):
+            body.append(_img(figs.png(f"{d.name} PDN step", draw_pdn_step, d, size=(9.5, 3.4)),
+                             f"{d.name}: the rail at each IC when the load steps; grey: the copper's spike"))
+        if pdn_share_port(d) is not None:
+            body.append(_img(figs.png(f"{d.name} PDN decaps", draw_pdn_decaps, d, size=(9.5, 3.4)),
+                             f"{d.name}: each part's share of {pdn_share_port(d)['part']}'s current; shaded where the "
+                             "decaps ring (not judged)"))
     body.append(_img(figs.png(f"{d.name} PDN", draw_pdn, d, size=(9.5, 4.2)),
                      f"{d.name}: |Z| at each IC's supply pins; the dashed red line is the target"))
     body.append(_responses(f"{d.name} PDN", getattr(d, "responses", ()), figs))

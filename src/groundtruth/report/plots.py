@@ -1695,8 +1695,10 @@ def transfer_clipboard(view) -> str:
 
 
 def is_receiver(r) -> bool:
-    """Whether a response is a receiver's (the path's output per volt of the source), not an op-amp's output or loop."""
-    return "receiver" in r.name and r.name.endswith("/ source")
+    """Whether a response is a receiver's (the path's output per volt of the source), not an op-amp's output or loop:
+    named by its pins ("SIG: U1.3 → U13.5", analysis/simulate.path_pins), or "receiver / source" (runs kept before
+    the pins named it, or a pin not known)."""
+    return r.name.endswith("receiver / source") or (getattr(r, "quantity", "") == "voltage gain" and " → " in r.name)
 
 
 def receiver_style(r, others: bool) -> dict:
@@ -2137,14 +2139,25 @@ def draw_pdn(fig: Figure, p) -> None:
         f = np.array(port["f"]) / 1e6
         f_all += list(f)
         c = PDN_COLOURS[k % len(PDN_COLOURS)]
-        ax.plot(f, port["z_ohm"], color=c, lw=1.2, label=port["part"])
+        bad = port.get("nonphysical_from")         # a curve pdn calls not physical: dashed, said in the key
+        ax.plot(f, port["z_ohm"], color=c, lw=1.2, ls="--" if bad else "-",
+                label=port["part"] + (f" (not physical from {bad / 1e6:.3g} MHz)" if bad else ""))
         if ax_p is not None:
             ax_p.plot(f, port["phase_deg"], color=c, lw=1.1)
         if port["peaks"]:
             pk = port["peaks"][0]
             ax.plot([pk["f"] / 1e6], [pk["z_ohm"]], "v", color=c, ms=5)
+        # the explained peaks near or over the target (pdn._explain_peaks): the pair of parts ringing there
+        for pk in port["peaks"]:
+            if pk.get("low") and pk.get("margin_db", 99) < 6.0:
+                pair = (f"{_short_part(pk['low'])}↔{_short_part(pk['high'])}" if pk["low"] != pk["high"]
+                        else _short_part(pk["low"]))
+                ax.annotate(pair, (pk["f"] / 1e6, pk["z_ohm"]), xytext=(0, 7), textcoords="offset points",
+                            ha="center", va="bottom", fontsize=FS_TICK, color=c)
     if p.target_ohm:
-        ax.plot([min(f_all), p.check_to / 1e6], [p.target_ohm] * 2, "--", color="#d62728", lw=1.2, label="target")
+        est = getattr(p, "i_step_source", "set") in ("estimate", "partly")
+        ax.plot([min(f_all), p.check_to / 1e6], [p.target_ohm] * 2, "--", color="#d62728", lw=1.2,
+                label="target (estimated step)" if est else "target")
         for a_ in (ax, ax_p):
             if a_ is not None:
                 a_.axvline(p.check_to / 1e6, color="#d62728", lw=0.8, ls=":")
@@ -2203,6 +2216,129 @@ def draw_pdn_holds(fig: Figure, p) -> None:
     left_in, right_in = _width_in("U1102W", FS_TICK) + 0.3, 0.25
     header = _title_and_key(ax, "what holds the rail at each IC (the part carrying most of its current)",
                             w_in - left_in - right_in)
+    _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TICK) + 0.08, header + 0.06)
+
+
+def _short_part(name: str) -> str:
+    """A part's name for a plot label: "source J1" as "src J1", others as they are."""
+    return name.replace("source ", "src ") if name else ""
+
+
+def pdn_has_step(p) -> bool:
+    """A PDN rail with a step response at one of its ICs (pdn._port_step)."""
+    return any(getattr(r, "step", None) and r.step.get("kind") == "load" for r in getattr(p, "responses", ()))
+
+
+def draw_pdn_step(fig: Figure, p) -> None:
+    """A rail's load step at each IC (pdn._port_step): the voltage's change in mV against time on a log axis (the
+    copper's nanosecond spike and the decaps' and source's microsecond-to-millisecond dip on one plot), the allowed
+    ±ripple band shaded, the first LATE_TAUS time constants of the check_to low-pass shaded grey (the spike: the
+    impedance above the decaps, which the impedance target judges, not the step check), each IC's dip after it
+    marked."""
+    from ..analysis.pdn import LATE_TAUS
+    from ..components.values import format_si
+    fig.clear()
+    ax = fig.add_subplot(111)
+    resp = [r for r in p.responses if getattr(r, "step", None) and r.step.get("kind") == "load"]
+    if not resp:
+        ax.set_axis_off()
+        return
+    t_spike = LATE_TAUS / (2 * math.pi * p.check_to)
+    lo, hi = 0.0, 0.0
+    t_min, t_max = math.inf, 0.0
+    for k, r in enumerate(resp):
+        c = PDN_COLOURS[k % len(PDN_COLOURS)]
+        t, y = np.asarray(r.step["t"]), np.asarray(r.step["y"])
+        keep = t > 0
+        dv = (y[keep] - r.step["v_nom"]) * 1e3
+        ax.plot(t[keep], dv, color=c, lw=1.3, label=r.step.get("label") or r.name)
+        m = r.step.get("metrics") or {}
+        if m.get("dip_late") is not None:
+            ax.plot([m["t_dip_late"]], [m["dip_late"] * 1e3], "v", color=c, ms=6)
+        late = t[keep] > t_spike
+        if np.any(late):
+            lo, hi = min(lo, float(np.min(dv[late]))), max(hi, float(np.max(dv[late])))
+        t_min, t_max = min(t_min, float(t[keep][0])), max(t_max, float(t[keep][-1]))
+    band = p.voltage * resp[0].step["max_dev"] * 1e3 if p.voltage else None
+    if band:
+        ax.axhspan(-band, band, color="#2ca02c", alpha=0.07, lw=0)
+        for v in (-band, band):
+            ax.axhline(v, color="#2ca02c", lw=0.8, ls="--")
+    ax.axvspan(t_min, t_spike, color="0.5", alpha=0.10, lw=0)
+    ax.annotate("copper spike\n(judged by |Z|)", (t_min, 1.0), xycoords=("data", "axes fraction"), xytext=(3, -3),
+                textcoords="offset points", ha="left", va="top", fontsize=FS_TICK, color="0.35")
+    # the axis fits the dips after the spike and the band (the spike, often far larger, runs off it)
+    span = max(hi - lo, 2 * (band or 0.0), 1e-3)
+    ax.set_ylim(min(lo, -(band or 0.0)) - 0.15 * span, max(hi, band or 0.0) + 0.15 * span)
+    ax.set_xscale("log")
+    ax.set_xlim(t_min, t_max)
+    ax.set_xlabel("time after the step (s)", fontsize=FS_TEXT)
+    ax.set_ylabel("ΔV (mV)", fontsize=FS_TEXT)
+    ax.tick_params(labelsize=FS_TICK, which="both")
+    ax.grid(True, which="both", alpha=0.3)
+    w_in, _ = fig.get_size_inches()
+    left_in, right_in = _lh(FS_TEXT) + _width_in("-1000", FS_TICK) + 0.24, 0.25
+    step = getattr(p, "i_step", None)
+    header = _title_and_key(ax, f"{p.name}: the rail at each IC when the load steps"
+                            + (f" by {format_si(float(format(step, '.3g')), 'A')}" if step else "")
+                            + (f" (dashed: ±{band:.3g} mV allowed; ▼ the dip after the spike)" if band else ""),
+                            w_in - left_in - right_in)
+    _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TEXT) + _lh(FS_TICK) + 0.1, header + 0.06)
+
+
+def pdn_share_port(p):
+    """The port whose decap shares the plot shows: the worst one (furthest over or nearest to the target), else the
+    first; None without shares."""
+    with_shares = [port for port in getattr(p, "ports", ()) if port.get("shares")]
+    if not with_shares:
+        return None
+    worst = (getattr(p, "worst", None) or {}).get("part")
+    return next((port for port in with_shares if port["part"] == worst), with_shares[0])
+
+
+def draw_pdn_decaps(fig: Figure, p, part: Optional[str] = None, top: int = 8) -> None:
+    """How much of one IC's current each part carries against frequency (pdn.finish_pdn's shares: |I| of the part
+    per A at the IC; shaded where the parts' currents circulate, an anti-resonance): the `top` parts with the largest share somewhere below check_to, the USEFUL_SHARE line dashed.
+    A decap holds the rail where its curve is high; one that stays low does little there. The IC: `part`, else the
+    worst port."""
+    from ..analysis.pdn import USEFUL_SHARE
+    fig.clear()
+    ax = fig.add_subplot(111)
+    port = next((x for x in p.ports if x["part"] == part), None) if part else pdn_share_port(p)
+    if port is None:
+        ax.set_axis_off()
+        return
+    f = np.array(port["f"]) / 1e6
+    band = f <= p.check_to / 1e6
+    ranked = sorted(port["shares"].items(), key=lambda kv: -max(np.array(kv[1])[band], default=0.0))[:top]
+    palette = list(PDN_COLOURS) + ["#7f7f7f", "#aec7e8", "#ffbb78", "#98df8a", "#ff9896", "#c5b0d5"]
+    # each decap's "without it" (pdn._cap_effects: the margin's change at the key frequencies) beside its name
+    without = {r["ref"]: r["without"] for r in getattr(p, "decaps", ()) if r.get("without")}
+    for k, (name, v) in enumerate(ranked):
+        wo = without.get(name)
+        from ..analysis.pdn import without_text
+        label = name + (f" (without: {without_text(wo, short=True)})"
+                        if wo and not wo.get("bound") and not wo.get("no_rise") else "")
+        ax.plot(f, v, color=palette[k % len(palette)], lw=1.3, label=label)
+    ax.axhline(USEFUL_SHARE, color="#888888", lw=0.8, ls="--")
+    ax.axvline(p.check_to / 1e6, color="#d62728", lw=0.8, ls=":")
+    # where the parts' currents circulate (an anti-resonance: shares of several times 1) the band is shaded and the
+    # axis stops at 1.2: the shares there are not "supplies the IC"
+    ring = port.get("ringing") or []
+    for k, r in enumerate(ring):
+        if r:
+            lo = f[k] if k == 0 else math.sqrt(f[k - 1] * f[k])
+            hi = f[k] if k == len(f) - 1 else math.sqrt(f[k] * f[k + 1])
+            ax.axvspan(lo, hi, color="#d62728", alpha=0.08, lw=0)
+    ax.set_ylim(0, 1.2)
+    ax.set_ylabel("share of its current", fontsize=FS_TEXT)
+    _freq_axis(ax, list(f))
+    ax.tick_params(labelsize=FS_TICK, which="both")
+    ax.grid(True, which="both", alpha=0.3)
+    w_in, _ = fig.get_size_inches()
+    left_in, right_in = _lh(FS_TEXT) + _width_in("1.00", FS_TICK) + 0.24, 0.25
+    header = _title_and_key(ax, f"which parts carry {port['part']}'s current (dashed: {USEFUL_SHARE:.0%}, a decap's "
+                            "useful band above it; shaded: ringing, not judged)", w_in - left_in - right_in)
     _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TICK) + 0.08, header + 0.06)
 
 

@@ -302,11 +302,13 @@ def _run(args, simulate: bool) -> int:
             print(f"  [{frac * 100:5.1f}%] {msg}", file=sys.stderr)
 
     converters, bridges, thermal, capacity, solver, combined, dc_loads = [], [], None, [], None, None, []
+    heat_loads = []
     pdn, si, cap_bias = [], None, []
     if simulate:
         res = run_sim(board, cfg, nets, progress=progress if args.verbose else None)
         issues, routes, converters, bridges, solver = res.issues, res.routes, res.converters, res.bridges, res.solver
         combined, dc_loads = res.dc_combined, list(res.dc_loads)
+        heat_loads = [d for d in dc_loads if not getattr(d, "pdn_rail", "")]   # a PDN rail's run heats nothing
         cap_bias = list(getattr(res, "cap_bias", ()))       # each capacitor at its DC voltage (analysis/bias.py)
         pdn = list(getattr(res, "pdn", ()))
         si = getattr(getattr(res, "checks", None), "si", None)
@@ -319,7 +321,7 @@ def _run(args, simulate: bool) -> int:
                 flag = "--thermal" if args.thermal else "--capacity"
                 raise CliError(f"{flag} needs the thermal extra: pip install \"groundtruth-pcb[thermal]\" ({e})")
         if args.thermal:
-            thermal, th_issues = run_thermal(board, cfg, list(converters) + list(bridges) + dc_loads,
+            thermal, th_issues = run_thermal(board, cfg, list(converters) + list(bridges) + heat_loads,
                                              progress=progress if args.verbose else None)
             if thermal.error:
                 print(f"thermal: {thermal.error}", file=sys.stderr)
@@ -327,7 +329,7 @@ def _run(args, simulate: bool) -> int:
             else:
                 issues = list(issues) + th_issues
         if args.capacity:
-            capacity = run_capacity(board, cfg, list(converters) + list(bridges) + dc_loads,
+            capacity = run_capacity(board, cfg, list(converters) + list(bridges) + heat_loads,
                                     progress=progress if args.verbose else None)
             for c in capacity:
                 if c.error:

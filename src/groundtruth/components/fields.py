@@ -91,6 +91,13 @@ PARAMS = (
           "fb_ripple: the simulated ripple at FB below it is an issue (analysis/fb_ripple.py)"),
     Param("FB Ripple Max", "controller", "the most switching ripple its FB pin should see (V p-p)", "V", 1e-3, "mV",
           1e-4, 5.0, "100mV", "fb_ripple: the simulated ripple at FB above it is an issue"),
+    # an IC's current from one supply rail: the PDN's load step when none is set (analysis/pdn.estimate_i_step)
+    Param("Supply Current", "IC", "the IC's maximum current from its supply rail (the datasheet's I_DD / I_CC, "
+          "max, at its busiest)", "A", 1.0, "A", 1e-5, 100.0, "150mA",
+          "PDN: the load step (half of it) when the rail has none set, so the rail gets a target impedance"),
+    Param("Supply Voltage Min", "IC", "the lowest supply voltage the IC works at (the datasheet's V_DD min)", "V",
+          1.0, "V", 0.1, 1000.0, "3.0V", "PDN: the limit for the DC voltage at its supply pins (pdn_dc_voltage; "
+          "empty: the rail's voltage less its ripple)"),
     Param("Vf", "diode", "diode_vf (a buck's catch diode)", "V", 1.0, "V", 0.0, 10.0, "0.55V",
           "catch-diode loss"),
     Param("Cj", "diode", "c_oss of a diode buck (the catch diode at the switch node)", "F", 1e-12, "pF", 1e-13, 1e-6,

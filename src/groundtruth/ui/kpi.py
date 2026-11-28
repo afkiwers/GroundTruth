@@ -238,22 +238,87 @@ def _efficiency(e) -> list[Kpi]:
 
 def _pdn(rr) -> list[Kpi]:
     """A rail's PDN: the target, the worst margin (and where), the ICs, the highest peak, the source."""
-    from ..components.values import format_si
+    from ..components.values import format_si as _full
+
+    def format_si(v, unit=""):
+        """Three significant digits on a tile (format_si keeps six, for values read back)."""
+        return _full(float(f"{v:.3g}"), unit) if isinstance(v, (int, float)) else _full(v, unit)
+    how = getattr(rr, "i_step_source", "set")
+    step = getattr(rr, "i_step", None)
+    sub = (f"to {format_si(rr.check_to, 'Hz')}" if how == "set" else
+           f"step {format_si(step, 'A')} from Supply Current" if how == "fields" else
+           f"step {format_si(step, 'A')} ESTIMATED" if how in ("estimate", "partly") else "")
     out = [("target", format_si(rr.target_ohm, "Ω") if rr.target_ohm else "none",
-            f"to {format_si(rr.check_to, 'Hz')}" if rr.target_ohm else "set the step current", "",
-            "V · ripple / I_step: below it the rail holds its voltage for that current step")]
+            sub if rr.target_ohm else "set the step current", "warn" if how in ("estimate", "partly") else "",
+            "V · ripple / I_step: below it the rail holds its voltage for that current step"
+            + ("; I_step is estimated from the ICs' pin counts (half their typical maximum current): set Load step "
+               "on the Power integrity tab, or the ICs' Supply Current field" if how in ("estimate", "partly") else ""))]
     if rr.worst:
         w = rr.worst
-        st = "error" if w["margin_db"] < 0 else "warn" if w["margin_db"] < 3 else "ok"
+        st = ("error" if w["margin_db"] < 0 and how not in ("estimate", "partly") else "warn" if w["margin_db"] < 3
+              else "ok")
+        # why it is the worst, and the best fix tried there (pdn._explain_peaks), in the tile's hover text
+        port = next((p for p in rr.ports if p["part"] == w["part"]), {})
+        at = next((pk for pk in port.get("peaks", ()) if pk["f"] == w["f"]), port.get("worst") or {})
+        from ..analysis.pdn import point_advice
+        why = (f"; {at['cause']}" if at.get("cause") else "") + (f"; {point_advice(at)}" if point_advice(at) else "")
         out.append(("worst margin", f"{w['margin_db']:+.1f} dB", f"{w['part']} @ {format_si(w['f'], 'Hz')}", st,
-                    f"the IC furthest over (or nearest to) the target, held there by {w['holds']}"))
+                    f"the IC furthest over (or nearest to) the target, held there by {w['holds']}{why}"))
+    dcs = [(d, d["part"]) for d in getattr(rr, "dc_ics", ())]
+    if dcs:
+        d, part = min(dcs, key=lambda t: t[0]["v"] - t[0]["limit"])
+        st = "error" if d["v"] < d["limit"] else "ok"
+        out.append(("lowest DC", f"{d['v']:.3f} V", f"{part}: −{d['drop_mv']:.1f} mV, min {d['limit']:.3g} V", st,
+                    f"the DC voltage at each IC's supply pins with every IC drawing its maximum current: the rail's "
+                    f"voltage less the IR drop in the copper (supply {d['supply_mv']:.1f} mV + return "
+                    f"{d['return_mv']:.1f} mV at {part}); the limit is {d['limit_how']}. The map is the view "
+                    f"'{getattr(rr, 'dc_view', '')}'"))
+    steps = [(p["step"], p["part"]) for p in rr.ports if p.get("step") and p["step"].get("peak_late") is not None]
+    if steps and rr.voltage:
+        m, part = max(steps, key=lambda t: t[0]["peak_late"])
+        # the band the run judged with (kept with the step; a run kept before PdnResult.ripple: the step's own)
+        allowed = rr.voltage * getattr(rr, "ripple", None) if getattr(rr, "ripple", None) else \
+            rr.voltage * float(next((r.step.get("max_dev") for r in getattr(rr, "responses", ())
+                                     if getattr(r, "step", None) and r.step.get("max_dev")), 0.05))
+        est = how in ("estimate", "partly")
+        st = ("error" if m["peak_late"] > allowed and not est else "warn" if m["peak_late"] > allowed or est
+              else "ok")
+        # the move shown is the one ranked and judged: the largest |ΔV| after the spike, with its sign (a dip, or
+        # an overshoot when that is larger)
+        move = m["dip_late"] if abs(m["dip_late"]) >= m["peak_late"] - 1e-12 else m["peak_late"]
+        spike = m.get("peak", abs(m.get("dip") or 0.0))
+        out.append(("load step", f"{move * 1e3:+.3g} mV",
+                    f"{part} of ±{allowed * 1e3:.3g} mV" + (f"; spike ±{spike * 1e3:.3g} mV" if spike
+                                                             and spike > m["peak_late"] else ""), st,
+                    f"the rail's largest move at an IC when its load steps by {format_si(step, 'A')}"
+                    + (" (ESTIMATED)" if est else "") + ", after the copper's first nanoseconds (that spike is the "
+                    "impedance above the decaps, which the target judges): the decaps' and the source's dip, against "
+                    "the allowed ripple; the plot below the curves shows it against time"))
+    used = [c for c in getattr(rr, "decaps", ()) if "little" in c]
+    if used:
+        little = [c["ref"] for c in used if c["little"]]
+        out.append(("decaps", f"{len(used) - len(little)} of {len(used)} work",
+                    ("doing little: " + ", ".join(little[:4]) + (" …" if len(little) > 4 else "")) if little
+                    else "each carries ≥5 % somewhere", "warn" if little else "ok",
+                    "decaps that carry at least 5 % of an IC's current somewhere below the check frequency; the "
+                    "others are too far from every IC or resonate where other parts already hold the rail (the "
+                    "plot under the curves: each part's share of the worst IC's current)"))
     out.append(("ICs", str(len(rr.ports)), ", ".join(p["part"] for p in rr.ports[:4])
                 + (" …" if len(rr.ports) > 4 else ""), "", "the ICs with supply pins on the rail (ports)"))
-    peaks = [(pk, p["part"]) for p in rr.ports for pk in p["peaks"][:1]]
+    # the highest peak below check_to (where the target applies; above it the package and die decouple), of a port
+    # whose curve is physical (pdn.nonphysical_from), with its cause (pdn._explain_peaks)
+    peaks = [(pk, p["part"]) for p in rr.ports if p.get("nonphysical_from") is None for pk in p["peaks"]
+             if pk["f"] <= rr.check_to]
     if peaks:
         pk, part = max(peaks, key=lambda t: t[0]["z_ohm"])
-        out.append(("highest peak", format_si(pk["z_ohm"], "Ω"), f"{part} @ {format_si(pk['f'], 'Hz')}", "",
-                    "the highest anti-resonance: two decaps, or the decaps and the planes, ringing together"))
+        pair = (f"{pk['low'].replace('source ', '')}↔{pk['high'].replace('source ', '')}"
+                if pk.get("low") and pk.get("high") and pk["low"] != pk["high"] else "")
+        out.append(("highest peak", format_si(pk["z_ohm"], "Ω"),
+                    f"{part} @ {format_si(pk['f'], 'Hz')}" + (f" ({pair})" if pair else ""), "",
+                    "the highest anti-resonance below the check frequency"
+                    + (f": {pk['cause']}" if pk.get("cause") else ": two decaps, or the decaps and the planes, "
+                       "ringing together")
+                    + (f"; Z0 {format_si(pk['z0'], 'Ω')}, Q {pk['q']:.2g}" if pk.get("z0") else "")))
     if rr.source:
         out.append(("source", rr.source.split(" ", 1)[0], "R + jωL", "", rr.source))
     return out

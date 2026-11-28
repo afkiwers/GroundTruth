@@ -50,7 +50,7 @@ fitting ones first.
 A supply rail's impedance as its ICs see it between their supply and ground pins, from 10 kHz to 1 GHz: the decaps,
 the planes' capacitance, the vias and the regulator together, solved on one model of the whole board. Below a target
 impedance `Z_t = V · ripple / I_step` the rail holds its voltage within the ripple whatever the frequency of the IC's
-current step. In the settings:
+current step. Without `i_step` the rail still gets a target: the load step is half the sum of its ICs' maximum supply currents, from each IC's `Supply Current` field, else ESTIMATED from its pin count (8 pins 20 mA, 20 pins 50 mA, 48 pins 100 mA, 100 pins 250 mA, 256 pins 500 mA, more 1.5 A). An estimated step is marked as such on the tiles, the plot and the report, and its findings are warnings at most: set `i_step` (or the ICs' fields) to make them firm. A regulator on the rail (a part with a power_out pin) is not counted (its own load's current is not known: set the step), and a Supply Current field that does not read as 10 µA … 100 A (a bare `150` reads 150 A) is not used: the note says so. In the settings:
 
 ```yaml
 pdn:
@@ -59,7 +59,8 @@ pdn:
 ```
 
 `ground` (default the first reference net), `source` (the part feeding the rail: found as the part with a `power_out`
-pin on it, else a connector; `none` for no source), `vrm_r` / `vrm_l` (its output resistance and inductance: a
+pin on it, else a switching regulator's output inductor (its other pad on an IC's `power_out` switch pin),
+else a connector; `none` for no source), `vrm_r` / `vrm_l` (its output resistance and inductance: a
 regulator's flat output impedance and the inductance above its loop bandwidth; defaults 5 mΩ, 20 nH), `parts` (the
 ICs to check; default every part with `power_in` pins on the rail and a pad on the ground), `check_to` (the target
 applies up to here, default 100 MHz: above, the package and the die decouple), `decap_mm` (default 3 mm). Simulate
@@ -96,12 +97,19 @@ Find rails lists every stage's output beside the rails ICs draw from (read at it
 from it; its step half the stage's load current). Checked on the loop test board: the field solve's |Z| at the
 buck's output capacitor equals the analytic closed loop within 5 % from 1 to 100 kHz (tests/test_load_step.py).
 
+**Peaks explained.** Peaks explained: each IC's peaks below check_to and its worst point say why: the anti-resonance of the part holding the rail below the peak (inductive above its own resonance) with the one above it (capacitive), Q from the curve's fitted pole (the mounting's inductance in it) and Z0 = |Z_peak| / Q, or at the worst point the inductance above the decaps or too little capacitance; for a point over the target or within 3 dB of it, fixes are tried by a rank-one update of the solved network (no new model): a capacitor resonating at the peak, a damping capacitor (ESR about Z0), one more of the part there, each beside the decap where it helps most and judged by the highest |Z| within a decade of the point (a fix often moves a peak rather than lowering it: kept only when that highest |Z| falls by 1 dB or more and nothing judged rises, and no point further away goes over the target; the text says whether it meets the target; below resolution 2 it adds that a peak's height and frequency depend on the grid, to check at 2 before adding parts; not for a soft bump of Q below 1, the peak's Q read from the curve's fitted pole; where no fix is tried or none helps, the reason is given, and at the inductive rise the advice is the layout's: decaps closer to the pins, more and shorter vias, planes closer). The `pdn_impedance` issue names the cause and the best fix, the plot labels the parts ringing at each peak near the target, the report has a table. Each decap also gets its "without it" figure: the largest rise of |Z| at one of the peaks or worst points when it is taken out, exact there and a lower bound on the harm (taking a decap out moves the peaks it takes part in, which this does not judge: it never says removing one helps); shown in the decap plot's legend and the report. A port whose curve turns non-physical (the fine model's correction larger than the board-wide model's inductance) is said so and not judged [A128] [A129].
+
+**Which decaps work.** From the solve's own branch currents, each part's share of each IC's current against frequency (the plot under the curves, for the worst IC); per decap its largest share below check_to and at which IC, its useful band (where it carries at least 10 %), its own resonance 1/(2π√(ESL·C)) with C at its DC bias, and "does little" when it never carries 5 % (the info `decap_ineffective`: too far from every IC, or resonating where other parts already hold the rail); frequencies where the decaps ring (their currents add to more than 1.5 times the IC's, an anti-resonance) are shaded and not judged, and a decap beside an IC left out of the model is not flagged; the tile counts the decaps that work [A126].
+
+**The DC voltage at each IC.** The rail's own DC run from its source pin to every IC's supply pins, each IC drawing its maximum current (its `Supply Current` field, else the pin-count estimate) and returning through its ground pins, on the whole-board DC model; each IC's worst supply pin's voltage is the rail's voltage less the supply and return drop, against its `Supply Voltage Min` field, else the rail's voltage less its ripple; the issue `pdn_dc_voltage` below it. The run is also its own Results view, "<rail> (PDN DC)": its current density map, busiest vias and copper loss. Without a source no DC run (a note) [A125]. An LDO (or other regulator) fed from the rail draws its output rail's ICs' maximum current (one level). The run uses the ICs' maximum, often estimated currents: it heats nothing in Thermal or Current capacity and is not in the combined DC view. ICs left out of the impedance ports are still loaded and checked.
+
 **The step over time.** With `i_step` and a voltage, each port's voltage when its IC's current steps: its solved
 impedance fitted (vector fitting), the current the board sees passing the IC's package and die above `check_to` (a
 first-order low-pass there, as the target assumes [A19]), with a `load_step`'s ramp, harness, load capacitance or
 switched coil as on a converter. First the copper's inductance shows (L·ΔI·2π·check_to), then the decaps' and the
-source's dip; the issue `pdn_step` when that dip (after the spike: the spike is the impedance above the decaps, which `pdn_impedance` judges) moves by more than the ripple. On the test board the step after
-10 ns matches the analytic closed-loop step within 1 % of its dip.
+source's dip; the issue `pdn_step` when that dip (after the spike: the spike is the impedance above the decaps, which `pdn_impedance` judges) moves by more than the ripple.  The tile **load step** shows the largest dip after the spike (the figure pdn_step judges) against the allowed ripple, with the spike beside it; the plot under the impedance curves draws each IC's ΔV in mV on a log time axis, the allowed band dashed, the spike's first nanoseconds shaded grey (the step is fitted on the impedance up to three times the check frequency; an IC whose fitted step would first move against the load step gets a note, no figures); the reports' IC table has the dip. On the test board the step after
+10 ns matches the analytic closed-loop step within 1 % of its dip. A rail with nothing holding it at DC (no source found) gets no step response, only a note: a constant step current would drain
+its decaps without limit (I·t/C), which is not a dip a real board shows; set `source`.
 
 **Power tree.** The tab's (and the Converters tab's) **Power tree…** draws the board's power as a flow chart, read
 from the board and the settings (`analysis/power_tree.py`, `report/power_tree.py`): sources (connectors with a pad

@@ -10,7 +10,8 @@ last map's layer alone (its ⤢ button) and saves <theme>_layer_<layer>.png. --r
 (kept in DIR/groundtruth/history when Preferences keep runs); the History tab is captured with its two newest runs
 compared. A tab "Signal paths:<path>" selects that path and saves <theme>_paths_<path>.png once its schematic is
 drawn. A tab "Fixes:<kind>" (Fixes:filter, Fixes:snubber, Fixes:cm ...) selects the first design change of that
-kind after --simulate and saves <theme>_Fixes_<kind>.png once its schematic is drawn. Captured with Win32 PrintWindow, which works while the screen
+kind after --simulate and saves <theme>_Fixes_<kind>.png once its schematic is drawn. A tab "Results:<text>"
+(Results:Bode) shows the first Results view whose name has that text and saves <theme>_Results_<text>.png. Captured with Win32 PrintWindow, which works while the screen
 itself cannot be read (a locked or minimised remote desktop)."""
 import argparse
 import ctypes
@@ -75,7 +76,8 @@ def main() -> int:
     ap.add_argument("--tabs", default="Signal paths,Converters,Results")
     ap.add_argument("--out")
     ap.add_argument("--size", default="1400x900")
-    ap.add_argument("--scroll", action="store_true", help="also the Results tab scrolled down to its last plot")
+    ap.add_argument("--scroll", action="store_true", help="also the Results tab (or a Results:<view> tab) scrolled "
+                    "down to its last plot")
     ap.add_argument("--runs", type=int, default=0, help="simulate this many times (the History tab's runs)")
     ap.add_argument("--real-prefs", action="store_true",
                    help="use this computer's Preferences and server job list (default: a private folder, so the "
@@ -166,6 +168,35 @@ def main() -> int:
                     return
                 path = out / f"{args.theme}_paths_{''.join(ch if ch.isalnum() else '_' for ch in net)}.png"
                 print(f"{path}: {'ok' if capture(f, path) else 'PrintWindow failed'}")
+                return
+            if name.startswith("Results:"):               # the Results tab with the first view whose name has this text
+                text, rp = name.split(":", 1)[1], f.results_panel
+                if state.get("view") != text:
+                    items = [rp.choice.GetString(i) for i in range(rp.choice.GetCount())]
+                    k = next((i for i, s in enumerate(items) if text.lower() in s.lower()), None)
+                    if k is None:
+                        print(f"  no Results view with {text!r}: {items}")
+                        return
+                    f.notebook.SetSelection(f.notebook.FindPage(rp))
+                    rp.choice.SetSelection(k)
+                    rp._route_changed()
+                    state["view"] = text
+                    tabs.insert(0, name)                  # capture once rendered and painted
+                    return
+                stem = f"{args.theme}_Results_{''.join(ch if ch.isalnum() else '_' for ch in text)}"
+                if state.get("view_scrolled") == text:    # --scroll: the same view scrolled to its last plot
+                    path = out / f"{stem}_scrolled.png"
+                    print(f"{path}: {'ok' if capture(f, path) else 'PrintWindow failed'}")
+                    state["view_scrolled"] = None
+                    rp.page.Scroll(-1, 0)                 # back to the top for the next view
+                    return
+                path = out / f"{stem}.png"
+                print(f"{path}: {'ok' if capture(f, path) else 'PrintWindow failed'}")
+                print(f"  tiles: {rp.tile_text()}")
+                if args.scroll:
+                    rp.page.Scroll(-1, rp.page.GetVirtualSize().height)
+                    state["view_scrolled"] = text
+                    tabs.insert(0, name)                  # capture the scrolled page on the next idle tick
                 return
             if name.startswith("Fixes:"):                 # the Fixes tab with a design change selected (its kind)
                 kind, p = name.split(":", 1)[1], f.fixes

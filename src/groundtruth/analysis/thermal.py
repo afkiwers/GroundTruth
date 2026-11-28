@@ -152,7 +152,7 @@ def _stages(converters) -> list:
     """The power-stage results a thermal solve can use (their DC paths solved); a motor bridge's legs heat the
     board through the bridge (_bridges)."""
     return [c for c in converters if (c.kind == "dcload" or c.kind == "converter" and not getattr(c, "view_of", None))
-            and not c.error and not getattr(c, "bridge", None)]
+            and not c.error and not getattr(c, "bridge", None) and not getattr(c, "pdn_rail", "")]
 
 
 def _bridges(results) -> list:

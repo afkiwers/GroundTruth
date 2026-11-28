@@ -24,6 +24,8 @@ the [README](../../README.md); how the fields are read in detail: [the settings 
 | `Qrr` | FET | nC | `62 nanocoulomb` | a silicon body diode's reverse-recovery charge (GaN has none): recovery loss and current spike | |
 | `Qg` | FET | nC | `12 nanocoulomb` | total gate charge: the efficiency sweep's gate-drive loss Q_g·V_gate·f_sw per switch | Efficiency |
 | `Vds` | FET | V | `100V` | the switch's voltage rating: the fix advisor keeps the switch-node peak below 80 % of it | Run checks |
+| `Supply Voltage Min` | IC | V | `3.0V` | the lowest supply voltage it works at: the limit for the DC voltage at its supply pins (`pdn_dc_voltage`; empty: the rail's voltage less its ripple) | |
+| `Supply Current` | IC | A | `150mA` | its maximum current from the supply rail: half of it (summed over the rail's ICs) is the PDN's load step when the rail has none set, all of it the IC's draw in the rail's DC run | |
 | `Vf` | diode | V | `0.55V` | a buck's catch diode: its conduction loss | |
 | `Cj` | diode | pF | `120 picofarad` | a diode buck's catch-diode capacitance at the switch node: ringing, node charge current | |
 | `DCR` | inductor | mΩ | `6.9milliohm` | the winding resistance: winding loss, DC paths | DC loads, Thermal, Signal paths |

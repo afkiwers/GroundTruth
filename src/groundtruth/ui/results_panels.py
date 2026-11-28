@@ -1306,11 +1306,17 @@ class ResultsPanel(wx.Panel):
             if self.canvas3.IsShown() and rr.kind == "bode":     # a Bode view's step responses
                 from ..report.plots import draw_step
                 views.append((self.canvas3, lambda fig: draw_step(fig, rr)))
+            elif self.canvas3.IsShown() and rr.kind == "pdn":    # a rail's decaps: their share of the worst IC's current
+                from ..report.plots import draw_pdn_decaps
+                views.append((self.canvas3, lambda fig: draw_pdn_decaps(fig, rr)))
             elif self.canvas3.IsShown():
                 views.append((self.canvas3, lambda fig: draw_section(fig, board, rr)))
             if rr.kind == "pdn":
-                from ..report.plots import draw_pdn_holds
-                views.append((self.canvas2, lambda fig: draw_pdn_holds(fig, rr)))
+                # the load step at each IC when there is one (the step's figures up front), else what holds the
+                # rail at each frequency (the decaps' shares under it say more of that)
+                from ..report.plots import draw_pdn_holds, draw_pdn_step, pdn_has_step
+                views.append((self.canvas2, (lambda fig: draw_pdn_step(fig, rr)) if pdn_has_step(rr)
+                              else (lambda fig: draw_pdn_holds(fig, rr))))
             elif rr.kind == "bode":             # and their poles and zeros in the s-plane
                 from ..report.plots import draw_pz
                 views.append((self.canvas2, lambda fig: draw_pz(fig, rr)))
@@ -1436,7 +1442,9 @@ class ResultsPanel(wx.Panel):
         else:
             maps = self._px(heatmap_height_in(rr, w / inch, max(h - 6, MAPS_MIN_PX) / inch, layer, vectors, scale))
         heights = ((self.canvas, max(maps, MAPS_MIN_PX)),
-                   (self.canvas3, (self._px(STEP_IN) if rr.kind == "bode" else
+                   # a Bode view's steps and a PDN rail's decap shares are plots of STEP_IN (the cross-section's
+                   # height was 0 for a PDN view: the decap plot was laid out with no height, never seen)
+                   (self.canvas3, (self._px(STEP_IN) if rr.kind in ("bode", "pdn") else
                                    self._px(section_height_in(self.board, rr, w / inch))) if self.canvas3.IsShown() else 120),
                    (self.canvas2, self._px(SPECTRUM_IN)))
         for c, h in heights:
@@ -1568,6 +1576,9 @@ class ResultsPanel(wx.Panel):
         if rr is not None and rr.kind == "bode":        # a Bode view: its step responses there (plots.draw_step)
             from ..report.plots import has_step
             return has_step(rr)
+        if rr is not None and rr.kind == "pdn":         # its decaps' shares of the worst IC's current
+            from ..report.plots import pdn_share_port
+            return pdn_share_port(rr) is not None
         if rr is not None and rr.kind == "bridge":      # its capacitors' ripple bars (not on the sweep)
             return bool(self.section_box.GetValue() and getattr(rr, "caps", None) and rr.view != "sweep")
         return bool(self.section_box.GetValue() and rr is not None and getattr(rr, "section", None)

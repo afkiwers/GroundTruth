@@ -637,7 +637,9 @@ def part_losses(result) -> dict[str, tuple[float, str]]:
     combined = getattr(result, "dc_combined", None)
     if combined is not None:
         paths += [(p, "all stages together") for p in getattr(combined, "dc", [])]
-    for r in list(getattr(result, "converters", ())) + list(getattr(result, "dc_loads", ())):
+    # a PDN rail's own DC run (its ICs' maximum, estimated currents) is not an operating point: not counted
+    for r in list(getattr(result, "converters", ())) + [d for d in getattr(result, "dc_loads", ())
+                                                        if not getattr(d, "pdn_rail", "")]:
         paths += [(p, f"{r.net}: {p['name']}") for p in getattr(r, "dc", [])]
     for p, where in paths:
         for part in p.get("parts", ()):

@@ -47,6 +47,9 @@ CHECKS: dict[str, tuple[str, str]] = {
     "part_temperature": ("warning", "Part temperature above the limit (thermal solve)"),
     "pdn_impedance": ("warning", "A supply rail's impedance at an IC above its target (PDN)"),
     "pdn_step": ("warning", "A supply rail moves by more than its ripple at an IC when the load steps (PDN)"),
+    "pdn_dc_voltage": ("warning", "An IC's supply pins below its minimum supply voltage at DC (the rail's IR drop, "
+                                  "PDN)"),
+    "decap_ineffective": ("info", "Decoupling capacitors that carry almost none of the ICs' current (PDN)"),
     "decap_missing": ("warning", "An IC's supply pin with no decoupling capacitor close by"),
     "clearance_voltage": ("error", "Copper of two nets closer than IPC-2221B asks for their voltage difference"),
     "cap_voltage": ("warning", "A capacitor's voltage over its (derated) rating"),

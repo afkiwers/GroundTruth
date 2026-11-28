@@ -14,6 +14,29 @@ from groundtruth.report import html
 EDGE = Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")
 
 
+def _edge_renders() -> bool:
+    """Headless Edge is there AND writes a page's DOM: some versions (Edge 158 on one machine) start headless,
+    write nothing at all (no page, no screenshot, no log) and exit 0, which failed these tests for a reason that
+    has nothing to do with the report. Checked once on a trivial page."""
+    if not EDGE.exists():
+        return False
+    import tempfile
+    d = Path(tempfile.mkdtemp(prefix="edge_probe_"))
+    page = d / "p.html"
+    page.write_text("<!doctype html><html><body><pre id='probe'>ok</pre></body></html>", encoding="utf-8")
+    try:
+        run = subprocess.run([str(EDGE), "--headless=new", "--disable-gpu", f"--user-data-dir={d / 'edge'}",
+                              "--dump-dom", page.as_uri()], capture_output=True, text=True, encoding="utf-8",
+                             timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return ">ok</pre>" in run.stdout
+
+
+HEADLESS = _edge_renders()
+NO_HEADLESS = "needs Microsoft Edge rendering a headless page (missing, or it writes nothing on this machine)"
+
+
 def _issues() -> list[Issue]:
     """Seven issues of four checks: clearance_voltage 3 (2 warnings, 1 error), cap_voltage 2 (warnings),
     vds_rating 1 (error), plane_resonance 1 (info)."""
@@ -121,7 +144,7 @@ def test_long_tables_are_paged_and_short_ones_not():
     assert "paged" not in html._issues(many[:25])
 
 
-@pytest.mark.skipif(not EDGE.exists(), reason="needs Microsoft Edge for a headless page")
+@pytest.mark.skipif(not HEADLESS, reason=NO_HEADLESS)
 def test_the_pager_pages_the_issues_with_their_filters(tmp_path):
     """61 issues (20 errors): 25 rows at first; page 2 the next 25; 50 rows; all (no page buttons); on page 3 the
     Error filter goes back to the first page of its 20; a check whose one row is the last shows it (the page counted
@@ -137,7 +160,7 @@ def test_the_pager_pages_the_issues_with_their_filters(tmp_path):
     assert res["late"] == [1, "Rows 1–1 of 1"]          # a check whose only row was past the first page
 
 
-@pytest.mark.skipif(not EDGE.exists(), reason="needs Microsoft Edge for a headless page")
+@pytest.mark.skipif(not HEADLESS, reason=NO_HEADLESS)
 def test_a_summary_finding_opens_its_check(tmp_path):
     """The summary's count of a check (Main findings) shows that check's rows only, every severity (the Error chip
     picked before is released)."""
@@ -146,7 +169,7 @@ def test_a_summary_finding_opens_its_check(tmp_path):
     assert out == "cap_voltage,cap_voltage|all,cap_voltage"
 
 
-@pytest.mark.skipif(not EDGE.exists(), reason="needs Microsoft Edge for a headless page")
+@pytest.mark.skipif(not HEADLESS, reason=NO_HEADLESS)
 def test_clicking_checks_shows_only_them(tmp_path):
     """vds_rating and plane_resonance picked: their two rows; with Error: only vds_rating's, the chips counting
     errors; 'all' checks with Error: the two errors; back to All: all seven."""
