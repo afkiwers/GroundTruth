@@ -1823,10 +1823,12 @@ def has_step(view) -> bool:
 
 
 def draw_step(fig: Figure, view) -> None:
-    """The step responses of a view's responses (transfer.Response.step: each its circuit's response to a 1 V step at
-    the driver, emi/mna.Circuit.step): each in its colour against time, its final value dashed with the ±2 % band,
-    the 10-90 % rise and the settling time marked; each response on its own time scale (a filter's milliseconds beside
-    an op-amp's nanoseconds) when they differ by more than ten times, the slowest's otherwise."""
+    """The step responses of a view's responses (transfer.Response.step): each in its colour against time, its final
+    value dashed with the ±2 % band, the settling time dotted; each response on its own time scale (a filter's
+    milliseconds beside an op-amp's nanoseconds) when they differ by more than ten times, the slowest's otherwise.
+    Where the path's op-amps have known supplies (analysis/swing.py: step["large"]) in volts, the driver from its low
+    to its high level, each output held within its limits (grey dotted lines), the same step without the limits
+    faint and dashed where it differs; else per volt of a 1 V step at the driver (emi/mna.Circuit.step)."""
     from ..analysis.transfer import SETTLE_BAND, response_label
     fig.clear()
     resp = [r for r in view.responses if getattr(r, "step", None)]
@@ -1838,6 +1840,11 @@ def draw_step(fig: Figure, view) -> None:
     if all(r.step.get("kind") == "load" for r in resp):
         _draw_load_step(fig, view, resp)
         return
+    large = [r.step.get("large") for r in resp]
+    volts = any(large)
+    if volts:           # volts and volts per volt on one axis don't mix: only the responses in volts
+        resp = [r for r in resp if r.step.get("large")]
+        large = [r.step["large"] for r in resp]
     spans = [float(r.step["t"][-1]) for r in resp]
     apart = max(spans) / max(min(spans), 1e-300) > 10
     groups = [[r] for r in resp] if apart else [resp]
@@ -1846,25 +1853,61 @@ def draw_step(fig: Figure, view) -> None:
         t_end = max(float(r.step["t"][-1]) for r in group)
         scale, unit = next(((k, u) for k, u in ((1.0, "s"), (1e-3, "ms"), (1e-6, "µs"), (1e-9, "ns"))
                             if t_end >= 2 * k), (1e-12, "ps"))
-        for r in group:
+        rails = set()
+        span_v = []                       # the limited curves' and the rails' range: the axis (the faint unlimited
+        for r in group:                   # step may run far past the rails, 13 V on 3.3 V)
             c = PDN_COLOURS[resp.index(r) % len(PDN_COLOURS)]
+            lg = r.step.get("large")
+            style = receiver_style(r, len(group) > 1)
+            if lg is not None:            # in volts: the limited step, the unlimited one faint where it differs
+                t, y = np.asarray(lg["t"]) / scale, np.asarray(lg["y"])
+                lin = np.asarray(lg["lin"])
+                ax.plot(t, y, color=c, lw=1.3, label=response_label(r, view.owner), **style)
+                span_v += [float(np.min(y)), float(np.max(y))] + list(lg.get("rails") or ())
+                if np.max(np.abs(lin - y)) > 1e-3 * max(1.0, float(np.max(np.abs(y)))):
+                    ax.plot(t, lin, color=c, lw=0.8, ls="--", alpha=0.45)
+                if lg.get("rails"):
+                    rails.add(tuple(round(v, 6) for v in lg["rails"]))
+                m = lg.get("metrics") or {}
+                y0, fin = float(y[0]), lg["final"]
+                if m and m.get("rise") is not None:
+                    d = fin - y0
+                    ax.axhline(fin, color=c, lw=0.7, ls="--")
+                    ax.axhspan(fin - abs(d) * SETTLE_BAND, fin + abs(d) * SETTLE_BAND, color=c, alpha=0.08, lw=0)
+                    if m.get("settling") is not None:
+                        ax.axvline(m["settling"] / scale, color=c, lw=0.7, ls=":")
+                continue
             t, y, m = np.asarray(r.step["t"]) / scale, np.asarray(r.step["y"]), r.step["metrics"]
-            ax.plot(t, y, color=c, lw=1.3, label=response_label(r, view.owner), **receiver_style(r, len(group) > 1))
+            ax.plot(t, y, color=c, lw=1.3, label=response_label(r, view.owner), **style)
             fin = m.get("final")
             if fin and m.get("rise") is not None:
                 ax.axhline(fin, color=c, lw=0.7, ls="--")
                 ax.axhspan(fin * (1 - SETTLE_BAND), fin * (1 + SETTLE_BAND), color=c, alpha=0.08, lw=0)
                 if m.get("settling") is not None:
                     ax.axvline(m["settling"] / scale, color=c, lw=0.7, ls=":")
+        for lo, hi in sorted(rails):      # the op-amps' output limits
+            for v in (lo, hi):
+                ax.axhline(v, color="0.45", lw=0.9, ls=":")
+                ax.annotate(f"{v:g} V", (1.0, v), xycoords=("axes fraction", "data"), xytext=(-2, 2),
+                            textcoords="offset points", ha="right", va="bottom", fontsize=FS_TICK, color="0.4")
+        if span_v:
+            lo_v, hi_v = min(span_v), max(span_v)
+            pad = 0.08 * max(hi_v - lo_v, 1e-3)
+            ax.set_ylim(lo_v - pad, hi_v + pad)
         ax.set_xlabel(f"time ({unit})", fontsize=FS_TEXT)
         ax.tick_params(labelsize=FS_TICK)
         ax.grid(True, alpha=0.3)
         if len(groups) > 1:
             ax.set_title(response_label(group[0], view.owner), fontsize=FS_TEXT)
-    axes[0].set_ylabel("V per V step", fontsize=FS_TEXT)
+    axes[0].set_ylabel("V" if volts else "V per V step", fontsize=FS_TEXT)
     w_in, h_in = fig.get_size_inches()
     left_in, right_in = _lh(FS_TEXT) + _width_in("-1000", FS_TICK) + 0.24, 0.25
-    title = f"{view.owner}: step response (1 V at the driver; dashed: final value, ±2 %; dotted: settled)"
+    if volts:
+        lo, hi = next(x for x in large if x)["levels"]
+        title = (f"{view.owner}: step response (driver {lo:g} → {hi:g} V; grey dotted: supply limits; faint: "
+                 "without them; dashed: final ±2 %; dotted: settled)")
+    else:
+        title = f"{view.owner}: step response (1 V at the driver; dashed: final value, ±2 %; dotted: settled)"
     if len(groups) == 1:                # one time scale: the title and the legend over it
         header = _title_and_key(axes[0], title, w_in - left_in - right_in)
     else:                               # a panel per response, each named over it: the title on its own line above

@@ -130,7 +130,8 @@ def _sources(board: Board, config, vm: Volts, amp_pads: set) -> dict:
     return src
 
 
-def dc_operating_point(board: Board, config, vm: Volts) -> DcPoint:
+def dc_operating_point(board: Board, config, vm: Volts, fixed: Optional[dict] = None,
+                       exclude: Optional[set] = None) -> DcPoint:
     """The DC operating point of the board's linear network [Ho 1975] [A58]: resistors, shorts / inductors / ferrites
     (their DCR, at least LINK_OHMS) and op-amp channels (an amplifier part's, analog_net.opamp_channels: a VCVS of its
     open-loop gain A0 behind R_O, as Circuit.opamp at DC); capacitors are open at DC. The sources: _sources. Solved by
@@ -138,7 +139,9 @@ def dc_operating_point(board: Board, config, vm: Volts) -> DcPoint:
     source), so the voltage across a capacitor is an exact range of its two ends' difference (a divider's midpoint 6 V
     of 12 V; a capacitor across a feedback resistor ~0 V). Nets with no DC path to a source are left out (`floating`).
     Audit round 7, AA-1: the bounds before took each net on its own (a divider's midpoint 12 V, a feedback capacitor
-    the op-amp's whole supply)."""
+    the op-amp's whole supply). `fixed` {net: (lo, hi, why)}: sources of the caller's that win over _sources' (a
+    signal path's driver at one level: analysis/swing.py); `exclude`: nets that are never sources (a path's own
+    nets, which its circuit sets: an ADC's bidirectional pin on an op-amp's output is a receiver there)."""
     import numpy as np
     from .analog_net import AMP_R_O, opamp_channels
     channels, amp_pads = [], set()
@@ -150,6 +153,9 @@ def dc_operating_point(board: Board, config, vm: Volts) -> DcPoint:
             channels.append(ch)
             amp_pads |= {(fp.reference, p.number) for p in (ch.inp, ch.inn, ch.out) if p is not None}
     src = _sources(board, config, vm, amp_pads)
+    for n in exclude or ():
+        src.pop(n, None)
+    src.update(fixed or {})
     links = []                                            # (net a, net b, conductance)
     for fp in board.footprints:
         m = config.model_for(fp.reference)
@@ -166,11 +172,15 @@ def dc_operating_point(board: Board, config, vm: Volts) -> DcPoint:
         if not ch.out.net or not ch.inp.net:
             continue
         prm = ch.params
-        if ch.inn is None:
-            a0 = float(prm.get("gain") or 1.0)
+        # a Gain field (or no IN− pin) makes the channel a gain block, gain·v(in+), as the AC circuit has it
+        # (analog_net._gain_block): an instrumentation amplifier's feedback is inside the IC, so the open-loop gain
+        # across the board's parts gave it a rail-to-rail operating point (audit 2026-11-28, the output limits)
+        block = prm.get("gain") is not None or ch.inn is None
+        if block:
+            a0 = float(prm["gain"]) if prm.get("gain") is not None else 1.0
         else:
             a0 = 10 ** (prm["aol"] / 20) if prm.get("aol") else 1e5
-        amps.append((f"#amp{k}", ch.out.net, ch.inp.net, ch.inn.net if ch.inn is not None else None, a0,
+        amps.append((f"#amp{k}", ch.out.net, ch.inp.net, ch.inn.net if ch.inn is not None and not block else None, a0,
                      1.0 / max(prm.get("z_out") or AMP_R_O, LINK_OHMS)))
     nodes = sorted({n for a, b, _ in links for n in (a, b) if n not in src}
                    | {n for _, out, inp, inn, _, _ in amps for n in (out, inp, inn) if n and n not in src}
@@ -191,13 +201,30 @@ def dc_operating_point(board: Board, config, vm: Volts) -> DcPoint:
                 driven.add(x)
         if a in parent and b in parent:
             parent[find(a)] = find(b)
+    # an op-amp channel joins its output to its gain node (it drives that net); its inputs draw no current, so they
+    # are not joined: a channel is determined once each input is (a source, a net with a DC path, or a net of its own
+    # output's, through its feedback), and only then does its output count as driven. An input with no DC path at
+    # all (a capacitor in, no bias resistor) leaves the channel's output, and the nets around it, undetermined:
+    # floating, not the 0 V the least-squares solve gave them (audit 2026-11-28, the output limits)
     for node, out, inp, inn, _, _ in amps:
-        for x in (out, inp, inn):
-            if x in parent:
-                parent[find(x)] = find(node)
-        if any(x in src for x in (out, inp, inn) if x):
+        if out in parent:
+            parent[find(out)] = find(node)
+        if out in src:
             driven.add(node)
     alive = {find(n) for n in driven}
+    known: set = set()
+    changed = True
+    while changed:
+        changed = False
+        for node, out, inp, inn, _, _ in amps:
+            if node in known:
+                continue
+            if all(x in src or (x in parent and (find(x) == find(node) or find(x) in alive))
+                   for x in (inp, inn) if x):
+                known.add(node)
+                alive.add(find(node))
+                changed = True
+    alive -= {find(node) for node, *_ in amps if node not in known}
     keep = [n for n in nodes if find(n) in alive]
     floating = {n for n in nodes if find(n) not in alive and not n.startswith("#amp")}
     if not keep:

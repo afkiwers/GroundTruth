@@ -26,6 +26,8 @@ CHECKS: dict[str, tuple[str, str]] = {
                                    "an op-amp's Bandwidth field)"),
     "opamp_stability": ("warning", "An op-amp's loop has little phase margin: it rings (below 45°) or is close to "
                                    "oscillating (below 20°: an error)"),
+    "output_saturation": ("warning", "An op-amp's output would pass its supply's limits over the path's signal: it "
+                                     "clips (its Output Swing, rail to rail by default)"),
     "emi_margin": ("warning", "Estimated radiated emission close to or above the limit"),
     "band_unsolved": ("warning", "Part of the radiated band could not be solved (emission held, not computed)"),
     "dc_unsolved": ("warning", "A power stage's DC path could not be solved (left out of its loss, input current and "

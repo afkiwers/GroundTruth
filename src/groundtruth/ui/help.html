@@ -218,8 +218,9 @@ in the schematic: see <a href="#siglabels">Labelling a signal path</a>.</p>
 <ul>
 <li><b>The form</b>: <b>Start net</b> (pick it from the list of the board's nets or type it); then <b>Driver pin</b> and
   <b>Receiver pins</b> list the pins of that net (also across series parts) to choose from; <b>Frequency</b>,
-  <b>Rise time</b>, <b>Amplitude (V)</b> and <b>Duty cycle</b> (0.5 for a clock). Values take units and SI
-  prefixes (20MHz, 2ns, 3.3).</li>
+  <b>Rise time</b>, <b>Amplitude (V)</b>, <b>Low level (V)</b> (where the signal swings from: empty 0 V; a sensor
+  idling at mid-supply, a bipolar signal below 0 V; it sets the op-amps' operating point for their output limits,
+  see Bode below) and <b>Duty cycle</b> (0.5 for a clock). Values take units and SI prefixes (20MHz, 2ns, 3.3).</li>
 <li><b>A signal path across nets</b>: the driver and receiver pins may be on different nets joined by series
   parts (a damping resistor, a ferrite, an inductor): the path runs through them and each part's impedance (from
   the <a href="#parts">Parts tab</a>) counts, at its place along the path. A part that doesn't pass a signal by
@@ -1697,7 +1698,12 @@ open-loop output resistance <b>Zout</b> (the datasheet's R_O, default 100 Ω), e
 gives a follower exactly that margin. Its gain, bandwidth and output impedance in the circuit then
 follow from the resistors and capacitors around it; a part with a <b>Gain</b> field stays a fixed gain block (for
 an amplifier GroundTruth can't see inside, such as an instrumentation-amplifier IC), as does an op-amp whose
-inverting input can't be told. The pins are found by their schematic names (+IN, IN+, INP, +, −IN, IN−, INN, −,
+inverting input can't be told. Its output stays within its supply: the voltages on its supply pins (V+ / V− /
+VCC ... or power pins; a rail named like +3V3, a PDN rail or <code>safety: voltages:</code> in the settings), less
+its <b>Output Swing High</b> and <b>Output Swing Low</b> fields (how close the output gets to each rail: the
+datasheet's V_OH = V+ − x and V_OL = V− + y: the headroom in volts (50mV) or as a share of the supply (10%), or
+the level the output reaches (4.5V on a 5 V supply, from half the rail up; −13V for the low side on ±15 V; 90%);
+empty: rail to rail; the finding says how a value was read). The pins are found by their schematic names (+IN, IN+, INP, +, −IN, IN−, INN, −,
 OUT, VOUT, and per channel of a dual or quad: +INA, −INB, OUTA, IN1+ …; a single op-amp's unnamed output: its one
 pin of type output), else by the GT labels
 <code>amp_in</code>, <code>amp_inv</code> (the inverting input) and <code>amp_out</code>. Small signal only: no
@@ -1821,7 +1827,14 @@ forms of inverting, non-inverting, Sallen-Key, multiple-feedback and integrator 
 same circuits with Lcapy (validation audit round 7); and TI's OPA376 multiple-feedback low-pass, drawn in KiCad
 in <code>examples/opamp_mfb_lowpass</code>. For that board the ideal H(s) read from the copper is exactly TI's
 Eq. 1: DC gain −R4/R1 = −4.98, f₀ = 1/(2π·√(R3·R4·C2·C5)) = 21.0 kHz, 3 dB of Chebyshev peaking.</p>
-<p>The <b>step response</b>: the path's (and each op-amp output's) response to a 1 V step at the driver, from rest,
+<p>Where the op-amps' supplies are known the step is in <b>volts</b> and large-signal: the driver steps from the
+path's Low level to Low level + Amplitude, starting from the circuit's DC operating point (the board's resistor
+network with the driver at its low level), and each op-amp's output is held at its limits while the drive would carry
+it beyond them (grey dotted lines; the same step without the limits faint and dashed), let go as soon as the drive
+turns back. The step tile then says when the path clips. An op-amp whose supply is not known is not limited (a note
+says so). Slew rate, the output's current limit, the inputs' common-mode range and recovery from saturation are not
+modelled.</p>
+<p>The <b>step response</b> otherwise: the path's (and each op-amp output's) response to a 1 V step at the driver, from rest,
 on the plot under the Bode plot: the final value (the DC gain) dashed with its ±2 % band, the settling time dotted;
 a filter's milliseconds and an op-amp's nanoseconds each on a panel of their own. The <b>step</b> tile gives the
 overshoot (amber from 20 %), the 10-90 % rise time and the settling time into ±2 %; an undershoot (the first move
@@ -1841,7 +1854,11 @@ its stage's limit: the stage's own transfer, from the previous op-amp's output (
 an upstream filter does not count against it; a filter after the op-amp is not part of its stage (use the path's
 Max bandwidth for it). A loop with less than 45° of phase margin is an <b>opamp_stability</b> warning, below 20° an
 error; give the op-amp <b>PM</b> (its datasheet's phase margin at unity gain) or <b>Fp2</b>: with one pole the
-margin is always near 90°. With the Bode button the findings are notes and a tile; Simulate makes them issues.</p>
+margin is always near 90°. An op-amp whose output would pass its limits at the driver's low or high level is an
+<b>output_saturation</b> warning: the voltage it would need, where it is held, and the driver's range that keeps the
+path linear (set the path's Low level and Amplitude to the real signal); one that touches a limit only during the
+step (its overshoot cut) is an info. With the Bode button the findings are notes and a tile; Simulate makes them
+issues.</p>
 
 <hr><a name="prefs"></a><h3>Preferences</h3>
 <p><b>Preferences…</b> (top bar, next to Help) holds your settings on this computer, for every board (a board's

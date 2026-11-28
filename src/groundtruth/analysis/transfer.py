@@ -98,7 +98,15 @@ def _plain_step(st: Optional[dict], points: int = 400) -> Optional[dict]:
         return None
     t, y = np.asarray(st["t"]), np.asarray(st["y"])
     k = np.unique(np.linspace(0, len(t) - 1, min(points, len(t))).astype(int))
-    return {"metrics": st["metrics"], "t": [float(t[i]) for i in k], "y": [float(y[i]) for i in k]}
+    out = {"metrics": st["metrics"], "t": [float(t[i]) for i in k], "y": [float(y[i]) for i in k]}
+    lg = st.get("large")
+    if lg:          # the step in volts with the op-amps held within their supply (analysis/swing.py)
+        t, y = np.asarray(lg["t"]), np.asarray(lg["y"])
+        k = np.unique(np.linspace(0, len(t) - 1, min(points, len(t))).astype(int))
+        out["large"] = {"levels": list(lg["levels"]), "final": float(lg["final"]), "held": list(lg["held"]),
+                        "rails": list(lg["rails"]) if lg.get("rails") else None, "metrics": lg.get("metrics"),
+                        "t": [float(t[i]) for i in k], "y": [float(y[i]) for i in k]}
+    return out
 
 
 def _plain_normal(nf: Optional[dict]) -> Optional[dict]:

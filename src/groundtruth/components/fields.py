@@ -165,6 +165,15 @@ PARAMS = (
     Param("PM", "op-amp", "the amplifier model's pm: its phase margin at unity gain, degrees (fp2 = "
           "GBW·sin(PM)·tan(PM))",
           "deg", 1.0, "°", 10.0, 90.0, "60", "signal paths: the op-amp's loop, its phase margin"),
+    # how close the output gets to each supply (the datasheet's V_OH = V+ − x, V_OL = V− + y, at the load it drives)
+    Param("Output Swing High", "op-amp", "the amplifier model's swing_hi: where its output stops below its positive "
+          "supply: the headroom (50mV, 10%) or, from half the rail up, the level reached (4.5V, 90%); empty: rail to "
+          "rail", "swing", 1.0, "V", -1000.0, 1000.0,
+          "50mV", "signal paths: each op-amp output's upper limit (the large-signal step, output_saturation)"),
+    Param("Output Swing Low", "op-amp", "the amplifier model's swing_lo: where its output stops above its negative "
+          "supply (or ground): the headroom (50mV, 10%) or the level reached (-13V on ±15 V, 90%); empty: rail to rail",
+          "swing", 1.0, "V", -1000.0, 1000.0,
+          "50mV", "signal paths: each op-amp output's lower limit (the large-signal step, output_saturation)"),
     # a logic buffer (Schmitt trigger) in a signal path (model `buffer`): its datasheet values at the supply it runs
     # at (an HTTP lib's parameters, e.g. from InvenTree); Zout and Cin are the op-amps' rows above
     Param("Rise Time", "buffer", "the buffer model's rise: its output's edge", "s", 1e-9, "ns", 1e-11, 1e-5, "2.5ns",
@@ -183,7 +192,8 @@ MODEL_FIELDS = {"cap": {"C": "Capacitance", "ESR": "ESR", "ESL": "ESL", "C_bias"
                 "inductor": {"L": "Inductance", "R": "DCR"},
                 "resistor": {"R": "Resistance"},
                 "amplifier": {"gain": "Gain", "gbw": "GBW", "bandwidth": "Bandwidth", "z_out": "Zout", "c_in": "Cin",
-                              "aol": "Aol", "fp2": "Fp2", "pm": "PM",
+                              "aol": "Aol", "fp2": "Fp2", "pm": "PM", "swing_hi": "Output Swing High",
+                              "swing_lo": "Output Swing Low",
                               "r_in": "Rin", "slew": "Slew Rate", "cmrr": "CMRR"},
                 "buffer": {"rise": "Rise Time", "z_out": "Zout", "c_in": "Cin", "vt_pos": "Threshold Rising",
                            "vt_neg": "Threshold Falling", "hyst": "Hysteresis"}}
@@ -220,11 +230,12 @@ def read(fp, name: str) -> Optional[Reading]:
         return None
     source = f"{fp.reference} {field_name} {text.strip()}"
     # gains, slew rates and dB values have no SI unit parse_quantity knows: _special reads those
-    value, why = _special(text, p) if p.quantity in ("gain", "V/s", "dB", "S", "deg", "metal", "sheet") else \
-        parse_quantity(
-        text, p.quantity, p.assumed)
+    value, why = _special(text, p) if p.quantity in ("gain", "V/s", "dB", "S", "deg", "metal", "sheet", "swing") \
+        else parse_quantity(text, p.quantity, p.assumed)
     if value is None:
         return Reading(None, text, source, why)
+    if isinstance(value, str):                  # an output swing as a share of the supply ("10%"): no range
+        return Reading(value, text, source, "")
     note = f"{p.unit} assumed" if why == "unit assumed" else ""
     if not p.lo <= value <= p.hi:               # the user's value: used, with a note (a missing unit?)
         note = "; ".join(n for n in (note, f"{format_si(value, _symbol(p))} is outside the usual "
@@ -239,6 +250,9 @@ def _special(text: str, p: Param) -> tuple[Optional[float], str]:
     t = text.strip().replace(" ", "").replace(",", ".")
     low = t.lower()
     try:
+        if p.quantity == "swing":                       # an output swing: "50mV", "0.05V", "10%" (models.swing_value)
+            from .models import swing_value
+            return swing_value(t), ""
         if p.quantity == "sheet":                       # Ω per square: "0.77mΩ", "0.77mOhm/sq", a bare number in Ω
             # an HTTP lib that appends the template's unit to a value typed with it ("0.77mOhm" + "Ohm"): once
             t = re.sub(r"(?i)(ohm|Ω)(ohm|Ω)$", r"\1", re.sub(r"(?i)(/sq|/□|persquare)$", "", t))
@@ -300,7 +314,7 @@ def _special(text: str, p: Param) -> tuple[Optional[float], str]:
 
 def _symbol(p: Param) -> str:
     """The unit symbol for messages ("Ω" for ohm, else the quantity as it is: "F", "V" ...)."""
-    return {"ohm": "Ω", "deg": "°", "metal": "Ω/□", "sheet": "Ω/□"}.get(p.quantity, p.quantity)
+    return {"ohm": "Ω", "deg": "°", "metal": "Ω/□", "sheet": "Ω/□", "swing": "V"}.get(p.quantity, p.quantity)
 
 
 def terminal_sheet(fp) -> Optional[float]:
@@ -451,6 +465,10 @@ def same(a, b) -> bool:
     capacitor's DC-bias curve (text, components/bias.py) the same when its points are, each to within REL_TOL."""
     if a is None or b is None:
         return False
+    if isinstance(a, str) and isinstance(b, str) and a.endswith("%") and b.endswith("%"):     # output swings
+        return same(float(a[:-1]), float(b[:-1]))
+    if (isinstance(a, str) and a.endswith("%")) or (isinstance(b, str) and b.endswith("%")):
+        return False
     if isinstance(a, str) or isinstance(b, str):
         from .bias import parse_bias
         pa, pb = parse_bias(a)[0], parse_bias(b)[0]
@@ -498,7 +516,7 @@ _KEY_UNITS = {"rds_on": "Ω", "rds_on_low": "Ω", "dcr": "Ω", "ESR": "Ω", "R":
               "core_alpha": "", "core_beta": "", "dead_rise": "s", "dead_fall": "s", "v_sd": "V", "diode_vf": "V",
               "ESL": "H", "L": "H", "gbw": "Hz",
               "bandwidth": "Hz", "z_out": "Ω", "c_in": "F", "r_in": "Ω", "slew": "V/s", "cmrr": "dB", "gain": "",
-              "aol": "dB", "fp2": "Hz", "pm": "°"}
+              "aol": "dB", "fp2": "Hz", "pm": "°", "swing_hi": "V", "swing_lo": "V"}
 
 
 def _sync(getter, setter, linked: list[str], values: dict, keys, default=None) -> bool:

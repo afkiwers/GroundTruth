@@ -106,6 +106,8 @@ the open-loop figures instead.
 | `Aol` | op-amp | dB | `110dB` | the open-loop DC gain (the circuit model, with GBW) | |
 | `Fp2` | op-amp | MHz | `20MHz` | a second open-loop pole: the loop's phase margin | |
 | `PM` | op-amp | ° | `60` | the phase margin at unity gain, instead of Fp2 | |
+| `Output Swing High` | op-amp | V or % | `50mV`, `10%`, `4.5V`, `90%` | where the output stops below its positive supply: the headroom (datasheet V_OH = V+ − 50 mV at its load: `50mV`; a share of the supply: `10%`) or, from half the rail up, the level it reaches (`4.5V` on 5 V, `90%`); empty: rail to rail. The large-signal step, `output_saturation` | |
+| `Output Swing Low` | op-amp | V or % | `50mV`, `10%`, `-13V` | where the output stops above its negative supply or ground: the headroom (V_OL = V− + 50 mV: `50mV`, `10%`) or, negative, the level it reaches (`-13V` on ±15 V); from 50 % a share reached | |
 | `CMRR` | op-amp | dB | `90dB` | shown only (the path model is single-ended) | |
 
 ### Logic buffers (Schmitt triggers)

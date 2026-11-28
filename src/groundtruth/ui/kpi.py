@@ -94,8 +94,18 @@ def _bode(rr) -> list[Kpi]:
     # the path's step response: its overshoot and settling time (emi/mna.Circuit.step)
     from ..analysis.transfer import fmt_s
     st = next((r.step for r in rr.responses if getattr(r, "step", None)), None)
+    lg = (st or {}).get("large")
+    if st and len(out) < 4 and lg and lg.get("held"):
+        # an op-amp held at its supply's limit (analysis/swing.py): that, not the small-signal step's figures
+        lo, hi = lg["levels"]
+        out.append(("step", f"clips at {lg['final']:.3g} V", f"{', '.join(lg['held'])} at its limit · driver "
+                    f"{lo:g} → {hi:g} V", "warn",
+                    "the receiver's step with the driver going from its low level to its high one (the path's Low "
+                    "level and Amplitude), each op-amp's output held within its supply (less its Output Swing): an "
+                    "op-amp reaches its limit, so the path clips (see the output_saturation issue and the plot)"))
+        st = None
     if st and len(out) < 4:
-        m = st["metrics"]
+        m = (lg or {}).get("metrics") or st["metrics"]
         if m.get("unstable"):
             out.append(("step", "unstable", "a pole in the right half-plane", "error",
                         "the receiver's response to a 1 V step at the driver grows without bound: the circuit has a "

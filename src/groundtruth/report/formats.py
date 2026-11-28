@@ -455,6 +455,12 @@ def response_lines(r) -> list[str]:
     if st:
         from ..analysis.transfer import step_text
         out.append(f"    {r.name}: step: {step_text(st['metrics'])}")
+        lg = st.get("large")
+        if lg:              # the step in volts, each op-amp within its supply (analysis/swing.py)
+            lo, hi = lg["levels"]
+            out.append(f"    {r.name}: step {lo:g} → {hi:g} V at the driver: {lg['y'][0]:.3g} V → {lg['final']:.3g} V"
+                       + (f", held at a supply limit: {', '.join(lg['held'])}" if lg["held"]
+                          else ", within the supplies"))
     sym, nf = getattr(r, "symbolic", None), getattr(r, "normal", None)
     if sym:
         note = f"; {sym['note']}" if sym.get("note") else ""
