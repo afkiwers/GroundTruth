@@ -2144,7 +2144,9 @@ def draw_pdn(fig: Figure, p) -> None:
             pk = port["peaks"][0]
             ax.plot([pk["f"] / 1e6], [pk["z_ohm"]], "v", color=c, ms=5)
     if p.target_ohm:
-        ax.plot([min(f_all), p.check_to / 1e6], [p.target_ohm] * 2, "--", color="#d62728", lw=1.2, label="target")
+        est = getattr(p, "i_step_source", "set") in ("estimate", "partly")
+        ax.plot([min(f_all), p.check_to / 1e6], [p.target_ohm] * 2, "--", color="#d62728", lw=1.2,
+                label="target (estimated step)" if est else "target")
         for a_ in (ax, ax_p):
             if a_ is not None:
                 a_.axvline(p.check_to / 1e6, color="#d62728", lw=0.8, ls=":")

@@ -238,13 +238,25 @@ def _efficiency(e) -> list[Kpi]:
 
 def _pdn(rr) -> list[Kpi]:
     """A rail's PDN: the target, the worst margin (and where), the ICs, the highest peak, the source."""
-    from ..components.values import format_si
+    from ..components.values import format_si as _full
+
+    def format_si(v, unit=""):
+        """Three significant digits on a tile (format_si keeps six, for values read back)."""
+        return _full(float(f"{v:.3g}"), unit) if isinstance(v, (int, float)) else _full(v, unit)
+    how = getattr(rr, "i_step_source", "set")
+    step = getattr(rr, "i_step", None)
+    sub = (f"to {format_si(rr.check_to, 'Hz')}" if how == "set" else
+           f"step {format_si(step, 'A')} from Supply Current" if how == "fields" else
+           f"step {format_si(step, 'A')} ESTIMATED" if how in ("estimate", "partly") else "")
     out = [("target", format_si(rr.target_ohm, "Ω") if rr.target_ohm else "none",
-            f"to {format_si(rr.check_to, 'Hz')}" if rr.target_ohm else "set the step current", "",
-            "V · ripple / I_step: below it the rail holds its voltage for that current step")]
+            sub if rr.target_ohm else "set the step current", "warn" if how in ("estimate", "partly") else "",
+            "V · ripple / I_step: below it the rail holds its voltage for that current step"
+            + ("; I_step is estimated from the ICs' pin counts (half their typical maximum current): set Load step "
+               "on the Power integrity tab, or the ICs' Supply Current field" if how in ("estimate", "partly") else ""))]
     if rr.worst:
         w = rr.worst
-        st = "error" if w["margin_db"] < 0 else "warn" if w["margin_db"] < 3 else "ok"
+        st = ("error" if w["margin_db"] < 0 and how not in ("estimate", "partly") else "warn" if w["margin_db"] < 3
+              else "ok")
         out.append(("worst margin", f"{w['margin_db']:+.1f} dB", f"{w['part']} @ {format_si(w['f'], 'Hz')}", st,
                     f"the IC furthest over (or nearest to) the target, held there by {w['holds']}"))
     out.append(("ICs", str(len(rr.ports)), ", ".join(p["part"] for p in rr.ports[:4])

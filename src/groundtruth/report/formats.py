@@ -397,7 +397,12 @@ def pdn_text(d) -> list[str]:
     head = f"PDN {d.name} ({d.rail} / {d.ground}" + (f", {d.voltage:g} V" if d.voltage else "") + ")"
     if d.error:
         return [f"{head}: {d.error}"]
-    out = [head + (f": target {format_si(d.target_ohm, 'Ω')} to {format_si(d.check_to, 'Hz')}" if d.target_ohm
+    how = getattr(d, "i_step_source", "set")
+    step = (f" (load step {format_si(d.i_step, 'A')}"
+            + {"fields": " from the ICs' Supply Current", "estimate": " ESTIMATED from the ICs' pin counts",
+               "partly": " PARTLY ESTIMATED (pin counts)"}.get(how, "")
+            + ")") if getattr(d, "i_step", None) else ""
+    out = [head + (f": target {format_si(d.target_ohm, 'Ω')} to {format_si(d.check_to, 'Hz')}{step}" if d.target_ohm
                    else ": no target (set i_step)")]
     if d.source:
         out.append(f"    source: {d.source}")

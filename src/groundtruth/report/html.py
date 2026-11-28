@@ -1270,13 +1270,20 @@ def _pdn(d, issues, figs) -> str:
             + (f", {d.voltage:g} V" if d.voltage else "") + "</span></header>"]
     if d.error:
         return "".join(body) + f"<p class='note'>{e(d.error)}</p></article>"
+    how = getattr(d, "i_step_source", "set")
+    step = (f", load step {format_si(d.i_step, 'A')}"
+            + {"fields": " from the ICs' Supply Current", "estimate": " ESTIMATED from the ICs' pin counts",
+               "partly": " PARTLY ESTIMATED (pin counts)"}.get(how, "")
+            if getattr(d, "i_step", None) else "")
     cards = [_kpi("Target", format_si(d.target_ohm, "Ω") if d.target_ohm else "none",
-                  f"up to {format_si(d.check_to, 'Hz')}" if d.target_ohm else "set i_step for one")]
+                  f"up to {format_si(d.check_to, 'Hz')}{step}" if d.target_ohm else "set i_step for one",
+                  "warn" if how in ("estimate", "partly") else "")]
     if d.worst:
         w = d.worst
         cards.append(_kpi("Worst margin", f"{w['margin_db']:+.1f} dB",
                           f"{w['part']}: {format_si(w['z_ohm'], 'Ω')} @ {format_si(w['f'], 'Hz')}",
-                          "error" if w["margin_db"] < 0 else "warn" if w["margin_db"] < 3 else "ok"))
+                          "error" if w["margin_db"] < 0 and how not in ("estimate", "partly") else
+                          "warn" if w["margin_db"] < 3 else "ok"))
     cards.append(_kpi("ICs", str(len(d.ports)), "with supply pins on the rail"))
     if d.source:
         cards.append(_kpi("Source", d.source.split(" ", 1)[0], d.source.split(" ", 1)[1] if " " in d.source else ""))

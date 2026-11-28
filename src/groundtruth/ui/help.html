@@ -867,8 +867,11 @@ says when that fine model holds only part of the current or its correction is no
 pads the board-wide grid cannot join to the rail's copper is left out with a note (raise the resolution).</p>
 <p>The <b>Power integrity</b> tab lists the rails: <b>Find rails</b> adds every rail ICs draw supply from and every
 power stage's output (its source found by itself: the stage, named in the list; read at the stage's output connector
-when no IC draws from it, its load step half the stage's load current); set each one's <b>Load step</b> for a target
-(and its voltage when the name has none). <b>Power tree…</b> (here and on the Converters tab) draws the board's
+when no IC draws from it, its load step half the stage's load current); set each one's <b>Load step</b> for a firm target
+(and its voltage when the name has none). Without one the target uses an estimated step: half the sum of the rail's ICs'
+maximum currents, from each IC's <b>Supply Current</b> field, else from its pin count (marked <i>est.</i> in the list and
+ESTIMATED on the tiles, the plot and the report; its findings are warnings at most; a regulator on the rail is not counted, and a
+Supply Current field outside 10 µA … 100 A is not used, both said in the notes). <b>Power tree…</b> (here and on the Converters tab) draws the board's
 power as a flow chart: the sources (input connectors), series links (a pass FET, a filter inductor, a shunt), the
 switching stages (SMPS) and linear regulators (LDO: a part with a power_in pin on one rail and a power_out pin on
 another), each rail with its voltage, and under each rail its loads (the ICs drawing from it, an output connector)

@@ -50,7 +50,7 @@ fitting ones first.
 A supply rail's impedance as its ICs see it between their supply and ground pins, from 10 kHz to 1 GHz: the decaps,
 the planes' capacitance, the vias and the regulator together, solved on one model of the whole board. Below a target
 impedance `Z_t = V · ripple / I_step` the rail holds its voltage within the ripple whatever the frequency of the IC's
-current step. In the settings:
+current step. Without `i_step` the rail still gets a target: the load step is half the sum of its ICs' maximum supply currents, from each IC's `Supply Current` field, else ESTIMATED from its pin count (8 pins 20 mA, 20 pins 50 mA, 48 pins 100 mA, 100 pins 250 mA, 256 pins 500 mA, more 1.5 A). An estimated step is marked as such on the tiles, the plot and the report, and its findings are warnings at most: set `i_step` (or the ICs' fields) to make them firm. A regulator on the rail (a part with a power_out pin) is not counted (its own load's current is not known: set the step), and a Supply Current field that does not read as 10 µA … 100 A (a bare `150` reads 150 A) is not used: the note says so. In the settings:
 
 ```yaml
 pdn:

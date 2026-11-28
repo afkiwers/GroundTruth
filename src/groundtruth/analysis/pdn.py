@@ -39,6 +39,7 @@ import numpy as np
 
 from ..config.settings import PdnSpec
 from ..core.board import Board, Footprint, Pad
+from ..components.values import format_si
 from ..core.issues import Issue, resolve_severity
 from ..solver.peec import Branch, RouteExcitation, SolverError
 from .simulate import BoardModel, ModelRun, _choose_pitch, part_pairs
@@ -54,6 +55,49 @@ IC_PREFIXES = ("U", "IC")        # without pin types on the board: parts with th
 CONNECTOR_PREFIXES = ("J", "P", "X", "CN", "CON")
 VRM_R_DEFAULT, VRM_L_DEFAULT = 5e-3, 20e-9       # PdnSpec's defaults: a regulator's output
 HARNESS_R, HARNESS_L = 20e-3, 500e-9             # a connector's source with those defaults: ~0.5 m of lead [A110]
+STEP_FRACTION = 0.5              # an IC's load step: this share of its maximum supply current [A124]
+# an IC's maximum supply current by its pin count when it has no Supply Current field [A124]: (most pins, A)
+PACKAGE_CURRENT = ((8, 0.02), (20, 0.05), (48, 0.1), (100, 0.25), (256, 0.5), (10**9, 1.5))
+
+
+def ic_current(fp: Footprint) -> tuple[float, str, str]:
+    """An IC's maximum current from its supply rail: its Supply Current field, else an estimate by its pin count
+    [A124]. (amperes, how: "field" | "estimate", a note: why a field was not used, or ""). A field that does not
+    read, is not above zero or is outside the usual 10 µA … 100 A (a bare "150" meant as mA reads 150 A) is not
+    used: the pin-count estimate instead, and the note says so."""
+    from ..components.fields import BY_FIELD, read
+    r = read(fp, "Supply Current")
+    note = ""
+    if r is not None:
+        p = BY_FIELD["supply current"]
+        if isinstance(r.value, float) and p.lo <= r.value <= p.hi:
+            return r.value, "field", ""
+        note = (f"{fp.reference} Supply Current {r.text.strip()!r} not used ("
+                + (r.note or "not a current") + "): estimated by its pin count instead")
+    n = len({p.number for p in fp.pads if p.number})
+    return next(a for most, a in PACKAGE_CURRENT if n <= most), "estimate", note
+
+
+def estimate_i_step(parts: list) -> tuple[Optional[float], str, list]:
+    """A rail's load step when none is set: STEP_FRACTION of the sum of its ICs' maximum currents (all of them may
+    step together: the safe side). `parts`: the ICs only (supply_parts), not connector ports, whose load is off the
+    board. (amperes or None without an IC, "fields" when every IC has a Supply Current field else "estimate",
+    [{part, amps, how}])."""
+    detail = []
+    for fp, _rail_pads, _gnd in parts:
+        # a regulator fed from the rail (a power_out pin) draws its own load's current, which its pin count says
+        # nothing about: left out of the sum, named in the notes (set Load step for such a rail)
+        if any(p.pin_type == "power_out" for p in fp.pads):
+            detail.append({"part": fp.reference, "amps": 0.0, "how": "regulator", "note": ""})
+            continue
+        amps, how, note = ic_current(fp)
+        detail.append({"part": fp.reference, "amps": amps, "how": how, "note": note})
+    counted = [d for d in detail if d["how"] != "regulator"]
+    if not counted:
+        return None, "", detail
+    how = ("fields" if all(d["how"] == "field" for d in counted) else
+           "estimate" if all(d["how"] == "estimate" for d in counted) else "partly")
+    return STEP_FRACTION * sum(d["amps"] for d in counted), how, detail
 
 
 def rail_voltage(name: str) -> Optional[float]:
@@ -243,6 +287,10 @@ class PdnResult:
     kind: str = "pdn"
     voltage: Optional[float] = None
     target_ohm: Optional[float] = None
+    i_step: Optional[float] = None      # A: the load step the target and the step response use
+    i_step_source: str = ""             # "set" (the spec's), "fields" (the ICs' Supply Current), "estimate",
+    #                                     "partly" (some fields, some pin counts)
+    i_step_detail: list = field(default_factory=list)   # [{part, amps, how}] behind an estimated step
     check_to: float = 100e6
     source: str = ""                    # the source part and its model, in words
     stage: str = ""                     # a power stage as the source (its closed loop: analysis/load_step.py)
@@ -654,10 +702,6 @@ def prepare_pdn(model: BoardModel, specs: list) -> tuple[list, list, list]:
         v = spec.voltage if spec.voltage is not None else rail_voltage(spec.rail)
         res = PdnResult(spec.label, spec.rail, ground, voltage=v, check_to=spec.check_to)
         results.append(res)
-        if spec.i_step is not None and v is not None:
-            res.target_ohm = v * spec.ripple / spec.i_step
-        elif spec.i_step is not None:
-            res.notes.append(f"no voltage for {spec.rail} (set voltage): no target impedance")
         if bbox is None:
             res.error = "the board has no outline (Edge.Cuts): the PDN model is the whole board"
             continue
@@ -669,6 +713,28 @@ def prepare_pdn(model: BoardModel, specs: list) -> tuple[list, list, list]:
             if missing:
                 res.notes.append(f"{', '.join(sorted(missing))}: no supply pin on {spec.rail} and pad on {ground}: "
                                  "left out")
+        # the load step: the one set, else estimated from the ICs' currents (their fields, else their pin counts)
+        if spec.i_step is not None:
+            res.i_step, res.i_step_source = spec.i_step, "set"
+        else:
+            res.i_step, res.i_step_source, res.i_step_detail = estimate_i_step(parts)
+        if res.i_step and v is not None:
+            res.target_ohm = v * spec.ripple / res.i_step
+        elif res.i_step:
+            res.notes.append(f"no voltage for {spec.rail} (set voltage): no target impedance")
+        if res.i_step_source not in ("", "set"):
+            counted = sorted((d for d in res.i_step_detail if d["how"] != "regulator"), key=lambda d: -d["amps"])
+            what = {"fields": "from the ICs' Supply Current fields", "estimate": "ESTIMATED by the ICs' pin counts",
+                    "partly": "PARTLY ESTIMATED (Supply Current fields, else pin counts)"}[res.i_step_source]
+            res.notes.append(f"load step {format_si(res.i_step, 'A')}: half the {len(counted)} ICs' maximum current "
+                             f"{what}: " + ", ".join(f"{d['part']} {format_si(d['amps'], 'A')}"
+                                                     + ("" if d["how"] == "field" else " est.") for d in counted)
+                             + " (set Load step, or the ICs' Supply Current field, to replace it)")
+        regs = [d["part"] for d in res.i_step_detail if d["how"] == "regulator"]
+        if regs and spec.i_step is None:
+            res.notes.append(f"{', '.join(regs)}: regulator(s) on {spec.rail} (a power_out pin) not counted in the load step "
+                             "(their load's current is not known): set Load step for this rail")
+        res.notes += [d["note"] for d in res.i_step_detail if d.get("note")]
         for port in spec.ports:             # pin pairs: a connector the load hangs on (a converter's output)
             got = _port_pads(board, port, spec.rail, ground)
             if isinstance(got, str):
@@ -940,10 +1006,10 @@ def _port_step(setup: PdnSetup, resp, meta: dict, fs: np.ndarray, z: np.ndarray)
     from .load_step import sampled_step
     res, spec = setup.res, setup.spec
     ls = spec.load_step or LoadStep()
-    if res.voltage is None or not (spec.i_step or ls.switched) or np.sum(fs <= spec.check_to) < 6:
+    if res.voltage is None or not (res.i_step or ls.switched) or np.sum(fs <= spec.check_to) < 6:
         return
     try:
-        st = sampled_step(fs, z, ls, spec.i_step or 0.0, res.voltage, ls.rise, f_max=spec.check_to)
+        st = sampled_step(fs, z, ls, res.i_step or 0.0, res.voltage, ls.rise, f_max=spec.check_to)
     except (ValueError, ZeroDivisionError, np.linalg.LinAlgError) as e:
         res.notes.append(f"{meta['part']}: no step response ({e})")
         return
@@ -953,7 +1019,7 @@ def _port_step(setup: PdnSetup, resp, meta: dict, fs: np.ndarray, z: np.ndarray)
         late = t > LATE_TAUS / (2 * math.pi * spec.check_to)
         if np.any(late):
             dv = v[late] - res.voltage
-            k = int(np.argmin(dv) if (spec.i_step or ls.switched) else np.argmax(dv))
+            k = int(np.argmin(dv) if (res.i_step or ls.switched) else np.argmax(dv))
             m["dip_late"], m["t_dip_late"] = float(dv[k]), float(t[late][k])
             m["peak_late"] = float(np.max(np.abs(dv)))
         if name == "port":                     # (a load node behind a harness: its figures in the notes)
@@ -1017,6 +1083,11 @@ def _issues(setup: PdnSetup, rules):
     on refboard's converter output) whose harness could never draw that edge."""
     res, spec = setup.res, setup.spec
     from ..components.values import format_si as _si
+    # an estimated load step (none set): its findings are warnings at most and say so
+    est = res.i_step_source in ("estimate", "partly")
+    tag = (f" [load step {_si(res.i_step, 'A')} ESTIMATED from the ICs' pin counts: set Load step]" if est else
+           f" [load step {_si(res.i_step, 'A')} from the ICs' Supply Current]" if res.i_step_source == "fields"
+           else "")
     for port in res.ports:
         m = port.get("step")
         peak = m.get("peak_late", m["peak"]) if m else None
@@ -1028,7 +1099,8 @@ def _issues(setup: PdnSetup, rules):
                         f"{spec.label}: at {port['part']} the rail moves by {peak * 1e3:.3g} mV "
                         f"({100 * peak / res.voltage:.2f} %) when the load steps, more than the "
                         f"{spec.ripple * 100:g} % allowed (dips {late[0] * 1e3:+.3g} mV after {_si(late[1], 's')}"
-                        f"{spike})", port["xy"], key=f"pdn:{spec.label}:{port['part']}:step",
+                        f"{spike}){tag}", port["xy"], severity="warning" if est else None,
+                        key=f"pdn:{spec.label}:{port['part']}:step",
                         details={"dip": late[0], "peak": peak, "t_dip": late[1], "spike": m["dip"]})
     if not res.target_ohm:
         return
@@ -1037,9 +1109,9 @@ def _issues(setup: PdnSetup, rules):
         w = port["worst"]
         if w["margin_db"] >= WARN_DB:
             continue
-        sev = "error" if w["margin_db"] < 0 else "warning"
+        sev = "error" if w["margin_db"] < 0 and not est else "warning"
         setup.issue(rules, "pdn_impedance",
                     f"{spec.label}: {port['part']} sees {format_si(w['z_ohm'], 'Ω')} at {format_si(w['f'], 'Hz')} "
                     f"against the target {format_si(res.target_ohm, 'Ω')} (margin {w['margin_db']:+.1f} dB; held there "
-                    f"by {w['holds']})", port["xy"], severity=sev, key=f"pdn:{spec.label}:{port['part']}:z",
+                    f"by {w['holds']}){tag}", port["xy"], severity=sev, key=f"pdn:{spec.label}:{port['part']}:z",
                     details={k: w[k] for k in ("f", "z_ohm", "margin_db")})

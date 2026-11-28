@@ -318,3 +318,58 @@ def test_an_open_loop_is_found_before_it_is_solved():
     assert not loop_closes(plane, [(4, 1.0), (3, -1.0)])              # the island's pad
     no_decap = SimpleNamespace(**{**vars(plane), "nb": 3, "a_nodes": plane.a_nodes[:3], "b_nodes": plane.b_nodes[:3]})
     assert not loop_closes(no_decap, [(0, 1.0), (3, -1.0)])           # through the capacitance alone: open
+
+
+def test_without_a_load_step_the_target_is_estimated_from_the_ics(tmp_path):
+    """No i_step: U1 (2 pins, no Supply Current field) gets 20 mA by its pin count [A124], the step half of it
+    (10 mA), the target 3.3 V · 5 % / 10 mA = 16.5 Ω, marked ESTIMATED and its findings warnings at most. With a
+    Supply Current field of 400 mA the step is 200 mA (target 0.825 Ω), from the field."""
+    from groundtruth.analysis.pdn import estimate_i_step, supply_parts
+    from groundtruth.report.formats import pdn_text
+    from groundtruth.ui.kpi import _pdn
+    g = pdn_board(caps=[("C1", "1u", (22.0, 15.0))])
+    b, _, _ = make(tmp_path, g, "est0", nets=())
+    step, how, detail = estimate_i_step(supply_parts(b, "VDD", "GND"))
+    assert step == pytest.approx(0.01) and how == "estimate" and detail == [
+        {"part": "U1", "amps": pytest.approx(0.02), "how": "estimate", "note": ""}]
+    p, issues, _ = _run(tmp_path, "est", PdnSpec("VDD", source="none", voltage=3.3), caps=[("C1", "1u", (22.0, 15.0))])
+    assert p.i_step_source == "estimate" and p.target_ohm == pytest.approx(16.5)
+    assert any("ESTIMATED" in n for n in p.notes)
+    assert all(i.severity != "error" for i in issues if i.check in ("pdn_impedance", "pdn_step"))
+    tile = _pdn(p)[0]
+    assert "ESTIMATED" in tile[2] and tile[3] == "warn"
+    assert "ESTIMATED" in pdn_text(p)[0]
+    g = pdn_board(caps=[("C1", "1u", (22.0, 15.0))])
+    g.fields("U1", **{"Supply Current": "400mA"})
+    b, _, _ = make(tmp_path, g, "est1", nets=())
+    step, how, _ = estimate_i_step(supply_parts(b, "VDD", "GND"))
+    assert step == pytest.approx(0.2) and how == "fields"
+    assert 3.3 * 0.05 / step == pytest.approx(0.825)
+
+
+
+@pytest.mark.parametrize("text, used", [("400mA", 0.4), ("2A", 2.0), ("0", None), ("abc", None), ("-5mA", None),
+                                         ("150", None), ("1e-9A", None)])
+def test_a_supply_current_field_is_used_only_when_it_reads_as_a_sensible_current(tmp_path, text, used):
+    """A Supply Current field within 10 µA … 100 A is used; one that does not read, is not above zero or is outside
+    that range (a bare "150" meant as mA reads 150 A) is not: the pin-count estimate, with a note naming the field."""
+    from groundtruth.analysis.pdn import estimate_i_step, supply_parts
+    g = pdn_board()
+    g.fields("U1", **{"Supply Current": text})
+    b, _, _ = make(tmp_path, g, "f", nets=())
+    step, how, detail = estimate_i_step(supply_parts(b, "VDD", "GND"))
+    if used is None:
+        assert how == "estimate" and step == pytest.approx(0.01) and text in detail[0]["note"]
+    else:
+        assert how == "fields" and step == pytest.approx(used / 2) and not detail[0]["note"]
+
+
+def test_a_regulator_on_the_rail_is_not_counted_in_the_estimate(tmp_path):
+    """U1 given a power_out pin (a regulator fed from the rail): its own load is not known, so it is left out of the
+    sum; with no other IC there is no estimated step (no target), and the detail says why."""
+    from groundtruth.analysis.pdn import estimate_i_step, supply_parts
+    b, _, _ = make(tmp_path, pdn_board(), "reg", nets=())
+    parts = supply_parts(b, "VDD", "GND")
+    parts[0][0].pads[1].pin_type = "power_out"
+    step, how, detail = estimate_i_step(parts)
+    assert step is None and how == "" and detail[0]["how"] == "regulator"

@@ -84,8 +84,8 @@ class PdnPanel(SelectableRows, wx.Panel):
         self.hint = wx.StaticText(self, label="No rails yet: press Find rails (on the right) to list the supply rails "
                                               "the ICs draw from, then set each one's load step.")
         self.list = wx.ListCtrl(self, style=wx.LC_REPORT)
-        for i, (c, w) in enumerate([("Rail", 120), ("Voltage", 65), ("Ripple", 55), ("Load step", 70),
-                                    ("Target", 70), ("Source", 110), ("ICs", 120)]):
+        for i, (c, w) in enumerate([("Rail", 120), ("Voltage", 65), ("Ripple", 55), ("Load step", 105),
+                                    ("Target", 105), ("Source", 110), ("ICs", 120)]):
             self.list.InsertColumn(i, c, width=self.FromDIP(w))
         self.list.SetMinSize(wx.Size(320, 120))
         self._init_rows(None, "rails")
@@ -227,14 +227,23 @@ class PdnPanel(SelectableRows, wx.Panel):
             if v is None:
                 from ..analysis.pdn import rail_voltage
                 v = rail_voltage(d.rail)
-            target = v * d.ripple / d.i_step if v and d.i_step else None
+            step, est = d.i_step, ""
+            if step is None and self.board is not None:
+                # no load step set: Simulate estimates one from the ICs (pdn.estimate_i_step), shown as such
+                from ..analysis.pdn import estimate_i_step, supply_parts
+                parts = supply_parts(self.board, d.rail, d.ground or self._ground())
+                if d.parts:
+                    parts = [t for t in parts if t[0].reference in set(d.parts)]
+                step, how, _ = estimate_i_step(parts)
+                est = " (est.)" if how in ("estimate", "partly") else " (fields)" if how == "fields" else ""
+            target = v * d.ripple / step if v and step else None
             # a source found by itself: the power stage whose output the rail is, named
             stage = getattr(self, "conv_rails", {}).get(d.rail)
             source = d.source or (f"found: {stage[0]}" if stage else AUTO_SOURCE)
             i = self.list.InsertItem(self.list.GetItemCount(), d.label)
             for col, text in enumerate([format_si(v, "V") if v else "?", f"{d.ripple * 100:g} %",
-                                        format_si(d.i_step, "A") if d.i_step else "–",
-                                        format_si(target, "Ω") if target else "–", source,
+                                        format_si(step, "A") + est if step else "–",
+                                        format_si(target, "Ω") + est if target else "–", source,
                                         ", ".join(d.parts + d.ports) if d.parts or d.ports else
                                         f"all ({len(self.rails.get(d.rail, []))})"], 1):
                 self.list.SetItem(i, col, text)
