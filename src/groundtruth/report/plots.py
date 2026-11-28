@@ -1695,8 +1695,10 @@ def transfer_clipboard(view) -> str:
 
 
 def is_receiver(r) -> bool:
-    """Whether a response is a receiver's (the path's output per volt of the source), not an op-amp's output or loop."""
-    return "receiver" in r.name and r.name.endswith("/ source")
+    """Whether a response is a receiver's (the path's output per volt of the source), not an op-amp's output or loop:
+    named by its pins ("SIG: U1.3 → U13.5", analysis/simulate.path_pins), or "receiver / source" (runs kept before
+    the pins named it, or a pin not known)."""
+    return r.name.endswith("receiver / source") or (getattr(r, "quantity", "") == "voltage gain" and " → " in r.name)
 
 
 def receiver_style(r, others: bool) -> dict:

@@ -10,7 +10,8 @@ last map's layer alone (its ⤢ button) and saves <theme>_layer_<layer>.png. --r
 (kept in DIR/groundtruth/history when Preferences keep runs); the History tab is captured with its two newest runs
 compared. A tab "Signal paths:<path>" selects that path and saves <theme>_paths_<path>.png once its schematic is
 drawn. A tab "Fixes:<kind>" (Fixes:filter, Fixes:snubber, Fixes:cm ...) selects the first design change of that
-kind after --simulate and saves <theme>_Fixes_<kind>.png once its schematic is drawn. Captured with Win32 PrintWindow, which works while the screen
+kind after --simulate and saves <theme>_Fixes_<kind>.png once its schematic is drawn. A tab "Results:<text>"
+(Results:Bode) shows the first Results view whose name has that text and saves <theme>_Results_<text>.png. Captured with Win32 PrintWindow, which works while the screen
 itself cannot be read (a locked or minimised remote desktop)."""
 import argparse
 import ctypes
@@ -166,6 +167,24 @@ def main() -> int:
                     return
                 path = out / f"{args.theme}_paths_{''.join(ch if ch.isalnum() else '_' for ch in net)}.png"
                 print(f"{path}: {'ok' if capture(f, path) else 'PrintWindow failed'}")
+                return
+            if name.startswith("Results:"):               # the Results tab with the first view whose name has this text
+                text, rp = name.split(":", 1)[1], f.results_panel
+                if state.get("view") != text:
+                    items = [rp.choice.GetString(i) for i in range(rp.choice.GetCount())]
+                    k = next((i for i, s in enumerate(items) if text.lower() in s.lower()), None)
+                    if k is None:
+                        print(f"  no Results view with {text!r}: {items}")
+                        return
+                    f.notebook.SetSelection(f.notebook.FindPage(rp))
+                    rp.choice.SetSelection(k)
+                    rp._route_changed()
+                    state["view"] = text
+                    tabs.insert(0, name)                  # capture once rendered and painted
+                    return
+                path = out / f"{args.theme}_Results_{''.join(ch if ch.isalnum() else '_' for ch in text)}.png"
+                print(f"{path}: {'ok' if capture(f, path) else 'PrintWindow failed'}")
+                print(f"  tiles: {rp.tile_text()}")
                 return
             if name.startswith("Fixes:"):                 # the Fixes tab with a design change selected (its kind)
                 kind, p = name.split(":", 1)[1], f.fixes

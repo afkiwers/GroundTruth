@@ -2300,6 +2300,12 @@ def cancel_doublets(poles, zeros) -> tuple[list, list, int]:
     return p, z, n
 
 
+def path_pins(driver: str, receiver: str) -> str:
+    """A signal path's own response's name: its driver and receiver pins ("U1.3 → U13.5"), the receiver's voltage per
+    volt of the driver's; "receiver / source" when a pin is not known."""
+    return f"{driver} → {receiver}" if driver and receiver else "receiver / source"
+
+
 def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str, f: np.ndarray,
                       cache=None) -> tuple[list, list[str], list[dict]]:
     """The path's responses from its whole circuit (analysis/analog_net: every op-amp and part on its nets, any
@@ -2317,7 +2323,8 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
     lumped = analog_network(board, config, spec, receiver, lumped=True, f_top=float(f[-1]), cache=cache)
     f_max = POLE_SPAN * float(f[-1])
     keep = lambda roots: [r for r in roots if r == 0 or abs(r) / (2 * math.pi) <= f_max]     # noqa: E731
-    outs = [(f"{spec.name}: receiver / source", net.out_node, lumped.out_node)]
+    # the path's own response, named by its pins: the receiver per volt of the driver ("U1.3 → U13.5")
+    outs = [(f"{spec.name}: {path_pins(spec.driver, receiver)}", net.out_node, lumped.out_node)]
     for name, _kind in net.opamps:              # each op-amp channel's output (not one on AC ground)
         node, lnode = net.amp_out.get(name), lumped.amp_out.get(name)
         # only the channels the signal passes (net.on_path): the others are in the circuit for their loading
@@ -2609,7 +2616,7 @@ def path_responses(setup, net: str, model: Optional["BoardModel"] = None) -> lis
             setup.res.notes.append(f"Bode: the path's circuit could not be solved ({e}): the path model instead")
     out = []
     try:
-        out.append(fitted_response(f"{net}: receiver / source", net, "voltage gain", f, setup.response_fn(f)))
+        out.append(fitted_response(f"{net}: {path_pins(setup.spec.driver, end)}", net, "voltage gain", f, setup.response_fn(f)))
     except (ValueError, ZeroDivisionError, FloatingPointError) as e:
         setup.res.notes.append(f"Bode: the path's response could not be computed ({e})")
     for name, gain in setup.amp_gains:

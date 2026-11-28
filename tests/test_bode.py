@@ -36,7 +36,7 @@ def test_an_rc_lowpass_sweeps_to_its_closed_form_without_a_field_solve(tmp_path,
     (r,) = sim.bode_paths(board, sc.config)
     assert not r.error, r.error
     resp = r.responses[0]
-    assert resp.name == "SIG_A: receiver / source" and len(resp.f) == 300
+    assert resp.name == "SIG_A: U1.1 → U2.1" and len(resp.f) == 300
     assert resp.f[0] == pytest.approx(1.0) and resp.f[-1] == pytest.approx(100e6)
     f_c = 1 / (2 * math.pi * 1025.0 * 10.005e-9)
     g = gain_figures(resp)
@@ -73,7 +73,7 @@ def test_each_receiver_has_its_result_and_its_curve_is_drawn_on_top(tmp_path):
     fig = Figure(figsize=(8, 5))
     draw_bode(fig, bode_views(SimpleNamespace(routes=[r]))[0])
     by = {ln.get_label(): ln for ln in fig.axes[0].get_lines()}
-    rx, amp = by["receiver / source"], by["U5: output"]
+    rx, amp = by["U1.1 → U2.1"], by["U5: output"]
     assert rx.get_zorder() > amp.get_zorder() and rx.get_linestyle() == "--", (rx.get_zorder(), rx.get_linestyle())
 
 
@@ -84,7 +84,7 @@ def test_an_opamp_stage_gives_its_gain_and_its_pole_at_gbw_over_gain(tmp_path):
     board, sc, _ = make(tmp_path, opamp_path_board(Gain="10", GBW="10MHz"), "amp", nets=(_spec(**SWEEP),))
     (r,) = bode_paths(board, sc.config)
     names = [x.name for x in r.responses]
-    assert names == ["SIG_A: receiver / source", "U5: output"]
+    assert names == ["SIG_A: U1.1 → U2.1", "U5: output"]
     for resp in r.responses:
         g = gain_figures(resp)
         assert g["low_db"] == pytest.approx(20.0, abs=0.05) and g["f_3db"] == pytest.approx(1e6, rel=0.02)
