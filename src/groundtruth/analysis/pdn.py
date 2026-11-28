@@ -49,6 +49,10 @@ PER_DECADE = 4                   # initial solves per decade (21 over the sweep)
 MAX_SOLVES = 40                  # with the refinement
 REFINE_DB = 1.0                  # split a gap whose log-log interpolation may be off by more than this (dB)
 WARN_DB = 3.0                    # a margin to the target under this is a warning (under 0: an error)
+RINGING_SUM = 1.5                # the parts' |I| per A at the IC adding to more: current circulating (not judged)
+SHARE_KEEP = 0.01                # a part's share curve kept for the plot and the decap table from this fraction up
+USEFUL_SHARE = 0.10              # a decap's useful band: where it carries at least this share of an IC's current
+LITTLE_SHARE = 0.05              # a decap that never reaches this share of any IC's current below check_to does little
 SHARE_MIN = 0.05                 # a part's share of the port current listed from this fraction up
 SUPPLY_TYPES = ("power_in",)     # schematic pin types of an IC's supply pins
 IC_PREFIXES = ("U", "IC")        # without pin types on the board: parts with these prefixes and rail + ground pads
@@ -98,6 +102,154 @@ def estimate_i_step(parts: list) -> tuple[Optional[float], str, list]:
     how = ("fields" if all(d["how"] == "field" for d in counted) else
            "estimate" if all(d["how"] == "estimate" for d in counted) else "partly")
     return STEP_FRACTION * sum(d["amps"] for d in counted), how, detail
+
+
+DC_SUFFIX = " (PDN DC)"          # a PDN rail's DC run is the DC load "<rail label> (PDN DC)" (its own Results view)
+
+
+def _rail_ics(board: Board, spec: PdnSpec, ground: str) -> list:
+    """The rail's ICs as prepare_pdn takes them (supply_parts, narrowed to spec.parts)."""
+    parts = supply_parts(board, spec.rail, ground)
+    if spec.parts:
+        parts = [t for t in parts if t[0].reference in set(spec.parts)]
+    return parts
+
+
+def _dc_source_pins(board: Board, config, spec: PdnSpec, ground: str) -> tuple[str, str, str]:
+    """Where the rail's DC current comes from: (its supply pin "REF.PAD", its return pin or "", in words). The
+    source as the PDN finds it: a power stage's output inductor (named, or the stage whose output the rail is), a
+    named part, else find_source (a regulator's power_out pin, a switcher's output inductor, a connector). The
+    return: the source's own pad on the ground, else (an inductor) the ground pad of the IC driving its other pad
+    (the controller's GND); "" when none (the supply side only is modelled then)."""
+    src = None
+    if spec.source.lower() == "none":
+        return "", "", ""
+    stage = None
+    if spec.source.startswith(STAGE):
+        stage = find_stage(board, config, spec.rail, spec.source[len(STAGE):])
+    elif not spec.source:
+        stage = find_stage(board, config, spec.rail)
+    if stage is not None:
+        from .power import switch_inductor
+        _node, src = switch_inductor(board, config, stage)
+    if src is None:
+        src = board.footprint(spec.source) if spec.source and not spec.source.startswith(STAGE) else \
+            find_source(board, spec.rail, ground)
+    if src is None:
+        return "", "", ""
+    if stage is not None:
+        outs = stage_outputs(board, config, stage)[0]
+        pad = next((p for p in src.pads if p.net in outs), None)
+    else:
+        pad = (next((p for p in src.pads if p.net == spec.rail and p.pin_type == "power_out"), None)
+               or next((p for p in src.pads if p.net == spec.rail), None))
+    if pad is None:
+        return "", "", ""
+    ret = next((p for p in src.pads if p.net == ground), None)
+    if ret is None:                 # an inductor: its controller's ground pin (the IC driving its other pad)
+        other = {p.net for p in src.pads if p.net and p.net != pad.net}
+        for fp in board.footprints:
+            if not fp.dnp and any(p.net in other and p.pin_type == "power_out" for p in fp.pads):
+                ret = next((p for p in fp.pads if p.net == ground), None)
+                if ret is not None:
+                    break
+    return f"{src.reference}.{pad.number}", (_pin_of(board, ret) if ret is not None else ""), src.reference
+
+
+def _pin_of(board: Board, pad: Pad) -> str:
+    """A pad as "REF.PAD" (its footprint found by the pad object)."""
+    for fp in board.footprints:
+        if any(p is pad for p in fp.pads):
+            return f"{fp.reference}.{pad.number}"
+    return ""
+
+
+def dc_load_spec(board: Board, config, spec: PdnSpec):
+    """The rail's DC run as a DC load (analysis/dcload.py), so its result has the DC maps, densities and busiest
+    vias of a DC load: from the rail's source pin (and its return) to every IC's supply pins, each IC drawing its
+    maximum current (ic_current: its Supply Current field, else by its pin count) shared over its supply pins and
+    returning through its ground pins [A125]. Regulators fed from the rail and connector ports are not loads (their
+    current is not known). (DcLoadSpec or None, a reason when None)."""
+    from ..config.settings import DcLoad, DcLoadSpec
+    ground = spec.ground or (config.reference_nets[0] if config.reference_nets else "GND")
+    src, ret, _ = _dc_source_pins(board, config, spec, ground)
+    if not src:
+        return None, "no source found (set `source`): the DC voltage at the ICs needs one"
+    loads = []
+    src_ref = src.rsplit(".", 1)[0]
+    for fp, rail_pads, gnd_pads in _rail_ics(board, spec, ground):
+        outs = {p.net for p in fp.pads if p.pin_type == "power_out" and p.net and p.net != spec.rail}
+        if fp.reference == src_ref or any(p.pin_type == "power_out" and p.net == spec.rail for p in fp.pads):
+            continue                      # the rail's own source
+        if outs:
+            # a regulator fed from the rail (an LDO: its input current is its output's load; a switcher's is less,
+            # by its efficiency and voltage ratio, so this is the safe side): its output rails' ICs' maximum
+            # currents, one level down (their own regulators not followed) [A125]
+            amps = sum(ic_current(f)[0] for o in outs for f, *_ in supply_parts(board, o, ground)
+                       if not any(p.pin_type == "power_out" for p in f.pads))
+            if amps <= 0:
+                continue
+        else:
+            amps, _how, _note = ic_current(fp)
+        for k, p in enumerate(rail_pads):
+            g = gnd_pads[k % len(gnd_pads)] if ret and gnd_pads else None
+            loads.append(DcLoad(f"{fp.reference}.{p.number}", amps / len(rail_pads),
+                                f"{fp.reference}.{g.number}" if g is not None else ""))
+    if not loads:
+        return None, "no IC to load the rail with"
+    if not ret or any(not ld.ret for ld in loads):
+        ret = ""
+        loads = [DcLoad(ld.pin, ld.current, "") for ld in loads]
+    return DcLoadSpec(spec.label + DC_SUFFIX, src, loads, source_return=ret), ""
+
+
+def ic_dc_voltages(res, dc, spec: PdnSpec, board: Board) -> None:
+    """Each loaded IC's DC voltage from the rail's DC run (a DcLoadResult): its worst supply pin's voltage
+    V_rail − (supply drop + return drop), the drops, the current, and its limit: the IC's Supply Voltage Min field,
+    else V·(1 − ripple) [A125]. All of them in res.dc_ics (ICs left out of the impedance ports too: they draw and
+    are checked), each port's also as its "dc"; the run's name on res.dc_view."""
+    from ..components.fields import read
+    res.dc_view = dc.net
+    if dc.error or not dc.loads or res.voltage is None:
+        res.notes.append(f"DC voltage at the ICs: {dc.error or 'no DC result'}")
+        return
+    by_part: dict[str, list] = {}
+    for ld in dc.loads:
+        by_part.setdefault(ld["pin"].rsplit(".", 1)[0], []).append(ld)
+    ports = {p["part"]: p for p in res.ports}
+    res.dc_ics = []
+    for part, lds in by_part.items():
+        w = max(lds, key=lambda r: r["drop_mv"])
+        fp = board.footprint(part)
+        r = read(fp, "Supply Voltage Min") if fp is not None else None
+        limit, how = ((r.value, "its Supply Voltage Min") if r is not None and isinstance(r.value, float)
+                      else (res.voltage * (1 - spec.ripple), f"{res.voltage:g} V − {spec.ripple * 100:g} %"))
+        d = {"part": part, "v": res.voltage - w["drop_mv"] / 1e3, "drop_mv": w["drop_mv"],
+             "supply_mv": w["supply_mv"], "return_mv": w["return_mv"], "pin": w["pin"],
+             "current_a": sum(x["current_a"] for x in lds), "limit": limit, "limit_how": how,
+             "returns": bool(w["ret"]), "xy": (w["x"], w["y"]),
+             "regulator": fp is not None and any(p.pin_type == "power_out" for p in fp.pads)}
+        res.dc_ics.append(d)
+        if part in ports:
+            ports[part]["dc"] = d
+
+
+def dc_issues(res, rules) -> list:
+    """pdn_dc_voltage: an IC whose supply pins see less than their limit at DC (from ic_dc_voltages)."""
+    out = []
+    for d in getattr(res, "dc_ics", ()):
+        if d["v"] >= d["limit"]:
+            continue
+        sev = resolve_severity("pdn_dc_voltage", rules.severity, None)
+        if sev == "off":
+            continue
+        out.append(Issue("pdn_dc_voltage", sev, res.name,
+                         f"{res.name}: {d['part']} sees {d['v']:.3f} V at DC ({d['pin']}: {d['drop_mv']:.0f} mV "
+                         f"drop, {d['supply_mv']:.0f} mV supply + {d['return_mv']:.0f} mV return at "
+                         f"{_s3(d['current_a'], 'A')}), below {d['limit']:.3f} V ({d['limit_how']})",
+                         (round(d["xy"][0], 4), round(d["xy"][1], 4)), key=f"pdn:{res.name}:{d['part']}:dc",
+                         details={"v": d["v"], "limit": d["limit"], "drop_mv": d["drop_mv"]}))
+    return out
 
 
 def rail_voltage(name: str) -> Optional[float]:
@@ -310,7 +462,10 @@ class PdnResult:
     #                                     "partly" (some fields, some pin counts)
     i_step_detail: list = field(default_factory=list)   # [{part, amps, how}] behind an estimated step
     check_to: float = 100e6
-    source: str = ""                    # the source part and its model, in words
+    dc_view: str = ""                   # the rail's DC run (a DC load view "<name> (PDN DC)"), dc_ics from it
+    dc_ics: list = field(default_factory=list)      # [{part, v, drop_mv, limit, ...}] every IC it loads
+    left_out: list = field(default_factory=list)    # [{part, pads: [[x, y]]}] ICs not solved as ports (off the grid)
+    source: str = ""                  # the source part and its model, in words
     stage: str = ""                     # a power stage as the source (its closed loop: analysis/load_step.py)
     f_min: float = F_MIN                # the sweep's lowest frequency (lower with a power stage's loop)
     ports: list = field(default_factory=list)       # [{part, pins, f, z_ohm, phase_deg, worst, peaks, l_nh, holds}]
@@ -826,6 +981,7 @@ def prepare_pdn(model: BoardModel, specs: list) -> tuple[list, list, list]:
                     # one IC's pad without copper on this grid (a small pad on a coarse model): that IC is left out,
                     # not the rail
                     res.notes.append(f"{fp.reference} left out: {e} on this model's {st.d:.2f} mm grid")
+                    res.left_out.append({"part": fp.reference, "pads": [list(map(float, p.position)) for p in rp]})
                     continue
                 # its pads on the rail's and the ground's main copper, or it would read only stray capacitance (and
                 # slow every solve: a nearly floating port)
@@ -833,6 +989,7 @@ def prepare_pdn(model: BoardModel, specs: list) -> tuple[list, list, list]:
                 on_gnd = all(piece[plane.node_id(nd)] == main.get(ground) for nd, a_ in inj if a_ < 0)
                 if not (on_rail and on_gnd):
                     cut.append(fp.reference + ("" if on_rail else f" ({spec.rail})") + ("" if on_gnd else f" ({ground})"))
+                    res.left_out.append({"part": fp.reference, "pads": [list(map(float, p.position)) for p in rp]})
                     continue
                 ports.append(inj)
                 meta.append({"part": fp.reference, "value": fp.value, "pins": [p.pin for p in rp],
@@ -974,13 +1131,26 @@ def finish_pdn(model: BoardModel, setup: PdnSetup):
         _port_step(setup, res.responses[-1], meta, fs, Z[:, p])
         # what holds the rail at each frequency: each part's share of the port's current (its branches added)
         holds = []
+        every = {n: [] for n in part_names}         # each part's share at every frequency (decaps)
+        ringing = []                                # the frequencies where the parts' currents circulate
         for k, f in enumerate(fs):
             I = sols[f].I_branch[p]
-            shares = {n: abs(complex(np.sum(I[idx[n]]))) for n in part_names if idx[n] and len(I) > max(idx[n])}
+            cur = {n: complex(np.sum(I[idx[n]])) for n in part_names if idx[n] and len(I) > max(idx[n])}
+            shares = {n: abs(c) for n, c in cur.items()}
+            for n in part_names:
+                every[n].append(float(shares.get(n, 0.0)))
+            # near an anti-resonance the parts carry current circulating between them, many times the IC's own (their
+            # magnitudes add to well over 1 A per A): no part's share means "supplies the IC" there, so those
+            # frequencies are marked and not judged (the decap table, the plot's shading) [A126]
+            ringing.append(sum(shares.values()) > RINGING_SUM)
             top = max(shares.items(), key=lambda t: t[1], default=(None, 0.0))
             holds.append({"f": float(f), "part": top[0] if top[1] >= SHARE_MIN else "planes",
                           "share": float(top[1])})
         port["holds"] = holds
+        # kept: the parts that carry a share worth showing somewhere in the sweep (|I| of the part per A at the
+        # port: the shares of parts in parallel can add to more than 1 where their currents are out of phase)
+        port["shares"] = {n: v for n, v in every.items() if max(v, default=0.0) >= SHARE_KEEP}
+        port["ringing"] = ringing
         # peaks: local maxima of |Z| (anti-resonances), the highest first
         peaks = [k for k in range(1, len(fs) - 1) if z[k] > z[k - 1] and z[k] >= z[k + 1]]
         port["peaks"] = [{"f": float(fs[k]), "z_ohm": float(z[k])} for k in sorted(peaks, key=lambda k: -z[k])[:4]]
@@ -1012,6 +1182,8 @@ def finish_pdn(model: BoardModel, setup: PdnSetup):
         w = min(res.ports, key=lambda p: p["worst"]["margin_db"])
         res.worst = {"part": w["part"], **w["worst"]}
     _decaps_near(model, setup)
+    setup.model_board = model.board
+    _decap_use(setup, config)
     _issues(setup, config.rules)
     res.seconds = time.time() - setup.t_start
     return res
@@ -1093,6 +1265,65 @@ def _decaps_near(model: BoardModel, setup: PdnSetup):
                         f"have no decap within {spec.decap_mm:g} mm ({pin.pin}: {where})",
                         tuple(pin.position), severity="warning", key=f"pdn:{spec.label}:{port['part']}:decap",
                         details={"part": port["part"], "pins": [p.pin for p, _ in far]})
+
+
+def _decap_use(setup: PdnSetup, config) -> None:
+    """Each decap's part in holding the rail, from the solved branch currents (no extra solve): over every IC port,
+    its largest share of an IC's current below check_to (and at which IC and frequency), the band where it carries
+    at least USEFUL_SHARE, its own series resonance 1/(2π·√(ESL·C)) (C at its DC bias), and "little" when it never
+    reaches LITTLE_SHARE: added to each res.decaps row; a decap_ineffective info lists those. The share is a part's
+    current per A drawn at the IC: a decap far from every IC, or one whose resonance sits where others already hold
+    the rail, carries little [A126]."""
+    res, spec = setup.res, setup.spec
+    for row in res.decaps:
+        best = (0.0, None, None)
+        band = None
+        for port in res.ports:
+            v = port.get("shares", {}).get(row["ref"])
+            if not v:
+                continue
+            fs = port["f"]
+            ring = port.get("ringing") or [False] * len(fs)
+            for f, s, r in zip(fs, v, ring):
+                if f <= spec.check_to and not r and s > best[0]:
+                    best = (s, port["part"], f)
+            run = None                      # the widest stretch of consecutive frequencies at USEFUL_SHARE or more
+            for f, s, r in zip(fs, v, ring):
+                if s >= USEFUL_SHARE and f <= spec.check_to and not r:
+                    run = (run[0], f) if run else (f, f)
+                    if band is None or run[1] / run[0] > band[1] / band[0]:
+                        band = run
+                else:
+                    run = None
+        m = config.model_for(row["ref"])
+        c, esl = (row.get("C_dc") or row.get("C")), (m.get("ESL") if m is not None else None)
+        row["srf"] = float(1 / (2 * math.pi * math.sqrt(esl * c))) if c and esl else None
+        row["peak_share"], row["peak_at"], row["peak_f"] = float(best[0]), best[1], best[2]
+        row["band"] = [float(band[0]), float(band[1])] if band else None
+        row["little"] = best[0] < LITTLE_SHARE
+        # near an IC that was left out of the ports (its pads off the grid): it decouples that IC, which the model
+        # does not draw from, so it is not called useless
+        fp = setup.model_board.footprint(row["ref"]) if getattr(setup, "model_board", None) else None
+        pads = [p.position for p in fp.pads if p.net == spec.rail] if fp is not None else []
+        near = next((lo["part"] for lo in res.left_out for xy in lo["pads"] for cp in pads
+                     if math.dist(cp, xy) <= 3 * spec.decap_mm), None)
+        if row["little"] and near:
+            row["little"], row["for_left_out"] = False, near
+    little = [r["ref"] for r in res.decaps if r.get("little")]
+    if little and res.ports:
+        setup.issue(config.rules, "decap_ineffective",
+                    f"{spec.label}: {len(little)} of {len(res.decaps)} decap(s) never carry {LITTLE_SHARE:.0%} of an "
+                    f"IC's current below {_s3(spec.check_to, 'Hz')}: {', '.join(little[:12])}"
+                    + (" …" if len(little) > 12 else "") + " (far from every IC, or their resonance where others hold "
+                    "the rail: move them nearer an IC, or change their value)", _part_xy(setup, little[0]),
+                    severity="info", key=f"pdn:{spec.label}:little",
+                    details={"decaps": little})
+
+
+def _part_xy(setup: PdnSetup, ref: str) -> tuple:
+    """A part's position (an issue's location), else the first port's."""
+    fp = setup.model_board.footprint(ref) if getattr(setup, "model_board", None) else None
+    return tuple(map(float, fp.position)) if fp is not None else setup.res.ports[0]["xy"]
 
 
 def _port_step_figures(res: PdnResult, port: dict):

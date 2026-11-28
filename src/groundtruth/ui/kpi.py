@@ -259,6 +259,24 @@ def _pdn(rr) -> list[Kpi]:
               else "ok")
         out.append(("worst margin", f"{w['margin_db']:+.1f} dB", f"{w['part']} @ {format_si(w['f'], 'Hz')}", st,
                     f"the IC furthest over (or nearest to) the target, held there by {w['holds']}"))
+    dcs = [(d, d["part"]) for d in getattr(rr, "dc_ics", ())]
+    if dcs:
+        d, part = min(dcs, key=lambda t: t[0]["v"] - t[0]["limit"])
+        st = "error" if d["v"] < d["limit"] else "ok"
+        out.append(("lowest DC", f"{d['v']:.3f} V", f"{part}: −{d['drop_mv']:.1f} mV, min {d['limit']:.3g} V", st,
+                    f"the DC voltage at each IC's supply pins with every IC drawing its maximum current: the rail's "
+                    f"voltage less the IR drop in the copper (supply {d['supply_mv']:.1f} mV + return "
+                    f"{d['return_mv']:.1f} mV at {part}); the limit is {d['limit_how']}. The map is the view "
+                    f"'{getattr(rr, 'dc_view', '')}'"))
+    used = [c for c in getattr(rr, "decaps", ()) if "little" in c]
+    if used:
+        little = [c["ref"] for c in used if c["little"]]
+        out.append(("decaps", f"{len(used) - len(little)} of {len(used)} work",
+                    ("doing little: " + ", ".join(little[:4]) + (" …" if len(little) > 4 else "")) if little
+                    else "each carries ≥5 % somewhere", "warn" if little else "ok",
+                    "decaps that carry at least 5 % of an IC's current somewhere below the check frequency; the "
+                    "others are too far from every IC or resonate where other parts already hold the rail (the "
+                    "plot under the curves: each part's share of the worst IC's current)"))
     out.append(("ICs", str(len(rr.ports)), ", ".join(p["part"] for p in rr.ports[:4])
                 + (" …" if len(rr.ports) > 4 else ""), "", "the ICs with supply pins on the rail (ports)"))
     peaks = [(pk, p["part"]) for p in rr.ports for pk in p["peaks"][:1]]

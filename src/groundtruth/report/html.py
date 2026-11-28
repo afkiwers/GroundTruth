@@ -1298,11 +1298,41 @@ def _pdn(d, issues, figs) -> str:
                  e(f"{w['margin_db']:+.1f} dB @ {format_si(w['f'], 'Hz')}") if w else "–",
                  e(w.get("holds", "")),
                  e(f"{format_si(pk['z_ohm'], 'Ω')} @ {format_si(pk['f'], 'Hz')}") if pk else "–",
-                 f"{p['l_nh']:.2f} nH" if p.get("l_nh") else "–", e(", ".join(near[:4]) or "none")]
+                 f"{p['l_nh']:.2f} nH" if p.get("l_nh") else "–",
+                 e(f"{p['dc']['v']:.3f} V (−{p['dc']['drop_mv']:.1f} mV; min {p['dc']['limit']:.3g} V)")
+                 if p.get("dc") else "–", e(", ".join(near[:4]) or "none")]
         rows.append("<tr>" + "".join(f"<td class='num'>{c}</td>" if k in (1, 5) else f"<td>{c}</td>"
                                      for k, c in enumerate(cells)) + "</tr>")
+    # ICs the DC run loads that are not impedance ports (left out of the AC model): their DC voltage still shown
+    port_parts = {p["part"] for p in d.ports}
+    for x in [x for x in getattr(d, "dc_ics", ()) if x["part"] not in port_parts]:
+        rows.append("<tr>" + "".join(f"<td>{c}</td>" for c in (
+            e(x["part"] + (" (regulator)" if x.get("regulator") else "")), "–", "–", "not an impedance port", "–", "–",
+            e(f"{x['v']:.3f} V (−{x['drop_mv']:.1f} mV; min {x['limit']:.3g} V)"), "")) + "</tr>")
     body.append("<h4>ICs</h4>" + _table(["IC", "#Supply pins", "Worst margin", "Held there by", "Highest peak",
-                                         "#L above decaps", "Decaps within 9 mm"], rows))
+                                         "#L above decaps", "DC voltage", "Decaps within 9 mm"], rows))
+    used = [c for c in d.decaps if "little" in c]
+    if used:
+        def _band(c):
+            """A decap's useful band as text."""
+            if not c.get("band"):
+                return "–"
+            lo, hi = (float(f"{x:.3g}") for x in c["band"])
+            return f"{format_si(lo, 'Hz')} … {format_si(hi, 'Hz')}"
+        drows = []
+        for c in sorted(used, key=lambda c: -c["peak_share"]):
+            cells = [e(c["ref"]), e(c["value"]), e(format_si(c["C_dc"], "F")) if c.get("C_dc") else "–",
+                     e(format_si(float(f"{c['srf']:.3g}"), "Hz")) if c.get("srf") else "–",
+                     f"{c['peak_share'] * 100:.0f} %" + (f" ({e(c['peak_at'])})" if c.get("peak_at") else ""),
+                     e(_band(c)), "does little" if c["little"] else ""]
+            drows.append("<tr>" + "".join(f"<td>{x}</td>" for x in cells) + "</tr>")
+        body.append("<h4>Decaps</h4>" + _table(["Decap", "Value", "C at its DC bias", "Own resonance",
+                                                "Largest share (IC)", "Useful band (≥10 %)", ""], drows))
+        from .plots import draw_pdn_decaps, pdn_share_port
+        if pdn_share_port(d) is not None:
+            body.append(_img(figs.png(f"{d.name} PDN decaps", draw_pdn_decaps, d, size=(9.5, 3.4)),
+                             f"{d.name}: each part's share of {pdn_share_port(d)['part']}'s current; shaded where the "
+                             "decaps ring (not judged)"))
     body.append(_img(figs.png(f"{d.name} PDN", draw_pdn, d, size=(9.5, 4.2)),
                      f"{d.name}: |Z| at each IC's supply pins; the dashed red line is the target"))
     body.append(_responses(f"{d.name} PDN", getattr(d, "responses", ()), figs))

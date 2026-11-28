@@ -418,7 +418,14 @@ def pdn_text(d) -> list[str]:
             line += f"; highest peak {format_si(pk['z_ohm'], 'Ω')} @ {format_si(pk['f'], 'Hz')}"
         if p.get("l_nh"):
             line += f"; {p['l_nh']:.2f} nH above the decaps"
+        if p.get("dc"):
+            line += (f"; DC {p['dc']['v']:.3f} V (−{p['dc']['drop_mv']:.1f} mV at {p['dc']['pin']}, min "
+                     f"{p['dc']['limit']:.3g} V)")
         out.append(line)
+    for x in getattr(d, "dc_ics", ()):
+        if x["part"] not in {p["part"] for p in d.ports}:
+            out.append(f"    {x['part']} (not an impedance port): DC {x['v']:.3f} V (−{x['drop_mv']:.1f} mV at "
+                       f"{x['pin']}, min {x['limit']:.3g} V)")
     near = []
     for c in d.decaps:
         if c["near"]:

@@ -857,6 +857,8 @@ V &middot; ripple / I_step, whatever the frequency of the IC's current step.</p>
   and die above <i>check_to</i> (as the target assumes): first the copper's inductance (L·ΔI over the edge), then the
   decaps' and the source's dip; the issue <b>pdn_step</b> when that dip (after the spike, which the impedance target judges) moves by more than the ripple. The Results view
   shows it under the curves.</li>
+<li>Which decaps work: from the solve's own branch currents, each part's share of each IC's current against frequency (the plot under the curves, for the worst IC); per decap its largest share below check_to and at which IC, its useful band (where it carries at least 10 %), its own resonance 1/(2π√(ESL·C)) with C at its DC bias, and "does little" when it never carries 5 % (the info <b>decap_ineffective</b>: too far from every IC, or resonating where other parts already hold the rail); frequencies where the decaps ring (their currents add to more than 1.5 times the IC's, an anti-resonance) are shaded and not judged, and a decap beside an IC left out of the model is not flagged; the tile counts the decaps that work.</li>
+<li>the DC voltage at each IC: the rail's own DC run from its source pin to every IC's supply pins, each IC drawing its maximum current (its Supply Current field, else the pin-count estimate) and returning through its ground pins, on the whole-board DC model; each IC's worst supply pin's voltage is the rail's voltage less the supply and return drop, against its Supply Voltage Min field, else the rail's voltage less its ripple; the issue <b>pdn_dc_voltage</b> below it. The run is also its own Results view, "&lt;rail&gt; (PDN DC)": its current density map, busiest vias and copper loss. An LDO (or other regulator) fed from the rail draws its output rail's ICs' maximum current (one level). The run uses the ICs' maximum, often estimated currents: it heats nothing in Thermal or Current capacity and is not in the combined DC view. ICs left out of the impedance ports are still loaded and checked.</li>
 </ul>
 <p>The model is the whole board at the board-wide resolution (Preferences), and each IC's (or connector port's) loop
 on a fine model of its own: the decaps that actually carry its current at high frequency (read off the board-wide
@@ -1259,6 +1261,10 @@ settings file changes it or switches a check off):</p>
   allowed deviation (5 %) when its load steps (<a href="#loadstep">Load step</a>)</td></tr>
 <tr><td>pdn_step (warning)</td><td>a supply rail moves by more than its ripple at an IC (or port) when the load
   steps (<a href="#pdn">Power integrity</a>)</td></tr>
+<tr><td>decap_ineffective (info)</td><td>decaps that never carry 5 % of an IC's current below the check frequency
+  (<a href="#pdn">Power integrity</a>)</td></tr>
+<tr><td>pdn_dc_voltage (warning)</td><td>an IC's supply pins below its minimum supply voltage at DC (the
+  rail's IR drop with every IC at its maximum current; <a href="#pdn">Power integrity</a>)</td></tr>
 <tr><td>fb_ripple (warning)</td><td>the switching ripple at a controller's FB pin below its FB Ripple Min or above
   its FB Ripple Max (<a href="#fbripple">FB ripple</a>)</td></tr>
 </table>

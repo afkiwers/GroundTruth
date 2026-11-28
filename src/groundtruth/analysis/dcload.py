@@ -40,6 +40,9 @@ class DcLoadResult(ConverterResult):
     loads: list = field(default_factory=list)      # [{pin, ret, current_a, supply_mv, return_mv, drop_mv, v_out}]
     max_drop: Optional[float] = None               # V, the rail's limit (dc_drop)
     source_v: Optional[float] = None               # not modelled: the drops are relative (V at the loads = V_src - drop)
+    # a PDN rail's own DC run (pdn.dc_load_spec): its currents are the ICs' maxima, often estimated, not an operating
+    # point: a view of its own, but no heat (Thermal, capacity), no part power and not in the combined DC view
+    pdn_rail: str = ""
 
     def label(self) -> str:
         """Its name in the Results list."""

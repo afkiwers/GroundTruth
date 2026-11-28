@@ -2210,6 +2210,56 @@ def draw_pdn_holds(fig: Figure, p) -> None:
     _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TICK) + 0.08, header + 0.06)
 
 
+def pdn_share_port(p):
+    """The port whose decap shares the plot shows: the worst one (furthest over or nearest to the target), else the
+    first; None without shares."""
+    with_shares = [port for port in getattr(p, "ports", ()) if port.get("shares")]
+    if not with_shares:
+        return None
+    worst = (getattr(p, "worst", None) or {}).get("part")
+    return next((port for port in with_shares if port["part"] == worst), with_shares[0])
+
+
+def draw_pdn_decaps(fig: Figure, p, part: Optional[str] = None, top: int = 8) -> None:
+    """How much of one IC's current each part carries against frequency (pdn.finish_pdn's shares: |I| of the part
+    per A at the IC; shaded where the parts' currents circulate, an anti-resonance): the `top` parts with the largest share somewhere below check_to, the USEFUL_SHARE line dashed.
+    A decap holds the rail where its curve is high; one that stays low does little there. The IC: `part`, else the
+    worst port."""
+    from ..analysis.pdn import USEFUL_SHARE
+    fig.clear()
+    ax = fig.add_subplot(111)
+    port = next((x for x in p.ports if x["part"] == part), None) if part else pdn_share_port(p)
+    if port is None:
+        ax.set_axis_off()
+        return
+    f = np.array(port["f"]) / 1e6
+    band = f <= p.check_to / 1e6
+    ranked = sorted(port["shares"].items(), key=lambda kv: -max(np.array(kv[1])[band], default=0.0))[:top]
+    palette = list(PDN_COLOURS) + ["#7f7f7f", "#aec7e8", "#ffbb78", "#98df8a", "#ff9896", "#c5b0d5"]
+    for k, (name, v) in enumerate(ranked):
+        ax.plot(f, v, color=palette[k % len(palette)], lw=1.3, label=name)
+    ax.axhline(USEFUL_SHARE, color="#888888", lw=0.8, ls="--")
+    ax.axvline(p.check_to / 1e6, color="#d62728", lw=0.8, ls=":")
+    # where the parts' currents circulate (an anti-resonance: shares of several times 1) the band is shaded and the
+    # axis stops at 1.2: the shares there are not "supplies the IC"
+    ring = port.get("ringing") or []
+    for k, r in enumerate(ring):
+        if r:
+            lo = f[k] if k == 0 else math.sqrt(f[k - 1] * f[k])
+            hi = f[k] if k == len(f) - 1 else math.sqrt(f[k] * f[k + 1])
+            ax.axvspan(lo, hi, color="#d62728", alpha=0.08, lw=0)
+    ax.set_ylim(0, 1.2)
+    ax.set_ylabel("share of its current", fontsize=FS_TEXT)
+    _freq_axis(ax, list(f))
+    ax.tick_params(labelsize=FS_TICK, which="both")
+    ax.grid(True, which="both", alpha=0.3)
+    w_in, _ = fig.get_size_inches()
+    left_in, right_in = _lh(FS_TEXT) + _width_in("1.00", FS_TICK) + 0.24, 0.25
+    header = _title_and_key(ax, f"which parts carry {port['part']}'s current (dashed: {USEFUL_SHARE:.0%}, a decap's "
+                            "useful band above it; shaded: ringing, not judged)", w_in - left_in - right_in)
+    _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TICK) + 0.08, header + 0.06)
+
+
 def figure_png(draw, *args, size=(8, 5), dpi=110, **kw) -> bytes:
     """A plot as PNG bytes: draw(fig, *args, **kw) on a new figure of `size` inches, rendered off-screen (Agg),
     cropped to what is drawn (a board's maps keep their aspect inside the figure: a tall board in a wide figure left

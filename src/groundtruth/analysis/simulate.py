@@ -34,7 +34,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Optional
 
 import numpy as np
@@ -4519,6 +4519,27 @@ def _simulate(board: Board, config: Config, nets: Optional[list[str]], progress:
     brid = [b for b in config.bridges if not nets or b.name in nets or any(b.leg_name(l) in nets for l in b.legs)]
     dl = [d for d in getattr(config, "dc_loads", ()) if not nets or d.name in nets]
     pl = [d for d in getattr(config, "pdn", ()) if not nets or d.label in nets]
+    # each PDN rail's DC run (analysis/pdn.dc_load_spec): a DC load from its source to its ICs at their maximum
+    # current, solved with the DC loads (its own Results view: the map, densities, vias); the voltage at each IC from
+    # it goes onto the rail's ports after finishing (pdn.ic_dc_voltages)
+    pdn_dc = []
+    if pl:
+        from .pdn import dc_load_spec
+        for d in pl:
+            dspec, why = dc_load_spec(board, config, d)
+            pdn_dc.append((d, dspec, why))
+        auto = [x[1] for x in pdn_dc if x[1] is not None]
+        dl = dl + auto
+        # the whole-board DC model takes its nets from the config's DC loads (power.dc_board_build): these runs'
+        # too, or a rail on tracks only (no plane) has no copper in it. A model built before without them is
+        # built again.
+        # built again. Earlier runs' entries are replaced (a reused model: the parts or fields may have changed).
+        names = {s.name for s in auto}
+        keep = [d for d in getattr(model.config, "dc_loads", ()) if d.name not in names]
+        if keep + auto != list(getattr(model.config, "dc_loads", ())):
+            model.config = replace(model.config, dc_loads=keep + auto)
+            if hasattr(model, "_dc_board"):
+                del model._dc_board
     if ph is not None:      # building a model takes about what a solve or two does (6-layer board: 3-4 s)
         a = config.analysis
         # every kind of item counts, a bridge's legs as power stages: a run of a motor bridge alone estimated
@@ -4560,6 +4581,10 @@ def _simulate(board: Board, config: Config, nets: Optional[list[str]], progress:
         from .dcload import prepare_dc_loads
         with step("DC loads: their model"):
             dsetups, result.dc_loads, d_issues = prepare_dc_loads(model, dl)
+        for d, dspec, _ in pdn_dc:              # mark the PDN rails' own runs (not an operating point)
+            for r in result.dc_loads:
+                if dspec is not None and r.net == dspec.name:
+                    r.pdn_rail = d.label
         issues.extend(d_issues)
     # supply rails' PDN impedance (analysis/pdn.py): one whole-board model per rail, its ICs as ports
     psetups = []
@@ -4634,6 +4659,18 @@ def _simulate(board: Board, config: Config, nets: Optional[list[str]], progress:
     stats.mark("finishing")
     for s in psetups:
         issues.extend(s.issues)
+    if pdn_dc:
+        from .pdn import dc_issues, ic_dc_voltages
+        for d, dspec, why in pdn_dc:
+            res = next((r for r in result.pdn if r.name == d.label and not r.error), None)
+            if res is None:
+                continue
+            dres = next((x for x in result.dc_loads if dspec is not None and x.net == dspec.name), None)
+            if dres is None:
+                res.notes.append(f"DC voltage at the ICs: {why}")
+                continue
+            ic_dc_voltages(res, dres, d, board)
+            issues.extend(dc_issues(res, config.rules))
     if bsetups:
         from .bridge import finish_bridge
         # one thread from here (the receiver, the sweep): a short switch interval lets a waiting GUI thread have
@@ -4667,7 +4704,8 @@ def _simulate(board: Board, config: Config, nets: Optional[list[str]], progress:
             ph.report(_done_message(), 1.0)
         return result
     result.issues = finish_issues(result, issues, route_issues, stage_issues,
-                                  [s.res for s in csetups] + list(result.dc_loads), config, board)
+                                  [s.res for s in csetups] + [d for d in result.dc_loads if not d.pdn_rail],
+                                  config, board)
     stats.mark("issues")
     if ph is not None:
         ph.report(_done_message(), 1.0)

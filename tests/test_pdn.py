@@ -407,3 +407,146 @@ def test_a_switchers_output_inductor_is_the_rails_source(tmp_path):
          "pintype": "power_out"}])
     b, _, _ = make(tmp_path, g, "ind", nets=())
     assert find_source(b, "VDD", "GND").reference == "L1"
+
+
+def _track_rail(tmp_path, name, fields):
+    """A 2-layer board: the connector J1 (VDD, GND) at x = 5 mm, the IC U1 at x = 30 mm, joined on F.Cu by one VDD
+    track 0.5 mm wide, GND a plane on B.Cu (vias at both ground pads); U1 with `fields`. Simulated as the PDN rail
+    VDD (3.3 V, source J1): (its PdnResult, the issues, the result)."""
+    from boardgen import BoardGen
+    g = BoardGen(layers=2, size=(40.0, 20.0))
+    g.plane("GND", "B.Cu")
+    pad = {"size": (1.0, 1.0)}
+    g.footprint("J1", "Conn", "Connector:Fake_2pin", (5.0, 10.0), [
+        {"number": 1, "at": (0.0, 0.0), "net": "VDD", **pad}, {"number": 2, "at": (0.0, 3.0), "net": "GND", **pad}])
+    g.footprint("U1", "MCU", "Package_SO:Fake_IC", (30.0, 10.0), [
+        {"number": 1, "at": (0.0, 0.0), "net": "VDD", "pintype": "power_in", **pad},
+        {"number": 2, "at": (0.0, 3.0), "net": "GND", "pintype": "power_in", **pad}])
+    g.via((5.0, 13.0), "GND")
+    g.via((30.0, 13.0), "GND")
+    g.track((5.0, 10.0), (30.0, 10.0), "VDD", width=0.5)
+    g.fields("U1", **fields)
+    b, sc, _ = make(tmp_path, g, name, nets=())
+    sc.set_pdn([PdnSpec("VDD", source="J1", voltage=3.3, i_step=0.1)])
+    sc.save()
+    r = simulate(b, SettingsFile.load(sc.path).config)
+    return r.pdn[0], r.issues, r
+
+
+def test_the_dc_voltage_at_an_ic_is_the_rail_less_the_tracks_drop(tmp_path):
+    """U1 draws 1 A (its Supply Current) through a 0.5 mm × 25 mm track of 35 µm copper: the supply side drops
+    I·ρL/(wt) = 1 A · 1.72e-8 Ω·m · 24 mm / (0.5 mm · 35 µm) ≈ 23.6 mV over the track between the pads' edges
+    (within 15 %: the pads and the current's entry), the return through the plane far less; the voltage is 3.3 V
+    less it. A Supply Voltage Min of 3.29 V is above it: pdn_dc_voltage. The DC run is its own view."""
+    p, issues, r = _track_rail(tmp_path, "dc", {"Supply Current": "1A", "Supply Voltage Min": "3.29V"})
+    d = p.ports[0]["dc"]
+    expect = 1.0 * 1.72e-8 * 24e-3 / (0.5e-3 * 35e-6) * 1e3
+    assert d["supply_mv"] == pytest.approx(expect, rel=0.15), d
+    assert 0 <= d["return_mv"] < d["supply_mv"] / 3
+    assert d["v"] == pytest.approx(3.3 - d["drop_mv"] / 1e3) and d["limit"] == pytest.approx(3.29)
+    assert any(i.check == "pdn_dc_voltage" and "U1" in i.message for i in issues)
+    assert p.dc_view == "VDD (PDN DC)" and any(x.net == "VDD (PDN DC)" for x in r.dc_loads)
+    from groundtruth.ui.kpi import _pdn
+    tile = next(t for t in _pdn(p) if t[0] == "lowest DC")
+    assert tile[3] == "error" and tile[1].startswith("3.2")
+
+
+def test_without_a_supply_voltage_min_the_limit_is_the_ripple(tmp_path):
+    """No Supply Voltage Min: the limit is 3.3 V · (1 − 5 %) = 3.135 V, far below the drop at 1 A: no issue."""
+    p, issues, _ = _track_rail(tmp_path, "dc2", {"Supply Current": "1A"})
+    assert p.ports[0]["dc"]["limit"] == pytest.approx(3.135)
+    assert not any(i.check == "pdn_dc_voltage" for i in issues)
+
+
+
+def test_the_pdn_dc_run_heats_nothing_and_is_not_in_the_combined_view(tmp_path):
+    """The PDN rail's own DC run (its ICs' maximum currents, often estimated) is a view of its own, marked pdn_rail:
+    Thermal's stages leave it out (no heat from estimated currents), and so does the part power check."""
+    from groundtruth.analysis.thermal import _stages
+    p, _, r = _track_rail(tmp_path, "heat", {"Supply Current": "1A"})
+    (run,) = [x for x in r.dc_loads if x.net == "VDD (PDN DC)"]
+    assert run.pdn_rail == "VDD" and _stages([run]) == []
+    assert [x["part"] for x in p.dc_ics] == ["U1"]
+
+
+def test_an_ldo_fed_from_the_rail_draws_its_output_rails_load(tmp_path):
+    """U2, an LDO with its input (power_in) on VDD and its output (power_out) on V2, where U3 draws 300 mA: in the
+    VDD DC run U2 draws those 300 mA (its input current is its output's load), U1 its own 1 A."""
+    from groundtruth.analysis.pdn import dc_load_spec
+    from boardgen import BoardGen
+    g = BoardGen(layers=2, size=(40.0, 20.0))
+    g.plane("GND", "B.Cu")
+    pad = {"size": (1.0, 1.0)}
+    g.footprint("J1", "Conn", "Connector:Fake_2pin", (5.0, 10.0), [
+        {"number": 1, "at": (0.0, 0.0), "net": "VDD", **pad}, {"number": 2, "at": (0.0, 3.0), "net": "GND", **pad}])
+    g.footprint("U1", "MCU", "Package_SO:Fake_IC", (30.0, 10.0), [
+        {"number": 1, "at": (0.0, 0.0), "net": "VDD", "pintype": "power_in", **pad},
+        {"number": 2, "at": (0.0, 3.0), "net": "GND", "pintype": "power_in", **pad}])
+    g.footprint("U2", "LDO", "Package_SO:Fake_IC", (20.0, 5.0), [
+        {"number": 1, "at": (0.0, 0.0), "net": "VDD", "pintype": "power_in", **pad},
+        {"number": 2, "at": (2.0, 0.0), "net": "V2", "pintype": "power_out", **pad},
+        {"number": 3, "at": (0.0, 3.0), "net": "GND", "pintype": "power_in", **pad}])
+    g.footprint("U3", "ADC", "Package_SO:Fake_IC", (25.0, 5.0), [
+        {"number": 1, "at": (0.0, 0.0), "net": "V2", "pintype": "power_in", **pad},
+        {"number": 2, "at": (0.0, 3.0), "net": "GND", "pintype": "power_in", **pad}])
+    g.track((5.0, 10.0), (30.0, 10.0), "VDD", width=0.5)
+    g.fields("U1", **{"Supply Current": "1A"})
+    g.fields("U3", **{"Supply Current": "300mA"})
+    b, sc, _ = make(tmp_path, g, "ldo", nets=())
+    spec, why = dc_load_spec(b, sc.config, PdnSpec("VDD", source="J1", voltage=3.3))
+    assert spec is not None, why
+    amps = {ld.pin.split(".")[0]: ld.current for ld in spec.loads}
+    assert amps == {"U1": pytest.approx(1.0), "U2": pytest.approx(0.3)}
+
+
+def test_four_equal_decaps_share_the_current_equally(solved):
+    """Four equal 1 µF decaps placed symmetrically round the IC: below their resonance each carries a quarter of
+    its current (C/(4C + C_pp), within 5 %), so each is useful; the own resonance is 1/(2π·√(ESL·C))."""
+    p, _, cfg = solved["four"]
+    port = p.ports[0]
+    k = int(np.argmin(np.abs(np.log(np.array(port["f"]) / 1e5))))
+    for ref in ("C1", "C2", "C3", "C4"):
+        assert port["shares"][ref][k] == pytest.approx(0.25, rel=0.05), ref
+    m = cfg.model_for("C1")
+    row = next(r for r in p.decaps if r["ref"] == "C1")
+    assert row["srf"] == pytest.approx(1 / (2 * math.pi * math.sqrt(m.get("ESL") * row["C_dc"])), rel=1e-6)
+    assert not row["little"] and row["band"] and row["band"][0] <= 1e4 * 1.01
+
+
+def test_a_tiny_cap_beside_a_big_one_does_little(tmp_path):
+    """10 pF beside 10 µF: below check_to (100 MHz) the 10 pF cap's admittance is 10⁶ times smaller and its own
+    resonance (~1.6 GHz with 1 nH) lies above the band, so it never carries 5 % of the IC's current: flagged (info
+    decap_ineffective); the 10 µF one is not."""
+    p, issues, _ = _run(tmp_path, "tiny", PdnSpec("VDD", source="none", voltage=3.3, i_step=1.0),
+                        caps=[("C1", "10u", (22.0, 15.0)), ("C2", "10p", (18.0, 15.0))])
+    rows = {r["ref"]: r for r in p.decaps}
+    assert rows["C2"]["little"] and not rows["C1"]["little"]
+    assert rows["C1"]["peak_share"] > 0.9 and rows["C2"]["peak_share"] < 0.05
+    (info,) = [i for i in issues if i.check == "decap_ineffective"]
+    assert info.severity == "info" and "C2" in info.message and "C1" not in info.message
+    from groundtruth.report.plots import draw_pdn_decaps
+    from matplotlib.figure import Figure
+    fig = Figure(figsize=(8, 3))
+    draw_pdn_decaps(fig, p)
+    labels = [l.get_label() for l in fig.axes[0].get_lines()]
+    assert "C1" in labels
+
+
+def test_ringing_decaps_do_not_read_as_working_and_a_left_out_ics_decap_is_not_flagged(tmp_path):
+    """10 µF and 100 nF (an anti-resonance between them) and U2 cut off from the rail (left out of the ports) with a
+    10 nF decap beside it: the in-phase shares stay within 0 … 1 at every frequency (the current circulating between
+    the two decaps cancels out), and the decap beside U2 is not called useless (it decouples an IC the model did not
+    draw from), marked for_left_out."""
+    p, issues, _ = _run(tmp_path, "ring", PdnSpec("VDD", source="none", voltage=3.3, i_step=1.0), cut_ic=True,
+                        caps=[("C1", "10u", (22.0, 15.0)), ("C2", "100n", (18.0, 15.0)),
+                              ("C3", "10n", (31.5, 22.0))])
+    assert [lo["part"] for lo in p.left_out] == ["U2"]
+    for v in p.ports[0]["shares"].values():
+        pass
+    ring = p.ports[0]["ringing"]
+    assert any(ring) and not ring[0]          # the anti-resonance is marked, the low end is not
+    for row in p.decaps:
+        assert row["peak_share"] <= 1.5, row        # ringing frequencies (the parts' |I| over 1.5) are not judged
+    row = next(r for r in p.decaps if r["ref"] == "C3")
+    assert not row["little"] and row.get("for_left_out") == "U2"
+    assert not any("C3" in i.message for i in issues if i.check == "decap_ineffective")

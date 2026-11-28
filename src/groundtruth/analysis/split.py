@@ -175,5 +175,6 @@ def merge_parts(config: Config, nets: Optional[list], parts: list[SimulationResu
     route_issues = [i for p in parts for i in p.part.get("route_issues", [])]
     stage_issues = [i for p in parts for i in p.part.get("stage_issues", [])]
     result.issues = finish_issues(result, issues, route_issues, stage_issues,
-                                  list(result.converters) + list(result.dc_loads), cfg, board)
+                                  list(result.converters) + [d for d in result.dc_loads
+                                                             if not getattr(d, "pdn_rail", "")], cfg, board)
     return result

@@ -1306,6 +1306,9 @@ class ResultsPanel(wx.Panel):
             if self.canvas3.IsShown() and rr.kind == "bode":     # a Bode view's step responses
                 from ..report.plots import draw_step
                 views.append((self.canvas3, lambda fig: draw_step(fig, rr)))
+            elif self.canvas3.IsShown() and rr.kind == "pdn":    # a rail's decaps: their share of the worst IC's current
+                from ..report.plots import draw_pdn_decaps
+                views.append((self.canvas3, lambda fig: draw_pdn_decaps(fig, rr)))
             elif self.canvas3.IsShown():
                 views.append((self.canvas3, lambda fig: draw_section(fig, board, rr)))
             if rr.kind == "pdn":
@@ -1568,6 +1571,9 @@ class ResultsPanel(wx.Panel):
         if rr is not None and rr.kind == "bode":        # a Bode view: its step responses there (plots.draw_step)
             from ..report.plots import has_step
             return has_step(rr)
+        if rr is not None and rr.kind == "pdn":         # its decaps' shares of the worst IC's current
+            from ..report.plots import pdn_share_port
+            return pdn_share_port(rr) is not None
         if rr is not None and rr.kind == "bridge":      # its capacitors' ripple bars (not on the sweep)
             return bool(self.section_box.GetValue() and getattr(rr, "caps", None) and rr.view != "sweep")
         return bool(self.section_box.GetValue() and rr is not None and getattr(rr, "section", None)
