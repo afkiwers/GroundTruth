@@ -1442,7 +1442,9 @@ class ResultsPanel(wx.Panel):
         else:
             maps = self._px(heatmap_height_in(rr, w / inch, max(h - 6, MAPS_MIN_PX) / inch, layer, vectors, scale))
         heights = ((self.canvas, max(maps, MAPS_MIN_PX)),
-                   (self.canvas3, (self._px(STEP_IN) if rr.kind == "bode" else
+                   # a Bode view's steps and a PDN rail's decap shares are plots of STEP_IN (the cross-section's
+                   # height was 0 for a PDN view: the decap plot was laid out with no height, never seen)
+                   (self.canvas3, (self._px(STEP_IN) if rr.kind in ("bode", "pdn") else
                                    self._px(section_height_in(self.board, rr, w / inch))) if self.canvas3.IsShown() else 120),
                    (self.canvas2, self._px(SPECTRUM_IN)))
         for c, h in heights:

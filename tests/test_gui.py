@@ -877,7 +877,12 @@ def test_configurations_back_to_last_settings_and_undo(app, frame, monkeypatch):
     idle()
     assert on() == [True] and "·" not in f.GetTitle()
     # Ctrl+Z in a text field goes to the field: the settings stay
-    field = next(w for w in f.nets.GetChildren() if isinstance(w, wx.TextCtrl))
+    def descendants(w):
+        """Every window inside w (the tab's fields sit in sub-panels since its layout was split)."""
+        for c in w.GetChildren():
+            yield c
+            yield from descendants(c)
+    field = next(w for w in descendants(f.nets) if isinstance(w, wx.TextCtrl))
     monkeypatch.setattr(wx.Window, "FindFocus", staticmethod(lambda: field))
     steps = f._undo.undo_label()
     f._undo_key(False)
@@ -3772,6 +3777,10 @@ def test_a_pdn_rail_is_found_set_and_shown_after_simulate(app, tmp_path, monkeyp
         # under the curves: the load step at each IC when the rail has one (this one does: 0.5 A), else the band of
         # what holds the rail
         assert any("copper spike" in t or "holds the rail" in t for t in titles) or f.results_panel.fig2.texts
+        # and the decaps' shares between them, shown with a real height (it was laid out 0 px high, never seen)
+        rp = f.results_panel
+        assert rp.canvas3.IsShown() and rp.canvas3.GetMinSize().height > 100
+        assert any(ax.get_ylabel() == "share of its current" for ax in rp.fig3.axes)
     finally:
         close_window(f)
 

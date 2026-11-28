@@ -2139,12 +2139,21 @@ def draw_pdn(fig: Figure, p) -> None:
         f = np.array(port["f"]) / 1e6
         f_all += list(f)
         c = PDN_COLOURS[k % len(PDN_COLOURS)]
-        ax.plot(f, port["z_ohm"], color=c, lw=1.2, label=port["part"])
+        bad = port.get("nonphysical_from")         # a curve pdn calls not physical: dashed, said in the key
+        ax.plot(f, port["z_ohm"], color=c, lw=1.2, ls="--" if bad else "-",
+                label=port["part"] + (f" (not physical from {bad / 1e6:.3g} MHz)" if bad else ""))
         if ax_p is not None:
             ax_p.plot(f, port["phase_deg"], color=c, lw=1.1)
         if port["peaks"]:
             pk = port["peaks"][0]
             ax.plot([pk["f"] / 1e6], [pk["z_ohm"]], "v", color=c, ms=5)
+        # the explained peaks near or over the target (pdn._explain_peaks): the pair of parts ringing there
+        for pk in port["peaks"]:
+            if pk.get("low") and pk.get("margin_db", 99) < 6.0:
+                pair = (f"{_short_part(pk['low'])}↔{_short_part(pk['high'])}" if pk["low"] != pk["high"]
+                        else _short_part(pk["low"]))
+                ax.annotate(pair, (pk["f"] / 1e6, pk["z_ohm"]), xytext=(0, 7), textcoords="offset points",
+                            ha="center", va="bottom", fontsize=FS_TICK, color=c)
     if p.target_ohm:
         est = getattr(p, "i_step_source", "set") in ("estimate", "partly")
         ax.plot([min(f_all), p.check_to / 1e6], [p.target_ohm] * 2, "--", color="#d62728", lw=1.2,
@@ -2210,6 +2219,11 @@ def draw_pdn_holds(fig: Figure, p) -> None:
     _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TICK) + 0.08, header + 0.06)
 
 
+def _short_part(name: str) -> str:
+    """A part's name for a plot label: "source J1" as "src J1", others as they are."""
+    return name.replace("source ", "src ") if name else ""
+
+
 def pdn_has_step(p) -> bool:
     """A PDN rail with a step response at one of its ICs (pdn._port_step)."""
     return any(getattr(r, "step", None) and r.step.get("kind") == "load" for r in getattr(p, "responses", ()))
@@ -2222,6 +2236,7 @@ def draw_pdn_step(fig: Figure, p) -> None:
     impedance above the decaps, which the impedance target judges, not the step check), each IC's dip after it
     marked."""
     from ..analysis.pdn import LATE_TAUS
+    from ..components.values import format_si
     fig.clear()
     ax = fig.add_subplot(111)
     resp = [r for r in p.responses if getattr(r, "step", None) and r.step.get("kind") == "load"]
@@ -2265,7 +2280,7 @@ def draw_pdn_step(fig: Figure, p) -> None:
     left_in, right_in = _lh(FS_TEXT) + _width_in("-1000", FS_TICK) + 0.24, 0.25
     step = getattr(p, "i_step", None)
     header = _title_and_key(ax, f"{p.name}: the rail at each IC when the load steps"
-                            + (f" by {step * 1e3:.3g} mA" if step else "")
+                            + (f" by {format_si(float(format(step, '.3g')), 'A')}" if step else "")
                             + (f" (dashed: ±{band:.3g} mV allowed; ▼ the dip after the spike)" if band else ""),
                             w_in - left_in - right_in)
     _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TEXT) + _lh(FS_TICK) + 0.1, header + 0.06)
@@ -2297,8 +2312,14 @@ def draw_pdn_decaps(fig: Figure, p, part: Optional[str] = None, top: int = 8) ->
     band = f <= p.check_to / 1e6
     ranked = sorted(port["shares"].items(), key=lambda kv: -max(np.array(kv[1])[band], default=0.0))[:top]
     palette = list(PDN_COLOURS) + ["#7f7f7f", "#aec7e8", "#ffbb78", "#98df8a", "#ff9896", "#c5b0d5"]
+    # each decap's "without it" (pdn._cap_effects: the margin's change at the key frequencies) beside its name
+    without = {r["ref"]: r["without"] for r in getattr(p, "decaps", ()) if r.get("without")}
     for k, (name, v) in enumerate(ranked):
-        ax.plot(f, v, color=palette[k % len(palette)], lw=1.3, label=name)
+        wo = without.get(name)
+        from ..analysis.pdn import without_text
+        label = name + (f" (without: {without_text(wo, short=True)})"
+                        if wo and not wo.get("bound") and not wo.get("no_rise") else "")
+        ax.plot(f, v, color=palette[k % len(palette)], lw=1.3, label=label)
     ax.axhline(USEFUL_SHARE, color="#888888", lw=0.8, ls="--")
     ax.axvline(p.check_to / 1e6, color="#d62728", lw=0.8, ls=":")
     # where the parts' currents circulate (an anti-resonance: shares of several times 1) the band is shaded and the

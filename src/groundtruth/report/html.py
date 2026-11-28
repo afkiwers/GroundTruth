@@ -1323,15 +1323,39 @@ def _pdn(d, issues, figs) -> str:
                 return "–"
             lo, hi = (float(f"{x:.3g}") for x in c["band"])
             return f"{format_si(lo, 'Hz')} … {format_si(hi, 'Hz')}"
+        def _without(c):
+            """What taking the decap out does (pdn._cap_effects), as text."""
+            from ..analysis.pdn import without_text
+            return without_text(c.get("without")) or "–"
         drows = []
         for c in sorted(used, key=lambda c: -c["peak_share"]):
             cells = [e(c["ref"]), e(c["value"]), e(format_si(c["C_dc"], "F")) if c.get("C_dc") else "–",
                      e(format_si(float(f"{c['srf']:.3g}"), "Hz")) if c.get("srf") else "–",
                      f"{c['peak_share'] * 100:.0f} %" + (f" ({e(c['peak_at'])})" if c.get("peak_at") else ""),
-                     e(_band(c)), "does little" if c["little"] else ""]
+                     e(_band(c)), e(_without(c)), "does little" if c["little"] else ""]
             drows.append("<tr>" + "".join(f"<td>{x}</td>" for x in cells) + "</tr>")
         body.append("<h4>Decaps</h4>" + _table(["Decap", "Value", "C at its DC bias", "Own resonance",
-                                                "Largest share (IC)", "Useful band (≥10 %)", ""], drows))
+                                                "Largest share (IC)", "Useful band (≥10 %)",
+                                                "Without it (exact at its peaks and worst points)", ""], drows))
+        from ..analysis.pdn import point_advice
+        prows = []
+        for port in d.ports:
+            pts = [pk for pk in port["peaks"] if pk.get("cause")]
+            w = port.get("worst") or {}
+            if w.get("cause") and not any(pk["f"] == w["f"] for pk in pts):
+                pts.append(w)
+            for pk in sorted(pts, key=lambda x: x.get("margin_db", 99)):
+                prows.append("<tr>" + "".join(f"<td>{x}</td>" for x in (
+                    e(port["part"]), e(format_si(float(f"{pk['f']:.3g}"), "Hz")),
+                    e(format_si(float(f"{pk['z_ohm']:.3g}"), "Ω")),
+                    f"{pk['margin_db']:+.1f} dB" if "margin_db" in pk else "–", e(pk["cause"]),
+                    e(f"Z0 {format_si(float(format(pk['z0'], '.3g')), 'Ω')}, Q {pk['q']:.2g}")
+                    if pk.get("z0") else "–",
+                    e(point_advice(pk) or "–"))) +
+                    "</tr>")
+        if prows:
+            body.append("<h4>Peaks and the worst points: why, and what helps</h4>" + _table(
+                ["IC", "Frequency", "|Z|", "Margin", "Cause", "Z0, Q", "Fix (judged a decade either side)"], prows))
         from .plots import draw_pdn_decaps, draw_pdn_step, pdn_has_step, pdn_share_port
         if pdn_has_step(d):
             body.append(_img(figs.png(f"{d.name} PDN step", draw_pdn_step, d, size=(9.5, 3.4)),

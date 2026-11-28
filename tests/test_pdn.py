@@ -529,7 +529,7 @@ def test_a_tiny_cap_beside_a_big_one_does_little(tmp_path):
     fig = Figure(figsize=(8, 3))
     draw_pdn_decaps(fig, p)
     labels = [l.get_label() for l in fig.axes[0].get_lines()]
-    assert "C1" in labels
+    assert any(l.startswith("C1") for l in labels)
 
 
 def test_ringing_decaps_do_not_read_as_working_and_a_left_out_ics_decap_is_not_flagged(tmp_path):
@@ -573,3 +573,106 @@ def test_the_load_step_is_up_front_on_the_tile_the_plot_and_the_report(tmp_path)
     fig = Figure(figsize=(8, 3))
     draw_pdn_step(fig, p)
     assert fig.axes[0].get_xscale() == "log" and "mV" in fig.axes[0].get_ylabel()
+
+
+SPEC_2CAP = PdnSpec("VDD", source="J1", vrm_r=0.02, vrm_l=5e-9, voltage=3.3, i_step=1.0)
+CAPS_2 = [("C1", "10u", (22.0, 15.0)), ("C2", "100n", (18.0, 15.0))]
+
+
+def test_without_a_decap_is_exact_on_the_board_model(tmp_path):
+    """The rank-one "without it" [A128] at each key frequency against the same board with C2's model open (its pads
+    and vias kept), on the board-wide model (raw solves, the IC's fine-model correction apart): within 0.1 %. Taking
+    C2 out lowers |Z| at the C1/C2 anti-resonance (no anti-resonance without it) and raises it at 100 MHz."""
+    from groundtruth.analysis import pdn
+    from groundtruth.components.models import ComponentModel
+    runs = {}
+    for name, open_c2 in (("both", False), ("open", True)):
+        b, sc, _ = make(tmp_path, pdn_board(source=True, caps=CAPS_2), name, nets=(), cavity_max_nodes=12000)
+        sc.set_pdn([SPEC_2CAP])
+        if open_c2:
+            sc.set_component("C2", ComponentModel("open", {}))
+        sc.save()
+        runs[name] = simulate(b, SettingsFile.load(sc.path).config, keep_factorisations=True).pdn_setups[0]
+    sb, so = runs["both"], runs["open"]
+    idx = [i for i, n in enumerate(pdn._names(sb.branches)) if n == "C2"]
+    keys = sb.keys
+    assert len(keys) >= 2
+    moved = []
+    for f in keys:
+        s = sb.run.ok()[f]
+        pred = pdn.without_part(complex(s.Z[0]), complex(np.sum(s.I_branch[0][idx])), pdn._branch_z(sb, "C2", f),
+                                s.Zd["C2"])
+        real = so.run.exc.excs[0].solve(f).Z_loop
+        assert abs(pred) == pytest.approx(abs(real), rel=1e-3), f
+        moved.append((f, abs(pred) / abs(s.Z[0])))
+    assert any(r < 0.9 for f, r in moved if 5e6 < f < 3e7) and any(r > 1.2 for f, r in moved if f >= 1e8)
+
+
+def test_a_peak_is_explained_and_the_worst_points_fix_is_what_a_real_part_does(tmp_path):
+    """C1 10 µF and C2 100 nF: the peak between them (~11.5 MHz) is C1 (inductive above its resonance) with C2
+    (capacitive), Z0 = 1/(2πf·C2); the worst point (100 MHz, inductive) is the inductance above the decaps, and its
+    fix, one more 10 µF beside C1, predicted by rank one [A128], matches a real third 10 µF placed next to C1 and
+    solved again within 3 %. The issue names the cause and the fix."""
+    p, issues, _ = _run(tmp_path, "m5", SPEC_2CAP, source=True, caps=CAPS_2)
+    port = p.ports[0]
+    pk = next(x for x in port["peaks"] if 5e6 < x["f"] < 3e7)
+    c2 = next(r for r in p.decaps if r["ref"] == "C2")["C_dc"]
+    assert pk["low"] == "C1" and pk["high"] == "C2" and "anti-resonance" in pk["cause"]
+    # Q from the curve's fitted pole (C2's mounting in it: the bare part read Q 0.83 for a peak of Q ~3), Z0 = |Z|/Q,
+    # near 1/(2πf·C2) (within the mounting's share)
+    assert pk["q_from"] == "the curve's fitted pole" and 1.0 < pk["q"] < 6.0
+    assert pk["z0"] == pytest.approx(pk["z_ohm"] / pk["q"], rel=1e-9)
+    # below the bare part's 1/(2πf·C2): its mounting inductance cancels part of its reactance (~45 mΩ left at 11.5 MHz)
+    assert 0.15 < pk["z0"] * 2 * math.pi * pk["f"] * c2 < 1.0
+    w = port["worst"]
+    assert w["f"] >= 1e8 and "inductance above the decaps" in w["cause"]
+    fx = w["fixes"][0]
+    assert fx["beside"] == "C1" and fx["z_local_new"] < fx["z_local_old"] and not fx["peak"]
+    assert "nH there" in w["cause"]
+    b, _, _ = _run(tmp_path, "m5b", SPEC_2CAP, source=True, caps=CAPS_2 + [("C3", "10u", (22.0, 13.6))])
+    real = b.ports[0]["z_ohm"][b.ports[0]["f"].index(fx["f_local_new"])]
+    assert fx["z_local_new"] == pytest.approx(real, rel=0.03)
+    (iss,) = [i for i in issues if i.check == "pdn_impedance"]
+    assert "inductance above the decaps" in iss.message and "beside C1" in iss.message
+    row = next(r for r in p.decaps if r["ref"] == "C2")
+    assert row["without"]["db"] > 0 and row["without"]["margin_without"] < row["without"]["margin_with"]
+
+
+def test_without_a_decap_never_claims_that_removing_it_helps(tmp_path):
+    """The reviewer's case: C1 10 µF and C2 100 nF, check_to 20 MHz. Taking C1 out moves the anti-resonance (the
+    source's 5 nH with C2: ~7 MHz, 0.89 Ω on a re-solve, far worse), which the key frequencies do not see: the figure
+    is the largest rise at one of them, compared at the same frequency, never a fall read as help; the text says it
+    is a lower bound and that a peak can move."""
+    from groundtruth.analysis.pdn import without_text
+    spec = PdnSpec("VDD", source="J1", vrm_r=0.02, vrm_l=5e-9, voltage=3.3, i_step=1.0, check_to=20e6)
+    p, _, _ = _run(tmp_path, "wo", spec, source=True, caps=CAPS_2)
+    for row in p.decaps:
+        w = row["without"]
+        assert w.get("no_rise") or w["db"] > 0, row
+        text = without_text(w)
+        assert ("at least" in text and "move a peak" in text) or "not judged" in text, text
+
+
+def test_a_fix_is_judged_by_where_the_peak_moves_and_a_bank_counts_as_one_capacitance(tmp_path):
+    """The reviewer's case: one more 100 nF beside C2 does not lower the C1/C2 peak much, it moves it down (~8.7 MHz):
+    the fix reports the highest |Z| within a decade of the peak after it, matching a real re-solve with that part
+    within 10 %. And four equal 1 µF in parallel above a peak are its capacitive side together: C = 4 × one,
+    Z0 = 1/(2πf·4C), the cause naming the three others."""
+    spec = PdnSpec("VDD", source="J1", vrm_r=0.02, vrm_l=5e-9, voltage=3.3, i_step=5.0)
+    p, _, _ = _run(tmp_path, "mv", spec, source=True, caps=CAPS_2)
+    pk = next(x for x in p.ports[0]["peaks"] if 5e6 < x["f"] < 3e7)
+    more = [fx for fx in pk["fixes"] if fx["what"].startswith("one more")]
+    assert more, (pk["fixes"], pk.get("fix_note"))        # (a fix judged by its moved peak must be kept, not dropped)
+    if more:
+        fx = more[0]
+        b, _, _ = _run(tmp_path, "mv2", spec, source=True, caps=CAPS_2 + [("C3", "100n", (18.0, 13.6))])
+        port = b.ports[0]
+        near = [z for f, z in zip(port["f"], port["z_ohm"]) if fx["span"][0] <= f <= fx["span"][1]]
+        assert fx["z_local_new"] == pytest.approx(max(near), rel=0.10)
+        assert fx["z_local_new"] <= fx["z_local_old"] * 10 ** (-1 / 20)
+    q, _, _ = _run(tmp_path, "bank", PdnSpec("VDD", source="J1", vrm_r=0.02, vrm_l=5e-9, voltage=3.3, i_step=1.0),
+                   source=True, caps=FOUR)
+    c1 = next(r for r in q.decaps if r["ref"] == "C1")["C_dc"]
+    bump = max((x for x in q.ports[0]["peaks"] if x.get("c_above")), key=lambda x: x["c_above"])
+    assert bump["c_above"] == pytest.approx(4 * c1, rel=1e-6) and "3 more in parallel" in bump["cause"]
+    assert bump["z0"] == pytest.approx(1 / (2 * math.pi * bump["f"] * 4 * c1), rel=0.15)    # the fit's, near the bank's

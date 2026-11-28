@@ -307,7 +307,13 @@ def rails_with_ics(board: Board, ground: str) -> dict[str, list[str]]:
 
 
 STAGE = "stage:"                 # a PdnSpec source naming a power stage: "stage:conv1"
-STEP_FIT_ABOVE = 3.0             # the step's fit takes the solved |Z| up to this many times check_to [A127]
+MAX_KEYS = 8                     # key frequencies (peaks, the worst point) where each decap's own impedance is solved
+MIN_GAIN_DB = 1.0                # a fix must lower the highest |Z| near its point by at least this
+MAX_CERAMIC = 47e-6              # the largest ceramic a fix suggests (a bigger one is no part of that ESL)
+SPOT_SPAN = 10.0                 # a fix's spot is judged over this factor either side of its point
+MIN_CARRIED = 0.02               # a decap carrying less of every IC's current at the key frequencies is not driven
+MAX_DECAP_SOLVES = 30           # at most this many decaps get their own solve there (the ones carrying most current)
+STEP_FIT_ABOVE = 3.0            # the step's fit takes the solved |Z| up to this many times check_to [A127]
 LATE_TAUS = 10.0                 # a port step's "late" dip: after this many time constants of the check_to low-pass
 STAGE_F_LOW = 30.0               # with a power stage as the source the sweep starts at its crossover / this ...
 F_MIN_STAGE = 100.0              # ... but not below this
@@ -431,22 +437,59 @@ class PortSolution:
     f: float
     Z: np.ndarray
     I_branch: np.ndarray
+    # at the key frequencies only (PdnSetup.refine's second phase): each decap's driving-point impedance across its
+    # own two terminals with everything in place, {ref: Z_kk} (the rank-one "without it" / "with one more" figures)
+    Zd: Optional[dict] = None
 
 
 class PortSet:
     """Several ports on one model, solved together at each frequency (the model's factorisation is shared; one
-    right-hand side each). Duck-types the excitation a ModelRun holds (`stack`, `solve`)."""
+    right-hand side each). Duck-types the excitation a ModelRun holds (`stack`, `solve`). At the frequencies in
+    `decap_at` it also drives each decap's own terminals (decap_excs): 1 A across the part, the impedance there."""
 
     def __init__(self, stack, ports: list[list[tuple]]):
         """`ports`: each port's injections [(node, A)], +1 A in at the supply pads, -1 A out at the ground pads."""
         self.stack = stack
         self.excs = [RouteExcitation(stack, [], injections=inj) for inj in ports]
+        self.decap_excs: dict = {}          # {ref: RouteExcitation} across each decap's terminals (set_decaps)
+        # {f: the decaps to drive there (None: all)}: the key frequencies (all decaps) and, for the spots where a fix
+        # would go, every frequency of the band (PdnSetup.refine's phases)
+        self.want: dict = {}
+        self.last: dict = {}                # {f: PortSolution}: the ports' solve, reused when f comes again
+
+    @property
+    def decap_at(self) -> set:
+        """The frequencies with decaps to drive."""
+        return set(self.want)
+
+    def set_decaps(self, terminals: dict) -> None:
+        """Each decap's two terminals {ref: (node a, node b)} (its part branch's ends: the capacitor's own metal), as
+        an excitation of +1 A into a, −1 A out of b."""
+        self.decap_excs = {ref: RouteExcitation(self.stack, [], injections=[(a, 1.0), (b, -1.0)])
+                           for ref, (a, b) in terminals.items()}
 
     def solve(self, f: float) -> PortSolution:
-        """Every port at f (SolverError when one fails)."""
-        sols = [e.solve(f) for e in self.excs]
-        return PortSolution(f, np.array([s.Z_loop for s in sols], complex),
-                            np.array([s.I_branch for s in sols], complex))
+        """Every port at f (SolverError when one fails); at a key frequency also every decap's own impedance (a
+        decap whose solve fails is left out of Zd)."""
+        sol = self.last.get(f)
+        if sol is None:
+            sols = [e.solve(f) for e in self.excs]
+            sol = PortSolution(f, np.array([s.Z_loop for s in sols], complex),
+                               np.array([s.I_branch for s in sols], complex))
+            self.last[f] = sol
+        if f in self.want:
+            refs = self.want[f]
+            zd = dict(sol.Zd or {})
+            for ref, e in self.decap_excs.items():
+                if ref in zd or (refs is not None and ref not in refs):
+                    continue                    # solved already, or not wanted here
+                try:
+                    zd[ref] = complex(e.solve(f).Z_loop)
+                except SolverError:
+                    continue
+            sol = replace(sol, Zd=zd)
+            self.last[f] = sol
+        return sol
 
 
 @dataclass
@@ -513,6 +556,9 @@ class PdnSetup:
         self.cavity, self.spectrum_run = None, None
         self.issues: list[Issue] = []
         self.t_start = time.time()
+        self.phase = 0                      # refine's phases: 0 the sweep, 1 the key frequencies, 2 the spots
+        self.keys: list = []                # the key frequencies (phase 1: every decap driven there)
+        self.spot_of: dict = {}             # {(port, f): ref}: where a fix for that peak / worst point would go
 
     def refine(self, run, config) -> list:
         """One more frequency where the worst port's |Z| bends most (a resonance between solves), or [] when every
@@ -520,8 +566,52 @@ class PdnSetup:
         if run is not self.run:
             return []                       # a regional model: its LOCAL_F only
         sols = run.ok()
-        if len(run.sols) >= MAX_SOLVES or len(sols) < 3:
-            return []
+        nxt = [] if len(run.sols) >= MAX_SOLVES or len(sols) < 3 else self._next_frequency(sols)
+        if nxt or self.phase >= 2 or not getattr(run.exc, "decap_excs", None):
+            return nxt
+        if self.phase == 1:
+            # phase 2: the spots where a fix would go (spot_parts: per port near or over its target, the part
+            # holding the rail above each such peak or at its worst point), driven at every frequency of the band,
+            # so a fix is judged over the whole curve (a new peak it opens between the key frequencies) [A128]
+            self.phase = 2
+            self.spot_of = spot_parts(sols, _names(self.branches), self.keys, self.res.target_ohm,
+                                      self.spec.check_to, set(run.exc.decap_excs))
+            # each spot over a decade either side of its point (within the band): a part added there changes the curve
+            # near its own resonance and the new anti-resonance it makes with its neighbour, within about that [A128];
+            # the whole band cost 52 more solves on a 2-IC rail against the sweep's 80
+            want: dict = {}
+            for (_p, f0), ref in self.spot_of.items():
+                for f in sols:
+                    if f <= self.spec.check_to and f0 / SPOT_SPAN <= f <= f0 * SPOT_SPAN and f not in self.keys:
+                        want.setdefault(f, set()).add(ref)
+            if not want:
+                return []
+            run.exc.want.update(want)
+            return sorted(want)
+        # phase 1: the sweep is resolved: its key frequencies again, now with every decap's own impedance (PortSet)
+        self.phase = 1
+        keys = key_frequencies(sols, self.spec.check_to)
+        self.keys = keys
+        names = _names(self.branches)
+
+        def carried(ref):
+            """The part's largest |I| per A at a port over the key frequencies."""
+            idx = [i for i, n in enumerate(names) if n == ref]
+            return max((abs(complex(np.sum(sols[f].I_branch[p][idx]))) for f in keys
+                        for p in range(len(sols[f].Z))), default=0.0)
+        # a decap carrying under MIN_CARRIED of every port's current there is not driven: taking it out moves |Z| by
+        # about that share at most (its "without" is that bound, _cap_effects); the others, the MAX_DECAP_SOLVES
+        # carrying most (a board's dozens of 100 nF)
+        self.carried = {ref: carried(ref) for ref in run.exc.decap_excs}
+        keep = sorted((r for r in run.exc.decap_excs if self.carried[r] >= MIN_CARRIED),
+                      key=lambda r: -self.carried[r])[:MAX_DECAP_SOLVES]
+        run.exc.decap_excs = {r: run.exc.decap_excs[r] for r in keep}
+        for f in keys:
+            run.exc.want[f] = None
+        return keys
+
+    def _next_frequency(self, sols: dict) -> list:
+        """The refinement's next frequency ([] when every gap is resolved)."""
         fs = np.array(sorted(sols))
         z = np.max(np.abs(np.array([sols[f].Z for f in fs])), axis=1)      # the worst port at each frequency
         lx, ly = np.log10(fs), 20 * np.log10(np.maximum(z, 1e-12))
@@ -539,7 +629,8 @@ class PdnSetup:
     def solve_limit(self, run) -> int:
         """The most solves `run` takes with refine (the progress count, simulate.solve_limit): the ports' run up to
         MAX_SOLVES, a regional model its LOCAL_F."""
-        return max(len(run.planned), MAX_SOLVES) if run is self.run else len(run.planned)
+        # + the key frequencies again (phase 1) and up to every solved frequency once more round the spots (phase 2)
+        return max(len(run.planned), MAX_SOLVES) * 2 + MAX_KEYS if run is self.run else len(run.planned)
 
     def issue(self, rules, check, message, loc, severity=None, **kw):
         """Add an issue for this rail (unless its check is switched off)."""
@@ -1020,6 +1111,15 @@ def prepare_pdn(model: BoardModel, specs: list) -> tuple[list, list, list]:
         # its current on this model: one of the sweep's own solves, the one nearest LOCAL_PROBE_F, made now and kept
         # (the scheduler solves only what is not solved yet)
         caps = decaps(board, config, spec.rail, ground)
+        # each decap's two terminals (its one part branch's ends): driven at the key frequencies for its own
+        # impedance (the "without it" and "one more beside it" figures, rank-one [A128]); a part modelled as several
+        # branches (no terminal metal) has no one pair of terminals and is left out
+        terms = {}
+        for c in caps:
+            own = [b for b in plane.branches if b.kind == "part" and b.name == c.reference]
+            if len(own) == 1:
+                terms[c.reference] = (own[0].a, own[0].b)
+        exc.set_decaps(terms)
         f_probe = min(run.planned, key=lambda f: abs(math.log(f / LOCAL_PROBE_F)))
         sol, shares = probe_shares(exc, list(plane.branches), {c.reference for c in caps}, f_probe) if caps \
             else (None, [])
@@ -1130,7 +1230,18 @@ def finish_pdn(model: BoardModel, setup: PdnSetup):
         from .transfer import fitted_response
         res.responses.append(fitted_response(f"{meta['part']}: Z at its supply pins", res.name, "impedance", fs,
                                              Z[:, p], use_e=True))
-        _port_step(setup, res.responses[-1], meta, fs, Z[:, p])
+        # a curve no passive network has (|Z| rising while capacitive: the fine model's correction, a constant
+        # inductance, larger than the board-wide model's own inductance there): said, and nothing judged from it
+        bad = nonphysical_from(fs, Z[:, p], spec.check_to)
+        if bad is not None:
+            port["nonphysical_from"] = bad
+            res.notes.append(f"{meta['part']}: its curve is not physical from {_s3(bad, 'Hz')} (|Z| rising while its "
+                             "phase is capacitive: the fine model's correction"
+                             + (f" of {dl * 1e9:+.2g} nH" if dl is not None else "") + " outweighs the board-wide "
+                             "model's own inductance at its pins there): its peaks, fixes and load step are not "
+                             "judged; a higher resolution (Preferences) brings the two models together")
+        else:
+            _port_step(setup, res.responses[-1], meta, fs, Z[:, p])
         # what holds the rail at each frequency: each part's share of the port's current (its branches added)
         holds = []
         every = {n: [] for n in part_names}         # each part's share at every frequency (decaps)
@@ -1186,6 +1297,8 @@ def finish_pdn(model: BoardModel, setup: PdnSetup):
     _decaps_near(model, setup)
     setup.model_board = model.board
     _decap_use(setup, config)
+    _cap_effects(setup)
+    _explain_peaks(setup, config)
     _issues(setup, config.rules)
     res.seconds = time.time() - setup.t_start
     return res
@@ -1344,6 +1457,443 @@ def _part_xy(setup: PdnSetup, ref: str) -> tuple:
     return tuple(map(float, fp.position)) if fp is not None else setup.res.ports[0]["xy"]
 
 
+def nonphysical_from(fs, zc, check_to: float) -> Optional[float]:
+    """The first frequency below check_to from which a port's curve is not that of a passive network: |Z| rising
+    faster than half a decade per decade while its phase is below −45° (capacitive), at two solves in a row (a
+    passive driving-point impedance rising that steeply is inductive [A129]); None when it is physical."""
+    z = np.abs(np.asarray(zc))
+    ph = np.degrees(np.angle(np.asarray(zc)))
+    run = 0
+    for k in range(1, len(fs)):
+        if fs[k] > check_to:
+            break
+        slope = math.log10(max(z[k], 1e-15) / max(z[k - 1], 1e-15)) / max(math.log10(fs[k] / fs[k - 1]), 1e-9)
+        run = run + 1 if (slope > 0.5 and ph[k] < -45 and ph[k - 1] < -45) else 0
+        if run >= 2:
+            return float(fs[k - 1])
+    return None
+
+
+def key_frequencies(sols: dict, check_to: float) -> list:
+    """The frequencies where each decap's own impedance is worth solving: per port its worst |Z| below check_to and its
+    three highest peaks there, the MAX_KEYS with the highest |Z| of any port (ascending)."""
+    fs = sorted(sols)
+    Z = np.abs(np.array([sols[f].Z for f in fs]))               # (frequencies, ports)
+    keys = set()
+    band = [k for k, f in enumerate(fs) if f <= check_to]
+    for p in range(Z.shape[1]):
+        z = Z[:, p]
+        if not band:
+            continue
+        keys.add(max(band, key=lambda k: z[k]))
+        peaks = [k for k in band if 0 < k < len(fs) - 1 and z[k] > z[k - 1] and z[k] >= z[k + 1]]
+        keys.update(sorted(peaks, key=lambda k: -z[k])[:3])
+    top = sorted(keys, key=lambda k: -float(np.max(Z[k])))[:MAX_KEYS]
+    return sorted(float(fs[k]) for k in top)
+
+
+def spot_parts(sols: dict, names: list, keys: list, target: Optional[float], check_to: float,
+               solvable: set) -> dict:
+    """Where a fix for each key point near or over the target would go (within WARN_DB of it): {(port, f): ref}, the
+    decap carrying most of that port's current at the nearest solve above a peak that does not ring (the part on
+    the peak's capacitive side: a part beside it lowers the peak), or at the worst point itself. Only decaps that
+    can be driven (`solvable`); {} without a target."""
+    if not target:
+        return {}
+    fs = sorted(sols)
+    parts = sorted({n for n in names if n})
+    idx = {n: [i for i, m in enumerate(names) if m == n] for n in parts}
+
+    def shares(f, p):
+        """Each part's |I| per A at port p and f."""
+        sf = sols[f]
+        return {n: abs(complex(np.sum(sf.I_branch[p][idx[n]]))) for n in parts if idx[n]}
+    out = {}
+    for f in keys:
+        if f not in sols or f > check_to:
+            continue
+        for p in range(len(sols[f].Z)):
+            if abs(sols[f].Z[p]) < target * 10 ** (-WARN_DB / 20):
+                continue
+            z = [abs(sols[x].Z[p]) for x in fs]
+            k = fs.index(f)
+            j = k
+            if 0 < k < len(fs) - 1 and z[k] > z[k - 1] and z[k] >= z[k + 1]:
+                j = next((i for i in range(k + 1, len(fs)) if sum(shares(fs[i], p).values()) <= RINGING_SUM), k)
+            sh = {n: v for n, v in shares(fs[j], p).items() if n in solvable}
+            if sh:
+                out[(p, f)] = max(sh, key=sh.get)
+    return out
+
+
+def without_part(zpp: complex, i_k: complex, z_k: complex, zkk: complex) -> complex:
+    """The port's impedance with one part taken out, from the solve with it in place (rank one: compensation and
+    reciprocity [A128]): the part (impedance z_k) carries i_k per A at the port and the network seen across its two
+    terminals is Z_kk (the part in parallel with the rest, Z_kk0): Z_pp0 = Z_pp + i_k² · (Z_kk0 + z_k), with
+    1/Z_kk0 = 1/Z_kk − 1/z_k."""
+    rest = 1.0 / (1.0 / zkk - 1.0 / z_k)
+    return zpp + i_k ** 2 * (rest + z_k)
+
+
+def with_added(zpp: complex, i_k: complex, z_k: complex, zkk: complex, z_new: complex) -> complex:
+    """The port's impedance with a part z_new added across an existing part's terminals (in parallel with it, beside
+    it): Z_pp − Z_pk² / (Z_kk + z_new), Z_pk = z_k · i_k the voltage across the part per A at the port [A128]."""
+    zpk = z_k * i_k
+    return zpp - zpk ** 2 / (zkk + z_new)
+
+
+def _branch_z(setup: PdnSetup, ref: str, f: float) -> Optional[complex]:
+    """A part's own impedance at f (its one part branch), None when it has several."""
+    own = [b for b in setup.branches if b.kind == "part" and b.name == ref]
+    return complex(own[0].z(f)) if len(own) == 1 else None
+
+
+def _key_data(setup: PdnSetup) -> tuple[list, dict]:
+    """The key frequencies' solutions with their decaps' Z_kk ([f], {f: PortSolution}) and each part's branch
+    indices; ([], {}) when none was solved."""
+    sols = setup.run.ok()
+    keys = [f for f in setup.keys if getattr(sols.get(f), "Zd", None)]
+    return keys, sols
+
+
+def _port_z(port: dict, f: float) -> Optional[complex]:
+    """A port's impedance at a solved frequency as its curve has it (the fine model's correction included)."""
+    try:
+        k = port["f"].index(f)
+    except ValueError:
+        return None
+    return port["z_ohm"][k] * np.exp(1j * math.radians(port["phase_deg"][k]))
+
+
+def _cap_effects(setup: PdnSetup) -> None:
+    """Each decap's "without it" figure, exact at the key frequencies (the ports' peaks and worst points, where each
+    decap's own impedance was solved): the largest rise of |Z| at one of them when it is taken out (without_part),
+    compared at the SAME frequency: {part, f, z_with, z_without, db, at_least: True} (db ≤ 0: no rise at any of
+    them, "no_rise"). It is a lower bound on the harm, never a claim that removing it helps: taking a decap out
+    moves the anti-resonances it takes part in (a 10 µF out, the source's inductance with the 100 nF rose 18 dB at
+    a new frequency on the test board), which the key frequencies do not see [A128]."""
+    res, spec = setup.res, setup.spec
+    keys, sols = _key_data(setup)
+    if not keys:
+        return
+    names = _names(setup.branches)
+    band = [f for f in keys if f <= spec.check_to]
+    for row in res.decaps:
+        ref = row["ref"]
+        idx = [k for k, n in enumerate(names) if n == ref]
+        best = None
+        for p, port in enumerate(res.ports):
+            if port.get("nonphysical_from") is not None:
+                continue
+            for f in band:
+                s, zc = sols[f], _port_z(port, f)
+                zkk, zk = (s.Zd or {}).get(ref), _branch_z(setup, ref, f)
+                if zkk is None or zk is None or zc is None or not idx:
+                    continue
+                ik = complex(np.sum(s.I_branch[p][idx]))
+                z0 = abs(zc + (without_part(complex(s.Z[p]), ik, zk, zkk) - complex(s.Z[p])))
+                db = 20 * math.log10(max(z0, 1e-12) / max(abs(zc), 1e-12))     # at the same frequency
+                if best is None or db > best["db"]:
+                    best = {"part": port["part"], "f": f, "z_with": abs(zc), "z_without": z0, "db": db,
+                            "at_least": True}
+                    if res.target_ohm:
+                        best["margin_with"] = 20 * math.log10(res.target_ohm / max(abs(zc), 1e-12))
+                        best["margin_without"] = 20 * math.log10(res.target_ohm / max(z0, 1e-12))
+        if best is not None and best["db"] <= 0.05:
+            best["no_rise"] = True
+        if best is not None:
+            row["without"] = best
+        elif ref in getattr(setup, "carried", {}):
+            # not driven: it carries under MIN_CARRIED of every IC's current at the key frequencies; taking out a
+            # part carrying a share s raises |Z| there by about 1/(1 − s) at most: that bound, marked as one
+            s_ = setup.carried[ref]
+            row["without"] = {"bound": True, "carried": s_, "db": 20 * math.log10(1 / max(1 - s_, 1e-6))}
+
+
+def without_text(w: Optional[dict], short: bool = False) -> str:
+    """A decap's "without it" figure in words (_cap_effects): the proven rise, a lower bound; or that it carries too
+    little to be solved; or no rise at its key points (a moved peak not judged). short: for a plot's legend."""
+    if not w:
+        return ""
+    if w.get("bound"):
+        return (f"<{max(w['db'], 0.1):.1f} dB" if short else
+                f"under {max(w['db'], 0.01):.2f} dB (it carries {w['carried'] * 100:.1f} % at most: not solved)")
+    if w.get("no_rise"):
+        return ("no rise at its key points" if short else
+                "no rise at its peaks and worst points; taking it out moves the peaks it takes part in: not judged")
+    at = f"{_s3(w['f'], 'Hz')} ({w['part']})"
+    if short:
+        return f"≥{w['db']:+.1f} dB @ {_s3(w['f'], 'Hz')}"
+    return (f"at least {w['db']:+.1f} dB: |Z| {_s3(w['z_with'], 'Ω')} → {_s3(w['z_without'], 'Ω')} at {at}"
+            + (f", margin there {w['margin_with']:+.1f} → {w['margin_without']:+.1f} dB" if "margin_with" in w else "")
+            + "; it can also move a peak elsewhere")
+
+
+E6 = (1.0, 1.5, 2.2, 3.3, 4.7, 6.8)
+
+
+def _e6(c: float, up: bool = False) -> float:
+    """The E6 value nearest to c (log scale); up: the smallest E6 value at least c."""
+    dec = 10 ** math.floor(math.log10(c))
+    vals = [v * dec for v in E6 + (10.0,)]
+    if up:
+        return min(v for v in vals if v >= c * (1 - 1e-9))
+    return min(vals, key=lambda v: abs(math.log(v / c)))
+
+
+def _fitted_q(resp, f: float) -> Optional[float]:
+    """The Q of a fitted response's pole nearest f (within 20 %): |p| / (2·|Re p|) of a complex pole in the left
+    half plane (rad/s, transfer.Response.poles); None without one."""
+    best = None
+    for pl in getattr(resp, "poles", None) or ():
+        pl = complex(pl)
+        if pl.real >= 0 or pl.imag <= 0:
+            continue
+        fp = abs(pl) / (2 * math.pi)
+        d = abs(fp - f) / f
+        if d <= 0.2 and (best is None or d < best[0]):
+            best = (d, abs(pl) / (2 * abs(pl.real)))
+    return best[1] if best else None
+
+
+def _explain_peaks(setup: PdnSetup, config) -> None:
+    """Each port's peaks below check_to explained [A128]: the parts on either side (what holds the rail at the
+    nearest solves below and above that do not ring: the one below is inductive there, above its own resonance, the
+    one above capacitive), the pair's characteristic impedance Z0 = 1/(2πf·C_above) and Q = |Z_peak| / Z0, the margin
+    to the target; and where the peak is over the target or within WARN_DB of it, fixes tried at the key frequencies
+    with with_added at the best decap's terminals: a capacitor resonating at the peak (C = 1/((2πf)²·ESL)), a damping
+    capacitor (ESR ≈ Z0, C ≥ 4 × C_above), one more of the part above; kept only when the peak falls and the port's
+    worst |Z| at the key frequencies does not rise. Each peak dict gains low, high, z0, q, margin_db, cause, fixes."""
+    res, spec = setup.res, setup.spec
+    keys, sols = _key_data(setup)
+    names = _names(setup.branches)
+    rows = {r["ref"]: r for r in res.decaps}
+    for p, port in enumerate(res.ports):
+        if port.get("nonphysical_from") is not None:
+            continue
+        fs, ring, holds = port["f"], port.get("ringing") or [], port["holds"]
+        for pk in port["peaks"]:
+            if pk["f"] > spec.check_to:
+                continue
+            k = fs.index(pk["f"])
+            below = next((j for j in range(k - 1, -1, -1) if not (ring and ring[j])), None)
+            above = next((j for j in range(k + 1, len(fs)) if not (ring and ring[j])), None)
+            low = holds[below]["part"] if below is not None else None
+            high = holds[above]["part"] if above is not None else None
+            # the capacitive side's capacitance: every decap carrying at least USEFUL_SHARE of the IC's current at
+            # the solve above (a bank of equal parts together: four 1 µF are 4 µF, Z0 a quarter of one's), else the
+            # curve's own capacitance there (the planes, the source)
+            group = []
+            if above is not None:
+                # and still capacitive there: below their own resonance (a bigger decap still carrying current above
+                # the peak is the inductive side's, not this one's)
+                group = [r for r in rows if (port.get("shares", {}).get(r) or [0] * len(fs))[above] >= USEFUL_SHARE
+                         and (rows[r].get("srf") or 0.0) > fs[above]]
+            c_high = sum((rows[r].get("C_dc") or rows[r].get("C") or 0.0) for r in group) if group else None
+            if not c_high and above is not None:
+                c_high = 1 / (2 * math.pi * fs[above] * max(port["z_ohm"][above], 1e-12))
+            pk["low"], pk["high"] = low, high
+            resp = res.responses[p] if p < len(res.responses) else None
+            q_fit = _fitted_q(resp, pk["f"])
+            trusted = q_fit is not None and not any("coarse" in n for n in getattr(resp, "notes", ()))
+            if q_fit:
+                # the peak's own Q from the curve's fitted pole (the mounting's inductance in it; the bare part's C
+                # read a Q 3.7 peak as Q 0.83 [A128]), Z0 = |Z_peak| / Q as in a parallel resonance
+                pk["q"], pk["z0"] = q_fit, pk["z_ohm"] / q_fit
+                pk["q_from"] = "the curve's fitted pole" + ("" if trusted else " (a coarse fit: approximate)")
+            elif c_high:
+                pk["z0"] = 1 / (2 * math.pi * pk["f"] * c_high)
+                pk["q"], pk["q_from"] = pk["z_ohm"] / pk["z0"], "the capacitive side's C"
+            if c_high:
+                pk["c_above"] = c_high
+            if res.target_ohm:
+                pk["margin_db"] = 20 * math.log10(res.target_ohm / pk["z_ohm"])
+            more = [r for r in group if r != high]
+            if low and high and low != high:
+                lw = "the source's inductance" if low.startswith("source") else (
+                    "the planes" if low == "planes" else f"{low} (inductive above its own resonance)")
+                hw = "the planes' capacitance" if high == "planes" else (
+                    "the source" if high.startswith("source") else
+                    f"{high}" + (f" and {len(more)} more in parallel ({format_si(float(format(c_high, '.3g')), 'F')} "
+                                 "together)" if more else "") + " (capacitive)")
+                pk["cause"] = f"anti-resonance of {lw} with {hw}"
+            else:                       # one part holds both sides: its inductance against the capacitance round it
+                who = low or high or "the board's copper"
+                who = "the source" if who.startswith("source") else who
+                pk["cause"] = f"{who}'s inductance against the rest of the rail's capacitance"
+            pk["fixes"] = []
+            # fixes for a point over the target or within WARN_DB of it; not for a soft bump (Q < 1: nothing rings,
+            # the level itself is what is short) and not without the capacitive side's value; why not, said
+            if not (res.target_ohm and pk.get("margin_db", 99) < WARN_DB):
+                continue
+            if config.analysis.resolution < 2:
+                # a peak's height and frequency depend on the grid (refboard: 2.54 Ω @ 4.2 MHz at 1x, 0.79 Ω @
+                # 5.6 MHz at 4x): its fix is only as good as the curve
+                pk["grid_note"] = ("its height and frequency depend on the grid: check at resolution 2 or more "
+                                   "(Preferences) before adding parts")
+            soft = trusted and pk.get("q", 9) < 1
+            why = (f"a soft bump (Q {pk['q']:.2g}: it rings little; the level itself is short there)" if soft else
+                   "no decap on the rail to try a fix beside" if not keys else
+                   "its frequency was not among the key frequencies the fixes are solved at" if pk["f"] not in keys
+                   else "no capacitive side found above it" if not c_high and not pk.get("z0") else "")
+            if why:
+                pk["fix_note"] = why
+                continue
+            s = sols[pk["f"]]
+            zd = s.Zd or {}
+            # where to add: the spot refine drove a decade round the point (spot_parts), else the part above if it
+            # was solved, else the decap carrying most of this IC's current here (judged at the key frequencies)
+            spots = [setup.spot_of[(p, pk["f"])]] if (p, pk["f"]) in setup.spot_of else [high] if high in zd else sorted(
+                (r for r in zd if [i for i, n in enumerate(names) if n == r]),
+                key=lambda r: -abs(complex(np.sum(s.I_branch[p][[i for i, n in enumerate(names) if n == r]]))))[:1]
+            if not spots:
+                pk["fix_note"] = ("no decap could be driven here (its solve failed, or the parts have no single pair "
+                                  "of terminals)")
+                continue
+            at = spots[0]
+            m = config.model_for(high) if high in rows else None
+            esl = (m.get("ESL") if m is not None else None) or 0.5e-9
+            esr = (m.get("ESR") if m is not None else None) or 0.01
+            w = 2 * math.pi * pk["f"]
+            cands = []
+            c_res = _e6(1 / (w ** 2 * esl))
+            if c_res <= MAX_CERAMIC:            # a ceramic resonating there (a bigger one is no ceramic of that ESL)
+                cands.append(("a capacitor resonating at the peak", c_res, esr, esl))
+            # a damping part: ESR ≈ Z0 (a polymer or tantalum part of that ESR, or a ceramic with a series resistor),
+            # C well above the capacitive side's so its own resonance is below the peak
+            cands.append(("a damping capacitor with ESR about Z0 (polymer / tantalum, or a ceramic and a series "
+                          "resistor)", _e6(4 * c_high, up=True), max(pk["z0"], 1e-3), 1e-9))
+            if high in rows:
+                cands.append((f"one more {rows[high]['value']}", rows[high].get("C_dc") or rows[high].get("C"), esr,
+                              esl))
+            pk["fixes"], why = _try_fixes(setup, p, port, pk["f"], pk["z_ohm"], at, cands, keys, sols, names)
+            if not pk["fixes"]:
+                pk["fix_note"] = why
+        # the worst point when it is no peak (the inductive rise towards check_to, or too little capacitance low
+        # down): its cause by the impedance's phase there and the same kind of fix, one more of what holds it there
+        w = port.get("worst")
+        if not w or not res.target_ohm or any(pk["f"] == w["f"] for pk in port["peaks"]):
+            continue
+        k = fs.index(w["f"])
+        ph = port["phase_deg"][k]
+        hold = holds[k]["part"]
+        if ph > 45:
+            zc = _port_z(port, w["f"])
+            l_here = zc.imag / (2 * math.pi * w["f"]) if zc is not None else None   # the inductance at that point
+            whose = ("the source's lead and the copper" if hold.startswith("source") else
+                     "the planes' and the copper's" if hold == "planes" else
+                     f"{hold}'s mounting, the vias and the planes between it and the pins")
+            w["cause"] = ("the inductance above the decaps" + (f" ({l_here * 1e9:.2g} nH there)" if l_here else "")
+                          + f": {whose}")
+            # no part fixes an inductance: the layout does (what helps, in the order it usually pays)
+            w["advice"] = ("lower that inductance: the decap closer to the pins (same layer, short wide traces), more "
+                           "and shorter vias to the planes, the planes closer together, a smaller decap package")
+        elif ph < -45:
+            w["cause"] = f"too little capacitance at {_s3(w['f'], 'Hz')} (the rail held by {hold} there)"
+        else:
+            w["cause"] = f"held by {hold} at its own resonance (its ESR and the copper's resistance)"
+        w["fixes"] = []
+        if config.analysis.resolution < 2 and ph <= 45:     # (an inductive rise converges; a resonance less so)
+            w["grid_note"] = ("its height and frequency depend on the grid: check at resolution 2 or more "
+                              "(Preferences) before adding parts")
+        hold = setup.spot_of.get((p, w["f"]), hold)          # the spot refine drove round the point
+        if w["margin_db"] >= WARN_DB:
+            continue
+        if w["f"] not in keys or hold not in rows or hold not in (sols[w["f"]].Zd or {}):
+            w["fix_note"] = ("no decap on the rail to try a part beside" if not keys else
+                             "no decap could be driven here (its solve failed, or no single pair of terminals)")
+            continue
+        m = config.model_for(hold)
+        c_h = rows[hold].get("C_dc") or rows[hold].get("C")
+        esl = (m.get("ESL") if m is not None else None) or 0.5e-9
+        esr = (m.get("ESR") if m is not None else None) or 0.01
+        cands = [(f"one more {rows[hold]['value']}", c_h, esr, esl)]
+        c_more = _e6(1 / (2 * math.pi * w["f"] * res.target_ohm))
+        if ph < -45 and c_more <= MAX_CERAMIC:      # capacitance short: the bulk the target asks for there
+            cands.append(("more capacitance", c_more, esr, esl))
+        w["fixes"], why = _try_fixes(setup, p, port, w["f"], w["z_ohm"], hold, cands, keys, sols, names, peak=False)
+        if not w["fixes"]:
+            w["fix_note"] = why
+
+
+def _try_fixes(setup: PdnSetup, p: int, port: dict, f0: float, z0_abs: float, at: str, cands: list, keys: list,
+               sols: dict, names: list, peak: bool = True) -> list:
+    """Candidate parts (what, C, ESR, ESL) added beside the decap `at`, each tried with with_added wherever `at` was
+    driven (a decade either side of the point and the key frequencies) [A128]. A fix moves a peak as often as it
+    lowers it, so it is judged by the highest |Z| within that decade, not by |Z| at the old frequency: kept when that
+    falls by at least MIN_GAIN_DB and the highest |Z| of everything judged does not rise. The best two (lowest new
+    local maximum), as {what, c, esr, esl, beside, z_local_old, z_local_new, f_local_new, margin_local_new,
+    reaches_target, span, peak}. (The IC's fine-model correction is taken as it was.)"""
+    res, spec = setup.res, setup.spec
+    idx = [i for i, n in enumerate(names) if n == at]
+    where = [f for f in sorted(sols) if f <= spec.check_to and at in (sols[f].Zd or {})]
+    near = [f for f in where if f0 / SPOT_SPAN <= f <= f0 * SPOT_SPAN]
+    if f0 not in where or not near:
+        return [], "the decap beside which a part would go was not solved round this point"
+    old = {f: abs(_port_z(port, f) or 0.0) for f in where}
+    old_local = max(old[f] for f in near)
+    old_worst = max(old.values())
+    out, rejected = [], []
+    for what, c, r, l_ in cands:
+        if not c:
+            continue
+        new = {}
+        for f in where:
+            sf, zc = sols[f], _port_z(port, f)
+            zkk, zk = (sf.Zd or {}).get(at), _branch_z(setup, at, f)
+            if zkk is None or zk is None or zc is None:
+                continue
+            wf = 2 * math.pi * f
+            zn = complex(r, wf * l_ - 1 / (wf * c))
+            ik = complex(np.sum(sf.I_branch[p][idx]))
+            new[f] = abs(zc + (with_added(complex(sf.Z[p]), ik, zk, zkk, zn) - complex(sf.Z[p])))
+        if not all(f in new for f in near):
+            continue
+        f_loc = max(near, key=lambda f: new[f])
+        local = new[f_loc]
+        if 20 * math.log10(old_local / max(local, 1e-12)) < MIN_GAIN_DB:
+            rejected.append("lowers the highest |Z| near it by less than 1 dB")
+            continue
+        if max(new.values()) > old_worst * 1.001:
+            rejected.append("raises the rail's worst point")
+            continue
+        # outside the span (the span's own new maximum is what is reported): no judged point newly over the target
+        if any(new[f] > res.target_ohm >= old[f] for f in new if f not in near):
+            rejected.append("pushes a point further away over the target")
+            continue
+        # a peak's new maximum at the top of a span that check_to cut short: the peak moved towards or past the
+        # band's edge, where the shared-pads model is least sure (−2.4 dB there on a test board): flagged
+        edge = peak and f0 * SPOT_SPAN > spec.check_to and f_loc == max(near)
+        out.append({"what": what, "c": c, "esr": r, "esl": l_, "beside": at, "z_local_old": old_local,
+                    "z_local_new": local, "f_local_new": f_loc,
+                    "margin_local_new": 20 * math.log10(res.target_ohm / max(local, 1e-12)),
+                    "reaches_target": bool(local <= res.target_ohm), "span": [min(near), max(near)], "peak": peak,
+                    "edge": edge})
+    out.sort(key=lambda x: x["z_local_new"])
+    why = ("no part tried helps: " + "; ".join(sorted(set(rejected))) if rejected else
+           "no part tried could be judged here")
+    return out[:2], ("" if out else why)
+
+
+def fix_text(fx: dict) -> str:
+    """One suggested fix in words: the part, where, and what the highest |Z| within a decade of the point becomes."""
+    c = float(f"{fx['c']:.2g}")
+    return (f"add {fx['what']}: {format_si(c, 'F')} (ESR {_s3(fx['esr'], 'Ω')}, ESL {_s3(fx['esl'], 'H')}) beside "
+            f"{fx['beside']}: the highest |Z| from {_s3(fx['span'][0], 'Hz')} to {_s3(fx['span'][1], 'Hz')} falls "
+            f"from {_s3(fx['z_local_old'], 'Ω')} to ≈{_s3(fx['z_local_new'], 'Ω')} (at {_s3(fx['f_local_new'], 'Hz')}"
+            f"; margin there {fx['margin_local_new']:+.1f} dB, "
+            + ("meets the target" if fx["reaches_target"] else "still short of the target")
+            + ("; the peak moves to the band's edge: approximate)" if fx.get("edge") else ")"))
+
+
+def point_advice(pk: dict) -> str:
+    """A peak's or worst point's fixes and notes as one text: the best fix, the layout advice (an inductive rise),
+    why no fix, and the grid note."""
+    parts = [fix_text(pk["fixes"][0])] if pk.get("fixes") else []
+    parts += [pk[k] for k in ("advice", "fix_note", "grid_note") if pk.get(k)]
+    return "; ".join(parts)
+
+
 def _port_step_figures(res: PdnResult, port: dict):
     """The port's step figures, taken from its response's step (set by _port_step before the port was listed)."""
     r = res.responses[-1] if res.responses else None
@@ -1391,8 +1941,17 @@ def _issues(setup: PdnSetup, rules):
         if w["margin_db"] >= WARN_DB:
             continue
         sev = "error" if w["margin_db"] < 0 and not est else "warning"
+        # why, and the best fix tried there (_explain_peaks: the peak at the worst frequency, else the worst point)
+        at = next((pk for pk in port["peaks"] if pk["f"] == w["f"]), w)
+        why = f": {at['cause']}" if at.get("cause") else ""
+        if port.get("nonphysical_from") is not None:
+            why = (f" [its curve is not physical from {_s3(port['nonphysical_from'], 'Hz')}: not trusted, see the "
+                   "notes; a higher resolution resolves it]")
+        fixes = at.get("fixes") or []
+        fix = f"; {point_advice(at)}" if point_advice(at) else ""
         setup.issue(rules, "pdn_impedance",
                     f"{spec.label}: {port['part']} sees {_s3(w['z_ohm'], 'Ω')} at {_s3(w['f'], 'Hz')} "
                     f"against the target {_s3(res.target_ohm, 'Ω')} (margin {w['margin_db']:+.1f} dB; held there "
-                    f"by {w['holds']}){tag}", port["xy"], severity=sev, key=f"pdn:{spec.label}:{port['part']}:z",
+                    f"by {w['holds']}){why}{fix}{tag}", port["xy"], severity=sev,
+                    key=f"pdn:{spec.label}:{port['part']}:z",
                     details={k: w[k] for k in ("f", "z_ohm", "margin_db")})

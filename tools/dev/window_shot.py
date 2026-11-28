@@ -76,7 +76,8 @@ def main() -> int:
     ap.add_argument("--tabs", default="Signal paths,Converters,Results")
     ap.add_argument("--out")
     ap.add_argument("--size", default="1400x900")
-    ap.add_argument("--scroll", action="store_true", help="also the Results tab scrolled down to its last plot")
+    ap.add_argument("--scroll", action="store_true", help="also the Results tab (or a Results:<view> tab) scrolled "
+                    "down to its last plot")
     ap.add_argument("--runs", type=int, default=0, help="simulate this many times (the History tab's runs)")
     ap.add_argument("--real-prefs", action="store_true",
                    help="use this computer's Preferences and server job list (default: a private folder, so the "
@@ -182,9 +183,20 @@ def main() -> int:
                     state["view"] = text
                     tabs.insert(0, name)                  # capture once rendered and painted
                     return
-                path = out / f"{args.theme}_Results_{''.join(ch if ch.isalnum() else '_' for ch in text)}.png"
+                stem = f"{args.theme}_Results_{''.join(ch if ch.isalnum() else '_' for ch in text)}"
+                if state.get("view_scrolled") == text:    # --scroll: the same view scrolled to its last plot
+                    path = out / f"{stem}_scrolled.png"
+                    print(f"{path}: {'ok' if capture(f, path) else 'PrintWindow failed'}")
+                    state["view_scrolled"] = None
+                    rp.page.Scroll(-1, 0)                 # back to the top for the next view
+                    return
+                path = out / f"{stem}.png"
                 print(f"{path}: {'ok' if capture(f, path) else 'PrintWindow failed'}")
                 print(f"  tiles: {rp.tile_text()}")
+                if args.scroll:
+                    rp.page.Scroll(-1, rp.page.GetVirtualSize().height)
+                    state["view_scrolled"] = text
+                    tabs.insert(0, name)                  # capture the scrolled page on the next idle tick
                 return
             if name.startswith("Fixes:"):                 # the Fixes tab with a design change selected (its kind)
                 kind, p = name.split(":", 1)[1], f.fixes

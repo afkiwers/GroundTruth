@@ -413,8 +413,9 @@ def pdn_text(d) -> list[str]:
             w = p["worst"]
             line += (f"; worst below {format_si(d.check_to, 'Hz')}: {format_si(w['z_ohm'], 'Ω')} @ "
                      f"{format_si(w['f'], 'Hz')} (margin {w['margin_db']:+.1f} dB, held by {w['holds']})")
-        if p["peaks"]:
-            pk = p["peaks"][0]
+        band = [pk for pk in p["peaks"] if pk["f"] <= d.check_to]       # where the target applies, as the tile
+        if band:
+            pk = max(band, key=lambda x: x["z_ohm"])
             line += f"; highest peak {format_si(pk['z_ohm'], 'Ω')} @ {format_si(pk['f'], 'Hz')}"
         if p.get("l_nh"):
             line += f"; {p['l_nh']:.2f} nH above the decaps"
@@ -424,6 +425,20 @@ def pdn_text(d) -> list[str]:
             line += (f"; DC {p['dc']['v']:.3f} V (−{p['dc']['drop_mv']:.1f} mV at {p['dc']['pin']}, min "
                      f"{p['dc']['limit']:.3g} V)")
         out.append(line)
+    from ..analysis.pdn import point_advice, without_text
+    for p in d.ports:                   # the peaks near or over the target and the worst point: why, what helps
+        pts = [pk for pk in p["peaks"] if pk.get("cause") and pk.get("margin_db", 99) < 6]
+        w = p.get("worst") or {}
+        if w.get("cause") and w.get("margin_db", 99) < 6 and not any(pk["f"] == w["f"] for pk in pts):
+            pts.append(w)
+        for pk in pts:
+            f3 = float(format(pk["f"], ".3g"))
+            out.append(f"    {p['part']} at {format_si(f3, 'Hz')}: {pk['cause']}"
+                       + (f"; {point_advice(pk)}" if point_advice(pk) else ""))
+    wo = [(c["ref"], c["without"]) for c in getattr(d, "decaps", ()) if c.get("without")]
+    if wo:
+        out.append("    without each decap (exact at its peaks and worst points, a lower bound): " + ", ".join(
+            f"{r} {without_text(w, short=True)}" for r, w in sorted(wo, key=lambda t: -t[1]["db"])))
     for x in getattr(d, "dc_ics", ()):
         if x["part"] not in {p["part"] for p in d.ports}:
             out.append(f"    {x['part']} (not an impedance port): DC {x['v']:.3f} V (−{x['drop_mv']:.1f} mV at "

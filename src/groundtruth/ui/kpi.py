@@ -257,8 +257,13 @@ def _pdn(rr) -> list[Kpi]:
         w = rr.worst
         st = ("error" if w["margin_db"] < 0 and how not in ("estimate", "partly") else "warn" if w["margin_db"] < 3
               else "ok")
+        # why it is the worst, and the best fix tried there (pdn._explain_peaks), in the tile's hover text
+        port = next((p for p in rr.ports if p["part"] == w["part"]), {})
+        at = next((pk for pk in port.get("peaks", ()) if pk["f"] == w["f"]), port.get("worst") or {})
+        from ..analysis.pdn import point_advice
+        why = (f"; {at['cause']}" if at.get("cause") else "") + (f"; {point_advice(at)}" if point_advice(at) else "")
         out.append(("worst margin", f"{w['margin_db']:+.1f} dB", f"{w['part']} @ {format_si(w['f'], 'Hz')}", st,
-                    f"the IC furthest over (or nearest to) the target, held there by {w['holds']}"))
+                    f"the IC furthest over (or nearest to) the target, held there by {w['holds']}{why}"))
     dcs = [(d, d["part"]) for d in getattr(rr, "dc_ics", ())]
     if dcs:
         d, part = min(dcs, key=lambda t: t[0]["v"] - t[0]["limit"])
@@ -300,11 +305,20 @@ def _pdn(rr) -> list[Kpi]:
                     "plot under the curves: each part's share of the worst IC's current)"))
     out.append(("ICs", str(len(rr.ports)), ", ".join(p["part"] for p in rr.ports[:4])
                 + (" …" if len(rr.ports) > 4 else ""), "", "the ICs with supply pins on the rail (ports)"))
-    peaks = [(pk, p["part"]) for p in rr.ports for pk in p["peaks"][:1]]
+    # the highest peak below check_to (where the target applies; above it the package and die decouple), of a port
+    # whose curve is physical (pdn.nonphysical_from), with its cause (pdn._explain_peaks)
+    peaks = [(pk, p["part"]) for p in rr.ports if p.get("nonphysical_from") is None for pk in p["peaks"]
+             if pk["f"] <= rr.check_to]
     if peaks:
         pk, part = max(peaks, key=lambda t: t[0]["z_ohm"])
-        out.append(("highest peak", format_si(pk["z_ohm"], "Ω"), f"{part} @ {format_si(pk['f'], 'Hz')}", "",
-                    "the highest anti-resonance: two decaps, or the decaps and the planes, ringing together"))
+        pair = (f"{pk['low'].replace('source ', '')}↔{pk['high'].replace('source ', '')}"
+                if pk.get("low") and pk.get("high") and pk["low"] != pk["high"] else "")
+        out.append(("highest peak", format_si(pk["z_ohm"], "Ω"),
+                    f"{part} @ {format_si(pk['f'], 'Hz')}" + (f" ({pair})" if pair else ""), "",
+                    "the highest anti-resonance below the check frequency"
+                    + (f": {pk['cause']}" if pk.get("cause") else ": two decaps, or the decaps and the planes, "
+                       "ringing together")
+                    + (f"; Z0 {format_si(pk['z0'], 'Ω')}, Q {pk['q']:.2g}" if pk.get("z0") else "")))
     if rr.source:
         out.append(("source", rr.source.split(" ", 1)[0], "R + jωL", "", rr.source))
     return out

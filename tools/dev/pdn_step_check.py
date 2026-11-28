@@ -18,16 +18,30 @@ def main():
     ap.add_argument("settings")
     ap.add_argument("--rail", required=True)
     ap.add_argument("--json")
+    ap.add_argument("--resolution", type=float, help="the board-wide model's resolution (analysis.resolution)")
     ap.add_argument("--png", help="folder for each rail's decap-share plot (report/plots.draw_pdn_decaps)")
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
     cfg = SettingsFile.load(a.settings).config
+    if a.resolution:
+        from dataclasses import replace
+        cfg = replace(cfg, analysis=replace(cfg.analysis, resolution=a.resolution))
     r = simulate(load_board(a.board), cfg, nets=[n for n in (p.label for p in cfg.pdn) if a.rail in n])
     for d in r.pdn:
         print(d.name, "source:", d.source, "| stage:", d.stage, "| f_min", d.f_min, "| step", d.i_step, d.i_step_source)
         for p in d.ports:
             print(f"  {p['part']}: f {p['f'][0]:.3g}..  |Z| {p['z_ohm'][0]:.4g} {p['z_ohm'][1]:.4g} {p['z_ohm'][2]:.4g} "
                   f"Ω, phase {p['phase_deg'][0]:.1f}°; dc {p.get('dc')}; step {p.get('step')}")
+        for p in d.ports:                   # milestone 5: each peak / worst point explained, the fixes tried
+            for pk in p["peaks"] + [p.get("worst") or {}]:
+                if pk.get("cause"):
+                    print(f"  {p['part']} {pk['f']:.4g} Hz |Z| {pk['z_ohm']:.4g}: {pk['cause']}; margin "
+                          f"{pk.get('margin_db', float('nan')):+.1f} dB; z0 {pk.get('z0')}; fixes "
+                          + "; ".join(f"{fx['what']} {fx['c']:.3g} F beside {fx['beside']} -> {fx['z_local_new']:.4g} @ {fx['f_local_new']:.4g} Hz (was {fx['z_local_old']:.4g})"
+                                      for fx in pk.get("fixes") or ()))
+        for row in d.decaps:
+            if row.get("without"):
+                print(f"  without {row['ref']}: {row['without']}")
         for n in d.notes:
             print("  note:", n)
     for i in r.issues:
