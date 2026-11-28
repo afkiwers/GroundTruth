@@ -59,7 +59,8 @@ pdn:
 ```
 
 `ground` (default the first reference net), `source` (the part feeding the rail: found as the part with a `power_out`
-pin on it, else a connector; `none` for no source), `vrm_r` / `vrm_l` (its output resistance and inductance: a
+pin on it, else a switching regulator's output inductor (its other pad on an IC's `power_out` switch pin),
+else a connector; `none` for no source), `vrm_r` / `vrm_l` (its output resistance and inductance: a
 regulator's flat output impedance and the inductance above its loop bandwidth; defaults 5 mΩ, 20 nH), `parts` (the
 ICs to check; default every part with `power_in` pins on the rail and a pad on the ground), `check_to` (the target
 applies up to here, default 100 MHz: above, the package and the die decouple), `decap_mm` (default 3 mm). Simulate
@@ -101,7 +102,8 @@ impedance fitted (vector fitting), the current the board sees passing the IC's p
 first-order low-pass there, as the target assumes [A19]), with a `load_step`'s ramp, harness, load capacitance or
 switched coil as on a converter. First the copper's inductance shows (L·ΔI·2π·check_to), then the decaps' and the
 source's dip; the issue `pdn_step` when that dip (after the spike: the spike is the impedance above the decaps, which `pdn_impedance` judges) moves by more than the ripple. On the test board the step after
-10 ns matches the analytic closed-loop step within 1 % of its dip.
+10 ns matches the analytic closed-loop step within 1 % of its dip. A rail with nothing holding it at DC (no source found) gets no step response, only a note: a constant step current would drain
+its decaps without limit (I·t/C), which is not a dip a real board shows; set `source`.
 
 **Power tree.** The tab's (and the Converters tab's) **Power tree…** draws the board's power as a flow chart, read
 from the board and the settings (`analysis/power_tree.py`, `report/power_tree.py`): sources (connectors with a pad

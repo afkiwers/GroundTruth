@@ -55,7 +55,7 @@ IC_PREFIXES = ("U", "IC")        # without pin types on the board: parts with th
 CONNECTOR_PREFIXES = ("J", "P", "X", "CN", "CON")
 VRM_R_DEFAULT, VRM_L_DEFAULT = 5e-3, 20e-9       # PdnSpec's defaults: a regulator's output
 HARNESS_R, HARNESS_L = 20e-3, 500e-9             # a connector's source with those defaults: ~0.5 m of lead [A110]
-STEP_FRACTION = 0.5              # an IC's load step: this share of its maximum supply current [A124]
+STEP_FRACTION = 0.5             # an IC's load step: this share of its maximum supply current [A124]
 # an IC's maximum supply current by its pin count when it has no Supply Current field [A124]: (most pins, A)
 PACKAGE_CURRENT = ((8, 0.02), (20, 0.05), (48, 0.1), (100, 0.25), (256, 0.5), (10**9, 1.5))
 
@@ -227,12 +227,30 @@ def find_stage(board: Board, config, rail: str, name: str = ""):
     return None
 
 
+def switcher_inductor(board: Board, rail: str) -> Optional[Footprint]:
+    """A switching regulator's output inductor on the rail: a two-pad part with one pad on the rail and the other on
+    a net an IC drives through a power_out pin (its SW pin: a buck converter whose controller's output pin is the
+    switch node, not the rail). None without one."""
+    driven = {p.net for fp in board.footprints if not fp.dnp for p in fp.pads
+              if p.pin_type == "power_out" and p.net and p.net != rail}
+    for fp in board.footprints:
+        nets = [p.net for p in fp.pads if p.net]
+        if not fp.dnp and _prefix(fp.reference) == "L" and len(set(nets)) == 2 and rail in nets \
+                and any(n in driven for n in nets if n != rail):
+            return fp
+    return None
+
+
 def find_source(board: Board, rail: str, ground: str) -> Optional[Footprint]:
-    """The part feeding the rail: one with a power_out pin on it (a regulator's output), else a connector with pads on
-    the rail and the ground; None when neither is there."""
+    """The part feeding the rail: one with a power_out pin on it (a regulator's output), else a switching
+    regulator's output inductor (switcher_inductor: its controller's power_out pin is the switch node), else a
+    connector with pads on the rail and the ground; None when none is there."""
     for fp in board.footprints:
         if not fp.dnp and any(p.net == rail and p.pin_type == "power_out" for p in fp.pads):
             return fp
+    ind = switcher_inductor(board, rail)
+    if ind is not None:
+        return ind
     for fp in board.footprints:
         nets = {p.net for p in fp.pads}
         if not fp.dnp and _prefix(fp.reference) in CONNECTOR_PREFIXES and rail in nets and ground in nets:
@@ -383,7 +401,8 @@ def _source_branch(st, src: Footprint, rail: str, ground: str, spec: PdnSpec) ->
     # a connector (no power_out pin on the rail) has a harness and the supply behind it, not a regulator's output:
     # with the regulator's defaults left as they are, a lead's instead [A110] (before 2026-11-12 the regulator's
     # 20 nH: the impedance below the decaps' range up to ~30 dB low: audit round 12, C-5)
-    harness = (not any(p.net == rail and p.pin_type == "power_out" for p in src.pads)
+    harness = (_prefix(src.reference) in CONNECTOR_PREFIXES
+               and not any(p.net == rail and p.pin_type == "power_out" for p in src.pads)
                and r == VRM_R_DEFAULT and l_ == VRM_L_DEFAULT)
     if harness:
         r, l_ = HARNESS_R, HARNESS_L
@@ -403,7 +422,8 @@ def _source_branch(st, src: Footprint, rail: str, ground: str, spec: PdnSpec) ->
     n = len(pairs)
     out = [Branch(a, b, z if n == 1 else (lambda f, z=z, n=n: n * z(f)), f"source {src.reference}", "part")
            for a, b in pairs]
-    return out, (f"{src.reference} ({src.value}) as {r * 1e3:g} mΩ + {l_ * 1e9:g} nH (vrm_r, vrm_l"
+    what = " (a switching regulator's output inductor)" if _prefix(src.reference) == "L" else ""
+    return out, (f"{src.reference} ({src.value}){what} as {r * 1e3:g} mΩ + {l_ * 1e9:g} nH (vrm_r, vrm_l"
                  + ("; a connector: a harness's defaults, give the supply's own values" if harness else "") + ")")
 
 
@@ -1008,6 +1028,15 @@ def _port_step(setup: PdnSetup, resp, meta: dict, fs: np.ndarray, z: np.ndarray)
     ls = spec.load_step or LoadStep()
     if res.voltage is None or not (res.i_step or ls.switched) or np.sum(fs <= spec.check_to) < 6:
         return
+    # nothing holds the rail at DC (no source: |Z| rising as 1/ωC towards DC): a constant step current would drain
+    # the decaps without limit (ΔV = I·t / C, tens of volts after milliseconds on a 5 V rail), not a dip the board
+    # can show. No step response then, said why. (A source with a large R or L leaves the low end capacitive too,
+    # but holds DC: its step is computed.)
+    if not res.source:
+        res.notes.append(f"{meta['part']}: no step response: nothing holds {spec.rail} at DC in the model (no "
+                         "source found: set `source` to the part that feeds it); a step would drain the decaps "
+                         "without limit")
+        return
     try:
         st = sampled_step(fs, z, ls, res.i_step or 0.0, res.voltage, ls.rise, f_max=spec.check_to)
     except (ValueError, ZeroDivisionError, np.linalg.LinAlgError) as e:
@@ -1074,6 +1103,11 @@ def _port_step_figures(res: PdnResult, port: dict):
         port["step"] = {"label": port["part"], **st["metrics"]}
 
 
+def _s3(value, unit: str = "") -> str:
+    """A value in an issue's text: three significant digits (format_si keeps six, for values read back)."""
+    return format_si(float(f"{value:.3g}"), unit)
+
+
 def _issues(setup: PdnSetup, rules):
     """pdn_impedance: a port above the target below check_to (an error over it, a warning within WARN_DB);
     pdn_step: the voltage at a port moving by more than the ripple when its IC steps (or the coil is switched on),
@@ -1082,36 +1116,34 @@ def _issues(setup: PdnSetup, rules):
     frequency; judged again in time it flagged an off-board load at a connector port (5 A, 1.3 nH: −3.5 V in 0.5 ns
     on refboard's converter output) whose harness could never draw that edge."""
     res, spec = setup.res, setup.spec
-    from ..components.values import format_si as _si
     # an estimated load step (none set): its findings are warnings at most and say so
     est = res.i_step_source in ("estimate", "partly")
-    tag = (f" [load step {_si(res.i_step, 'A')} ESTIMATED from the ICs' pin counts: set Load step]" if est else
-           f" [load step {_si(res.i_step, 'A')} from the ICs' Supply Current]" if res.i_step_source == "fields"
+    tag = (f" [load step {_s3(res.i_step, 'A')} ESTIMATED from the ICs' pin counts: set Load step]" if est else
+           f" [load step {_s3(res.i_step, 'A')} from the ICs' Supply Current]" if res.i_step_source == "fields"
            else "")
     for port in res.ports:
         m = port.get("step")
         peak = m.get("peak_late", m["peak"]) if m else None
         if m and res.voltage and peak > spec.ripple * res.voltage:
-            spike = (f"; before it the copper's spike {m['dip'] * 1e3:+.3g} mV at {_si(m['t_dip'], 's')}"
+            spike = (f"; before it the copper's spike {m['dip'] * 1e3:+.3g} mV at {_s3(m['t_dip'], 's')}"
                      if m.get("dip_late") is not None and abs(m["dip"]) > abs(m["dip_late"]) else "")
             late = m.get("dip_late", m["dip"]), m.get("t_dip_late", m["t_dip"])
             setup.issue(rules, "pdn_step",
                         f"{spec.label}: at {port['part']} the rail moves by {peak * 1e3:.3g} mV "
                         f"({100 * peak / res.voltage:.2f} %) when the load steps, more than the "
-                        f"{spec.ripple * 100:g} % allowed (dips {late[0] * 1e3:+.3g} mV after {_si(late[1], 's')}"
+                        f"{spec.ripple * 100:g} % allowed (dips {late[0] * 1e3:+.3g} mV after {_s3(late[1], 's')}"
                         f"{spike}){tag}", port["xy"], severity="warning" if est else None,
                         key=f"pdn:{spec.label}:{port['part']}:step",
                         details={"dip": late[0], "peak": peak, "t_dip": late[1], "spike": m["dip"]})
     if not res.target_ohm:
         return
-    from ..components.values import format_si
     for port in res.ports:
         w = port["worst"]
         if w["margin_db"] >= WARN_DB:
             continue
         sev = "error" if w["margin_db"] < 0 and not est else "warning"
         setup.issue(rules, "pdn_impedance",
-                    f"{spec.label}: {port['part']} sees {format_si(w['z_ohm'], 'Ω')} at {format_si(w['f'], 'Hz')} "
-                    f"against the target {format_si(res.target_ohm, 'Ω')} (margin {w['margin_db']:+.1f} dB; held there "
+                    f"{spec.label}: {port['part']} sees {_s3(w['z_ohm'], 'Ω')} at {_s3(w['f'], 'Hz')} "
+                    f"against the target {_s3(res.target_ohm, 'Ω')} (margin {w['margin_db']:+.1f} dB; held there "
                     f"by {w['holds']}){tag}", port["xy"], severity=sev, key=f"pdn:{spec.label}:{port['part']}:z",
                     details={k: w[k] for k in ("f", "z_ohm", "margin_db")})

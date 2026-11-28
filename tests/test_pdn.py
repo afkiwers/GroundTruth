@@ -373,3 +373,37 @@ def test_a_regulator_on_the_rail_is_not_counted_in_the_estimate(tmp_path):
     parts[0][0].pads[1].pin_type = "power_out"
     step, how, detail = estimate_i_step(parts)
     assert step is None and how == "" and detail[0]["how"] == "regulator"
+
+
+def test_without_a_source_there_is_no_step_response_only_a_note(solved):
+    """The rail with one decap and no source (source: none), a 1 A step: nothing holds it at DC (|Z| rises as 1/ωC
+    towards DC), so a constant step current would drain the decap without limit (1 A · 1 ms / 1 µF = 1000 V): no
+    step figures and no pdn_step issue, a note saying why."""
+    p, issues, _ = solved["one"]
+    assert all(port.get("step") is None for port in p.ports)
+    assert not any(i.check == "pdn_step" for i in issues)
+    assert any("no step response: nothing holds VDD at DC" in n for n in p.notes)
+
+
+def test_a_source_with_a_large_resistance_still_gets_its_step(tmp_path):
+    """The source J1 as 2 Ω (+ no inductance) with one 1 µF decap, a 100 mA step on 3.3 V: the source holds DC, so
+    the step is computed (though the low end may look capacitive) and settles at 100 mA · 2 Ω = 0.2 V."""
+    p, _, _ = _run(tmp_path, "bigr", PdnSpec("VDD", source="J1", vrm_r=2.0, vrm_l=1e-9, voltage=3.3, i_step=0.1),
+                   source=True, caps=[("C1", "1u", (22.0, 15.0))])
+    m = p.ports[0]["step"]
+    assert m is not None and m["final"] == pytest.approx(-0.2, rel=0.05), m
+
+
+def test_a_switchers_output_inductor_is_the_rails_source(tmp_path):
+    """No power_out pin on the rail, but an inductor from it to a net an IC drives through a power_out pin (a
+    buck's SW): that inductor is the source."""
+    from groundtruth.analysis.pdn import find_source
+    g = pdn_board()
+    g.footprint("L1", "10u", "Inductor_SMD:L_1210_3225Metric", (8.0, 8.0), [
+        {"number": 1, "at": (-1.5, 0.0), "net": "SW", "size": (1.0, 2.0)},
+        {"number": 2, "at": (1.5, 0.0), "net": "VDD", "size": (1.0, 2.0)}])
+    g.footprint("U9", "BUCK", "Package_SO:Fake_IC", (4.0, 8.0), [
+        {"number": 1, "at": (0.0, 0.0), "net": "SW", "size": (0.6, 0.8), "pinfunction": "SW",
+         "pintype": "power_out"}])
+    b, _, _ = make(tmp_path, g, "ind", nets=())
+    assert find_source(b, "VDD", "GND").reference == "L1"
