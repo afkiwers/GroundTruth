@@ -3769,7 +3769,9 @@ def test_a_pdn_rail_is_found_set_and_shown_after_simulate(app, tmp_path, monkeyp
         assert "PDN" in f.results_panel.choice.GetStringSelection() and not f.results_panel.draw_button.IsEnabled()
         assert "target" in f.results_panel.tile_text() and "U1" in f.results_panel._metrics(rails[0])
         titles = [t.get_text() for ax in f.results_panel.fig2.axes for t in [ax.title] + ax.texts]
-        assert any("holds the rail" in t for t in titles) or f.results_panel.fig2.texts
+        # under the curves: the load step at each IC when the rail has one (this one does: 0.5 A), else the band of
+        # what holds the rail
+        assert any("copper spike" in t or "holds the rail" in t for t in titles) or f.results_panel.fig2.texts
     finally:
         close_window(f)
 

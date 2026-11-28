@@ -1312,8 +1312,11 @@ class ResultsPanel(wx.Panel):
             elif self.canvas3.IsShown():
                 views.append((self.canvas3, lambda fig: draw_section(fig, board, rr)))
             if rr.kind == "pdn":
-                from ..report.plots import draw_pdn_holds
-                views.append((self.canvas2, lambda fig: draw_pdn_holds(fig, rr)))
+                # the load step at each IC when there is one (the step's figures up front), else what holds the
+                # rail at each frequency (the decaps' shares under it say more of that)
+                from ..report.plots import draw_pdn_holds, draw_pdn_step, pdn_has_step
+                views.append((self.canvas2, (lambda fig: draw_pdn_step(fig, rr)) if pdn_has_step(rr)
+                              else (lambda fig: draw_pdn_holds(fig, rr))))
             elif rr.kind == "bode":             # and their poles and zeros in the s-plane
                 from ..report.plots import draw_pz
                 views.append((self.canvas2, lambda fig: draw_pz(fig, rr)))

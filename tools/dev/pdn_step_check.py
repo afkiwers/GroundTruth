@@ -35,12 +35,14 @@ def main():
             print(" ", i.severity, i.message)
     if a.png:
         import pathlib
-        from groundtruth.report.plots import draw_pdn_decaps, figure_png
+        from groundtruth.report.plots import draw_pdn_decaps, draw_pdn_step, figure_png, pdn_has_step
         pathlib.Path(a.png).mkdir(parents=True, exist_ok=True)
         for d in r.pdn:
             if d.ports:
                 name = "".join(c if c.isalnum() else "_" for c in d.name)
                 (pathlib.Path(a.png) / f"decaps_{name}.png").write_bytes(figure_png(draw_pdn_decaps, d, size=(9.5, 3.6)))
+                if pdn_has_step(d):
+                    (pathlib.Path(a.png) / f"step_{name}.png").write_bytes(figure_png(draw_pdn_step, d, size=(9.5, 3.6)))
                 for row in d.decaps:
                     print("  decap", {k: row.get(k) for k in ("ref", "value", "srf", "peak_share", "peak_at",
                                                               "peak_f", "band", "little", "for_left_out")})

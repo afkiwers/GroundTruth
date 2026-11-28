@@ -307,6 +307,7 @@ def rails_with_ics(board: Board, ground: str) -> dict[str, list[str]]:
 
 
 STAGE = "stage:"                 # a PdnSpec source naming a power stage: "stage:conv1"
+STEP_FIT_ABOVE = 3.0             # the step's fit takes the solved |Z| up to this many times check_to [A127]
 LATE_TAUS = 10.0                 # a port step's "late" dip: after this many time constants of the check_to low-pass
 STAGE_F_LOW = 30.0               # with a power stage as the source the sweep starts at its crossover / this ...
 F_MIN_STAGE = 100.0              # ... but not below this
@@ -462,6 +463,7 @@ class PdnResult:
     #                                     "partly" (some fields, some pin counts)
     i_step_detail: list = field(default_factory=list)   # [{part, amps, how}] behind an estimated step
     check_to: float = 100e6
+    ripple: float = 0.05                # the allowed deviation, a fraction of the voltage (the spec's)
     dc_view: str = ""                   # the rail's DC run (a DC load view "<name> (PDN DC)"), dc_ics from it
     dc_ics: list = field(default_factory=list)      # [{part, v, drop_mv, limit, ...}] every IC it loads
     left_out: list = field(default_factory=list)    # [{part, pads: [[x, y]]}] ICs not solved as ports (off the grid)
@@ -875,7 +877,7 @@ def prepare_pdn(model: BoardModel, specs: list) -> tuple[list, list, list]:
     for spec in specs:
         ground = spec.ground or (config.reference_nets[0] if config.reference_nets else "GND")
         v = spec.voltage if spec.voltage is not None else rail_voltage(spec.rail)
-        res = PdnResult(spec.label, spec.rail, ground, voltage=v, check_to=spec.check_to)
+        res = PdnResult(spec.label, spec.rail, ground, voltage=v, check_to=spec.check_to, ripple=spec.ripple)
         results.append(res)
         if bbox is None:
             res.error = "the board has no outline (Edge.Cuts): the PDN model is the whole board"
@@ -1209,10 +1211,26 @@ def _port_step(setup: PdnSetup, resp, meta: dict, fs: np.ndarray, z: np.ndarray)
                          "source found: set `source` to the part that feeds it); a step would drain the decaps "
                          "without limit")
         return
+    # the fit takes the impedance up to STEP_FIT_ABOVE × check_to: far above it a resonance of the planes (hundreds
+    # of MHz) is still there after the low-pass (7× down at 7 × check_to) and became the fit's constant term: the
+    # rail rising first when the load draws more (+310 mV at t = 0 on a 5 V rail), a ring that hid the real dip [A127]
+    keep = fs <= STEP_FIT_ABOVE * spec.check_to
     try:
-        st = sampled_step(fs, z, ls, res.i_step or 0.0, res.voltage, ls.rise, f_max=spec.check_to)
+        st = sampled_step(fs[keep], z[keep], ls, res.i_step or 0.0, res.voltage, ls.rise, f_max=spec.check_to)
     except (ValueError, ZeroDivisionError, np.linalg.LinAlgError) as e:
         res.notes.append(f"{meta['part']}: no step response ({e})")
+        return
+    # a passive rail cannot move against the step first (more current drawn: it falls; −L·ΔI·2π·check_to at t = 0+):
+    # a start the other way is the fit's, not the board's: no figures then, said so
+    t0, v0 = st["nodes"][0][1], st["nodes"][0][2]
+    first = float(v0[np.argmax(t0 > 0)] - res.voltage) if np.any(t0 > 0) else 0.0
+    # (a start against the step that is a sizeable part of the whole response: a few mV of the fit's noise at the
+    # first picosecond beside a 200 mV dip is not it)
+    biggest = float(np.max(np.abs(v0 - res.voltage))) if len(v0) else 0.0
+    if not ls.switched and (res.i_step or 0.0) > 0 and first > 0.5 * biggest and             first > 0.02 * spec.ripple * res.voltage:
+        res.notes.append(f"{meta['part']}: no step response: its fit starts {first * 1e3:+.3g} mV, against the step "
+                         "(a passive rail falls first when the load draws more): the impedance above check_to is not "
+                         "fitted well enough")
         return
     for name, t, v, m in st["nodes"]:
         # the dip after the first LATE_TAUS time constants of the low-pass at check_to: the decaps' and the

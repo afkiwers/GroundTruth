@@ -550,3 +550,26 @@ def test_ringing_decaps_do_not_read_as_working_and_a_left_out_ics_decap_is_not_f
     row = next(r for r in p.decaps if r["ref"] == "C3")
     assert not row["little"] and row.get("for_left_out") == "U2"
     assert not any("C3" in i.message for i in issues if i.check == "decap_ineffective")
+
+
+def test_the_load_step_is_up_front_on_the_tile_the_plot_and_the_report(tmp_path):
+    """The source J1 as 50 mΩ (no inductance) and one 1 µF decap, a 1 A step on 3.3 V: the rail settles at 1 A · |Z| at
+    the lowest frequency (50 mΩ + the planes' milliohms, within 3 %); on the way the copper's ~1 nH between the
+    source and the decap rings against the decap (ζ = R/2·√(C/L) < 1), so the dip after the spike lies between that
+    and twice it. The tile shows that dip against the ±165 mV allowed (ok), the plot draws ΔV in mV on a log time
+    axis."""
+    from matplotlib.figure import Figure
+    from groundtruth.report.plots import draw_pdn_step, pdn_has_step
+    from groundtruth.ui.kpi import _pdn
+    p, _, _ = _run(tmp_path, "stepup", PdnSpec("VDD", source="J1", vrm_r=0.05, vrm_l=1e-12, voltage=3.3, i_step=1.0),
+                   source=True, caps=[("C1", "1u", (22.0, 15.0))])
+    m = p.ports[0]["step"]
+    z0 = p.ports[0]["z_ohm"][0]
+    assert m["final"] == pytest.approx(-1.0 * z0, rel=0.03) and 0.045 < z0 < 0.06, m
+    assert 2 * m["final"] < m["dip_late"] <= m["final"] + 1e-6, m
+    tile = next(t for t in _pdn(p) if t[0] == "load step")
+    assert tile[3] == "ok" and "165 mV" in tile[2] and tile[1] == f"{m['dip_late'] * 1e3:+.3g} mV"
+    assert pdn_has_step(p)
+    fig = Figure(figsize=(8, 3))
+    draw_pdn_step(fig, p)
+    assert fig.axes[0].get_xscale() == "log" and "mV" in fig.axes[0].get_ylabel()

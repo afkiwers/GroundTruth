@@ -268,6 +268,27 @@ def _pdn(rr) -> list[Kpi]:
                     f"voltage less the IR drop in the copper (supply {d['supply_mv']:.1f} mV + return "
                     f"{d['return_mv']:.1f} mV at {part}); the limit is {d['limit_how']}. The map is the view "
                     f"'{getattr(rr, 'dc_view', '')}'"))
+    steps = [(p["step"], p["part"]) for p in rr.ports if p.get("step") and p["step"].get("peak_late") is not None]
+    if steps and rr.voltage:
+        m, part = max(steps, key=lambda t: t[0]["peak_late"])
+        # the band the run judged with (kept with the step; a run kept before PdnResult.ripple: the step's own)
+        allowed = rr.voltage * getattr(rr, "ripple", None) if getattr(rr, "ripple", None) else \
+            rr.voltage * float(next((r.step.get("max_dev") for r in getattr(rr, "responses", ())
+                                     if getattr(r, "step", None) and r.step.get("max_dev")), 0.05))
+        est = how in ("estimate", "partly")
+        st = ("error" if m["peak_late"] > allowed and not est else "warn" if m["peak_late"] > allowed or est
+              else "ok")
+        # the move shown is the one ranked and judged: the largest |ΔV| after the spike, with its sign (a dip, or
+        # an overshoot when that is larger)
+        move = m["dip_late"] if abs(m["dip_late"]) >= m["peak_late"] - 1e-12 else m["peak_late"]
+        spike = m.get("peak", abs(m.get("dip") or 0.0))
+        out.append(("load step", f"{move * 1e3:+.3g} mV",
+                    f"{part} of ±{allowed * 1e3:.3g} mV" + (f"; spike ±{spike * 1e3:.3g} mV" if spike
+                                                             and spike > m["peak_late"] else ""), st,
+                    f"the rail's largest move at an IC when its load steps by {format_si(step, 'A')}"
+                    + (" (ESTIMATED)" if est else "") + ", after the copper's first nanoseconds (that spike is the "
+                    "impedance above the decaps, which the target judges): the decaps' and the source's dip, against "
+                    "the allowed ripple; the plot below the curves shows it against time"))
     used = [c for c in getattr(rr, "decaps", ()) if "little" in c]
     if used:
         little = [c["ref"] for c in used if c["little"]]

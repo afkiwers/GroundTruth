@@ -105,7 +105,7 @@ buck's output capacitor equals the analytic closed loop within 5 % from 1 to 100
 impedance fitted (vector fitting), the current the board sees passing the IC's package and die above `check_to` (a
 first-order low-pass there, as the target assumes [A19]), with a `load_step`'s ramp, harness, load capacitance or
 switched coil as on a converter. First the copper's inductance shows (L·ΔI·2π·check_to), then the decaps' and the
-source's dip; the issue `pdn_step` when that dip (after the spike: the spike is the impedance above the decaps, which `pdn_impedance` judges) moves by more than the ripple. On the test board the step after
+source's dip; the issue `pdn_step` when that dip (after the spike: the spike is the impedance above the decaps, which `pdn_impedance` judges) moves by more than the ripple.  The tile **load step** shows the largest dip after the spike (the figure pdn_step judges) against the allowed ripple, with the spike beside it; the plot under the impedance curves draws each IC's ΔV in mV on a log time axis, the allowed band dashed, the spike's first nanoseconds shaded grey (the step is fitted on the impedance up to three times the check frequency; an IC whose fitted step would first move against the load step gets a note, no figures); the reports' IC table has the dip. On the test board the step after
 10 ns matches the analytic closed-loop step within 1 % of its dip. A rail with nothing holding it at DC (no source found) gets no step response, only a note: a constant step current would drain
 its decaps without limit (I·t/C), which is not a dip a real board shows; set `source`.
 

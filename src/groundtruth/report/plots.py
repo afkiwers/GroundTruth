@@ -2210,6 +2210,67 @@ def draw_pdn_holds(fig: Figure, p) -> None:
     _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TICK) + 0.08, header + 0.06)
 
 
+def pdn_has_step(p) -> bool:
+    """A PDN rail with a step response at one of its ICs (pdn._port_step)."""
+    return any(getattr(r, "step", None) and r.step.get("kind") == "load" for r in getattr(p, "responses", ()))
+
+
+def draw_pdn_step(fig: Figure, p) -> None:
+    """A rail's load step at each IC (pdn._port_step): the voltage's change in mV against time on a log axis (the
+    copper's nanosecond spike and the decaps' and source's microsecond-to-millisecond dip on one plot), the allowed
+    ±ripple band shaded, the first LATE_TAUS time constants of the check_to low-pass shaded grey (the spike: the
+    impedance above the decaps, which the impedance target judges, not the step check), each IC's dip after it
+    marked."""
+    from ..analysis.pdn import LATE_TAUS
+    fig.clear()
+    ax = fig.add_subplot(111)
+    resp = [r for r in p.responses if getattr(r, "step", None) and r.step.get("kind") == "load"]
+    if not resp:
+        ax.set_axis_off()
+        return
+    t_spike = LATE_TAUS / (2 * math.pi * p.check_to)
+    lo, hi = 0.0, 0.0
+    t_min, t_max = math.inf, 0.0
+    for k, r in enumerate(resp):
+        c = PDN_COLOURS[k % len(PDN_COLOURS)]
+        t, y = np.asarray(r.step["t"]), np.asarray(r.step["y"])
+        keep = t > 0
+        dv = (y[keep] - r.step["v_nom"]) * 1e3
+        ax.plot(t[keep], dv, color=c, lw=1.3, label=r.step.get("label") or r.name)
+        m = r.step.get("metrics") or {}
+        if m.get("dip_late") is not None:
+            ax.plot([m["t_dip_late"]], [m["dip_late"] * 1e3], "v", color=c, ms=6)
+        late = t[keep] > t_spike
+        if np.any(late):
+            lo, hi = min(lo, float(np.min(dv[late]))), max(hi, float(np.max(dv[late])))
+        t_min, t_max = min(t_min, float(t[keep][0])), max(t_max, float(t[keep][-1]))
+    band = p.voltage * resp[0].step["max_dev"] * 1e3 if p.voltage else None
+    if band:
+        ax.axhspan(-band, band, color="#2ca02c", alpha=0.07, lw=0)
+        for v in (-band, band):
+            ax.axhline(v, color="#2ca02c", lw=0.8, ls="--")
+    ax.axvspan(t_min, t_spike, color="0.5", alpha=0.10, lw=0)
+    ax.annotate("copper spike\n(judged by |Z|)", (t_min, 1.0), xycoords=("data", "axes fraction"), xytext=(3, -3),
+                textcoords="offset points", ha="left", va="top", fontsize=FS_TICK, color="0.35")
+    # the axis fits the dips after the spike and the band (the spike, often far larger, runs off it)
+    span = max(hi - lo, 2 * (band or 0.0), 1e-3)
+    ax.set_ylim(min(lo, -(band or 0.0)) - 0.15 * span, max(hi, band or 0.0) + 0.15 * span)
+    ax.set_xscale("log")
+    ax.set_xlim(t_min, t_max)
+    ax.set_xlabel("time after the step (s)", fontsize=FS_TEXT)
+    ax.set_ylabel("ΔV (mV)", fontsize=FS_TEXT)
+    ax.tick_params(labelsize=FS_TICK, which="both")
+    ax.grid(True, which="both", alpha=0.3)
+    w_in, _ = fig.get_size_inches()
+    left_in, right_in = _lh(FS_TEXT) + _width_in("-1000", FS_TICK) + 0.24, 0.25
+    step = getattr(p, "i_step", None)
+    header = _title_and_key(ax, f"{p.name}: the rail at each IC when the load steps"
+                            + (f" by {step * 1e3:.3g} mA" if step else "")
+                            + (f" (dashed: ±{band:.3g} mV allowed; ▼ the dip after the spike)" if band else ""),
+                            w_in - left_in - right_in)
+    _adjust(fig, left_in, right_in, 0.10 + _lh(FS_TEXT) + _lh(FS_TICK) + 0.1, header + 0.06)
+
+
 def pdn_share_port(p):
     """The port whose decap shares the plot shows: the worst one (furthest over or nearest to the target), else the
     first; None without shares."""

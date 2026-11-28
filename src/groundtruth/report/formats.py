@@ -418,6 +418,8 @@ def pdn_text(d) -> list[str]:
             line += f"; highest peak {format_si(pk['z_ohm'], 'Ω')} @ {format_si(pk['f'], 'Hz')}"
         if p.get("l_nh"):
             line += f"; {p['l_nh']:.2f} nH above the decaps"
+        if p.get("step") and p["step"].get("dip_late") is not None:
+            line += f"; load step {p['step']['dip_late'] * 1e3:+.3g} mV after the spike"
         if p.get("dc"):
             line += (f"; DC {p['dc']['v']:.3f} V (−{p['dc']['drop_mv']:.1f} mV at {p['dc']['pin']}, min "
                      f"{p['dc']['limit']:.3g} V)")

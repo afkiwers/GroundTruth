@@ -1300,7 +1300,11 @@ def _pdn(d, issues, figs) -> str:
                  e(f"{format_si(pk['z_ohm'], 'Ω')} @ {format_si(pk['f'], 'Hz')}") if pk else "–",
                  f"{p['l_nh']:.2f} nH" if p.get("l_nh") else "–",
                  e(f"{p['dc']['v']:.3f} V (−{p['dc']['drop_mv']:.1f} mV; min {p['dc']['limit']:.3g} V)")
-                 if p.get("dc") else "–", e(", ".join(near[:4]) or "none")]
+                 if p.get("dc") else "–",
+                 e(f"{p['step']['dip_late'] * 1e3:+.3g} mV" + (f" (spike {p['step']['dip'] * 1e3:+.3g} mV)"
+                   if abs(p['step']['dip']) > abs(p['step']['dip_late']) else ""))
+                 if p.get("step") and p["step"].get("dip_late") is not None else "–",
+                 e(", ".join(near[:4]) or "none")]
         rows.append("<tr>" + "".join(f"<td class='num'>{c}</td>" if k in (1, 5) else f"<td>{c}</td>"
                                      for k, c in enumerate(cells)) + "</tr>")
     # ICs the DC run loads that are not impedance ports (left out of the AC model): their DC voltage still shown
@@ -1308,9 +1312,9 @@ def _pdn(d, issues, figs) -> str:
     for x in [x for x in getattr(d, "dc_ics", ()) if x["part"] not in port_parts]:
         rows.append("<tr>" + "".join(f"<td>{c}</td>" for c in (
             e(x["part"] + (" (regulator)" if x.get("regulator") else "")), "–", "–", "not an impedance port", "–", "–",
-            e(f"{x['v']:.3f} V (−{x['drop_mv']:.1f} mV; min {x['limit']:.3g} V)"), "")) + "</tr>")
+            e(f"{x['v']:.3f} V (−{x['drop_mv']:.1f} mV; min {x['limit']:.3g} V)"), "–", "")) + "</tr>")
     body.append("<h4>ICs</h4>" + _table(["IC", "#Supply pins", "Worst margin", "Held there by", "Highest peak",
-                                         "#L above decaps", "DC voltage", "Decaps within 9 mm"], rows))
+                                         "#L above decaps", "DC voltage", "Load step dip", "Decaps within 9 mm"], rows))
     used = [c for c in d.decaps if "little" in c]
     if used:
         def _band(c):
@@ -1328,7 +1332,10 @@ def _pdn(d, issues, figs) -> str:
             drows.append("<tr>" + "".join(f"<td>{x}</td>" for x in cells) + "</tr>")
         body.append("<h4>Decaps</h4>" + _table(["Decap", "Value", "C at its DC bias", "Own resonance",
                                                 "Largest share (IC)", "Useful band (≥10 %)", ""], drows))
-        from .plots import draw_pdn_decaps, pdn_share_port
+        from .plots import draw_pdn_decaps, draw_pdn_step, pdn_has_step, pdn_share_port
+        if pdn_has_step(d):
+            body.append(_img(figs.png(f"{d.name} PDN step", draw_pdn_step, d, size=(9.5, 3.4)),
+                             f"{d.name}: the rail at each IC when the load steps; grey: the copper's spike"))
         if pdn_share_port(d) is not None:
             body.append(_img(figs.png(f"{d.name} PDN decaps", draw_pdn_decaps, d, size=(9.5, 3.4)),
                              f"{d.name}: each part's share of {pdn_share_port(d)['part']}'s current; shaded where the "
