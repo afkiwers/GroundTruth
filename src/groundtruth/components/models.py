@@ -26,8 +26,11 @@ MODEL_PARAMS: dict[str, tuple[str, ...]] = {
     # an op-amp stage: gain (V/V, the stage's closed-loop gain, negative = inverting), gbw / bandwidth (Hz),
     # z_out (Ω), c_in (F), r_in (Ω), slew (V/s), cmrr (dB, kept and shown: a single-ended path has no common mode);
     # for the circuit model (analysis/analog_net, emi/mna.Circuit.opamp): aol (open-loop DC gain, dB), fp2 (a second
-    # open-loop pole, Hz) or pm (the phase margin at unity gain, degrees: fp2 = gbw·sin(pm)·tan(pm))
-    "amplifier": ("gain", "gbw", "bandwidth", "z_out", "c_in", "r_in", "slew", "cmrr", "aol", "fp2", "pm"),
+    # open-loop pole, Hz) or pm (the phase margin at unity gain, degrees: fp2 = gbw·sin(pm)·tan(pm)); swing_hi /
+    # swing_lo: how close its output gets to its positive / negative supply (V of headroom, or "10%" of the supply
+    # span: swing_value; none: rail to rail) for the large-signal limits (analysis/swing.py)
+    "amplifier": ("gain", "gbw", "bandwidth", "z_out", "c_in", "r_in", "slew", "cmrr", "aol", "fp2", "pm", "swing_hi",
+                  "swing_lo"),
     # a logic buffer (a Schmitt trigger, SN74LVC2G17): not linear. Its input loads the path before it (c_in); its
     # output drives the path after it with an edge of its own: rise (s), behind z_out (Ω), swinging its supply
     # pin's voltage. vt_pos / vt_neg (V): its input thresholds; hyst (V): their difference, when only that is given
@@ -36,6 +39,7 @@ MODEL_PARAMS: dict[str, tuple[str, ...]] = {
 # Parameters that may stay empty: C_bias, a ceramic capacitor's capacitance at its DC bias (from the maker's
 # DC-bias curve; an X7R 10 µF 100 V 1210 keeps ~30-60 % at 50 V), used instead of C where given
 OPTIONAL_PARAMS = {"C_bias", "gbw", "bandwidth", "z_out", "c_in", "r_in", "slew", "cmrr", "aol", "fp2", "pm",
+                   "swing_hi", "swing_lo",
                    "rise", "vt_pos", "vt_neg", "hyst"}
 AMP_Z_OUT = 1.0         # Ω, an amplifier's output impedance when its z_out is not given
 AMP_C_IN = 2e-12        # F, its input capacitance when its c_in is not given
@@ -54,9 +58,62 @@ R_MIN_OHMS = 1e-6       # the least a resistor's or winding's own R is taken as 
 SERIES_PATH_MAX_OHMS = 1e3  # resistors above this are pull-ups/downs, not part of a signal path
 
 
-def _tidy(v: float) -> float:
-    """Round to 6 significant digits so YAML shows 1e-05, not 9.999999999999999e-06."""
-    return float(f"{v:.6g}")
+def _tidy(v):
+    """Round to 6 significant digits so YAML shows 1e-05, not 9.999999999999999e-06 (a text value, an output
+    swing's "10%", as it is)."""
+    return v if isinstance(v, str) else float(f"{v:.6g}")
+
+
+SWING_KEYS = ("swing_hi", "swing_lo")     # an amplifier's output headroom from each supply (swing_value)
+
+
+def swing_value(v):
+    """An output swing as a model holds it: volts as a float ("0.5V", "20mV", "4.5V", "-13V", a number) or a share
+    of the supply span as text ("10%", "90%": 0 … 100 %). How either is read against the supply: swing_headroom.
+    ValueError for anything else."""
+    import re
+    t = str(v).strip().replace(" ", "").replace(",", ".").replace("−", "-")
+    m = re.fullmatch(r"([0-9]*\.?[0-9]+(?:e[-+]?\d+)?)%", t, re.I)
+    if m:
+        pct = float(m.group(1))
+        if not 0 <= pct <= 100:
+            raise ValueError(f"an output swing of {t} of the supply: 0 … 100 %")
+        return f"{pct:g}%"
+    m = re.fullmatch(r"([-+]?[0-9]*\.?[0-9]+(?:e[-+]?\d+)?)(mv|v)?", t, re.I)
+    if not m or not math.isfinite(float(m.group(1))):
+        raise ValueError(f"an output swing of {v!r}: volts (50mV, 4.5V) or a share of the supply (10%, 90%)")
+    return float(m.group(1)) * (1e-3 if (m.group(2) or "").lower() == "mv" else 1.0)
+
+
+def swing_headroom(v, lo_s: float, hi_s: float, side: str) -> tuple[float, str]:
+    """(the headroom in V an output swing leaves from its rail, how it was read) on a supply lo_s … hi_s, for the
+    upper (`side` "hi") or lower ("lo") limit [A123]. Datasheets give it either way, so both are read (the user,
+    2026-11-28: "in case Vsupply is 5V and the rail to rail is only lets say 4.5V or 90% of vsupply"):
+    - a share below 50 % is headroom ("10%": 0.5 V from a 5 V span), from 50 % the share of the supply the output
+      reaches ("90%": the same 0.5 V);
+    - volts on the upper side below half the positive rail are headroom (V_OH = V+ − 50mV: "50mV"), from half of
+      it the level the output reaches ("4.5V" on 5 V: 0.5 V; "13V" on ±15 V: 2 V);
+    - volts on the lower side are headroom ("50mV": V_OL = V− + 50 mV, on one supply also the level itself), a
+      negative value the level ("-13V" on ±15 V: 2 V).
+    A level past its rail is no headroom (0, said so). None: rail to rail (0, "")."""
+    if v is None:
+        return 0.0, ""
+    span = hi_s - lo_s
+    if isinstance(v, str):
+        pct = float(v.rstrip("%"))
+        if pct < 50:
+            return pct / 100.0 * span, ""
+        return (100.0 - pct) / 100.0 * span, f"{pct:g} % of the supply reached"
+    v = float(v)
+    if side == "hi" and (v < 0 or (hi_s > 0 and v >= hi_s / 2)):
+        level, room = v, hi_s - v
+    elif side == "lo" and v < 0:
+        level, room = v, v - lo_s
+    else:
+        return v, ""
+    if room < 0:
+        return 0.0, f"{level:g} V is past the {hi_s if side == 'hi' else lo_s:g} V rail: rail to rail taken"
+    return room, f"{level:g} V reached"
 
 
 @dataclass
@@ -127,7 +184,8 @@ class ComponentModel:
         elif value is None:
             self.params.pop(key, None)
         else:
-            self.params[key] = float(value)
+            # an output swing as volts or a share of the supply ("10%": swing_value), every other one a number
+            self.params[key] = swing_value(value) if key in SWING_KEYS else float(value)
 
     def impedance(self, f: float) -> Optional[complex]:
         """Complex impedance at frequency f (Hz). None means open circuit."""
@@ -268,7 +326,7 @@ class ComponentModel:
                         raise ValueError("C_bias: " + "; ".join(problems))
                     bias = bias_text(points)
             elif d.get(p) is not None:
-                params[p] = float(d[p])
+                params[p] = swing_value(d[p]) if p in SWING_KEYS else float(d[p])
         pins = d.get("pins") or []
         if isinstance(pins, str):
             pins = [p.strip() for p in pins.split(",") if p.strip()]

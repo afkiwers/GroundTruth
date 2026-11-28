@@ -1126,9 +1126,21 @@ def _responses(owner: str, responses, figs) -> str:
     view = BodeView(owner, responses)
     if has_step(view):          # the step responses (emi/mna.Circuit.step) and their figures
         from ..analysis.transfer import step_text
-        out.append(_img(figs.png(f"{owner} step", draw_step, view, size=(9.5, STEP_IN)),
-                        f"{owner}: the response to a 1 V step at the driver"))
-        out.append("<ul>" + "".join(f"<li>{e(r.name.split(': ', 1)[-1])}: {e(step_text(r.step['metrics']))}</li>"
+        big = next((r.step["large"] for r in responses if (getattr(r, "step", None) or {}).get("large")), None)
+        caption = (f"{owner}: the step from the driver's {big['levels'][0]:g} V to {big['levels'][1]:g} V, each op-amp "
+                   "output within its supply (analysis/swing.py)" if big else
+                   f"{owner}: the response to a 1 V step at the driver")
+        out.append(_img(figs.png(f"{owner} step", draw_step, view, size=(9.5, STEP_IN)), caption))
+
+        def line(r) -> str:
+            """A response's step in one line: in volts with what is held (the large-signal step), else per volt."""
+            lg = r.step.get("large")
+            if not lg:
+                return step_text(r.step["metrics"])
+            held = f"; held at a supply limit: {', '.join(lg['held'])}" if lg["held"] else ""
+            m = lg.get("metrics")
+            return (f"{lg['y'][0]:.3g} V → {lg['final']:.3g} V" + (f" ({step_text(m)})" if m else "") + held)
+        out.append("<ul>" + "".join(f"<li>{e(r.name.split(': ', 1)[-1])}: {e(line(r))}</li>"
                                     for r in responses if getattr(r, "step", None)) + "</ul>")
     out.append(_table(["Response", "Gain, bandwidth", "Model", "Poles (f0, Q)", "Zeros (f0, Q)"], rows, sort=False))
     # the transfer functions written out: in part names (the ideal circuit, MathML: browsers render it), and the

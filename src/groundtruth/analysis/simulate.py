@@ -2355,6 +2355,16 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
             r.notes.append(f"{n_doublets} pole-zero pair(s) within {DOUBLET:.1%} of each other cancelled (doublets: "
                            "a load the output hardly sees)")
         out.append(r)
+    # each op-amp's output held within its supply (analysis/swing.py [A123]): the large-signal step in volts, the
+    # outputs that clip over the driver's swing (output_saturation)
+    from . import swing
+    amp_nets = {nm: o for nm, _i, _n, o, _g in lumped.schematic.get("opamps", ())}
+    pairs = [(r, lnode, amp_nets.get(title.split(": ", 1)[0]) if title.endswith(": output")
+              else lumped.schematic.get("out")) for r, (title, _node, lnode) in zip(out, outs)]
+    try:
+        saturation, sat_notes = swing.apply(board, config, spec, lumped, pairs)
+    except (ValueError, RuntimeError, np.linalg.LinAlgError) as e:
+        saturation, sat_notes = [], [f"the op-amps' output limits were not applied: {e}"]
     sym = symbolic_transfer(net.schematic)
     if sym is not None and out:
         out[0].symbolic = {"text": sym.text, "latex": sym.latex, "mathml": sym.mathml, "note": "; ".join(sym.notes)}
@@ -2397,7 +2407,8 @@ def network_responses(board: Board, config: Config, spec: NetSpec, receiver: str
     # every loop is checked for stability (a bias buffer that rings matters), but the plot shows the path's own
     # channels: the others' loop gains go into the findings only
     besides = [n for n, _ in net.opamps if not net.on_path(n)]
-    findings = _bandwidth_and_stability(board, config, spec, receiver, net, f, out)
+    findings = _bandwidth_and_stability(board, config, spec, receiver, net, f, out) + saturation
+    notes += sat_notes
     if besides:
         notes.append(f"in the circuit for their loading, not plotted: {', '.join(besides)} (their outputs and loop "
                      "gains; a loop of theirs that rings is still flagged)")

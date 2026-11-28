@@ -248,6 +248,7 @@ class AnalogNetwork:
     # the path's own nets (the signal's: through its series parts and op-amp channels), the circuit around them
     # beyond: on_path tells the channels the signal passes from those only loading it (a quad's other channels)
     path_nets: list = field(default_factory=list)
+    amp_ref: dict = field(default_factory=dict)         # op-amp channel -> its part's reference (its supply pins)
 
     def on_path(self, name: str) -> bool:
         """Whether op-amp channel `name` carries the signal: its output and one of its inputs on the path's own nets
@@ -629,7 +630,8 @@ def analog_network(board: Board, config: Config, spec: NetSpec, receiver: str, l
         # unlike in the DC bias and the shunts), named in a note
         "dnp": sorted(not_fitted)}
     return AnalogNetwork(ckt, out, nets, opamps, sorted(parts), tracks, notes, node_of, schematic, amp_out, lines,
-                         part_nodes, {nm: dict(ch.params) for nm, ch in amps.items()}, path_nets=sorted(start))
+                         part_nodes, {nm: dict(ch.params) for nm, ch in amps.items()}, path_nets=sorted(start),
+                         amp_ref={nm: ch.ref for nm, ch in amps.items()})
 
 
 def _buffer_before(board: Board, config: Config, spec: NetSpec, drv_net: str, rcv_net: str, path: set,
@@ -760,3 +762,4 @@ def _gain_block(ckt: Circuit, name: str, inp: str, out: str, prm: dict):
     oi = ckt.internal(f"{name}.o")
     ckt.vcvs(oi, ckt.ground, node, ckt.ground, 1.0, f"{name}.buf")
     ckt.r(oi, out, max(prm.get("z_out") or 1.0, 1e-6))
+    ckt.limiters[name] = (node, out)      # its output held at its supply through `node` (Circuit.clamped_step)

@@ -33,6 +33,9 @@ NET_TIPS = {
     "Rise time": "The signal's edge time, e.g. 2ns: above 1/(π·t) its harmonics fall off faster, so faster edges "
                  "radiate more at high frequencies.",
     "Amplitude (V)": "The signal swing, e.g. 3.3: the emission scales with it.",
+    "Low level (V)": ("The driver's low level: the signal swings from it to it + the amplitude (empty: 0 V). Sets "
+                      "the op-amps' operating point for their output limits (the large-signal step, "
+                      "output_saturation): a sensor idling at 1.65 V, a bipolar signal at −1.65 V."),
     "Duty cycle": "The fraction of the period the signal is high, e.g. 0.5 for a clock: it sets which harmonics "
                   "are strong.",
     "Fall time": "The falling edge's time when it differs from the rising one, e.g. 3ns (empty: the rise time).",
@@ -176,6 +179,8 @@ class NetsPanel(SelectableRows, wx.Panel):
         self.freq = wx.TextCtrl(fw, value="20MHz")
         self.rise = wx.TextCtrl(fw, value="2ns")
         self.ampl = wx.TextCtrl(fw, value="3.3")
+        self.offset = wx.TextCtrl(fw)
+        self.offset.SetHint("0 V")
         self.duty = wx.TextCtrl(fw, value="0.5")
         self.fall, self.src_r, self.src_l, self.src_c, self.load_r, self.load_c, self.through = (
             wx.TextCtrl(fw) for _ in range(7))
@@ -202,7 +207,7 @@ class NetsPanel(SelectableRows, wx.Panel):
               ("Pass through", self.through)]),
             ("Signal", "What the driver sends.",
              [("Frequency", self.freq), ("Rise time", self.rise), ("Fall time", self.fall),
-              ("Amplitude (V)", self.ampl), ("Duty cycle", self.duty)]),
+              ("Amplitude (V)", self.ampl), ("Low level (V)", self.offset), ("Duty cycle", self.duty)]),
             ("Source and load", "The driver's output and the receivers' input. Empty: defaults.",
              [("Source R", self.src_r), ("Source L", self.src_l), ("Source C", self.src_c),
               ("Load R", self.load_r), ("Load C", self.load_c)]),
@@ -518,6 +523,7 @@ class NetsPanel(SelectableRows, wx.Panel):
         """(key, control, unit kind) of every field several paths can share; the kinds: hz, s, v, num, ohm, nh, pf,
         int (see _show / _read)."""
         return [("freq", self.freq, "hz"), ("rise_time", self.rise, "s"), ("amplitude_v", self.ampl, "v"),
+                ("offset_v", self.offset, "v?"),
                 ("duty", self.duty, "num"), ("fall_time", self.fall, "s?"), ("driver_ohms", self.src_r, "ohm?"),
                 ("driver_nh", self.src_l, "nh?"), ("driver_pf", self.src_c, "pf?"), ("load_ohms", self.load_r, "ohm?"),
                 ("load_pf", self.load_c, "pf?"), ("sweep_from", self.sweep_from, "hz?"),
@@ -603,6 +609,7 @@ class NetsPanel(SelectableRows, wx.Panel):
         self.freq.SetValue(format_si(n.freq, "Hz"))
         self.rise.SetValue(format_si(n.rise_time, "s"))
         self.ampl.SetValue(f"{n.amplitude_v:g}")
+        self.offset.SetValue("" if not n.offset_v else f"{n.offset_v:g}")
         self.duty.SetValue(f"{n.duty:g}")
         self.fall.SetValue(format_si(n.fall_time, "s") if n.fall_time is not None else "")
         for ctrl, v, kind in ((self.src_r, n.driver_ohms, "ohm"), (self.src_l, n.driver_nh, "nh"),
@@ -694,6 +701,7 @@ class NetsPanel(SelectableRows, wx.Panel):
             problems.append("frequency, rise time and amplitude must be numbers (e.g. 20MHz, 2ns, 3.3)")
         extra = {}
         for key, ctrl, strip, label in (("fall_time", self.fall, "s", "fall time"),
+                                        ("offset_v", self.offset, "V", "low level"),
                                         ("driver_ohms", self.src_r, "", "source R"),
                                         ("driver_nh", self.src_l, "nH", "source L"),
                                         ("driver_pf", self.src_c, "pF", "source C"),

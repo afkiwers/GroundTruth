@@ -128,6 +128,7 @@ A `nets:` entry:
 | `driver`, `receivers` | | Pins as `REF.PAD`; `receiver:` (one pin) works too. |
 | `freq`, `rise_time` | | Fundamental and edge time (`20MHz`, `2ns`, or plain Hz and s). |
 | `amplitude_v`, `duty` | 3.3, 0.5 | Swing and duty cycle of the trapezoid spectrum. |
+| `offset_v` | 0 | The driver's low level (V; the Signal paths tab's Low level): the signal swings `offset_v` … `offset_v + amplitude_v`. Sets the op-amps' operating point for their output limits (the large-signal step, `output_saturation`): a current sensor idling at mid-supply, a bipolar signal below 0 V. |
 | `current_a` | | Overrides the line-current estimate: peak A at the fundamental. |
 | `driver_ohms`, `load_pf` | `analysis` | Driver output resistance, input capacitance per receiver. |
 | `driver_nh`, `driver_pf`, `fall_time` | none, none, `rise_time` | The source: its series inductance (nH), its output capacitance (pF), a falling edge of its own. |
@@ -185,6 +186,7 @@ rules above decide.
 | `plane_resonance` | warning | A plane-pair resonance raises a route's or hot loop's moment by `resonance_db` or more. |
 | `bandwidth_limit` | warning | A signal path's bandwidth at its receiver above its `max_bandwidth`, or an op-amp stage's (from its input to its output, solved in its circuit) above its `Bandwidth` field (1 % tolerance). |
 | `opamp_stability` | warning / error | An op-amp's loop has less than 45° of phase margin (it rings); below 20° an error (close to oscillating). Give the op-amp `PM` or `Fp2` for its second pole: with one pole the margin is always near 90°. |
+| `output_saturation` | warning / info | An op-amp's output would pass its supply's limits (less its `Output Swing High` / `Low` fields; rail to rail without them) at the driver's low or high level (`offset_v`, `offset_v + amplitude_v`): it clips; the message gives the voltage it would need and the driver's range that stays linear. Only during the step (an overshoot cut at the rail): info. |
 | `emi_margin` | warning / error | Radiated estimate within `emi_margin_db` of the limit / over it (routes and hot loops). |
 | `band_unsolved` | warning | A solve did not converge and the band above the last solved frequency is held at its value there, not computed: a plane resonance in it would be missed. Simulate again at another resolution. |
 | `hot_loop` | warning / error | Switch-node overshoot over `overshoot_warning` / `overshoot_error`. |

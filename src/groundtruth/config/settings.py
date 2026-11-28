@@ -6,6 +6,7 @@ ordering survive when `groundtruth init` (or the plugin UI) updates it.
 from __future__ import annotations
 
 import copy
+import math
 import io
 import os
 import re
@@ -81,6 +82,9 @@ class NetSpec:
     rise_time: float
     amplitude_v: float = 3.3
     duty: float = 0.5
+    # the driver's low level (V): the signal swings offset_v … offset_v + amplitude_v; the op-amps' operating point
+    # and their output limits (analysis/swing.py: the large-signal step, output_saturation); None: 0 V
+    offset_v: Optional[float] = None
     current_a: Optional[float] = None   # overrides the line-current estimate (peak A at the fundamental)
     driver_ohms: Optional[float] = None   # driver output resistance (default analysis.driver_ohms)
     load_pf: Optional[float] = None       # input capacitance per receiver (default analysis.load_pf)
@@ -1274,6 +1278,8 @@ def net_problems(spec: NetSpec) -> list[str]:
                        f"/ fall time to at most that, or lower the frequency")
     if not spec.amplitude_v > 0:
         out.append("amplitude_v must be above 0 V")
+    if spec.offset_v is not None and not math.isfinite(spec.offset_v):
+        out.append("offset_v must be a number of volts")
     if spec.current_a is not None and not spec.current_a > 0:
         out.append("current_a must be above 0 A")
     for key in ("driver_ohms", "load_pf", "driver_nh", "driver_pf"):
@@ -1522,6 +1528,7 @@ def config_from_data(data: Any) -> Config:
                 rise_time=_num(n.get("rise_time"), f"{where}.rise_time", "s"),
                 amplitude_v=_num(n.get("amplitude_v", 3.3), f"{where}.amplitude_v", "V"),
                 duty=_num(n.get("duty", 0.5), f"{where}.duty"),
+                offset_v=None if n.get("offset_v") is None else _num(n.get("offset_v"), f"{where}.offset_v", "V"),
                 current_a=None if n.get("current_a") is None else _num(n.get("current_a"), f"{where}.current_a", "A"),
                 driver_ohms=None if n.get("driver_ohms") is None else _num(n.get("driver_ohms"), f"{where}.driver_ohms", "ohm"),
                 load_pf=None if n.get("load_pf") is None else _small(n.get("load_pf"), f"{where}.load_pf", "pF"),
@@ -2059,6 +2066,8 @@ class SettingsFile:
                  "rise_time": format_si(n.rise_time, "s"), "amplitude_v": n.amplitude_v}
             if n.duty != 0.5:
                 d["duty"] = n.duty
+            if n.offset_v:
+                d["offset_v"] = n.offset_v
             for key in ("current_a", "driver_ohms", "load_pf", "driver_nh", "driver_pf", "load_ohms"):
                 if getattr(n, key) is not None:
                     d[key] = getattr(n, key)

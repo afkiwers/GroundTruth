@@ -23,7 +23,14 @@ its admittance Y(f) at each frequency (frequency-dependent and not rational: `Ci
 - **The op-amp** (`Circuit.opamp`): a linear macromodel from datasheet values [Franco 2015] [A52]: Rin ∥ Cin between the
   inputs, Cin_cm from each input to ground, the open-loop gain A(s) = A0 / ((1 + s/ω1)(1 + s/ω2)) as a
   transconductance into R1 ∥ C1 (ω1 = 2π·GBW/A0) and an optional second stage R2 ∥ C2 (ω2), a unity-gain buffer and
-  the open-loop output resistance R_O. Small signal only: no rails, saturation or slew.
+  the open-loop output resistance R_O. Small signal (solve, transfer, step, poles_zeros): no rails or slew.
+- **Output limits** (`Circuit.clamped_dc`, `Circuit.clamped_step`): each amplifier's output pin held at its
+  limits (its supply's rails, as a macromodel's output clamp does [Boyle 1974] [A123]) while the drive would carry it
+  beyond them, released when the drive turns back: an active set per time step, where a held amplifier's last gain
+  node gives up its own equation for v(out) = limit (the gain node then sits where the output buffer puts the pin
+  at the limit, whatever the load draws through R_O, and does not wind up), and is let go when the current its own
+  equation lacks changes sign. The limits are on the deviation from an operating point the caller knows (the
+  circuit is the small-signal one, its supplies AC ground).
 
 Validated in tests/test_mna.py against closed forms (RC, RLC, inverting / non-inverting amplifiers with their
 bandwidth, Sallen-Key and multiple-feedback filters' f0 and Q, an integrator, a line two-port)."""
@@ -87,6 +94,10 @@ class Circuit:
     _counter: int = 0
     # each op-amp channel: {"buf": its output buffer's extra index, "inp", "inn": its input nodes, "prm"} (loop_gain)
     opamps: dict = field(default_factory=dict)
+    # each amplifier's (an op-amp channel's or a gain block's) (last gain node, output node): in a large-signal solve
+    # (clamped_dc, clamped_step) its output is held at its limits through its gain node [Boyle 1974] [A123]
+    limiters: dict = field(default_factory=dict)
+    inner: dict = field(default_factory=dict)          # an op-amp's earlier gain nodes, bounded alike (no wind-up)
     # the poles of (G, −C) by the circuit's size (poles_zeros: the same for every output, audit M-13)
     _pole_cache: dict = field(default_factory=dict, repr=False, compare=False)
 
@@ -198,6 +209,12 @@ class Circuit:
         oi = self.internal(f"{name}.o")
         self.vcvs(oi, self.ground, last, self.ground, 1.0, f"{name}.buf")
         self.opamps[name] = {"buf": self._extra - 1, "oi": oi, "inp": inp, "inn": inn, "prm": prm}
+        self.limiters[name] = (last, out)
+        if last != n1:
+            # the first stage bounded too while the output is held: at DC it follows the output (stage 2 has unity
+            # gain), and left free it integrates the held loop's error to A0 times it and holds the output at the
+            # rail long after the drive has turned back (wind-up: a Q 5 filter's overshoot held 1.5 ms, not 0.5)
+            self.inner[name] = [n1]
         self.r(oi, out, max(prm.r_out, 1e-6))
 
     def part(self, a: str, b: str, kind: str, values: dict, name: str = "part"):
@@ -424,6 +441,136 @@ class Circuit:
             y[k] = cv @ xp
             xm, xn, h_prev = xn, xp, h
         return y
+
+    # ------------------------------------------------------------------ large signal: output limits
+    def _limited_rows(self, bounds: dict) -> dict:
+        """{amplifier: (its last gain node's row, its output node's column, (lo, hi))} for the amplifiers of
+        `bounds` the circuit has (limiters; an output on the ground node has nothing to hold); a bound pair with
+        lo > hi (no room at all) is held at its middle."""
+        out = {}
+        for name, (lo, hi) in bounds.items():
+            gain, pin = self.limiters.get(name, (None, None))
+            if gain not in self.nodes or pin not in self.nodes:
+                continue
+            lo, hi = float(lo), float(hi)
+            if lo > hi:
+                lo = hi = 0.5 * (lo + hi)
+            out[name] = (self.nodes[gain], self.nodes[pin], (lo, hi))
+            # its earlier gain nodes bounded one span (at least 0.1 V) beyond the output's limits ("U3~0", not
+            # reported): wide enough that the output pin, behind R_O and its load, is what reaches the limit and is
+            # held there, near enough that leaving the rail takes that span at GBW's rate (ns to µs), not the dominant
+            # pole's time
+            w = max(hi - lo, 0.1)
+            for k, node in enumerate(self.inner.get(name, ())):
+                if node in self.nodes:
+                    out[f"{name}~{k}"] = (self.nodes[node], self.nodes[node], (lo - w, hi + w))
+        return out
+
+    @staticmethod
+    def _active_solve(a, rhs: np.ndarray, rows: dict, active: dict, cache: dict, key) -> tuple[np.ndarray, dict]:
+        """One linear system a·x = rhs with the limited outputs (rows: {name: (gain node's row, output's column,
+        (lo, hi))}) held at their limits where the solution would pass them: an active set [Nocedal 2006, §16.5]. A
+        held amplifier's gain-node row is replaced by v(out) = limit; it stays held while the current that row's own
+        equation lacks (a·x − rhs there: what the hold injects into the gain node) keeps it there (sinking at the
+        top, sourcing at the bottom: the drive still pushes outward), else it is let go. Starts from `active` ({name:
+        "lo" | "hi"}, the last step's), at most 2·len(rows) + 4 rounds (a cycle keeps the last set). (x, active);
+        `cache` keeps one factorisation per (key, active set)."""
+        import scipy.sparse.linalg as spl
+        active = dict(active)
+        x = None
+        for _ in range(2 * len(rows) + 4):
+            held = tuple(sorted(active.items()))
+            lu = cache.get((key, held))
+            if lu is None:
+                m = a.tolil(copy=True)
+                for name in active:
+                    i, j, _ = rows[name]
+                    m.rows[i], m.data[i] = [j], [1.0]
+                lu = cache[(key, held)] = spl.splu(m.tocsc())
+            r = rhs.copy()
+            for name, side in active.items():
+                i, _, (lo, hi) = rows[name]
+                r[i] = hi if side == "hi" else lo
+            x = lu.solve(r)
+            inject = a @ x - rhs                              # the clamp's current into each held node
+            changed = False
+            for name, (i, j, (lo, hi)) in rows.items():
+                tol = 1e-9 * max(1.0, abs(lo), abs(hi))
+                side = active.get(name)
+                if side is None:
+                    if x[j] > hi + tol:
+                        active[name], changed = "hi", True
+                    elif x[j] < lo - tol:
+                        active[name], changed = "lo", True
+                elif (side == "hi" and inject[i] > 0) or (side == "lo" and inject[i] < 0):
+                    # the clamp would have to push the node beyond its limit's side: the drive turned back
+                    del active[name]
+                    changed = True
+            if not changed:
+                break
+        return x, active
+
+    def clamped_dc(self, u: float, bounds: dict) -> tuple[np.ndarray, dict]:
+        """The DC solution (capacitors open, inductors shorts: G alone) for the input at u volts with each amplifier
+        of `bounds` ({name: (lo, hi)}, volts of its output, as deviations from the caller's operating point)
+        held within them [Boyle 1974] [A123]. (x, held: {name: "lo" | "hi"})."""
+        g, _c, b = self._sparse()
+        rows = self._limited_rows(bounds)
+        x, held = self._active_solve(g.tocsc(), b.real * float(u), rows, {}, {}, "dc")
+        return x, {k: v for k, v in held.items() if "~" not in k}
+
+    def clamped_step(self, outs: list, t, u: float, bounds: dict, ref: Optional[str] = None) -> dict:
+        """The response of the outputs `outs` (nodes, v − v(ref)) to the input stepping from 0 to u volts at t = 0,
+        each amplifier of `bounds` ({name: (lo, hi)}: its output's limits as deviations from the caller's
+        operating point) held within them [Boyle 1974] [A123]: from the clamped DC state at 0 (an output already at a
+        rail stays there), stepped by BDF2 as `step` is [Gear 1971] [Hairer 1993, §III.5], each step's system solved
+        with its active set (_active_solve). The grid t as `step` wants it. {"y": [array per output], "final":
+        [the clamped DC at u, per output], "held": {name: (first t, last t) held}, "held_end": {name: side at u's
+        DC}, "held_start": {name: side at 0}}."""
+        if self._y2:
+            raise ValueError("a circuit with frequency-dependent two-ports has no time-domain model: use lumped=True")
+        t = np.asarray(t, float)
+        hs = np.diff(t)
+        if len(t) < 3 or t[0] != 0.0 or not np.all(np.isfinite(t)) or np.any(hs <= 0):
+            raise ValueError("a step response's times must start at 0 and increase (at least three)")
+        g, c, b = self._sparse()
+        b = b.real
+        rows = self._limited_rows(bounds)
+        cvs = [self.output(o, ref) for o in outs]
+        cache: dict = {}
+        x0, start = self._active_solve(g.tocsc(), np.zeros(self.size), rows, {}, cache, "dc")
+        xe, end = self._active_solve(g.tocsc(), b * float(u), rows, start, cache, "dc")
+        ys = [np.empty(len(t)) for _ in outs]
+        held: dict = {}
+
+        def record(k, x, act):
+            """Each output's value at sample k and when each amplifier was held."""
+            for y, cv in zip(ys, cvs):
+                y[k] = cv @ x
+            for name in act:
+                first, _ = held.get(name, (t[k], t[k]))
+                held[name] = (first, t[k])
+        record(0, x0, start)
+        h = float(hs[0])
+        x1, act = self._active_solve((c / h + g).tocsc(), b * u + c @ x0 / h, rows, start, cache, ("be", h))
+        record(1, x1, act)
+        xm, xn, h_prev = x0, x1, h
+        for k in range(2, len(t)):
+            h = float(hs[k - 1])
+            if abs(h - h_prev) <= 1e-9 * h_prev:
+                h = h_prev
+            w = h / h_prev
+            key = ("bdf2", h, w)
+            a = cache.get(("mat",) + key)
+            if a is None:
+                a = cache[("mat",) + key] = ((1 + 2 * w) / (1 + w) * c / h + g).tocsc()
+            rhs = b * u + c @ ((1 + w) * xn - (w * w / (1 + w)) * xm) / h
+            xp, act = self._active_solve(a, rhs, rows, act, cache, key)
+            record(k, xp, act)
+            xm, xn, h_prev = xn, xp, h
+        outer = lambda d: {k: v for k, v in d.items() if "~" not in k}         # noqa: E731  (the outputs only)
+        return {"y": ys, "final": [float(cv @ xe) for cv in cvs], "held": outer(held), "held_end": outer(end),
+                "held_start": outer(start)}
 
     def loop_gain(self, name: str, f) -> np.ndarray:
         """The loop gain T(f) around op-amp channel `name` (opamp): its loop broken at its internal output, which
